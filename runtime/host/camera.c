@@ -1509,14 +1509,16 @@ void camera_held_end(CPUState* cpu) {
  * draws the game's frame once for each player (aurora_split_set_view: a
  * camera in the game camera's view space) and shows the two in halves of the
  * window; in a cutscene, the Tome or with no player, the frame shows whole.
- * Player 1 sees the game's own camera. Player 2, until they have a character
- * of their own, has a camera that circles player 1, turned by their right
+ * Player 1 sees the game's own camera. Player 2 has a camera that circles
+ * their character (player 1 until theirs is made), turned by their right
  * stick (or camera keys) and brought in and out by their left stick (or
  * forward and back). */
 #ifdef ED_AURORA
 void aurora_split_set(bool on, int layout);
 void aurora_split_set_view(int player, const float rot[9], float x, float y, float z, float zoom, bool hide_hud);
 #endif
+
+bool hle_coop_player2_position(CPUState* cpu, float out[3]);  // hle.c
 
 #define SPLIT_PITCH_LOW 0.05f
 #define SPLIT_PITCH_HIGH 1.30f
@@ -1561,6 +1563,10 @@ void camera_split_update(CPUState* cpu) {
         split_off(frame, "no player");
         return;
     }
+    // Player 2's camera circles their own character once they have one.
+    float p2[3];
+    if (hle_coop_player2_position(cpu, p2))
+        player = v3(p2[0], p2[1], p2[2]);
     // The game camera this frame draws from (camera.c's own, when it has
     // swapped them).
     const Vec3 eye = read_vec(cpu, cpu->gpr[4]), up = read_vec(cpu, cpu->gpr[5]),

@@ -3608,12 +3608,25 @@ static bool cutscene_playing(CPUState* cpu) {
            guest_read_f32(cpu, g_letterbox_height) > 0.0f;
 }
 
+#ifdef ED_AURORA
+static void coop_pad_read(CPUState* cpu, bool playing);
+#endif
+
 static void hle_PADRead(CPUState* cpu) {
     u32 out = hle_arg_u32(cpu, 0);
     DolPadState state[4];
     memset(state, 0, sizeof state);
-    controls_set_game_menu(game_menu_open(cpu));
-    controls_set_cutscene(cutscene_playing(cpu));
+    const bool menu = game_menu_open(cpu), cutscene = cutscene_playing(cpu);
+    controls_set_game_menu(menu);
+    controls_set_cutscene(cutscene);
+#ifdef ED_AURORA
+    coop_pad_read(cpu, !menu && !cutscene);
+    static bool told;
+    if (!told && getenv("ED_COOP_LOG") != NULL) {
+        told = true;
+        fprintf(stderr, "[coop] PADRead fills 0x%08X (from 0x%08X)\n", out, cpu->lr);
+    }
+#endif
     controls_note_frame(cpu->timebase / 675000ull);
     u32 motor_mask = dol_platform_pad_read(state);
     if (camera_pad_buttons(cpu, state[0].button))
@@ -5780,6 +5793,212 @@ static void find_camera(CPUState* cpu) {
     fprintf(stderr, "[camera] the game's camera not found: only its own fixed cameras\n");
 }
 
+// ---------------------------------------------------------------------------
+// Split-screen co-op (Mods): player 2's character
+// ---------------------------------------------------------------------------
+// The game keeps its characters in a list (r13 + list: a head whose +4 is the
+// first, each node's +4 the next). A node's +52 is its object (position at
+// +0, facing at +44), its +8 its flags; its actor (node + actor) holds its type
+// (+152), its model in the area's model list (+154) and its class (+158: 2 a
+// creature); its stats (node + stats) its health (stats + health). The player
+// is the node whose object is the player object (r13 + g_camera_player_offset).
+//
+// Player 2 is made as the area loader makes a character (0x80041868), as the
+// debug menu's spawn does upstream: a spawn record (init: position, facing,
+// type at +16, model at +20, flags at +40), create, then the room, register
+// and add; with the player's own type, model and flags.
+#define COOP_SPAWN_INIT 0x80040E94u
+#define COOP_SPAWN_CREATE 0x8003121Cu
+#define COOP_SPAWN_SET_ROOM 0x801F64C8u
+#define COOP_SPAWN_REGISTER 0x801F5D18u
+#define COOP_SPAWN_ADD 0x801DCB58u
+#define COOP_SPAWN_DISTANCE 150.0f
+
+static bool g_coop_found;
+static s16 g_coop_list_offset, g_coop_actor_offset, g_coop_stats_offset, g_coop_health_offset, g_coop_room_offset;
+static u32 g_coop_p2;            // player 2's node, 0 when there is none
+static unsigned g_coop_attempts;  // spawns tried in this area
+
+// The list's nodes, in order: 0 past the last.
+static u32 coop_next(CPUState* cpu, u32 node) {
+    node = node == 0u ? mem_read32(cpu, cpu->gpr[13] + (u32)(s32)g_coop_list_offset) : node;
+    const u32 next = guest_ram_range_valid(cpu, node, 8u) ? mem_read32(cpu, node + 4u) : 0u;
+    return guest_ram_range_valid(cpu, next, 56u) ? next : 0u;
+}
+
+static u32 coop_player(CPUState* cpu) {
+    const u32 player = mem_read32(cpu, cpu->gpr[13] + (u32)(s32)g_camera_player_offset);
+    if (player == 0u)
+        return 0u;
+    u32 node = 0u;
+    for (int i = 0; i < 1024 && (node = coop_next(cpu, node)) != 0u; i++)
+        if (mem_read32(cpu, node + 52u) == player)
+            return node;
+    return 0u;
+}
+
+static bool coop_listed(CPUState* cpu, u32 wanted) {
+    u32 node = 0u;
+    for (int i = 0; i < 1024 && (node = coop_next(cpu, node)) != 0u; i++)
+        if (node == wanted)
+            return true;
+    return false;
+}
+
+static void coop_describe(CPUState* cpu, const char* what, u32 node) {
+    const u32 actor = mem_read32(cpu, node + (u32)(s32)g_coop_actor_offset);
+    const u32 stats = mem_read32(cpu, node + (u32)(s32)g_coop_stats_offset);
+    const u32 object = mem_read32(cpu, node + 52u);
+    float at[3] = {0.0f, 0.0f, 0.0f};
+    if (guest_ram_range_valid(cpu, object, 16u))
+        for (u32 i = 0; i < 3u; i++)
+            at[i] = guest_read_f32(cpu, object + i * 4u);
+    fprintf(stderr, "[coop] %s 0x%08X: object 0x%08X type %u model %d class %u health %d flags 0x%08X at %.0f %.0f %.0f\n",
+            what, node, object, guest_ram_range_valid(cpu, actor, 160u) ? mem_read16(cpu, actor + 152u) : 0u,
+            guest_ram_range_valid(cpu, actor, 160u) ? (s16)mem_read16(cpu, actor + 154u) : -1,
+            guest_ram_range_valid(cpu, actor, 160u) ? mem_read8(cpu, actor + 158u) : 0u,
+            guest_ram_range_valid(cpu, stats + (u32)(s32)g_coop_health_offset, 2u)
+                ? (s16)mem_read16(cpu, stats + (u32)(s32)g_coop_health_offset)
+                : -1,
+            mem_read32(cpu, node + 8u), at[0], at[1], at[2]);
+}
+
+// Player 2 beside player 1: the first of eight directions round them (ahead
+// first) clear in the game's collision, else where player 1 stands.
+static void coop_place(CPUState* cpu, u32 object, float out[3]) {
+    float at[3];
+    for (u32 i = 0; i < 3u; i++)
+        out[i] = at[i] = guest_read_f32(cpu, object + i * 4u);
+    const float qz = guest_read_f32(cpu, object + 52u), qw = guest_read_f32(cpu, object + 56u);
+    const float facing = isfinite(qz) && isfinite(qw) ? 2.0f * atan2f(qz, qw) - 1.5707963f : 0.0f;
+    static const float kTurns[8] = {1.571f, -1.571f, 0.785f, -0.785f, 0.0f, 2.356f, -2.356f, 3.142f};
+    for (int i = 0; i < 8; i++) {
+        const float a = facing + kTurns[i];
+        const float from[3] = {at[0], at[1], at[2] + 60.0f};
+        const float to[3] = {at[0] + cosf(a) * COOP_SPAWN_DISTANCE, at[1] + sinf(a) * COOP_SPAWN_DISTANCE,
+                             at[2] + 60.0f};
+        float hit[3];
+        if (!camera_collide(cpu, from, to, 30.0f, hit)) {
+            out[0] = to[0];
+            out[1] = to[1];
+            return;
+        }
+    }
+}
+
+static void coop_spawn(CPUState* cpu, u32 player) {
+    const u32 actor = mem_read32(cpu, player + (u32)(s32)g_coop_actor_offset);
+    const u32 object = mem_read32(cpu, player + 52u);
+    if (!guest_ram_range_valid(cpu, actor, 160u) || !guest_ram_range_valid(cpu, object, 64u))
+        return;
+    const u32 rec = (cpu->gpr[1] - 0x200u) & ~15u;
+    u32 made = 0u, ignore = 0u;
+    float at[3];
+    coop_place(cpu, object, at);
+    if (!hle_guest_call(cpu, COOP_SPAWN_INIT, &rec, 1, 0.0, &ignore))
+        return;
+    for (u32 i = 0; i < 3u; i++)
+        guest_write_f32(cpu, rec + i * 4u, at[i]);
+    mem_write32(cpu, rec + 16u, mem_read16(cpu, actor + 152u));
+    mem_write32(cpu, rec + 20u, (u32)(s32)(s16)mem_read16(cpu, actor + 154u));
+    mem_write32(cpu, rec + 40u, mem_read32(cpu, player + 8u));
+    if (!hle_guest_call(cpu, COOP_SPAWN_CREATE, &rec, 1, 0.0, &made) || made == 0u) {
+        fprintf(stderr, "[coop] the game made no player 2\n");
+        return;
+    }
+    const u32 room_args[] = {made, mem_read32(cpu, cpu->gpr[13] + (u32)(s32)g_coop_room_offset)};
+    const u32 add_args[] = {1u, made};
+    hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, room_args, 2, 0.0, &ignore);
+    hle_guest_call(cpu, COOP_SPAWN_REGISTER, &made, 1, 0.0, &ignore);
+    hle_guest_call(cpu, COOP_SPAWN_ADD, add_args, 2, 0.0, &ignore);
+    g_coop_p2 = made;
+    coop_describe(cpu, "player 1", player);
+    coop_describe(cpu, coop_listed(cpu, made) ? "player 2 (listed)" : "player 2 (not in the list)", made);
+}
+
+// Player 2's feet, for their camera (camera.c); false while they have none.
+bool hle_coop_player2_position(CPUState* cpu, float out[3]) {
+    if (g_coop_p2 == 0u)
+        return false;
+    const u32 object = mem_read32(cpu, g_coop_p2 + 52u);
+    if (!guest_ram_range_valid(cpu, object, 16u))
+        return false;
+    for (u32 i = 0; i < 3u; i++)
+        out[i] = guest_read_f32(cpu, object + i * 4u);
+    return isfinite(out[0]) && isfinite(out[1]) && isfinite(out[2]);
+}
+
+// Each pad read: in co-op and in play, player 2 is there (made again in each
+// new area: the game's area change takes every character with it).
+static void coop_pad_read(CPUState* cpu, bool playing) {
+    if (!g_coop_found || !g_settings.mod_coop || !sda_ready(cpu))
+        return;
+    if (g_coop_p2 != 0u && !coop_listed(cpu, g_coop_p2)) {
+        fprintf(stderr, "[coop] player 2 is gone (an area change?)\n");
+        g_coop_p2 = 0u;
+        g_coop_attempts = 0u;
+    }
+    if (!playing)
+        return;
+    const u32 player = coop_player(cpu);
+    if (player == 0u)
+        return;
+    if (g_coop_p2 == 0u && g_coop_attempts < 3u) {
+        g_coop_attempts++;
+        coop_spawn(cpu, player);
+    }
+    // ED_COOP_LOG=1: both players, once a second.
+    static int log = -1;
+    if (log < 0)
+        log = getenv("ED_COOP_LOG") != NULL;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (log && g_coop_p2 != 0u && frame % 60u == 0u) {
+        coop_describe(cpu, "player 1", player);
+        coop_describe(cpu, "player 2", g_coop_p2);
+    }
+}
+
+// The list and actor (the game's search for the player's character beside
+// the health setter, and the stat setter's actor getter), the health (the
+// health setter's), and the spawn's calls, as upstream's debug menu finds
+// them (PAL only).
+static void find_coop(CPUState* cpu) {
+    if (strcmp(ED_GAME_ID, "GEDP01") != 0 || g_camera_player_offset == 0) {
+        fprintf(stderr, "[coop] not on this disc: no player 2\n");
+        return;
+    }
+    const u32 setter = 0x801F64FCu, stat_fn = 0x800354F8u, search = 0x801F6344u;
+    const u32 load = mem_read32(cpu, setter + 0x18u);
+    const u32 bl = mem_read32(cpu, setter + 0x24u);
+    const u32 set = setter + 0x24u + (u32)(((s32)(bl << 6)) >> 6 & ~3);
+    const u32 read = mem_read32(cpu, set + 0x30u);
+    const u32 actor_bl = mem_read32(cpu, stat_fn + 0x30u);
+    const u32 actor = stat_fn + 0x30u + (u32)(((s32)(actor_bl << 6)) >> 6 & ~3);
+    const u32 list_bl = mem_read32(cpu, search + 0x14u);
+    const u32 list = search + 0x14u + (u32)(((s32)(list_bl << 6)) >> 6 & ~3);
+    const u32 head = mem_read32(cpu, list + 0x0Cu);
+    const u32 room = mem_read32(cpu, COOP_SPAWN_INIT + 0x44u);
+    if (mem_read32(cpu, setter) != 0x9421FFF0u || (load >> 16) != 0x8063u || (bl & 0xFC000003u) != 0x48000001u ||
+        (read >> 16) != 0xA87Eu || (actor_bl & 0xFC000003u) != 0x48000001u ||
+        (mem_read32(cpu, actor) >> 16) != 0x8063u || mem_read32(cpu, actor + 4u) != 0x4E800020u ||
+        (list_bl & 0xFC000003u) != 0x48000001u || mem_read32(cpu, search + 0x20u) != 0x80030034u ||
+        (head >> 16) != 0x806Du || mem_read32(cpu, list + 0x10u) != 0x4E800020u ||
+        mem_read32(cpu, COOP_SPAWN_INIT) != 0x9421FFF0u || mem_read32(cpu, COOP_SPAWN_INIT + 0x28u) != 0x907F0010u ||
+        (room >> 16) != 0x806Du || mem_read32(cpu, COOP_SPAWN_CREATE) != 0x9421FFE0u ||
+        mem_read32(cpu, COOP_SPAWN_SET_ROOM) != 0x9421FFF0u || mem_read32(cpu, COOP_SPAWN_REGISTER) != 0x9421FFF0u) {
+        fprintf(stderr, "[coop] the game's characters not found: no player 2\n");
+        return;
+    }
+    g_coop_stats_offset = (s16)(load & 0xFFFFu);
+    g_coop_health_offset = (s16)(read & 0xFFFFu);
+    g_coop_actor_offset = (s16)(mem_read32(cpu, actor) & 0xFFFFu);
+    g_coop_list_offset = (s16)(head & 0xFFFFu);
+    g_coop_room_offset = (s16)(room & 0xFFFFu);
+    g_coop_found = true;
+    fprintf(stderr, "[coop] the player object's pointer is at 0x%08X; the characters' list at 0x%08X\n",
+            ED_GUEST_R13 + (u32)(s32)g_camera_player_offset, ED_GUEST_R13 + (u32)(s32)g_coop_list_offset);
+}
+
 // The pause menu's flag and render-state depth (game_menu_open), from the one
 // setter of the flag (flag = r3 != 0) and the reset of the depth to 0.
 static void find_game_menu(CPUState* cpu) {
@@ -6059,6 +6278,7 @@ void hle_install(CPUState* cpu) {
     find_game_menu(cpu);
     find_letterbox(cpu);
     find_camera(cpu);
+    find_coop(cpu);
 #endif
     find_refresh_prompt(cpu);
     publish_codegen_options();
