@@ -3613,6 +3613,8 @@ static void coop_pad_read(CPUState* cpu, bool playing);
 // Split-screen co-op: while player 2's turn reads the pad (coop_player_turn),
 // the game's pad 1 is player 2's controller.
 static bool g_coop_pad_p2;
+// Player 1's B held for them (coop_door_proxy: player 2 using a door).
+static bool g_coop_press_b;
 #endif
 
 static void hle_PADRead(CPUState* cpu) {
@@ -3723,6 +3725,13 @@ static void hle_PADRead(CPUState* cpu) {
         state[0].error = 0;
     mash_to_gameplay_apply(cpu, &state[0].button, &state[0].stick_x,
                            &state[0].analog_a);
+#ifdef ED_AURORA
+    if (g_coop_press_b) {
+        state[0].button |= 0x0200u;  // PAD_BUTTON_B
+        state[0].analog_b = 0xFFu;
+        state[0].error = 0;
+    }
+#endif
     if (g_mash_to_gameplay)
         state[0].error = 0;
     for (u32 i = 0; i < 4; i++) {
@@ -6054,6 +6063,12 @@ static CoopPlayerState g_coop_state[2];
 // Player 2 is the game's player during their turn (ED_COOP_P2_NOT_PLAYER=1,
 // testing: not).
 static bool g_coop_p2_is_player = true;
+// The game's look round the player for doors and things (0x80134A44) and the
+// character info it takes its arguments from (0x80123F70), for player 2's
+// turn; found with the characters' step (find_coop).
+#define COOP_SCAN 0x80134A44u
+#define COOP_CHARACTER_INFO 0x80123F70u
+static bool g_coop_scan;
 static bool g_coop_p2_state;  // player 2's has been kept since they were made
 static bool g_coop_turn;      // player 2's turn is running
 
@@ -6109,12 +6124,40 @@ static void coop_player_turn(CPUState* cpu) {
         if (g_coop_p2_is_player)
             mem_write32(cpu, who[i], now[i]);
     }
+    // What player 2 is next to, by the game's own scan for the player (as
+    // each character's step makes it for player 1: info = 0x80123F70(object);
+    // scan(object, info[180], info[176], out)); the controller then acts on
+    // it as it does for player 1 (opening the door they stand by). Player 1's
+    // record and prompt state come back with their state after the turn.
+    // Off unless ED_COOP_P2_SCAN=1 (testing): a scan for player 2 kept player 1
+    // from opening doors (something of the door's own); player 2 opens doors
+    // through player 1's own instead (coop_door_proxy). The words round the
+    // record are only put back with the scan: they hold player 2's walking
+    // too, which putting them back undid.
+    static int scan = -1;
+    if (scan < 0)
+        scan = getenv("ED_COOP_P2_SCAN") != NULL;
+    static u8 p1_prompt[2060];
+    const u32 prompt = cpu->gpr[13] - 24040u;
+    if (scan)
+        coop_bytes(cpu, prompt, p1_prompt, sizeof p1_prompt, true);
+    if (scan && g_coop_p2_is_player && g_coop_scan) {
+        u32 info = 0u;
+        if (hle_guest_call(cpu, COOP_CHARACTER_INFO, &now[0], 1, 0.0, &info) &&
+            guest_ram_range_valid(cpu, info, 184u)) {
+            const u32 out = (cpu->gpr[1] - 0x400u) & ~15u;
+            const u32 args[4] = {now[0], mem_read32(cpu, info + 180u), mem_read16(cpu, info + 176u), out};
+            hle_guest_call(cpu, COOP_SCAN, args, 4, 0.0, &ignore);
+        }
+    }
     const bool ran = hle_guest_call(cpu, COOP_CONTROLLER, &p2, 1, 0.0, &ignore);
+    coop_state(cpu, &g_coop_state[1], true);  // with what they found, for the next turn
+    g_coop_p2_state = true;
+    if (scan)
+        coop_bytes(cpu, prompt, p1_prompt, sizeof p1_prompt, false);
     for (int i = 0; i < 3; i++)
         mem_write32(cpu, who[i], was[i]);
     coop_bytes(cpu, COOP_CAMERA, camera, sizeof camera, false);
-    coop_state(cpu, &g_coop_state[1], true);
-    g_coop_p2_state = true;
     coop_state(cpu, &g_coop_state[0], false);
     g_coop_turn = false;
     static bool told;
@@ -6314,6 +6357,81 @@ static void coop_snap(CPUState* cpu) {
 // ED_COOP_SWAP_AT=n: the players trade places (position and facing) at n.
 // ED_COOP_SDA_DUMP=dir: the game's small-data area (r13 +-32 KB) written to
 // dir/sdaK.bin at n-100, n-40, n+60 and n+120 (K 0..3), to compare.
+// The players trade places: position (object +0..11) and facing (+44..59).
+static bool coop_trade_places(CPUState* cpu) {
+    const u32 player = coop_player(cpu);
+    const u32 o1 = player != 0u ? mem_read32(cpu, player + 52u) : 0u;
+    const u32 o2 = g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + 52u) : 0u;
+    if (!guest_ram_range_valid(cpu, o1, 64u) || !guest_ram_range_valid(cpu, o2, 64u))
+        return false;
+    for (u32 off = 0; off < 60u; off += 4u) {
+        if (off >= 12u && off < 44u)
+            continue;
+        const u32 a = mem_read32(cpu, o1 + off), b = mem_read32(cpu, o2 + off);
+        mem_write32(cpu, o1 + off, b);
+        mem_write32(cpu, o2 + off, a);
+    }
+    return true;
+}
+
+// Player 2 uses doors through player 1's own. Only the player looks round
+// for doors and things, and a second look (for player 2) kept player 1 from
+// opening any; so when player 2 presses B (a press, not a hold), the players
+// trade places and player 1 presses B there for a few frames: the game's own
+// look finds what player 2 stood by and its own use opens it, player 1 going
+// through (player 2 follows them, coop_follow). Nothing to use there (player
+// 1 still where they were put), they trade back.
+// In pad reads after the trade: the game's look settles on what is there
+// (its prompt comes up), then B, then time for the door to take them.
+#define COOP_PROXY_PRESS_FROM 20u
+#define COOP_PROXY_PRESS_UNTIL 26u
+#define COOP_PROXY_DONE 60u
+
+static void coop_door_proxy(CPUState* cpu) {
+    static unsigned step;
+    static bool b_was;
+    static float at[3];
+    DolPadState p2;
+    controls_read_player2(&p2);
+    const bool b = (p2.button & 0x0200u) != 0u;
+    const bool pressed = b && !b_was;
+    b_was = b;
+    const u32 player = coop_player(cpu);
+    const u32 o1 = player != 0u ? mem_read32(cpu, player + 52u) : 0u;
+    if (step == 0u) {
+        if (!pressed || !guest_ram_range_valid(cpu, o1, 64u) || !coop_trade_places(cpu))
+            return;
+        for (u32 i = 0; i < 3u; i++)
+            at[i] = guest_read_f32(cpu, o1 + i * 4u);
+        step = 1u;
+        fprintf(stderr, "[coop] player 2 uses what they stand by (through player 1)\n");
+        return;
+    }
+    step++;
+    g_coop_press_b = step >= COOP_PROXY_PRESS_FROM && step < COOP_PROXY_PRESS_UNTIL;
+    if (step == COOP_PROXY_PRESS_FROM && getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] assist presses B: player 1 at %.0f %.0f, next to 0x%08X (who 0x%08X)\n",
+                guest_read_f32(cpu, o1), guest_read_f32(cpu, o1 + 4u), mem_read32(cpu, cpu->gpr[13] - 23192u),
+                mem_read32(cpu, cpu->gpr[13] - 23196u));
+    if (step < COOP_PROXY_DONE)
+        return;
+    g_coop_press_b = false;
+    step = 0u;
+    if (!guest_ram_range_valid(cpu, o1, 64u))
+        return;
+    float moved = 0.0f;
+    for (u32 i = 0; i < 3u; i++) {
+        const float d = guest_read_f32(cpu, o1 + i * 4u) - at[i];
+        moved += d * d;
+    }
+    if (moved < 4.0f) {
+        coop_trade_places(cpu);
+        fprintf(stderr, "[coop] nothing to use there: the players trade back\n");
+    } else {
+        fprintf(stderr, "[coop] player 1 went on (%.0f units)\n", sqrtf(moved));
+    }
+}
+
 static void coop_test_swap(CPUState* cpu) {
     const char* at = getenv("ED_COOP_SWAP_AT");
     if (at == NULL || g_coop_p2 == 0u)
@@ -6375,8 +6493,10 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         g_coop_attempts++;
         coop_spawn(cpu, player);
     }
-    if (g_coop_p2 != 0u)
+    if (g_coop_p2 != 0u) {
+        coop_door_proxy(cpu);
         coop_follow(cpu, player);
+    }
     // ED_COOP_LOG=1: both players, once a second.
     static int log = -1;
     if (log < 0)
@@ -6496,10 +6616,13 @@ static void find_coop(CPUState* cpu) {
     // scan for the player (bl at 0x801335C4), for player 2's own.
     HleDispatchEntry* step = hle_dispatch_entry(COOP_CHARACTER_STEP);
     if (mem_read32(cpu, COOP_CHARACTER_STEP) == 0x9421FF10u && mem_read32(cpu, COOP_CHARACTER_STEP + 16u) == 0x7C7F1B78u &&
-        mem_read32(cpu, 0x801335C4u) == 0x48001481u && step != NULL && step->intercept == NULL && step->notify == NULL)
+        mem_read32(cpu, 0x801335C4u) == 0x48001481u && mem_read32(cpu, 0x80133468u) == 0x4BFF0B09u &&
+        mem_read32(cpu, COOP_SCAN) == 0x9421FFB0u && step != NULL && step->intercept == NULL && step->notify == NULL) {
         step->intercept = coop_character_step;
-    else
+        g_coop_scan = true;
+    } else {
         fprintf(stderr, "[coop] the characters' step not found: player 2 finds no doors\n");
+    }
     // The event call (stwu r1,-48(r1); mflr; stw; li r0,-1) for the threat
     // search, and the search's call of it (bl at 0x8003230C).
     HleDispatchEntry* send = hle_dispatch_entry(COOP_SEND_EVENT);
