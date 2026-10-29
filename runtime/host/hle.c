@@ -6091,6 +6091,33 @@ static void coop_send_event(CPUState* cpu) {
     g_hle_passthrough = true;
 }
 
+// Through doors together. A character's room is its object's +592 (what the
+// game's set-room call, 0x801F64C8(node, room), stores). The players stay in
+// one room: when player 2's is not player 1's (player 1 went through a door,
+// or player 2 did alone), player 2 is put in player 1's room, beside them.
+#define COOP_OBJECT_ROOM 592u
+
+static void coop_follow(CPUState* cpu, u32 player) {
+    const u32 o1 = mem_read32(cpu, player + 52u), o2 = mem_read32(cpu, g_coop_p2 + 52u);
+    if (!guest_ram_range_valid(cpu, o1, 64u) || !guest_ram_range_valid(cpu, o2, 64u) ||
+        !guest_ram_range_valid(cpu, o1 + COOP_OBJECT_ROOM, 4u) || !guest_ram_range_valid(cpu, o2 + COOP_OBJECT_ROOM, 4u))
+        return;
+    const u32 room = mem_read32(cpu, o1 + COOP_OBJECT_ROOM);
+    if (room == 0u || mem_read32(cpu, o2 + COOP_OBJECT_ROOM) == room)
+        return;
+    float at[3];
+    coop_place(cpu, o1, at);
+    for (u32 i = 0; i < 3u; i++)
+        guest_write_f32(cpu, o2 + i * 4u, at[i]);
+    for (u32 i = 0; i < 4u; i++)  // facing as player 1
+        mem_write32(cpu, o2 + 44u + i * 4u, mem_read32(cpu, o1 + 44u + i * 4u));
+    const u32 args[] = {g_coop_p2, room};
+    u32 ignore = 0u;
+    hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, args, 2, 0.0, &ignore);
+    fprintf(stderr, "[coop] player 2 brought to player 1's room 0x%08X, at %.0f %.0f %.0f\n", room, at[0], at[1],
+            at[2]);
+}
+
 // Player 2's feet, for their camera (camera.c); false while they have none.
 bool hle_coop_player2_position(CPUState* cpu, float out[3]) {
     if (g_coop_p2 == 0u)
@@ -6149,6 +6176,8 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         g_coop_attempts++;
         coop_spawn(cpu, player);
     }
+    if (g_coop_p2 != 0u)
+        coop_follow(cpu, player);
     // ED_COOP_LOG=1: both players, once a second.
     static int log = -1;
     if (log < 0)
