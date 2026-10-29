@@ -3622,6 +3622,12 @@ static void hle_PADRead(CPUState* cpu) {
 #ifdef ED_AURORA
     if (g_coop_pad_p2) {
         controls_read_player2(&state[0]);
+        static int pad_log = -1;  // ED_COOP_PAD_LOG=1: player 2's pad when anything is pressed
+        if (pad_log < 0)
+            pad_log = getenv("ED_COOP_PAD_LOG") != NULL;
+        if (pad_log && (state[0].button != 0u || state[0].stick_x != 0 || state[0].stick_y != 0))
+            fprintf(stderr, "[coop] player 2's pad: buttons 0x%04X stick %d %d\n", state[0].button,
+                    state[0].stick_x, state[0].stick_y);
         for (u32 i = 1; i < 4; i++)
             state[i].error = -1;  // PAD_ERR_NO_CONTROLLER
         for (u32 i = 0; i < 4; i++) {
@@ -5650,6 +5656,22 @@ static void hle_skin(CPUState* cpu) {
     u32 args[8];
     for (int i = 0; i < 8; i++)
         args[i] = cpu->gpr[3 + i];
+    // ED_COOP_SKIN_LOG=1 (testing): the skinning's arguments for player 2, and
+    // the words at the first, twice a second.
+    static int skin_log = -1;
+    if (skin_log < 0)
+        skin_log = getenv("ED_COOP_SKIN_LOG") != NULL;
+    u32 hle_coop_player2_object(CPUState* cpu);
+    if (skin_log && g_skin_character != 0u && g_skin_character == hle_coop_player2_object(cpu) &&
+        (cpu->timebase / 675000ull) % 30u == 0u) {
+        fprintf(stderr, "[skin] p2 args");
+        for (int i = 0; i < 8; i++)
+            fprintf(stderr, " %08X", args[i]);
+        fprintf(stderr, " | r3:");
+        for (u32 w = 0; w < 16u && guest_ram_range_valid(cpu, args[0] + w * 4u, 4u); w++)
+            fprintf(stderr, " %08X", mem_read32(cpu, args[0] + w * 4u));
+        fputc('\n', stderr);
+    }
     g_skin_running = true;
     const bool ok = hle_guest_call(cpu, g_skin_fn, args, 8, cpu->fpr[1], NULL);
     camera_skin_end(cpu, g_skin_character);
@@ -6011,6 +6033,9 @@ typedef struct {
 } CoopPlayerState;
 
 static CoopPlayerState g_coop_state[2];
+// Player 2 is the game's player during their turn (ED_COOP_P2_NOT_PLAYER=1,
+// testing: not).
+static bool g_coop_p2_is_player = true;
 static bool g_coop_p2_state;  // player 2's has been kept since they were made
 static bool g_coop_turn;      // player 2's turn is running
 
@@ -6055,7 +6080,19 @@ static void coop_player_turn(CPUState* cpu) {
         guest_write_f32(cpu, COOP_CAMERA + i * 4u, eye[i]);
         guest_write_f32(cpu, COOP_CAMERA + 12u + i * 4u, target[i]);
     }
+    // Player 2 is "the player" for their turn: the game's checks for doors,
+    // things to look at and what the player stands by ask round them.
+    const u32 who[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+    u32 was[3];
+    const u32 now[3] = {mem_read32(cpu, p2 + 52u), p2, mem_read32(cpu, p2 + 16u)};
+    for (int i = 0; i < 3; i++) {
+        was[i] = mem_read32(cpu, who[i]);
+        if (g_coop_p2_is_player)
+            mem_write32(cpu, who[i], now[i]);
+    }
     const bool ran = hle_guest_call(cpu, COOP_CONTROLLER, &p2, 1, 0.0, &ignore);
+    for (int i = 0; i < 3; i++)
+        mem_write32(cpu, who[i], was[i]);
     coop_bytes(cpu, COOP_CAMERA, camera, sizeof camera, false);
     coop_state(cpu, &g_coop_state[1], true);
     g_coop_p2_state = true;
@@ -6118,6 +6155,11 @@ static void coop_follow(CPUState* cpu, u32 player) {
             at[2]);
 }
 
+// Player 2's object, for the skinning log (ED_COOP_SKIN_LOG).
+u32 hle_coop_player2_object(CPUState* cpu) {
+    return g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + 52u) : 0u;
+}
+
 // Player 2's feet, for their camera (camera.c); false while they have none.
 bool hle_coop_player2_position(CPUState* cpu, float out[3]) {
     if (g_coop_p2 == 0u)
@@ -6156,9 +6198,38 @@ static void coop_dump(CPUState* cpu, bool playing) {
     fprintf(stderr, "[coop] dumped player 1 to %s\n", path);
 }
 
+// ED_COOP_SNAP=dir (testing): player 2's object (0x800 bytes) once a second
+// in play, to dir/snapN.txt, with their distance from the game camera's eye.
+static void coop_snap(CPUState* cpu) {
+    const char* dir = getenv("ED_COOP_SNAP");
+    static unsigned reads, n;
+    if (dir == NULL || g_coop_p2 == 0u || ++reads % 60u != 0u || n >= 40u)
+        return;
+    const u32 object = mem_read32(cpu, g_coop_p2 + 52u);
+    if (!guest_ram_range_valid(cpu, object, 0x800u))
+        return;
+    char path[512];
+    snprintf(path, sizeof path, "%s/snap%02u.txt", dir, n++);
+    FILE* f = fopen(path, "w");
+    if (f == NULL)
+        return;
+    float d2 = 0.0f;
+    for (u32 i = 0; i < 3u; i++) {
+        const float d = guest_read_f32(cpu, object + i * 4u) - guest_read_f32(cpu, COOP_CAMERA + i * 4u);
+        d2 += d * d;
+    }
+    fprintf(f, "distance %.0f\n", sqrtf(d2));
+    for (u32 off = 0; off < 0x800u; off += 4u)
+        fprintf(f, "%03X %08X\n", off, mem_read32(cpu, object + off));
+    fclose(f);
+}
+
 static void coop_pad_read(CPUState* cpu, bool playing) {
-    if (g_coop_found && sda_ready(cpu))
+    if (g_coop_found && sda_ready(cpu)) {
         coop_dump(cpu, playing);
+        if (playing)
+            coop_snap(cpu);
+    }
     if (!g_coop_found || !g_settings.mod_coop || !sda_ready(cpu))
         return;
     if (g_coop_p2 != 0u && !coop_listed(cpu, g_coop_p2)) {
@@ -6280,6 +6351,7 @@ static void find_coop(CPUState* cpu) {
     g_coop_actor_offset = (s16)(mem_read32(cpu, actor) & 0xFFFFu);
     g_coop_list_offset = (s16)(head & 0xFFFFu);
     g_coop_room_offset = (s16)(room & 0xFFFFu);
+    g_coop_p2_is_player = getenv("ED_COOP_P2_NOT_PLAYER") == NULL;
     // Player 2's turn, as the game controls player 1: the controller's start
     // (stwu r1,-160(r1); ... bl id (0x801F62C8)) and the pad routine's
     // (stwu r1,-32(r1); ... bl PADRead).
