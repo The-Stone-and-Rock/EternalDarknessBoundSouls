@@ -6024,13 +6024,31 @@ static void coop_spawn(CPUState* cpu, u32 player) {
 // player 2's turn it is player 2's camera.
 #define COOP_CAMERA 0x803012E0u
 
+// What the player is next to (a door, a thing to look at or pick up): the
+// scan (0x80134A44, from each character's step, 0x80133434, for the player
+// only) records who and what at r13 - 23196 and - 23192, with the prompt's
+// and its state's words beside; acting on it reads them. Each player has
+// their own.
+static const s32 kCoopInteract[5] = {-29016, -24032, -23196, -23192, -21996};
+
 typedef struct {
     u8 input[COOP_INPUT_SIZE];
     u8 control[COOP_CONTROL_SIZE];
     u8 aim[COOP_AIM_SIZE];
     u8 globals[48];       // r13 - 25680 .. - 25632: the controller's state
     u8 pad_globals[56];   // r13 - 23604 .. - 23548: the pad routine's
+    u32 interact[5];      // kCoopInteract
 } CoopPlayerState;
+
+static void coop_interact(CPUState* cpu, u32 out[5], bool save) {
+    for (int i = 0; i < 5; i++) {
+        const u32 at = cpu->gpr[13] + (u32)kCoopInteract[i];
+        if (save)
+            out[i] = mem_read32(cpu, at);
+        else
+            mem_write32(cpu, at, out[i]);
+    }
+}
 
 static CoopPlayerState g_coop_state[2];
 // Player 2 is the game's player during their turn (ED_COOP_P2_NOT_PLAYER=1,
@@ -6057,6 +6075,7 @@ static void coop_state(CPUState* cpu, CoopPlayerState* s, bool save) {
         coop_bytes(cpu, aim, s->aim, COOP_AIM_SIZE, save);
     coop_bytes(cpu, cpu->gpr[13] - 25680u, s->globals, sizeof s->globals, save);
     coop_bytes(cpu, cpu->gpr[13] - 23604u, s->pad_globals, sizeof s->pad_globals, save);
+    coop_interact(cpu, s->interact, save);
 }
 
 static void coop_player_turn(CPUState* cpu) {
@@ -6160,6 +6179,73 @@ u32 hle_coop_player2_object(CPUState* cpu) {
     return g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + 52u) : 0u;
 }
 
+// Player 2's own look round for doors and things. Each character's step
+// (0x80133434, fn(object, ...)) scans round it only when it is the player;
+// for player 2's it runs with them as the player, their own last scan in the
+// shared record, which keeps what it finds for their turn, and player 1's put
+// back after.
+#define COOP_CHARACTER_STEP 0x80133434u
+static bool g_coop_step_running;
+
+static void coop_character_step(CPUState* cpu) {
+    const u32 object = cpu->gpr[3];
+    static bool seen;
+    if (!seen && g_coop_p2 != 0u && object == mem_read32(cpu, g_coop_p2 + 52u) && getenv("ED_COOP_LOG") != NULL) {
+        seen = true;
+        fprintf(stderr, "[coop] player 2's step runs (their turn %s yet)\n", g_coop_p2_state ? "has run" : "has not run");
+    }
+    // Off unless ED_COOP_P2_STEP=1 (testing): with it, player 2 finds doors
+    // (the record above is theirs) but neither player can open one yet:
+    // something of the door's own, beyond these globals, is upset by the
+    // second scan.
+    static int off = -1;
+    if (off < 0)
+        off = getenv("ED_COOP_P2_STEP") == NULL;
+    if (off || g_coop_step_running || g_coop_p2 == 0u || !g_coop_p2_state || !sda_ready(cpu) ||
+        object != mem_read32(cpu, g_coop_p2 + 52u)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    u32 args[8];
+    for (int i = 0; i < 8; i++)
+        args[i] = cpu->gpr[3 + i];
+    // Player 2's whole state (their input too: using what they stand by is
+    // their button, read here), as in their turn.
+    const u32 who[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+    const u32 now[3] = {object, g_coop_p2, mem_read32(cpu, g_coop_p2 + 16u)};
+    u32 was[3];
+    static CoopPlayerState p1;
+    for (int i = 0; i < 3; i++) {
+        was[i] = mem_read32(cpu, who[i]);
+        mem_write32(cpu, who[i], now[i]);
+    }
+    // The scan's prompt and its state lie round the record (r13 - 24040 ..
+    // - 21980): player 1's, as they are, come back after player 2's scan,
+    // which finding nothing would clear them (player 1 could not open a door).
+    static u8 p1_prompt[2060];
+    const u32 prompt = cpu->gpr[13] - 24040u;
+    coop_bytes(cpu, prompt, p1_prompt, sizeof p1_prompt, true);
+    coop_state(cpu, &p1, true);
+    coop_state(cpu, &g_coop_state[1], false);
+    g_coop_step_running = true;
+    const bool ok = hle_guest_call(cpu, COOP_CHARACTER_STEP, args, 8, cpu->fpr[1], NULL);
+    g_coop_step_running = false;
+    coop_state(cpu, &g_coop_state[1], true);
+    coop_bytes(cpu, prompt, p1_prompt, sizeof p1_prompt, false);
+    coop_state(cpu, &p1, false);
+    for (int i = 0; i < 3; i++)
+        mem_write32(cpu, who[i], was[i]);
+    static u32 told;
+    if (getenv("ED_COOP_LOG") != NULL && g_coop_state[1].interact[3] != told) {
+        told = g_coop_state[1].interact[3];
+        fprintf(stderr, "[coop] player 2 is next to 0x%08X\n", told);
+    }
+    if (!ok)
+        fprintf(stderr, "[coop] player 2's step did not return\n");
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
 // Player 2's feet, for their camera (camera.c); false while they have none.
 bool hle_coop_player2_position(CPUState* cpu, float out[3]) {
     if (g_coop_p2 == 0u)
@@ -6224,7 +6310,49 @@ static void coop_snap(CPUState* cpu) {
     fclose(f);
 }
 
+// Testing, counted in pad reads in play since player 2 was made:
+// ED_COOP_SWAP_AT=n: the players trade places (position and facing) at n.
+// ED_COOP_SDA_DUMP=dir: the game's small-data area (r13 +-32 KB) written to
+// dir/sdaK.bin at n-100, n-40, n+60 and n+120 (K 0..3), to compare.
+static void coop_test_swap(CPUState* cpu) {
+    const char* at = getenv("ED_COOP_SWAP_AT");
+    if (at == NULL || g_coop_p2 == 0u)
+        return;
+    static unsigned reads;
+    const unsigned n = (unsigned)atoi(at), r = ++reads;
+    const char* dir = getenv("ED_COOP_SDA_DUMP");
+    const unsigned marks[4] = {n - 100u, n - 40u, n + 60u, n + 120u};
+    for (int k = 0; dir != NULL && k < 4; k++)
+        if (r == marks[k]) {
+            char path[512];
+            snprintf(path, sizeof path, "%s/sda%d.bin", dir, k);
+            FILE* f = fopen(path, "wb");
+            const u32 lo = cpu->gpr[13] - 0x8000u;
+            if (f != NULL && guest_ram_range_valid(cpu, lo, 0x10000u)) {
+                fwrite(cpu->ram + (lo - GC_RAM_BASE), 1, 0x10000u, f);
+                fclose(f);
+                fprintf(stderr, "[coop] small data %d written (read %u)\n", k, r);
+            }
+        }
+    if (r != n)
+        return;
+    const u32 player = coop_player(cpu);
+    const u32 o1 = player != 0u ? mem_read32(cpu, player + 52u) : 0u, o2 = mem_read32(cpu, g_coop_p2 + 52u);
+    if (!guest_ram_range_valid(cpu, o1, 64u) || !guest_ram_range_valid(cpu, o2, 64u))
+        return;
+    for (u32 off = 0; off < 60u; off += 4u) {
+        if (off >= 12u && off < 44u)
+            continue;  // position (0..11) and facing (44..59) only
+        const u32 a = mem_read32(cpu, o1 + off), b = mem_read32(cpu, o2 + off);
+        mem_write32(cpu, o1 + off, b);
+        mem_write32(cpu, o2 + off, a);
+    }
+    fprintf(stderr, "[coop] the players traded places (read %u)\n", r);
+}
+
 static void coop_pad_read(CPUState* cpu, bool playing) {
+    if (g_coop_found && sda_ready(cpu) && playing)
+        coop_test_swap(cpu);
     if (g_coop_found && sda_ready(cpu)) {
         coop_dump(cpu, playing);
         if (playing)
@@ -6364,6 +6492,14 @@ static void find_coop(CPUState* cpu) {
         controller->notify = coop_player_turn;
     else
         fprintf(stderr, "[coop] the player controller not found: player 2 cannot move\n");
+    // Each character's step (stwu r1,-240(r1) ... or r31,r3,r3), and its
+    // scan for the player (bl at 0x801335C4), for player 2's own.
+    HleDispatchEntry* step = hle_dispatch_entry(COOP_CHARACTER_STEP);
+    if (mem_read32(cpu, COOP_CHARACTER_STEP) == 0x9421FF10u && mem_read32(cpu, COOP_CHARACTER_STEP + 16u) == 0x7C7F1B78u &&
+        mem_read32(cpu, 0x801335C4u) == 0x48001481u && step != NULL && step->intercept == NULL && step->notify == NULL)
+        step->intercept = coop_character_step;
+    else
+        fprintf(stderr, "[coop] the characters' step not found: player 2 finds no doors\n");
     // The event call (stwu r1,-48(r1); mflr; stw; li r0,-1) for the threat
     // search, and the search's call of it (bl at 0x8003230C).
     HleDispatchEntry* send = hle_dispatch_entry(COOP_SEND_EVENT);
