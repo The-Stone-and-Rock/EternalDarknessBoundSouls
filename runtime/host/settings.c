@@ -47,6 +47,7 @@ Settings g_settings = {
     .mod_coop = false,
     .mod_split = 0,
     .mod_p2_input = 0,
+    .mod_p2_camera = 0,
     .mod_p2_layout = 1,  // Modern, as player 1
     .mod_p2_custom = "",
     .mod_stats = 0,
@@ -165,6 +166,8 @@ void settings_load(void) {
             g_settings.mod_split = clamp_int(n, 0, 1);
         else if (strcmp(key, "mod_p2_input") == 0)
             g_settings.mod_p2_input = clamp_int(n, 0, 1);
+        else if (strcmp(key, "mod_p2_camera") == 0)
+            g_settings.mod_p2_camera = clamp_int(n, 0, 1);
         else if (strcmp(key, "mod_p2_layout") == 0)
             g_settings.mod_p2_layout = clamp_int(n, 0, 2);
         else if (strcmp(key, "mod_p2_custom") == 0)
@@ -230,6 +233,7 @@ void settings_save(void) {
     fprintf(f, "mod_coop = %d\n", g_settings.mod_coop ? 1 : 0);
     fprintf(f, "mod_split = %d\n", g_settings.mod_split);
     fprintf(f, "mod_p2_input = %d\n", g_settings.mod_p2_input);
+    fprintf(f, "mod_p2_camera = %d\n", g_settings.mod_p2_camera);
     fprintf(f, "mod_p2_layout = %d\n", g_settings.mod_p2_layout);
     fprintf(f, "mod_p2_custom = %s\n", g_settings.mod_p2_custom);
     fprintf(f, "mod_stats = %d\n", g_settings.mod_stats);

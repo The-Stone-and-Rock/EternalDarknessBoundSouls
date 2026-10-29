@@ -459,23 +459,49 @@ void build_mods() {
 
     Row coop{"Split-screen co-op", on_off(g_settings.mod_coop)};
     coop.section = "I · Co-op";
-    coop.note = note("A second player in the same world, each with their own view, health, magick and sanity.");
+    coop.note = "A second player in the same world, each with their own view and controls. (Their own health, "
+                "magick and sanity are still to come.)";
     coop.change = [](int) { g_settings.mod_coop = !g_settings.mod_coop; };
     g_rows.push_back(coop);
 
     static const char* const kSplit[] = {"Side by side", "Above and below"};
     Row split{"Screen split", kSplit[g_settings.mod_split]};
     split.enabled = g_settings.mod_coop;
-    split.note = note("How the screen divides between the two players.");
+    split.note = "How the screen divides between the two players.";
     split.change = [](int dir) { cycle(g_settings.mod_split, 2, dir); };
     g_rows.push_back(split);
 
     static const char* const kInput[] = {"Controller", "Keyboard"};
     Row input{"Player 2 plays with", kInput[g_settings.mod_p2_input]};
     input.enabled = g_settings.mod_coop;
-    input.note = note("Which controller, its type and the buttons: Options, Controls, Player 2.");
+    input.note = "Which controller, its type and the buttons: Options, Controls, Player 2.";
     input.change = [](int dir) { cycle(g_settings.mod_p2_input, 2, dir); };
     g_rows.push_back(input);
+
+    // Each player's camera: player 1's is Options' Camera, player 2's their own.
+    Row p1_camera{"Player 1 camera", camera_mode_name(g_settings.camera)};
+    p1_camera.note = "The game's own fixed cameras, behind them, or through their eyes (as Options, Camera).";
+    p1_camera.change = [](int dir) {
+        static const int kModes[] = {CAMERA_ORIGINAL, CAMERA_THIRD_PERSON, CAMERA_FIRST_PERSON};
+        int at = 0;
+        for (int i = 0; i < 3; i++)
+            if (kModes[i] == g_settings.camera)
+                at = i;
+        cycle(at, 3, dir);
+        g_settings.camera = kModes[at];
+    };
+    g_rows.push_back(p1_camera);
+
+    static const char* const kP2Camera[] = {"Third person", "First person"};
+    Row p2_camera{"Player 2 camera", kP2Camera[g_settings.mod_p2_camera]};
+    p2_camera.enabled = g_settings.mod_coop;
+    p2_camera.note = g_settings.mod_p2_camera == 0
+                         ? "Behind player 2: their right stick turns it, and their left stick walks them "
+                           "away from it."
+                         : "Through player 2's eyes: their right stick looks around, and their left stick "
+                           "walks where they look.";
+    p2_camera.change = [](int dir) { cycle(g_settings.mod_p2_camera, 2, dir); };
+    g_rows.push_back(p2_camera);
 
     static const char* const kEnemies[] = {"Vanilla", "Enhanced"};
     static const char* const kEnemyNotes[] = {

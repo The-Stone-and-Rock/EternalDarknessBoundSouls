@@ -45,6 +45,9 @@ int camera_player_drawn(void);
 // camera.
 struct CPUState;
 void camera_split_update(struct CPUState* cpu);
+// Player 2's camera this frame (world eye and target), while split; their
+// turn walks them relative to it (hle.c).
+bool camera_player2_view(float eye[3], float target[3]);
 // From hle.c, as the game's camera makes its projection: the field of view
 // (degrees) to use instead of the game's.
 float camera_field_of_view(float game_fov);

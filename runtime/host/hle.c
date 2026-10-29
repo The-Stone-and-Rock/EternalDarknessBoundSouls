@@ -5997,6 +5997,10 @@ static void coop_spawn(CPUState* cpu, u32 player) {
 #define COOP_CONTROL 0x805D7900u     // the control blocks (0x805D7BA0 among them)
 #define COOP_CONTROL_SIZE 0x300u
 #define COOP_AIM_SIZE 208u           // the block channel 3 drives (its +12)
+// The game camera the controller reads at its start (0x801EAFA8 copies it):
+// its eye, then what it looks at. Forward is from one to the other, so in
+// player 2's turn it is player 2's camera.
+#define COOP_CAMERA 0x803012E0u
 
 typedef struct {
     u8 input[COOP_INPUT_SIZE];
@@ -6043,7 +6047,16 @@ static void coop_player_turn(CPUState* cpu) {
     hle_guest_call(cpu, COOP_PAD_UPDATE, NULL, 0, 0.0, &ignore);
     g_coop_pad_p2 = false;
     const u32 p2 = g_coop_p2;
+    u8 camera[24];
+    float eye[3], target[3];
+    const bool own_view = camera_player2_view(eye, target);
+    coop_bytes(cpu, COOP_CAMERA, camera, sizeof camera, true);
+    for (u32 i = 0; own_view && i < 3u; i++) {
+        guest_write_f32(cpu, COOP_CAMERA + i * 4u, eye[i]);
+        guest_write_f32(cpu, COOP_CAMERA + 12u + i * 4u, target[i]);
+    }
     const bool ran = hle_guest_call(cpu, COOP_CONTROLLER, &p2, 1, 0.0, &ignore);
+    coop_bytes(cpu, COOP_CAMERA, camera, sizeof camera, false);
     coop_state(cpu, &g_coop_state[1], true);
     g_coop_p2_state = true;
     coop_state(cpu, &g_coop_state[0], false);
@@ -6054,6 +6067,28 @@ static void coop_player_turn(CPUState* cpu) {
         fprintf(stderr, "[coop] player 2's first turn %s (player 1's node 0x%08X, player 2's 0x%08X)\n",
                 ran ? "ran" : "did not return", node, p2);
     }
+}
+
+// The players are not each other's threat. A character's threat search
+// (0x80032174: who in its room, within reach, should it square up to) asks
+// each other character with events 59, then 239, sent through the game's
+// event call (0x801F59B0(event, from, to, data), its answer in r4: 1 a
+// threat); another Alex answers yes, and both stood with their fists up. Asked
+// between the two players, the answer is no; everything else goes through.
+#define COOP_SEND_EVENT 0x801F59B0u
+
+static void coop_send_event(CPUState* cpu) {
+    const u32 event = cpu->gpr[3], from = cpu->gpr[4], to = cpu->gpr[5];
+    if ((event == 59u || event == 239u) && g_coop_p2 != 0u && sda_ready(cpu)) {
+        const u32 player = coop_player(cpu);
+        const u32 ids[2] = {player != 0u ? mem_read32(cpu, player + 16u) : ~0u, mem_read32(cpu, g_coop_p2 + 16u)};
+        if ((from == ids[0] && to == ids[1]) || (from == ids[1] && to == ids[0])) {
+            cpu->gpr[3] = 0u;
+            cpu->gpr[4] = 0u;
+            return;
+        }
+    }
+    g_hle_passthrough = true;
 }
 
 // Player 2's feet, for their camera (camera.c); false while they have none.
@@ -6070,7 +6105,33 @@ bool hle_coop_player2_position(CPUState* cpu, float out[3]) {
 
 // Each pad read: in co-op and in play, player 2 is there (made again in each
 // new area: the game's area change takes every character with it).
+// ED_COOP_DUMP=path (testing): player 1's node, actor and object (0x600
+// bytes each, as words) written to path once, 600 pad reads into play, to
+// compare a run with player 2 and one without.
+static void coop_dump(CPUState* cpu, bool playing) {
+    static int reads = -1;
+    const char* path = getenv("ED_COOP_DUMP");
+    if (path == NULL || !playing || reads >= 600)
+        return;
+    const u32 player = coop_player(cpu);
+    if (player == 0u || ++reads != 600)
+        return;
+    FILE* f = fopen(path, "w");
+    if (f == NULL)
+        return;
+    const u32 bases[3] = {player, mem_read32(cpu, player + (u32)(s32)g_coop_actor_offset),
+                          mem_read32(cpu, player + 52u)};
+    static const char* const kWhat[3] = {"node", "actor", "object"};
+    for (int b = 0; b < 3; b++)
+        for (u32 off = 0; off < 0x600u && guest_ram_range_valid(cpu, bases[b] + off, 4u); off += 4u)
+            fprintf(f, "%s+%03X %08X\n", kWhat[b], off, mem_read32(cpu, bases[b] + off));
+    fclose(f);
+    fprintf(stderr, "[coop] dumped player 1 to %s\n", path);
+}
+
 static void coop_pad_read(CPUState* cpu, bool playing) {
+    if (g_coop_found && sda_ready(cpu))
+        coop_dump(cpu, playing);
     if (!g_coop_found || !g_settings.mod_coop || !sda_ready(cpu))
         return;
     if (g_coop_p2 != 0u && !coop_listed(cpu, g_coop_p2)) {
@@ -6107,6 +6168,24 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         // its id (+8; a character's id is its node's +16).
         fprintf(stderr, "[coop] ids: player 1 %d, player 2 %d\n", (s32)mem_read32(cpu, player + 16u),
                 g_coop_p2 != 0u ? (s32)mem_read32(cpu, g_coop_p2 + 16u) : -1);
+        // Anything of player 1's that points at player 2 (a target, a threat).
+        if (g_coop_p2 != 0u) {
+            const u32 p2[4] = {g_coop_p2, mem_read32(cpu, g_coop_p2 + 52u),
+                               mem_read32(cpu, g_coop_p2 + (u32)(s32)g_coop_actor_offset), 132u};
+            const u32 p1[3] = {player, mem_read32(cpu, player + 52u),
+                               mem_read32(cpu, player + (u32)(s32)g_coop_actor_offset)};
+            static const char* const kWhat[4] = {"node", "object", "actor", "id"};
+            for (int b = 0; b < 3; b++)
+                for (u32 off = 0; off < 0x2000u; off += 4u) {
+                    if (!guest_ram_range_valid(cpu, p1[b] + off, 4u))
+                        break;
+                    const u32 v = mem_read32(cpu, p1[b] + off);
+                    for (int k = 0; k < 3; k++)
+                        if (v == p2[k])
+                            fprintf(stderr, "[coop] player 1's %s +0x%X holds player 2's %s\n", kWhat[b], off,
+                                    kWhat[k]);
+                }
+        }
         const u32 root = mem_read32(cpu, cpu->gpr[13] - 21524u);
         u32 cmd = guest_ram_range_valid(cpu, root, 40u) ? mem_read32(cpu, root + 36u) : 0u;
         for (int i = 0; i < 64 && guest_ram_range_valid(cpu, cmd, 48u); i++, cmd = mem_read32(cpu, cmd + 36u)) {
@@ -6176,12 +6255,22 @@ static void find_coop(CPUState* cpu) {
     // (stwu r1,-160(r1); ... bl id (0x801F62C8)) and the pad routine's
     // (stwu r1,-32(r1); ... bl PADRead).
     HleDispatchEntry* controller = hle_dispatch_entry(COOP_CONTROLLER);
+    // The camera's copy (lis r4, 0x8030; addi r5, r4, 0x12E0) checked too.
     if (mem_read32(cpu, COOP_CONTROLLER) == 0x9421FF60u && mem_read32(cpu, COOP_CONTROLLER + 0xA8u) == 0x481B065Du &&
+        mem_read32(cpu, 0x801EAFA8u) == 0x3C808030u && mem_read32(cpu, 0x801EAFACu) == 0x38A412E0u &&
         mem_read32(cpu, COOP_PAD_UPDATE) == 0x9421FFE0u && controller != NULL && controller->notify == NULL &&
         controller->intercept == NULL)
         controller->notify = coop_player_turn;
     else
         fprintf(stderr, "[coop] the player controller not found: player 2 cannot move\n");
+    // The event call (stwu r1,-48(r1); mflr; stw; li r0,-1) for the threat
+    // search, and the search's call of it (bl at 0x8003230C).
+    HleDispatchEntry* send = hle_dispatch_entry(COOP_SEND_EVENT);
+    if (mem_read32(cpu, COOP_SEND_EVENT) == 0x9421FFD0u && mem_read32(cpu, COOP_SEND_EVENT + 12u) == 0x3800FFFFu &&
+        mem_read32(cpu, 0x8003230Cu) == 0x481C36A5u && send != NULL && send->intercept == NULL && send->notify == NULL)
+        send->intercept = coop_send_event;
+    else
+        fprintf(stderr, "[coop] the threat search's question not found: the players square up to each other\n");
     g_coop_found = true;
     fprintf(stderr, "[coop] the player object's pointer is at 0x%08X; the characters' list at 0x%08X\n",
             ED_GUEST_R13 + (u32)(s32)g_camera_player_offset, ED_GUEST_R13 + (u32)(s32)g_coop_list_offset);

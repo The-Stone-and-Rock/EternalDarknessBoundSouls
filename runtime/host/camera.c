@@ -1526,6 +1526,17 @@ bool hle_coop_player2_position(CPUState* cpu, float out[3]);  // hle.c
 static bool g_split_on;
 static float g_split_yaw, g_split_pitch, g_split_distance;
 static unsigned long long g_split_frame;
+// Player 2's view this frame, for their turn's sense of forward (hle.c).
+static Vec3 g_p2_eye, g_p2_target;
+static bool g_p2_view;
+
+bool camera_player2_view(float eye[3], float target[3]) {
+    if (!g_split_on || !g_p2_view)
+        return false;
+    eye[0] = g_p2_eye.x, eye[1] = g_p2_eye.y, eye[2] = g_p2_eye.z;
+    target[0] = g_p2_target.x, target[1] = g_p2_target.y, target[2] = g_p2_target.z;
+    return true;
+}
 
 /* A camera's axes (right, up, back) from its eye, target and up, as
  * C_MTXLookAt makes them. */
@@ -1543,6 +1554,7 @@ static void split_off(unsigned long long frame, const char* why) {
     if (g_split_on)
         fprintf(stderr, "[split] off at frame %llu (%s)\n", frame, why);
     g_split_on = false;
+    g_p2_view = false;
 }
 
 void camera_split_update(CPUState* cpu) {
@@ -1588,16 +1600,38 @@ void camera_split_update(CPUState* cpu) {
         g_split_pitch = TP_PITCH;
         g_split_distance = TP_DISTANCE;
     }
+    // Their right stick (or camera keys) turns it; their left stick walks.
     float turn_x, turn_y, in_out;
     controls_player2_look(&turn_x, &turn_y, &in_out);
     const float step = 1.0f / 60.0f;
+    const bool first = g_settings.mod_p2_camera == 1;
+    // A new mode starts level in first person, at its usual height behind.
+    static int mode_was = -1;
+    if (g_settings.mod_p2_camera != mode_was || !g_split_on)
+        g_split_pitch = first ? 0.0f : TP_PITCH;
+    mode_was = g_settings.mod_p2_camera;
     g_split_yaw -= turn_x * YAW_RATE * step;
-    g_split_pitch = clampf(g_split_pitch - turn_y * PITCH_RATE * step, SPLIT_PITCH_LOW, SPLIT_PITCH_HIGH);
-    g_split_distance = clampf(g_split_distance - in_out * TP_ZOOM_RATE * step, TP_CLOSEST, TP_FARTHEST);
+    // Third person: how high round them it sits; first person: how far up
+    // or down they look (up on the stick looks up).
+    g_split_pitch = first ? clampf(g_split_pitch + turn_y * PITCH_RATE * step, -SPLIT_PITCH_HIGH, SPLIT_PITCH_HIGH)
+                          : clampf(g_split_pitch - turn_y * PITCH_RATE * step, SPLIT_PITCH_LOW, SPLIT_PITCH_HIGH);
     const Vec3 level = add(scale(e1, cosf(g_split_yaw)), scale(e2, sinf(g_split_yaw)));
-    const Vec3 dir = add(scale(level, cosf(g_split_pitch)), scale(k, sinf(g_split_pitch)));
-    const Vec3 focus = add(player, scale(k, TP_HEIGHT));
-    const Vec3 eye2 = add(focus, scale(dir, g_split_distance));
+    Vec3 eye2, focus;
+    if (first) {
+        // Through their eyes: a little ahead of the head (clear of the face
+        // and hair, which both views draw), looking away from where the
+        // third-person camera would sit.
+        const Vec3 look = add(scale(level, -cosf(g_split_pitch)), scale(k, sinf(g_split_pitch)));
+        eye2 = add(add(player, scale(k, FP_HEIGHT)), scale(normalize(flatten(look, k)), 25.0f));
+        focus = add(eye2, scale(look, 100.0f));
+    } else {
+        const Vec3 dir = add(scale(level, cosf(g_split_pitch)), scale(k, sinf(g_split_pitch)));
+        focus = add(player, scale(k, TP_HEIGHT));
+        eye2 = add(focus, scale(dir, g_split_distance));
+    }
+    g_p2_eye = eye2;
+    g_p2_target = focus;
+    g_p2_view = true;
     // Player 2's camera in the game camera's view space: its axes and eye.
     Vec3 x1, y1, z1, x2, y2, z2;
     look_axes(eye, target, k, &x1, &y1, &z1);

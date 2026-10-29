@@ -49,6 +49,7 @@ typedef struct {
     bool mod_coop;        // two-player split-screen co-op
     int mod_split;        // 0 side by side, 1 one above the other
     int mod_p2_input;     // player 2: 0 the second controller, 1 the keyboard
+    int mod_p2_camera;    // player 2's camera: 0 third person, 1 first person
     int mod_p2_layout;    // player 2's controls_layout (0 original, 1 modern, 2 custom)
     char mod_p2_custom[512];  // player 2's custom bindings (controls.cpp format)
     int mod_stats;        // 0 each character's own health, magick and sanity, 1 custom
