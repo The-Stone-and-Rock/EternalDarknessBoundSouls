@@ -76,6 +76,23 @@ constexpr int kKeys[kActionCount] = {
     SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT,
 };
 
+// Movement (the main stick) and camera (the C-stick) on the keyboard: WASD and
+// TFGH until rebound.
+constexpr int kMoveKeys[kDirectionCount] = {
+    SDL_SCANCODE_W, SDL_SCANCODE_S, SDL_SCANCODE_A, SDL_SCANCODE_D,
+    SDL_SCANCODE_T, SDL_SCANCODE_G, SDL_SCANCODE_F, SDL_SCANCODE_H,
+};
+
+const char* const kDirectionNames[kDirectionCount] = {
+    "Move forward", "Move back", "Move left", "Move right",
+    "Camera up", "Camera down", "Camera left", "Camera right",
+};
+
+const char* const kDirectionIds[kDirectionCount] = {
+    "move_up", "move_down", "move_left", "move_right",
+    "camera_up", "camera_down", "camera_left", "camera_right",
+};
+
 // GameCube positions, as Aurora maps a controller by default.
 const int kOriginalPad[kActionCount][2] = {
     {kSouth, kNone}, {kEast, kNone}, {kWest, kNone}, {kNorth, kNone},
@@ -104,8 +121,18 @@ const int kTomePad[kActionCount][2] = {
     {kDUp, kNone},   {kDDown, kNone}, {kDLeft, kNone}, {kDRight, kNone},
 };
 
-Binding g_bindings[kActionCount];
-int g_layout = 0;
+struct Player {
+    Binding bindings[kActionCount];
+    int moves[kDirectionCount];  // movement and camera keys (SDL scancodes, 0 when none)
+    int layout = 0;
+};
+Player g_players[2];
+// Player 1's: the game's pad.
+Binding (&g_bindings)[kActionCount] = g_players[0].bindings;
+int& g_layout = g_players[0].layout;
+// The player the Controls pages show and change.
+int g_menu_player = 0;
+Player& menu() { return g_players[g_menu_player]; }
 // The game's pause menu is open (set on the game thread, read by the icons).
 std::atomic<bool> g_game_menu{false};
 // A cutscene is playing (set on the game thread), where holding RB or Tab
@@ -115,9 +142,9 @@ std::atomic<bool> g_cutscene{false};
 std::atomic<bool> g_fast_forward{false};
 bool g_ff_was = false;
 bool g_ff_from_play = false;
-SDL_Gamepad* g_pad = nullptr;
+SDL_Gamepad* g_pads[2] = {};  // each player's controller: the first and the second connected
 
-int g_capture = -1;         // action waiting for an input, or -1
+int g_capture = -1;         // action (or kActionCount + direction) waiting for an input, or -1
 Uint64 g_capture_deadline = 0;
 bool g_capture_armed = false;  // every input released since capture began
 
@@ -131,16 +158,37 @@ const int* pad_inputs(int action) {
     return tome_buttons() ? kTomePad[action] : g_bindings[action].pad;
 }
 
-SDL_Gamepad* gamepad() {
-    if (g_pad != nullptr && SDL_GamepadConnected(g_pad))
-        return g_pad;
-    g_pad = nullptr;
+// The connected controller a player's pad_slot picks: the Nth connected, or
+// automatic: player 1 the first, player 2 the next one player 1 is not using.
+int pad_index(int player) {
+    const int slot = g_settings.pad_slot[player];
+    if (slot > 0)
+        return slot - 1;
+    if (player == 0 || !player_has_controller(0))
+        return 0;
+    return g_settings.pad_slot[0] == 1 || g_settings.pad_slot[0] == 0 ? 1 : 0;
+}
+
+int g_pad_index[2] = {-1, -1};  // the index each open controller was opened at
+
+// A player's controller, or none (a keyboard player, or nothing connected
+// at their place).
+SDL_Gamepad* gamepad(int player = 0) {
+    if (!player_has_controller(player))
+        return nullptr;
+    SDL_Gamepad*& pad = g_pads[player];
+    const int index = pad_index(player);
+    if (pad != nullptr && SDL_GamepadConnected(pad) && g_pad_index[player] == index)
+        return pad;
+    pad = nullptr;
     int count = 0;
     SDL_JoystickID* ids = SDL_GetGamepads(&count);
-    if (ids != nullptr && count > 0)
-        g_pad = SDL_OpenGamepad(ids[0]);
+    if (ids != nullptr && index < count) {
+        pad = SDL_OpenGamepad(ids[index]);
+        g_pad_index[player] = index;
+    }
     SDL_free(ids);
-    return g_pad;
+    return pad;
 }
 
 // 0-255 for a native input (buttons are 0 or 255).
@@ -228,7 +276,7 @@ void attach_virtual_pad() {
     g_virtual = id != 0 ? SDL_OpenJoystick(id) : nullptr;
     // The game reads the scripted pad, even with a real one connected.
     if (g_virtual != nullptr)
-        g_pad = SDL_OpenGamepad(id);
+        g_pads[0] = SDL_OpenGamepad(id);
     // A trigger at rest is the axis minimum (0 is half pressed).
     if (g_virtual != nullptr) {
         SDL_SetJoystickVirtualAxis(g_virtual, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, SDL_JOYSTICK_AXIS_MIN);
@@ -291,10 +339,10 @@ int stick(SDL_Gamepad* pad, SDL_GamepadAxis axis, bool invert) {
     return std::clamp(v / 256, -127, 127);
 }
 
-enum Brand { kXbox, kPlayStation, kNintendo };
+enum Brand { kXbox, kPlayStation, kNintendo, kXInput };
 
-Brand brand() {
-    SDL_Gamepad* pad = gamepad();
+// The family a connected controller reports (Xbox for one SDL cannot tell).
+Brand detected_brand(SDL_Gamepad* pad) {
     if (pad == nullptr)
         return kXbox;
     switch (SDL_GetGamepadType(pad)) {
@@ -307,12 +355,25 @@ Brand brand() {
     case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
     case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
         return kNintendo;
+    case SDL_GAMEPAD_TYPE_STANDARD:
+        return kXInput;  // a generic pad: Xbox positions, plain names
     default:
         return kXbox;
     }
 }
 
-const char* native_name(int n) {
+// A player's family: the type set by hand, else the connected controller's.
+Brand brand(int player = 0) {
+    switch (g_settings.pad_type[player]) {
+    case kPadXbox: return kXbox;
+    case kPadXInput: return kXInput;
+    case kPadPlayStation: return kPlayStation;
+    case kPadSwitch: return kNintendo;
+    default: return detected_brand(gamepad(player));
+    }
+}
+
+const char* native_name(int n, int player = 0) {
     static const char* const xbox[kNativeCount] = {
         "A", "B", "X", "Y", "LB", "RB", "LT", "RT", "LS", "RS", "Menu",
         "D-pad Up", "D-pad Down", "D-pad Left", "D-pad Right"};
@@ -322,19 +383,27 @@ const char* native_name(int n) {
     static const char* const nintendo[kNativeCount] = {
         "B", "A", "Y", "X", "L", "R", "ZL", "ZR", "L-stick", "R-stick", "+",
         "D-pad Up", "D-pad Down", "D-pad Left", "D-pad Right"};
+    static const char* const xinput[kNativeCount] = {
+        "A", "B", "X", "Y", "LB", "RB", "LT", "RT", "LS", "RS", "Start",
+        "D-pad Up", "D-pad Down", "D-pad Left", "D-pad Right"};
     if (n < 0 || n >= kNativeCount)
         return "-";
-    switch (brand()) {
+    switch (brand(player)) {
     case kPlayStation: return ps[n];
     case kNintendo: return nintendo[n];
+    case kXInput: return xinput[n];
     default: return xbox[n];
     }
 }
 
-void load_preset(int layout) {
+// A layout's controller buttons, and the keyboard's own keys (the same in
+// every layout, so a keyboard player starts from them whatever the layout).
+void load_preset(Player& p, int layout) {
     const int (*table)[2] = layout == kModern ? kModernPad : kOriginalPad;
     for (int a = 0; a < kActionCount; a++)
-        g_bindings[a] = {{table[a][0], table[a][1]}, kKeys[a]};
+        p.bindings[a] = {{table[a][0], table[a][1]}, kKeys[a]};
+    for (int d = 0; d < kDirectionCount; d++)
+        p.moves[d] = kMoveKeys[d];
 }
 
 int native_from_id(const std::string& id) {
@@ -344,8 +413,9 @@ int native_from_id(const std::string& id) {
     return kNone;
 }
 
-// settings.ini: controls_custom = attack=rt+south:13;action=east:14;...
-std::string serialize() {
+// settings.ini: controls_custom = attack=rt+south:13;action=east:14;...;
+// move_up=:26;... (the movement and camera keys: no controller input).
+std::string serialize(const Player& p = g_players[0]) {
     std::string out;
     for (int a = 0; a < kActionCount; a++) {
         if (!out.empty())
@@ -353,20 +423,22 @@ std::string serialize() {
         out += kActionIds[a];
         out += '=';
         bool first = true;
-        for (int n : g_bindings[a].pad)
+        for (int n : p.bindings[a].pad)
             if (n != kNone) {
                 if (!first)
                     out += '+';
                 out += kNativeIds[n];
                 first = false;
             }
-        out += ':' + std::to_string(g_bindings[a].key);
+        out += ':' + std::to_string(p.bindings[a].key);
     }
+    for (int d = 0; d < kDirectionCount; d++)
+        out += std::string(";") + kDirectionIds[d] + "=:" + std::to_string(p.moves[d]);
     return out;
 }
 
-void parse(const char* text) {
-    load_preset(kOriginal);
+void parse(Player& p, const char* text) {
+    load_preset(p, kOriginal);
     std::string s(text);
     size_t pos = 0;
     while (pos < s.size()) {
@@ -380,28 +452,42 @@ void parse(const char* text) {
         if (eq == std::string::npos || colon == std::string::npos || colon < eq)
             continue;
         const std::string id = item.substr(0, eq);
+        const int key = std::atoi(item.c_str() + colon + 1);
+        for (int d = 0; d < kDirectionCount; d++)
+            if (id == kDirectionIds[d])
+                p.moves[d] = key;
         int action = -1;
         for (int a = 0; a < kActionCount; a++)
             if (id == kActionIds[a])
                 action = a;
         if (action < 0)
             continue;
-        Binding b{{kNone, kNone}, std::atoi(item.c_str() + colon + 1)};
+        Binding b{{kNone, kNone}, key};
         const std::string pads = item.substr(eq + 1, colon - eq - 1);
         const size_t plus = pads.find('+');
         b.pad[0] = native_from_id(pads.substr(0, plus));
         if (plus != std::string::npos)
             b.pad[1] = native_from_id(pads.substr(plus + 1));
-        g_bindings[action] = b;
+        p.bindings[action] = b;
     }
 }
 
+// Each player's layout, and their bindings while Custom.
 void save() {
-    g_settings.controls_layout = g_layout;
-    if (g_layout == kCustom)
+    g_settings.controls_layout = g_players[0].layout;
+    if (g_players[0].layout == kCustom)
         snprintf(g_settings.controls_custom, sizeof g_settings.controls_custom, "%s",
-                 serialize().c_str());
+                 serialize(g_players[0]).c_str());
+    g_settings.mod_p2_layout = g_players[1].layout;
+    if (g_players[1].layout == kCustom)
+        snprintf(g_settings.mod_p2_custom, sizeof g_settings.mod_p2_custom, "%s",
+                 serialize(g_players[1]).c_str());
     settings_save();
+}
+
+// A player's saved custom bindings ("" when they have none).
+const char* saved_custom(int player) {
+    return player == 0 ? g_settings.controls_custom : g_settings.mod_p2_custom;
 }
 
 // Toggle modes (sprint, creep, target): a press flips the action on or off.
@@ -429,7 +515,7 @@ bool g_keyboard_last = false;
 
 void note_last_device(SDL_Gamepad* pad) {
     int count = 0;
-    const bool* keys = SDL_GetKeyboardState(&count);
+    const bool* keys = player_has_keyboard(0) ? SDL_GetKeyboardState(&count) : nullptr;
     bool keyboard = false;
     for (int k = 1; keys != nullptr && k < count && !keyboard; k++)
         keyboard = keys[k];
@@ -601,8 +687,10 @@ bool read_pad(DolPadState* state) {
     // Fast-forward (not in the pause menu). The game does not see RB or Tab
     // while it runs: held over, RB reads as let go until it is.
     const bool cutscene = g_cutscene.load(std::memory_order_relaxed);
+    // Player 1's keys, unless player 2 has the keyboard.
+    const bool keys = player_has_keyboard(0);
     // Tab on its own: with Alt, Cmd or Ctrl it is switching windows.
-    const bool tab = key_down(SDL_SCANCODE_TAB) &&
+    const bool tab = keys && key_down(SDL_SCANCODE_TAB) &&
                      (SDL_GetModState() & (SDL_KMOD_ALT | SDL_KMOD_GUI | SDL_KMOD_CTRL)) == 0;
     const bool held = native_value(pad, kRB) >= 128 || tab;
     if (held && !g_ff_was && !cutscene)
@@ -621,10 +709,11 @@ bool read_pad(DolPadState* state) {
     // The main stick first: toggled sprint ends when you stop moving.
     int x = stick(pad, SDL_GAMEPAD_AXIS_LEFTX, false);
     int y = stick(pad, SDL_GAMEPAD_AXIS_LEFTY, true);
-    if (key_down(SDL_SCANCODE_A)) x = -127;
-    if (key_down(SDL_SCANCODE_D)) x = 127;
-    if (key_down(SDL_SCANCODE_W)) y = 127;
-    if (key_down(SDL_SCANCODE_S)) y = -127;
+    const int* moves = g_players[0].moves;
+    if (keys && key_down(moves[kMoveLeft])) x = -127;
+    if (keys && key_down(moves[kMoveRight])) x = 127;
+    if (keys && key_down(moves[kMoveUp])) y = 127;
+    if (keys && key_down(moves[kMoveDown])) y = -127;
     const Uint64 now = SDL_GetTicks();
     if (x != 0 || y != 0)
         g_still_since = 0;
@@ -640,7 +729,7 @@ bool read_pad(DolPadState* state) {
         const int* inputs = pad_inputs(a);
         int v = live_value(pad, inputs[0]);
         const int held = live_value(pad, inputs[1]);
-        if (key_down(g_bindings[a].key) && !(fast && g_bindings[a].key == SDL_SCANCODE_TAB))
+        if (keys && key_down(g_bindings[a].key) && !(fast && g_bindings[a].key == SDL_SCANCODE_TAB))
             v = 255;
         const bool toggles = !tome && toggle_mode(a);
         if (!toggles)
@@ -671,13 +760,13 @@ bool read_pad(DolPadState* state) {
     }
     s.analog_a = (s.button & 0x0100) ? 255 : 0;
     s.analog_b = (s.button & 0x0200) ? 255 : 0;
-    // C-stick: right stick or TFGH.
+    // C-stick: right stick or the camera keys (TFGH).
     int cx = stick(pad, SDL_GAMEPAD_AXIS_RIGHTX, false);
     int cy = stick(pad, SDL_GAMEPAD_AXIS_RIGHTY, true);
-    if (key_down(SDL_SCANCODE_F)) cx = -127;
-    if (key_down(SDL_SCANCODE_H)) cx = 127;
-    if (key_down(SDL_SCANCODE_T)) cy = 127;
-    if (key_down(SDL_SCANCODE_G)) cy = -127;
+    if (keys && key_down(moves[kCameraLeft])) cx = -127;
+    if (keys && key_down(moves[kCameraRight])) cx = 127;
+    if (keys && key_down(moves[kCameraUp])) cy = 127;
+    if (keys && key_down(moves[kCameraDown])) cy = -127;
     // The camera options (camera.c): in play the right stick turns the camera
     // instead of being the C-stick, and the left stick turns with the view, so
     // up walks away from it. Aiming (R) holds the camera and leaves the left
@@ -718,8 +807,57 @@ bool read_pad(DolPadState* state) {
 
 }  // namespace
 
+void set_menu_player(int player) { g_menu_player = std::clamp(player, 0, 1); }
+int menu_player() { return g_menu_player; }
+
+bool player_uses_keyboard(int player) {
+    return player == 0 ? g_settings.controls_device != 1 : g_settings.mod_p2_input == 1;
+}
+
+bool player_has_keyboard(int player) {
+    if (player != 0)
+        return player_uses_keyboard(1);
+    // "Controller and keyboard" lends the keyboard to a keyboard player 2.
+    const bool lent = g_settings.controls_device == 0 && g_settings.mod_coop && player_uses_keyboard(1);
+    return player_uses_keyboard(0) && !lent;
+}
+
+bool player_has_controller(int player) {
+    return player == 0 ? g_settings.controls_device != 2 : g_settings.mod_p2_input == 0;
+}
+
+const char* pad_type_name(int type) {
+    static const char* const names[kPadTypeCount] = {"Automatic", "Xbox", "XInput", "PlayStation",
+                                                     "Switch"};
+    return type >= 0 && type < kPadTypeCount ? names[type] : "";
+}
+
+std::string detected_pad_type(int player) {
+    SDL_Gamepad* pad = gamepad(player);
+    if (pad == nullptr)
+        return "";
+    static const int kTypes[] = {kPadXbox, kPadPlayStation, kPadSwitch, kPadXInput};
+    return pad_type_name(kTypes[detected_brand(pad)]);
+}
+
+std::vector<std::string> connected_controllers() {
+    std::vector<std::string> names;
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    for (int i = 0; ids != nullptr && i < count; i++) {
+        const char* name = SDL_GetGamepadNameForID(ids[i]);
+        names.push_back(name != nullptr && name[0] != '\0' ? name : "Controller");
+    }
+    SDL_free(ids);
+    return names;
+}
+
 const char* action_name(int action) {
     return action >= 0 && action < kActionCount ? kActionNames[action] : "";
+}
+
+const char* direction_name(int direction) {
+    return direction >= 0 && direction < kDirectionCount ? kDirectionNames[direction] : "";
 }
 
 const char* layout_name(int layout) {
@@ -729,22 +867,25 @@ const char* layout_name(int layout) {
 
 std::string pad_label(int action) {
     std::string out;
-    for (int n : g_bindings[action].pad)
+    for (int n : menu().bindings[action].pad)
         if (n != kNone) {
             if (!out.empty())
                 out += " / ";
-            out += native_name(n);
+            out += native_name(n, g_menu_player);
         }
     return out.empty() ? "-" : out;
 }
 
-std::string key_label(int action) {
-    const int key = g_bindings[action].key;
+namespace {
+std::string scancode_label(int key) {
     if (key <= 0)
         return "-";
     const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(key));
     return name != nullptr && name[0] != '\0' ? name : "?";
 }
+}  // namespace
+
+std::string key_label(int action) { return scancode_label(menu().bindings[action].key); }
 
 namespace {
 std::string glyph_img(const std::string& file, const std::string& alt) {
@@ -752,24 +893,41 @@ std::string glyph_img(const std::string& file, const std::string& alt) {
     // parchment (tools/ui/make_ink_glyphs.py).
     return "<img class=\"glyph\" src=\"glyphs/ink/" + file + ".png\" alt=\"" + alt + "\"/>";
 }
+
+std::string scancode_glyph_file(int key);
+
+// A key's icon in the menu, or its name in a keycap.
+std::string scancode_glyph(int key) {
+    if (key <= 0)
+        return "<span class=\"unbound\">-</span>";
+    const std::string file = scancode_glyph_file(key);
+    if (file.empty())
+        return "<span class=\"keycap\">" + scancode_label(key) + "</span>";
+    return glyph_img(file, scancode_label(key));
+}
 }  // namespace
 
 std::string pad_glyphs(int action) {
-    const char* set = brand() == kPlayStation ? "ps" : brand() == kNintendo ? "switch" : "xbox";
+    const Brand b = brand(g_menu_player);
+    const char* set = b == kPlayStation ? "ps" : b == kNintendo ? "switch" : "xbox";
     std::string out;
-    for (int n : g_bindings[action].pad)
+    for (int n : menu().bindings[action].pad)
         if (n != kNone)
-            out += glyph_img(std::string(set) + "/" + kNativeIds[n], native_name(n));
+            out += glyph_img(std::string(set) + "/" + kNativeIds[n], native_name(n, g_menu_player));
     return out.empty() ? "<span class=\"unbound\">-</span>" : out;
 }
 
-// The bound key's icon under res/ui/glyphs ("kb/j"), or "" when it has none.
-std::string key_glyph_file(int action) {
-    if (g_bindings[action].key <= 0)
+// The bound key's icon under res/ui/glyphs ("kb/j"), or "" when it has none:
+// player 1's, for the game's prompts.
+std::string key_glyph_file(int action) { return scancode_glyph_file(g_bindings[action].key); }
+
+namespace {
+std::string scancode_glyph_file(int key) {
+    if (key <= 0)
         return "";
     // SDL's key name to the icon file: "Return" -> return, "Up" -> arrow_up,
     // "Left Shift" -> shift; keys without an icon show their name in a keycap.
-    std::string name = key_label(action);
+    std::string name = scancode_label(key);
     std::string file;
     for (char c : name)
         file += c == ' ' ? '_' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -801,15 +959,11 @@ std::string key_glyph_file(int action) {
             return "kb/" + file;
     return "";
 }
+}  // namespace
 
-std::string key_glyph(int action) {
-    if (g_bindings[action].key <= 0)
-        return "<span class=\"unbound\">-</span>";
-    const std::string file = key_glyph_file(action);
-    if (file.empty())
-        return "<span class=\"keycap\">" + key_label(action) + "</span>";
-    return glyph_img(file, key_label(action));
-}
+std::string key_glyph(int action) { return scancode_glyph(menu().bindings[action].key); }
+
+std::string direction_glyph(int direction) { return scancode_glyph(menu().moves[direction]); }
 
 std::string glyph_set() {
     // ED_GLYPHS=xbox, ps, switch or kb: that set whatever is connected (to see
@@ -817,7 +971,12 @@ std::string glyph_set() {
     static const char* const forced = std::getenv("ED_GLYPHS");
     if (forced != nullptr && forced[0] != '\0')
         return forced;
-    if (gamepad() == nullptr || g_keyboard_last)
+    // Player 1's prompts: the keyboard's when they play on it alone, their
+    // controller type's when on a controller alone (connected or not), else
+    // the one used last.
+    if (!player_has_controller(0))
+        return "kb";
+    if (player_has_keyboard(0) && (gamepad() == nullptr || g_keyboard_last))
         return "kb";
     return brand() == kPlayStation ? "ps" : brand() == kNintendo ? "switch" : "xbox";
 }
@@ -913,33 +1072,89 @@ uint64_t bindings_signature() {
 }
 
 std::string controller_name() {
-    SDL_Gamepad* pad = gamepad();
+    if (!player_has_controller(g_menu_player))
+        return "Keyboard";
+    SDL_Gamepad* pad = gamepad(g_menu_player);
     if (pad == nullptr)
-        return "No controller (keyboard)";
+        return g_menu_player == 0 ? "No controller (keyboard)" : "No second controller";
     const char* name = SDL_GetGamepadName(pad);
     return name != nullptr ? name : "Controller";
 }
 
 void set_layout(int layout) {
+    Player& p = menu();
     if (layout == kCustom) {
-        if (g_layout != kCustom && g_settings.controls_custom[0] != '\0')
-            parse(g_settings.controls_custom);  // the saved custom layout
-        else if (g_layout != kCustom)
-            custom_from(g_layout);  // a first Custom starts from the layout in use
+        if (p.layout != kCustom && saved_custom(g_menu_player)[0] != '\0')
+            parse(p, saved_custom(g_menu_player));  // the saved custom layout
+        else if (p.layout != kCustom && g_menu_player == 0)
+            custom_from(p.layout);  // a first Custom starts from the layout in use
     } else {
-        load_preset(layout);
+        load_preset(p, layout);
     }
-    g_layout = layout;
+    p.layout = layout;
     save();
 }
 
-int layout() { return g_layout; }
+int layout() { return menu().layout; }
+
+namespace {
+// A rebinding starts Custom from what is in use.
+void make_custom() {
+    Player& p = menu();
+    if (p.layout != kCustom) {
+        if (g_menu_player == 0)
+            custom_from(p.layout);
+        p.layout = kCustom;
+    }
+}
+
+// The keys offered by hand, in order: letters, digits, the arrows, then the
+// space bar, Enter, Tab, Backspace and the modifiers.
+const int kStepKeys[] = {
+    SDL_SCANCODE_A, SDL_SCANCODE_B, SDL_SCANCODE_C, SDL_SCANCODE_D, SDL_SCANCODE_E,
+    SDL_SCANCODE_F, SDL_SCANCODE_G, SDL_SCANCODE_H, SDL_SCANCODE_I, SDL_SCANCODE_J,
+    SDL_SCANCODE_K, SDL_SCANCODE_L, SDL_SCANCODE_M, SDL_SCANCODE_N, SDL_SCANCODE_O,
+    SDL_SCANCODE_P, SDL_SCANCODE_Q, SDL_SCANCODE_R, SDL_SCANCODE_S, SDL_SCANCODE_T,
+    SDL_SCANCODE_U, SDL_SCANCODE_V, SDL_SCANCODE_W, SDL_SCANCODE_X, SDL_SCANCODE_Y,
+    SDL_SCANCODE_Z, SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4,
+    SDL_SCANCODE_5, SDL_SCANCODE_6, SDL_SCANCODE_7, SDL_SCANCODE_8, SDL_SCANCODE_9,
+    SDL_SCANCODE_0, SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT,
+    SDL_SCANCODE_SPACE, SDL_SCANCODE_RETURN, SDL_SCANCODE_TAB, SDL_SCANCODE_BACKSPACE,
+    SDL_SCANCODE_LSHIFT, SDL_SCANCODE_LCTRL, SDL_SCANCODE_LALT,
+    SDL_SCANCODE_RSHIFT, SDL_SCANCODE_RCTRL, SDL_SCANCODE_RALT,
+};
+}  // namespace
+
+void step_pad(int action, int dir) {
+    if (action < 0 || action >= kActionCount)
+        return;
+    make_custom();
+    // kNone, then every controller input: kNativeCount + 1 places.
+    Binding& b = menu().bindings[action];
+    const int places = kNativeCount + 1;
+    b.pad[0] = (b.pad[0] + 1 + dir + places) % places - 1;
+    b.pad[1] = kNone;
+    save();
+}
+
+void step_key(int target, int dir) {
+    if (target < 0 || target >= kActionCount + kDirectionCount)
+        return;
+    make_custom();
+    int& key = target < kActionCount ? menu().bindings[target].key : menu().moves[target - kActionCount];
+    const int count = static_cast<int>(sizeof kStepKeys / sizeof kStepKeys[0]);
+    int at = -1;
+    for (int i = 0; i < count; i++)
+        if (kStepKeys[i] == key)
+            at = i;
+    // A key not in the list steps in from its start (or its end, going back).
+    at = at < 0 ? (dir > 0 ? 0 : count - 1) : (at + dir + count) % count;
+    key = kStepKeys[at];
+    save();
+}
 
 void begin_capture(int action) {
-    if (g_layout != kCustom) {
-        custom_from(g_layout);  // start Custom from what is in use
-        g_layout = kCustom;
-    }
+    make_custom();
     g_capture = action;
     g_capture_armed = false;
     g_capture_deadline = SDL_GetTicks() + 6000;
@@ -951,7 +1166,8 @@ int capture_action() { return g_capture; }
 bool poll_capture() {
     if (g_capture < 0)
         return true;
-    SDL_Gamepad* pad = gamepad();
+    // The menu player's controller; a movement or camera key takes a key only.
+    SDL_Gamepad* pad = g_capture < kActionCount ? gamepad(g_menu_player) : nullptr;
     bool any = false;
     int pressed = kNone;
     for (int n = 0; n < kNativeCount; n++) {
@@ -962,13 +1178,31 @@ bool poll_capture() {
                 pressed = n;
         }
     }
+    // The keyboard as it is now, for a player who plays on it: the first key
+    // held, read by its scancode.
+    const bool keys = player_uses_keyboard(g_menu_player);
+    int count = 0;
+    const bool* state = keys ? SDL_GetKeyboardState(&count) : nullptr;
+    int key = 0;
+    for (int k = SDL_SCANCODE_A; state != nullptr && k < count; k++)
+        if (state[k]) {
+            any = true;
+            if (key == 0)
+                key = k;
+        }
     if (!g_capture_armed) {
-        // Wait for the button that started the capture to be let go.
+        // Wait for the button or key that started the capture to be let go.
         if (!any)
             g_capture_armed = true;
-    } else if (pressed != kNone) {
-        g_bindings[g_capture].pad[0] = pressed;
-        g_bindings[g_capture].pad[1] = kNone;
+    } else if (key == SDL_SCANCODE_ESCAPE) {
+        g_capture = -1;
+        return true;
+    } else if (key != 0) {
+        capture_key(key);
+        return true;
+    } else if (pressed != kNone && g_capture < kActionCount) {
+        menu().bindings[g_capture].pad[0] = pressed;
+        menu().bindings[g_capture].pad[1] = kNone;
         g_capture = -1;
         save();
         return true;
@@ -988,7 +1222,10 @@ void capture_key(int scancode) {
         g_capture = -1;
         return;
     }
-    g_bindings[g_capture].key = scancode;
+    if (g_capture < kActionCount)
+        menu().bindings[g_capture].key = scancode;
+    else
+        menu().moves[g_capture - kActionCount] = scancode;
     g_capture = -1;
     save();
 }
@@ -997,11 +1234,15 @@ void capture_key(int scancode) {
 
 extern "C" void controls_init(void) {
     using namespace controls;
-    g_layout = std::clamp(g_settings.controls_layout, 0, static_cast<int>(kLayoutCount) - 1);
-    if (g_layout == kCustom && g_settings.controls_custom[0] != '\0')
-        parse(g_settings.controls_custom);
-    else
-        load_preset(g_layout == kCustom ? kOriginal : g_layout);
+    const int layouts[2] = {g_settings.controls_layout, g_settings.mod_p2_layout};
+    for (int i = 0; i < 2; i++) {
+        Player& p = g_players[i];
+        p.layout = std::clamp(layouts[i], 0, static_cast<int>(kLayoutCount) - 1);
+        if (p.layout == kCustom && saved_custom(i)[0] != '\0')
+            parse(p, saved_custom(i));
+        else
+            load_preset(p, p.layout == kCustom ? kOriginal : p.layout);
+    }
     dol_aurora_set_pad0_override(read_pad);
     SDL_AddEventWatch(mark_watch, nullptr);
 }

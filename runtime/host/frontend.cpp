@@ -105,9 +105,11 @@ public:
     void ProcessEvent(Rml::Event& event) override {
         using namespace Rml::Input;
         if (controls::capturing()) {
-            // Rebinding: find the SDL scancode for this key.
+            // Rebinding: find the SDL scancode for this key. A key RmlUi does
+            // not know (0) is left to the capture's own read of the keyboard,
+            // which would otherwise match the first unknown scancode.
             const int id = event.GetParameter<int>("key_identifier", 0);
-            for (int sc = SDL_SCANCODE_A; sc < SDL_SCANCODE_COUNT; sc++) {
+            for (int sc = SDL_SCANCODE_A; id != 0 && sc < SDL_SCANCODE_COUNT; sc++) {
                 const SDL_Keycode code = SDL_GetKeyFromScancode(
                     static_cast<SDL_Scancode>(sc), SDL_KMOD_NONE, false);
                 if (code != SDLK_UNKNOWN && RmlSDL::ConvertKey(static_cast<int>(code)) == id) {
@@ -258,7 +260,7 @@ std::string region_name(const std::string& id) {
 
 // --- Menu model -------------------------------------------------------------
 
-enum class Screen { Launcher, Play, Options, Controls, Mapping, InGame, Problem };
+enum class Screen { Launcher, Play, Options, Controls, Mapping, InGame, Problem, Mods };
 
 struct Row {
     std::string label;
@@ -426,6 +428,103 @@ void start_game(int slot) {
     g_close = true;
 }
 
+// The Mods page: from the launcher, the in-game menu and Options, back to the
+// one it came from. Options keeps its own way back (g_options_return).
+Screen g_mods_return = Screen::Launcher;
+
+Row mods_row(Screen from) {
+    Row mods{"Mods"};
+    mods.note = "Split-screen co-op and other changes to the game.";
+    mods.activate = [from] {
+        if (from != Screen::Options)
+            g_options_return = from;
+        g_mods_return = from;
+        g_screen = Screen::Mods;
+        g_selected = 0;
+    };
+    return mods;
+}
+
+void build_mods() {
+    // Every mod is still being made: each note says so, until it works.
+    auto note = [](const std::string& text) { return text + " In development: no effect yet."; };
+    // Custom stats: a percent of the character's own, 50% to 300% in steps of 25.
+    auto percent_row = [&](const char* label, int& value, const char* what) {
+        Row r{label, std::to_string(value) + "%"};
+        r.enabled = g_settings.mod_stats == 1;
+        r.note = note(std::string("Each player's most ") + what + ", as a share of their character's own.");
+        r.change = [&value](int dir) { value = std::clamp(value + dir * 25, 50, 300); };
+        return r;
+    };
+
+    Row coop{"Split-screen co-op", on_off(g_settings.mod_coop)};
+    coop.section = "I · Co-op";
+    coop.note = note("A second player in the same world, each with their own view, health, magick and sanity.");
+    coop.change = [](int) { g_settings.mod_coop = !g_settings.mod_coop; };
+    g_rows.push_back(coop);
+
+    static const char* const kSplit[] = {"Side by side", "Above and below"};
+    Row split{"Screen split", kSplit[g_settings.mod_split]};
+    split.enabled = g_settings.mod_coop;
+    split.note = note("How the screen divides between the two players.");
+    split.change = [](int dir) { cycle(g_settings.mod_split, 2, dir); };
+    g_rows.push_back(split);
+
+    static const char* const kInput[] = {"Controller", "Keyboard"};
+    Row input{"Player 2 plays with", kInput[g_settings.mod_p2_input]};
+    input.enabled = g_settings.mod_coop;
+    input.note = note("Which controller, its type and the buttons: Options, Controls, Player 2.");
+    input.change = [](int dir) { cycle(g_settings.mod_p2_input, 2, dir); };
+    g_rows.push_back(input);
+
+    static const char* const kEnemies[] = {"Vanilla", "Enhanced"};
+    static const char* const kEnemyNotes[] = {
+        "Creatures as the game made them.",
+        "Creatures hit twice as hard, and more of them, of the kinds each area holds, roam it."};
+    Row enemies{"Creatures", kEnemies[g_settings.mod_enemies]};
+    enemies.section = "II · Challenge";
+    enemies.note = note(kEnemyNotes[g_settings.mod_enemies]);
+    enemies.change = [](int dir) { cycle(g_settings.mod_enemies, 2, dir); };
+    g_rows.push_back(enemies);
+
+    static const char* const kInsanity[] = {"Normal", "More often", "Off"};
+    static const char* const kInsanityNotes[] = {
+        "The game's own sanity effects, as often as it chooses them.",
+        "Sanity effects come more often as sanity falls.",
+        "No sanity effects: the meter still drains and hurts at zero."};
+    Row insanity{"Sanity effects", kInsanity[g_settings.mod_insanity]};
+    insanity.note = note(kInsanityNotes[g_settings.mod_insanity]);
+    insanity.change = [](int dir) { cycle(g_settings.mod_insanity, 3, dir); };
+    g_rows.push_back(insanity);
+
+    static const char* const kStats[] = {"Character's own", "Custom"};
+    Row stats{"Stats", kStats[g_settings.mod_stats]};
+    stats.section = "III · Characters";
+    stats.page = 1;
+    stats.note = note(g_settings.mod_stats == 0
+                          ? "Each player has the health, magick and sanity of the character they play as."
+                          : "Each player's health, magick and sanity, set below as a share of their "
+                            "character's own.");
+    stats.change = [](int dir) { cycle(g_settings.mod_stats, 2, dir); };
+    g_rows.push_back(stats);
+    for (Row r : {percent_row("Health", g_settings.mod_health, "health"),
+                  percent_row("Magick", g_settings.mod_magick, "magick"),
+                  percent_row("Sanity", g_settings.mod_sanity, "sanity")}) {
+        r.page = 1;
+        g_rows.push_back(r);
+    }
+
+    Row back{"Back"};
+    back.gap = true;
+    back.page = 1;
+    back.activate = [] {
+        settings_save();
+        g_screen = g_mods_return;
+        g_selected = 0;
+    };
+    g_rows.push_back(back);
+}
+
 void build_launcher() {
     if (g_disc_on_main)
         g_rows.push_back(disc_row());
@@ -465,6 +564,7 @@ void build_launcher() {
         g_selected = 0;
     };
     g_rows.push_back(options);
+    g_rows.push_back(mods_row(Screen::Launcher));
 
     Row quit{"Quit"};
     quit.gap = true;
@@ -500,6 +600,17 @@ void build_play() {
 }
 
 Row layout_row() {
+    // On the keyboard alone every layout has the same keys: Default or Custom.
+    if (!controls::player_has_controller(controls::menu_player())) {
+        const bool custom = controls::layout() == controls::kCustom;
+        Row keys{"Keys", custom ? "\u2039 Custom \u203a" : "\u2039 Default \u203a"};
+        keys.note = custom ? "Your own keys (Button mapping)."
+                           : "WASD moves, TFGH turns the camera, J attacks, K acts. See Button mapping.";
+        keys.change = [custom](int) {
+            controls::set_layout(custom ? controls::kOriginal : controls::kCustom);
+        };
+        return keys;
+    }
     Row layout{"Layout", "\u2039 " + std::string(controls::layout_name(controls::layout())) + " \u203a"};
     static const char* const kLayoutNotes[] = {
         "The GameCube's button positions.",
@@ -512,6 +623,101 @@ Row layout_row() {
         controls::set_layout(l);
     };
     return layout;
+}
+
+// Whose controls the Controls pages show: player 2's are their own layout and
+// bindings, on the second controller or the keyboard (the Mods page's co-op).
+Row player_row() {
+    const int player = controls::menu_player();
+    Row r{"Player", "\u2039 Player " + std::to_string(player + 1) + " \u203a"};
+    r.note = player == 0 ? "Player 1's controls. Left/Right: player 2's, for split-screen co-op (Mods)."
+                         : "Player 2's controls, for split-screen co-op (Mods).";
+    r.change = [player](int) { controls::set_menu_player(1 - player); };
+    return r;
+}
+
+// What the menu player plays with: player 1 a controller, the keyboard or
+// both; player 2 a controller or the keyboard.
+Row device_row() {
+    const int player = controls::menu_player();
+    if (player == 0) {
+        static const char* const kDevice[] = {"Controller and keyboard", "Controller", "Keyboard"};
+        static const char* const kNotes[] = {
+            "Either works. In co-op, a keyboard player 2 takes the keyboard.",
+            "A controller only: the keyboard is free for player 2.",
+            "The keyboard only: every controller is free for player 2."};
+        Row r{"Plays with", kDevice[g_settings.controls_device]};
+        r.note = kNotes[g_settings.controls_device];
+        r.change = [](int dir) {
+            cycle(g_settings.controls_device, 3, dir);
+            settings_save();
+        };
+        return r;
+    }
+    static const char* const kInput[] = {"Controller", "Keyboard"};
+    Row r{"Plays with", kInput[g_settings.mod_p2_input]};
+    r.note = g_settings.mod_p2_input == 0
+                 ? "A controller of their own (chosen below)."
+                 : g_settings.controls_device == 2
+                       ? "The keyboard, as player 1: give them different keys (Button mapping)."
+                       : "The keyboard; in co-op player 1 then plays on their controller.";
+    r.change = [](int dir) {
+        cycle(g_settings.mod_p2_input, 2, dir);
+        settings_save();
+    };
+    return r;
+}
+
+// Which connected controller is the menu player's: automatic, or one by its
+// place in the list (kept for the next time it is connected).
+Row controller_row() {
+    const int player = controls::menu_player();
+    const std::vector<std::string> pads = controls::connected_controllers();
+    int& slot = g_settings.pad_slot[player];
+    std::string value;
+    if (slot == 0) {
+        const std::string name = controls::controller_name();
+        value = "Automatic" + (name.rfind("No ", 0) == 0 ? std::string(" (none connected)") : " (" + name + ")");
+    } else {
+        value = std::to_string(slot) + ": " +
+                (slot <= static_cast<int>(pads.size()) ? pads[slot - 1] : std::string("not connected"));
+    }
+    Row r{"Controller", "‹ " + value + " ›"};
+    r.note = pads.empty() ? "No controller is connected: this player's choice waits for one."
+                          : std::to_string(pads.size()) + " connected. Automatic: player 1 the first, "
+                                                          "player 2 the next one free.";
+    // Automatic, then a place for each connected controller (at least the
+    // two players' own, so either can be chosen before it is plugged in).
+    const int places = std::max(static_cast<int>(pads.size()), 2) + 1;
+    r.change = [&slot, places](int dir) {
+        slot = (std::min(slot, places - 1) + dir + places) % places;
+        settings_save();
+    };
+    return r;
+}
+
+// The menu player's controller type: the names and icons shown for it.
+Row pad_type_row() {
+    const int player = controls::menu_player();
+    int& type = g_settings.pad_type[player];
+    std::string value = controls::pad_type_name(type);
+    if (type == controls::kPadAuto) {
+        const std::string found = controls::detected_pad_type(player);
+        value += found.empty() ? "" : " (" + found + ")";
+    }
+    Row r{"Controller type", "‹ " + value + " ›"};
+    static const char* const kNotes[] = {
+        "Found from the controller when it is connected.",
+        "Xbox buttons and icons: A B X Y, LB RB, LT RT, Menu.",
+        "Any XInput controller: Xbox positions, plain names (Start).",
+        "PlayStation buttons and icons: Cross, Circle, Square, Triangle.",
+        "Switch buttons and icons: B A Y X, L R, ZL ZR, +."};
+    r.note = kNotes[type];
+    r.change = [&type](int dir) {
+        cycle(type, controls::kPadTypeCount, dir);
+        settings_save();
+    };
+    return r;
 }
 
 Row vibration_row() {
@@ -757,6 +963,7 @@ void build_options() {
     controls_row.note = "Left and right: the button layout. A: vibration, hold or toggle, "
                         "stick deadzone and button mapping.";
     controls_row.activate = [] {
+        controls::set_menu_player(0);
         g_screen = Screen::Controls;
         g_selected = 0;
     };
@@ -798,6 +1005,11 @@ void build_options() {
     fps.change = [](int) { g_settings.fps_counter = !g_settings.fps_counter; };
     g_rows.push_back(fps);
 
+    Row mods = mods_row(Screen::Options);
+    mods.section = "VI · Mods";
+    mods.page = 1;
+    g_rows.push_back(mods);
+
     if (g_options_return == Screen::Launcher && !g_disc_on_main) {
         Row disc = disc_row();
         disc.page = 1;
@@ -815,12 +1027,26 @@ void build_options() {
     g_rows.push_back(back);
 }
 
-void build_controls() {
-    g_rows.push_back(layout_row());
+void build_controls_mapping_and_back();
 
-    Row pad{"Controller", controls::controller_name()};
-    pad.enabled = false;
-    g_rows.push_back(pad);
+void build_controls() {
+    g_rows.push_back(player_row());
+    const bool p2 = controls::menu_player() == 1;
+    g_rows.push_back(device_row());
+    if (controls::player_has_controller(controls::menu_player())) {
+        g_rows.push_back(controller_row());
+        g_rows.push_back(pad_type_row());
+    }
+
+    Row layout = layout_row();
+    layout.gap = true;
+    g_rows.push_back(layout);
+
+    // Hold or toggle, deadzone and vibration: player 1's for now.
+    if (p2) {
+        build_controls_mapping_and_back();
+        return;
+    }
 
     auto hold_toggle = [](const char* label, bool* value, const char* note) {
         Row r{label, *value ? "Toggle" : "Hold"};
@@ -849,7 +1075,10 @@ void build_controls() {
     g_rows.push_back(deadzone);
 
     g_rows.push_back(vibration_row());
+    build_controls_mapping_and_back();
+}
 
+void build_controls_mapping_and_back() {
     Row mapping{"Button mapping"};
     mapping.gap = true;  // its own group, so it does not trail the settings
     mapping.note = "See and change which button or key does what.";
@@ -862,30 +1091,72 @@ void build_controls() {
     Row back{"Back"};
     back.gap = true;
     back.activate = [] {
+        controls::set_menu_player(0);
         g_screen = Screen::Options;
         g_selected = 0;
     };
     g_rows.push_back(back);
 }
 
+// The menu player's bindings: the controller column and the key column for
+// the devices they play with, then (with a keyboard) the movement and camera
+// keys on the right-hand page.
 void build_mapping() {
+    const int player = controls::menu_player();
+    const bool pad = controls::player_has_controller(player);
+    // Keys for a player whose device takes them (saved, though in co-op
+    // player 2 may have the keyboard).
+    const bool keys = controls::player_uses_keyboard(player);
+    const std::string waiting_for = pad && keys ? "a controller button, trigger or key"
+                                    : pad       ? "a controller button or trigger"
+                                                : "a key";
+    const std::string layout = pad ? controls::layout_name(controls::layout())
+                               : controls::layout() == controls::kCustom ? "Custom"
+                                                                         : "Default";
+    // Left/right picks by hand (no controller needed): the controller button
+    // where the player has one, else the key. A waits for a press.
+    const std::string how = pad ? (keys ? "Left/Right: choose the controller button. A: press a button or key."
+                                        : "Left/Right: choose the button. A: press it on the controller.")
+                                : "Left/Right: choose the key. A: press it.";
     for (int a = 0; a < controls::kActionCount; a++) {
         Row r{controls::action_name(a)};
         if (controls::capturing() && controls::capture_action() == a) {
-            r.value = "Press a button or key...";
-            r.note = "Waiting for a controller button, trigger or key (Esc cancels).";
+            r.value = "Press " + waiting_for + "...";
+            r.note = "Waiting for " + waiting_for + " (Esc cancels).";
         } else {
-            r.value_rml = controls::pad_glyphs(a) + "<span class=\"sep\"></span>" +
-                          controls::key_glyph(a);
-            r.note = std::string("Select to rebind (switches to Custom). Layout: ") +
-                     controls::layout_name(controls::layout()) + ".";
+            r.value_rml = pad && keys ? controls::pad_glyphs(a) + "<span class=\"sep\"></span>" +
+                                            controls::key_glyph(a)
+                          : pad ? controls::pad_glyphs(a)
+                                : controls::key_glyph(a);
+            r.note = how + " Layout: " + layout + ".";
         }
         r.activate = [a] { controls::begin_capture(a); };
+        r.change = pad ? std::function<void(int)>([a](int dir) { controls::step_pad(a, dir); })
+                       : std::function<void(int)>([a](int dir) { controls::step_key(a, dir); });
+        g_rows.push_back(r);
+    }
+    for (int d = 0; keys && d < controls::kDirectionCount; d++) {
+        const int target = controls::kActionCount + d;
+        Row r{controls::direction_name(d)};
+        if (d == 0)
+            r.section = "Movement and camera";
+        r.page = 1;
+        if (controls::capturing() && controls::capture_action() == target) {
+            r.value = "Press a key...";
+            r.note = "Waiting for a key (Esc cancels).";
+        } else {
+            r.value_rml = controls::direction_glyph(d);
+            r.note = std::string("Left/Right: choose the key. A: press it.") +
+                     (pad ? " A controller moves and turns the camera with its sticks." : "");
+        }
+        r.activate = [target] { controls::begin_capture(target); };
+        r.change = [target](int dir) { controls::step_key(target, dir); };
         g_rows.push_back(r);
     }
 
     Row back{"Back"};
     back.gap = true;
+    back.page = keys ? 1 : 0;
     back.activate = [] {
         g_screen = Screen::Controls;
         g_selected = 0;
@@ -929,6 +1200,7 @@ void build_in_game() {
         g_selected = 0;
     };
     g_rows.push_back(options);
+    g_rows.push_back(mods_row(Screen::InGame));
 
     // A reset: the machine as it booted, so the game starts again through its
     // logos to the title screen (the launcher's New game, in place).
@@ -1002,7 +1274,10 @@ void render() {
                           : g_screen == Screen::Play     ? "Load Game"
                           : g_screen == Screen::Options  ? "Options"
                           : g_screen == Screen::Controls ? "Controls"
-                          : g_screen == Screen::Mapping  ? "Button Mapping"
+                          : g_screen == Screen::Mapping  ? (controls::menu_player() == 1
+                                                                ? "Player 2 Mapping"
+                                                                : "Button Mapping")
+                          : g_screen == Screen::Mods     ? "Mods"
                           : g_screen == Screen::Problem  ? g_problem_heading.c_str()
                                                          : "Paused";
     g_doc->GetElementById("heading")->SetInnerRML(heading);
@@ -1052,7 +1327,7 @@ void render() {
     g_doc->SetClass("compact", g_screen == Screen::Mapping);
     // Over the game the page lies on the dimmed, paused frame.
     g_doc->SetClass("overlay", g_screen == Screen::InGame || g_screen == Screen::Problem ||
-                                   ((g_screen == Screen::Options ||
+                                   ((g_screen == Screen::Options || g_screen == Screen::Mods ||
                                      g_screen == Screen::Controls ||
                                      g_screen == Screen::Mapping) &&
                                     g_options_return == Screen::InGame));
@@ -1068,6 +1343,7 @@ void build_rows() {
     case Screen::Mapping: build_mapping(); break;
     case Screen::InGame: build_in_game(); break;
     case Screen::Problem: build_problem(); break;
+    case Screen::Mods: build_mods(); break;
     }
     if (g_selected >= static_cast<int>(g_rows.size()))
         g_selected = 0;
@@ -1102,6 +1378,7 @@ void go_back() {
         g_selected = 0;
         break;
     case Screen::Controls:
+        controls::set_menu_player(0);
         g_screen = Screen::Options;
         g_selected = 0;
         break;
@@ -1112,6 +1389,11 @@ void go_back() {
     case Screen::Options:
         settings_save();
         g_screen = g_options_return;
+        g_selected = 0;
+        break;
+    case Screen::Mods:
+        settings_save();
+        g_screen = g_mods_return;
         g_selected = 0;
         break;
     case Screen::InGame:
@@ -1383,11 +1665,18 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
                        g_discs[g_disc].path == g_settings.disc);
     g_screen = Screen::Launcher;
     g_selected = g_disc_on_main && disc_playable() ? 1 : 0;
-    // ED_MENU_OPEN=options or controls[,row] (testing): the launcher opens on
-    // that page, at that row.
+    // ED_MENU_OPEN=options, controls, mapping or mods[,row] (testing): the
+    // launcher opens on that page, at that row; controls2 and mapping2 show
+    // player 2's.
     if (const char* page = std::getenv("ED_MENU_OPEN"); page != nullptr) {
         g_options_return = Screen::Launcher;
-        g_screen = std::strncmp(page, "controls", 8) == 0 ? Screen::Controls : Screen::Options;
+        g_mods_return = Screen::Launcher;
+        g_screen = std::strncmp(page, "controls", 8) == 0  ? Screen::Controls
+                   : std::strncmp(page, "mapping", 7) == 0 ? Screen::Mapping
+                   : std::strncmp(page, "mods", 4) == 0    ? Screen::Mods
+                                                           : Screen::Options;
+        const char* digit = page + std::strcspn(page, "2,");
+        controls::set_menu_player(*digit == '2' ? 1 : 0);
         const char* comma = std::strchr(page, ',');
         g_selected = comma != nullptr ? std::atoi(comma + 1) : 0;
     }

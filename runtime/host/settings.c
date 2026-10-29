@@ -41,6 +41,20 @@ Settings g_settings = {
     .stick_deadzone = {5, 5, 5},
     .vibration = true,
     .camera = 0,
+    .controls_device = 0,
+    .pad_slot = {0, 0},
+    .pad_type = {0, 0},
+    .mod_coop = false,
+    .mod_split = 0,
+    .mod_p2_input = 0,
+    .mod_p2_layout = 1,  // Modern, as player 1
+    .mod_p2_custom = "",
+    .mod_stats = 0,
+    .mod_health = 100,
+    .mod_magick = 100,
+    .mod_sanity = 100,
+    .mod_enemies = 0,
+    .mod_insanity = 0,
     .controls_custom = "",
     .disc = "",
 };
@@ -139,6 +153,34 @@ void settings_load(void) {
             g_settings.vibration = n != 0;
         else if (strcmp(key, "camera") == 0)
             g_settings.camera = n == 1 ? 0 : clamp_int(n, 0, 3);  // 1 was a free look
+        else if (strcmp(key, "controls_device") == 0)
+            g_settings.controls_device = clamp_int(n, 0, 2);
+        else if (strcmp(key, "pad_slot_p1") == 0 || strcmp(key, "pad_slot_p2") == 0)
+            g_settings.pad_slot[key[10] - '1'] = clamp_int(n, 0, 8);
+        else if (strcmp(key, "pad_type_p1") == 0 || strcmp(key, "pad_type_p2") == 0)
+            g_settings.pad_type[key[10] - '1'] = clamp_int(n, 0, 4);
+        else if (strcmp(key, "mod_coop") == 0)
+            g_settings.mod_coop = n != 0;
+        else if (strcmp(key, "mod_split") == 0)
+            g_settings.mod_split = clamp_int(n, 0, 1);
+        else if (strcmp(key, "mod_p2_input") == 0)
+            g_settings.mod_p2_input = clamp_int(n, 0, 1);
+        else if (strcmp(key, "mod_p2_layout") == 0)
+            g_settings.mod_p2_layout = clamp_int(n, 0, 2);
+        else if (strcmp(key, "mod_p2_custom") == 0)
+            snprintf(g_settings.mod_p2_custom, sizeof g_settings.mod_p2_custom, "%s", value);
+        else if (strcmp(key, "mod_stats") == 0)
+            g_settings.mod_stats = clamp_int(n, 0, 1);
+        else if (strcmp(key, "mod_health") == 0)
+            g_settings.mod_health = clamp_int(n, 50, 300);
+        else if (strcmp(key, "mod_magick") == 0)
+            g_settings.mod_magick = clamp_int(n, 50, 300);
+        else if (strcmp(key, "mod_sanity") == 0)
+            g_settings.mod_sanity = clamp_int(n, 50, 300);
+        else if (strcmp(key, "mod_enemies") == 0)
+            g_settings.mod_enemies = clamp_int(n, 0, 1);
+        else if (strcmp(key, "mod_insanity") == 0)
+            g_settings.mod_insanity = clamp_int(n, 0, 2);
         else if (strcmp(key, "controls_custom") == 0)
             snprintf(g_settings.controls_custom, sizeof g_settings.controls_custom, "%s", value);
         else if (strcmp(key, "disc") == 0)
@@ -180,6 +222,22 @@ void settings_save(void) {
         fprintf(f, "stick_deadzone_%s = %d\n", kLayoutKeys[i], g_settings.stick_deadzone[i]);
     fprintf(f, "vibration = %d\n", g_settings.vibration ? 1 : 0);
     fprintf(f, "camera = %d\n", g_settings.camera);
+    fprintf(f, "controls_device = %d\n", g_settings.controls_device);
+    for (int i = 0; i < 2; i++) {
+        fprintf(f, "pad_slot_p%d = %d\n", i + 1, g_settings.pad_slot[i]);
+        fprintf(f, "pad_type_p%d = %d\n", i + 1, g_settings.pad_type[i]);
+    }
+    fprintf(f, "mod_coop = %d\n", g_settings.mod_coop ? 1 : 0);
+    fprintf(f, "mod_split = %d\n", g_settings.mod_split);
+    fprintf(f, "mod_p2_input = %d\n", g_settings.mod_p2_input);
+    fprintf(f, "mod_p2_layout = %d\n", g_settings.mod_p2_layout);
+    fprintf(f, "mod_p2_custom = %s\n", g_settings.mod_p2_custom);
+    fprintf(f, "mod_stats = %d\n", g_settings.mod_stats);
+    fprintf(f, "mod_health = %d\n", g_settings.mod_health);
+    fprintf(f, "mod_magick = %d\n", g_settings.mod_magick);
+    fprintf(f, "mod_sanity = %d\n", g_settings.mod_sanity);
+    fprintf(f, "mod_enemies = %d\n", g_settings.mod_enemies);
+    fprintf(f, "mod_insanity = %d\n", g_settings.mod_insanity);
     fprintf(f, "controls_custom = %s\n", g_settings.controls_custom);
     fprintf(f, "disc = %s\n", g_settings.disc);
     fclose(f);

@@ -28,7 +28,41 @@ enum Action {
 
 enum Layout { kOriginal, kModern, kCustom, kLayoutCount };
 
+// The keyboard's movement and camera keys (a controller uses its sticks),
+// bound like the actions. In the Button mapping list they follow the actions:
+// a capture or row index of kActionCount + direction.
+enum Direction {
+    kMoveUp, kMoveDown, kMoveLeft, kMoveRight,
+    kCameraUp, kCameraDown, kCameraLeft, kCameraRight,
+    kDirectionCount,
+};
+
+// Two players (the Mods page's co-op): player 1 is the game's pad, player 2
+// has a layout and bindings of their own, on the second controller or on the
+// keyboard (settings mod_p2_input). The Controls pages show and change the
+// menu player's; everything the game itself reads is player 1's.
+void set_menu_player(int player);
+int menu_player();
+// Whether a player plays on the keyboard now, and on a controller (settings
+// controls_device and mod_p2_input). Player 1's "controller and keyboard"
+// gives the keyboard up to player 2 in co-op; their own "keyboard" keeps it.
+bool player_has_keyboard(int player);
+bool player_has_controller(int player);
+// Whether a player's device choice includes the keyboard (their keys to set),
+// whether or not they have it now.
+bool player_uses_keyboard(int player);
+
+// A player's controller type (settings pad_type): the button names and icons
+// shown for it, set by hand or found from the controller.
+enum PadType { kPadAuto, kPadXbox, kPadXInput, kPadPlayStation, kPadSwitch, kPadTypeCount };
+const char* pad_type_name(int type);
+// The type found for a player's controller ("" when none is connected).
+std::string detected_pad_type(int player);
+// The controllers connected now, by name, in the order pad_slot counts them.
+std::vector<std::string> connected_controllers();
+
 const char* action_name(int action);
+const char* direction_name(int direction);
 const char* layout_name(int layout);
 // The current controller's buttons for an action ("RT / A"), and its key.
 std::string pad_label(int action);
@@ -37,7 +71,9 @@ std::string key_label(int action);
 // connected controller's family; text where there is no icon.
 std::string pad_glyphs(int action);
 std::string key_glyph(int action);
-// "Xbox controller", "DualSense", ... or "No controller".
+// A movement or camera key's icon (the menu player's).
+std::string direction_glyph(int direction);
+// The menu player's controller: "Xbox controller", "DualSense", ... or "No controller".
 std::string controller_name();
 
 // For the game's own button icons (buttons.cpp): the icon file under
@@ -68,14 +104,20 @@ uint64_t glyph_signature();
 std::string fast_forward_glyph();
 bool fast_forwarding();
 
-// Switch layout (Custom starts from the layout in use).
+// Switch the menu player's layout (Custom starts from the layout in use).
 void set_layout(int layout);
 int layout();
 
-// Rebinding (Custom): begin waiting for an input for one action; poll once a
-// frame until it returns true (bound, or timed out). A key event from the
-// menu's key listener can bind the key instead.
+// Rebinding (Custom), for the menu player: begin waiting for an input for one
+// action (or kActionCount + a direction, a key only); poll once a frame until
+// it returns true (bound, or timed out). A key event from the menu's key
+// listener can bind the key instead.
 void begin_capture(int action);
+// Choosing by hand (left/right in Button mapping), without the device: step
+// an action's controller input through the controller's buttons (and none),
+// or an action's or direction's key through the common keys. Custom, saved.
+void step_pad(int action, int dir);
+void step_key(int target, int dir);
 bool poll_capture();
 void capture_key(int sdl_scancode);
 bool capturing();

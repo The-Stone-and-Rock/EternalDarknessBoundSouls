@@ -39,6 +39,24 @@ typedef struct {
     int stick_deadzone[3];  // percent of the stick's travel ignored, per layout
     bool vibration;
     int camera;           // 0 the game's own, 2 third person, 3 first person (camera.h)
+    // Each player's controller (player 1, player 2): which one is theirs (0
+    // automatic, else the Nth connected) and its type (controls.h PadType: 0
+    // automatic, 1 Xbox, 2 XInput, 3 PlayStation, 4 Switch).
+    int controls_device;  // player 1: 0 controller and keyboard, 1 controller, 2 keyboard
+    int pad_slot[2];
+    int pad_type[2];
+    // Mods (the Mods page; in development, nothing reads them yet).
+    bool mod_coop;        // two-player split-screen co-op
+    int mod_split;        // 0 side by side, 1 one above the other
+    int mod_p2_input;     // player 2: 0 the second controller, 1 the keyboard
+    int mod_p2_layout;    // player 2's controls_layout (0 original, 1 modern, 2 custom)
+    char mod_p2_custom[512];  // player 2's custom bindings (controls.cpp format)
+    int mod_stats;        // 0 each character's own health, magick and sanity, 1 custom
+    int mod_health;       // custom stats: percent of the character's own, 50-300
+    int mod_magick;
+    int mod_sanity;
+    int mod_enemies;      // 0 vanilla, 1 enhanced (harder hits, more creatures)
+    int mod_insanity;     // sanity effects: 0 the game's own, 1 more often, 2 off
     char controls_custom[512];  // custom bindings (controls.cpp format)
     char disc[1024];      // last disc image chosen in the launcher
 } Settings;
