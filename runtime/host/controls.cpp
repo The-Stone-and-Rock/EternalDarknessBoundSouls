@@ -1247,6 +1247,28 @@ extern "C" void controls_init(void) {
     SDL_AddEventWatch(mark_watch, nullptr);
 }
 
+extern "C" void controls_player2_look(float* turn_x, float* turn_y, float* in_out) {
+    using namespace controls;
+    float tx = 0.f, ty = 0.f, io = 0.f;
+    if (SDL_Gamepad* pad = gamepad(1)) {
+        tx = stick(pad, SDL_GAMEPAD_AXIS_RIGHTX, false) / 127.f;
+        ty = stick(pad, SDL_GAMEPAD_AXIS_RIGHTY, true) / 127.f;
+        io = stick(pad, SDL_GAMEPAD_AXIS_LEFTY, true) / 127.f;
+    }
+    if (player_has_keyboard(1)) {
+        const int* moves = g_players[1].moves;
+        if (key_down(moves[kCameraLeft])) tx = -1.f;
+        if (key_down(moves[kCameraRight])) tx = 1.f;
+        if (key_down(moves[kCameraUp])) ty = 1.f;
+        if (key_down(moves[kCameraDown])) ty = -1.f;
+        if (key_down(moves[kMoveUp])) io = 1.f;
+        if (key_down(moves[kMoveDown])) io = -1.f;
+    }
+    *turn_x = tx;
+    *turn_y = ty;
+    *in_out = io;
+}
+
 extern "C" void controls_note_frame(unsigned long long frame) {
     controls::g_frame.store(frame, std::memory_order_relaxed);
 }

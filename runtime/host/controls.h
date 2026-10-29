@@ -131,6 +131,10 @@ extern "C" {
 #endif
 // Load the layout from settings and take over pad port 0.
 void controls_init(void);
+// Player 2's camera (split-screen), each -1..1: turn (right stick or camera
+// keys; right and up positive) and in or out (left stick or movement keys up
+// and down; up is in).
+void controls_player2_look(float* turn_x, float* turn_y, float* in_out);
 // Whether the game's pause menu is open (hle.c, each pad read).
 void controls_set_game_menu(bool open);
 // Whether a cutscene is playing (hle.c, each pad read), and whether the player

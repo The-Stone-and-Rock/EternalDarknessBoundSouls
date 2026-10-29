@@ -40,6 +40,11 @@ void camera_set_examining(bool hidden, int looking);
 // hides them to look closely at something), 0 never (first person: the eye
 // is in their head), -1 as the game has it.
 int camera_player_drawn(void);
+// From hle.c, once the camera has made its view (eye r4, up r5, target r6):
+// split-screen (Mods: co-op) for this frame, on or off, with each player's
+// camera.
+struct CPUState;
+void camera_split_update(struct CPUState* cpu);
 // From hle.c, as the game's camera makes its projection: the field of view
 // (degrees) to use instead of the game's.
 float camera_field_of_view(float game_fov);

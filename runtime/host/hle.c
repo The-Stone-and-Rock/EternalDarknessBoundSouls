@@ -5337,6 +5337,7 @@ static void notify_look_at(CPUState* cpu) {
         camera_set_examining(hidden, looking);
     }
     camera_look_at(cpu);
+    camera_split_update(cpu);
 }
 
 // The game's collision, for the third-person camera's line test: the world a

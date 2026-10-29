@@ -17,6 +17,7 @@
  * the two views (camera_stick_turn), and up walks away from this camera.
  */
 #include "host/camera.h"
+#include "host/controls.h"
 
 #include "host/settings.h"
 
@@ -1504,6 +1505,127 @@ void camera_held_end(CPUState* cpu) {
  * frame, whose bytes 40..63 it never uses (the eye and target written there
  * are read once, by LookAt). The world's up is the camera's up vector (+Z in
  * this game). */
+/* Split-screen (Mods: split-screen co-op). Each frame in play the renderer
+ * draws the game's frame once for each player (aurora_split_set_view: a
+ * camera in the game camera's view space) and shows the two in halves of the
+ * window; in a cutscene, the Tome or with no player, the frame shows whole.
+ * Player 1 sees the game's own camera. Player 2, until they have a character
+ * of their own, has a camera that circles player 1, turned by their right
+ * stick (or camera keys) and brought in and out by their left stick (or
+ * forward and back). */
+#ifdef ED_AURORA
+void aurora_split_set(bool on, int layout);
+void aurora_split_set_view(int player, const float rot[9], float x, float y, float z, float zoom, bool hide_hud);
+#endif
+
+#define SPLIT_PITCH_LOW 0.05f
+#define SPLIT_PITCH_HIGH 1.30f
+
+static bool g_split_on;
+static float g_split_yaw, g_split_pitch, g_split_distance;
+static unsigned long long g_split_frame;
+
+/* A camera's axes (right, up, back) from its eye, target and up, as
+ * C_MTXLookAt makes them. */
+static void look_axes(Vec3 eye, Vec3 target, Vec3 up, Vec3* x, Vec3* y, Vec3* z) {
+    *z = normalize(sub(eye, target));
+    *x = normalize(cross(up, *z));
+    *y = cross(*z, *x);
+}
+
+static void split_off(unsigned long long frame, const char* why) {
+#ifdef ED_AURORA
+    if (g_split_on)
+        aurora_split_set(false, 0);
+#endif
+    if (g_split_on)
+        fprintf(stderr, "[split] off at frame %llu (%s)\n", frame, why);
+    g_split_on = false;
+}
+
+void camera_split_update(CPUState* cpu) {
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (frame == g_split_frame)
+        return;  // once a frame (the camera runs twice)
+    g_split_frame = frame;
+    Vec3 player;
+    if (!g_settings.mod_coop) {
+        split_off(frame, "co-op off");
+        return;
+    }
+    if (!g_play || g_menu_open) {
+        split_off(frame, g_menu_open ? "the Tome" : "a cutscene");
+        return;
+    }
+    if (!player_position(cpu, &player)) {
+        split_off(frame, "no player");
+        return;
+    }
+    // The game camera this frame draws from (camera.c's own, when it has
+    // swapped them).
+    const Vec3 eye = read_vec(cpu, cpu->gpr[4]), up = read_vec(cpu, cpu->gpr[5]),
+               target = read_vec(cpu, cpu->gpr[6]);
+    const Vec3 k = normalize(up);
+    if (length(sub(target, eye)) <= 0.0f || length(k) <= 0.0f || !isfinite(eye.x) || !isfinite(target.x)) {
+        split_off(frame, "no camera");
+        return;
+    }
+    // The world's level directions, for player 2's turn round player 1.
+    Vec3 e1 = normalize(flatten(v3(1.0f, 0.0f, 0.0f), k));
+    if (length(e1) < 0.5f)
+        e1 = normalize(flatten(v3(0.0f, 1.0f, 0.0f), k));
+    const Vec3 e2 = cross(k, e1);
+    if (!g_split_on) {
+        // Starting where the game's camera looks from.
+        const Vec3 from = normalize(flatten(sub(eye, player), k));
+        g_split_yaw = length(from) > 0.5f ? atan2f(dot(from, e2), dot(from, e1)) : 0.0f;
+        g_split_pitch = TP_PITCH;
+        g_split_distance = TP_DISTANCE;
+    }
+    float turn_x, turn_y, in_out;
+    controls_player2_look(&turn_x, &turn_y, &in_out);
+    const float step = 1.0f / 60.0f;
+    g_split_yaw -= turn_x * YAW_RATE * step;
+    g_split_pitch = clampf(g_split_pitch - turn_y * PITCH_RATE * step, SPLIT_PITCH_LOW, SPLIT_PITCH_HIGH);
+    g_split_distance = clampf(g_split_distance - in_out * TP_ZOOM_RATE * step, TP_CLOSEST, TP_FARTHEST);
+    const Vec3 level = add(scale(e1, cosf(g_split_yaw)), scale(e2, sinf(g_split_yaw)));
+    const Vec3 dir = add(scale(level, cosf(g_split_pitch)), scale(k, sinf(g_split_pitch)));
+    const Vec3 focus = add(player, scale(k, TP_HEIGHT));
+    const Vec3 eye2 = add(focus, scale(dir, g_split_distance));
+    // Player 2's camera in the game camera's view space: its axes and eye.
+    Vec3 x1, y1, z1, x2, y2, z2;
+    look_axes(eye, target, k, &x1, &y1, &z1);
+    look_axes(eye2, focus, k, &x2, &y2, &z2);
+    const Vec3 axes[3] = {x2, y2, z2};
+    float rot[9];
+    for (int c = 0; c < 3; c++) {
+        rot[0 * 3 + c] = dot(axes[c], x1);
+        rot[1 * 3 + c] = dot(axes[c], y1);
+        rot[2 * 3 + c] = dot(axes[c], z1);
+    }
+    const Vec3 rel = sub(eye2, eye);
+#ifdef ED_AURORA
+    static const float kIdentity[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    aurora_split_set_view(0, kIdentity, 0.0f, 0.0f, 0.0f, 1.0f, false);
+    aurora_split_set_view(1, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), 1.0f, true);
+    aurora_split_set(true, g_settings.mod_split);
+#else
+    (void)rot;
+    (void)rel;
+#endif
+    if (!g_split_on)
+        fprintf(stderr, "[split] on at frame %llu (%s)\n", frame,
+                g_settings.mod_split == 1 ? "above and below" : "side by side");
+    // ED_SPLIT_LOG=1: player 2's camera, twice a second.
+    static int log = -1;
+    if (log < 0)
+        log = getenv("ED_SPLIT_LOG") != NULL;
+    if (log && frame % 30u == 0u)
+        fprintf(stderr, "[split] frame %llu: player 2 at %.0f %.0f %.0f in view 1 (eye %.0f %.0f %.0f, player %.0f %.0f %.0f)\n",
+                frame, dot(rel, x1), dot(rel, y1), dot(rel, z1), eye.x, eye.y, eye.z, player.x, player.y, player.z);
+    g_split_on = true;
+}
+
 void camera_look_at(CPUState* cpu) {
     g_cpu = cpu;
     if (!g_log_checked) {
