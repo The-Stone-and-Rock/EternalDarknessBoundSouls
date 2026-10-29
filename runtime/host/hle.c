@@ -6217,6 +6217,36 @@ static void coop_follow(CPUState* cpu, u32 player) {
             at[2]);
 }
 
+// Player 2's detail. Each frame the game shares out detail between the
+// characters by where they are from its camera (0x8011CA04): one in front of
+// the camera and near it may have full detail, the rest less, and their models
+// are made ready for that detail before they are drawn. The game camera is
+// player 1's, so player 2 close in their own view but behind player 1's
+// camera was the low-detail model. Where that share reads a character's
+// position (0x80118274, a copy of object +0..11, called from 0x8011CB70),
+// player 2 is given player 1's position, so they get player 1's detail.
+// ED_COOP_LOD_LOG=1 says so once a second.
+#define COOP_POSITION_COPY 0x80118274u
+#define COOP_DETAIL_CALL 0x8011CB74u  // the return address in the share
+
+static void coop_position_copy(CPUState* cpu) {
+    u32 from = cpu->gpr[4];
+    if (cpu->lr == COOP_DETAIL_CALL && g_settings.mod_coop && g_coop_p2 != 0u && sda_ready(cpu) &&
+        from == mem_read32(cpu, g_coop_p2 + 52u)) {
+        const u32 player = coop_player(cpu);
+        const u32 p1 = player != 0u ? mem_read32(cpu, player + 52u) : 0u;
+        if (guest_ram_range_valid(cpu, p1, 12u))
+            from = p1;
+        static unsigned n;
+        if (getenv("ED_COOP_LOD_LOG") != NULL && n++ % 60u == 0u)
+            fprintf(stderr, "[coop] player 2's detail by player 1's place (%s)\n", from == p1 ? "yes" : "no");
+    }
+    for (u32 i = 0; i < 12u; i += 4u)
+        mem_write32(cpu, cpu->gpr[3] + i, mem_read32(cpu, from + i));
+    cpu->gpr[5] = mem_read32(cpu, from);
+    cpu->gpr[0] = mem_read32(cpu, from + 8u);
+}
+
 // Player 2's object, for the skinning log (ED_COOP_SKIN_LOG).
 u32 hle_coop_player2_object(CPUState* cpu) {
     return g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + 52u) : 0u;
@@ -6350,6 +6380,10 @@ static void coop_snap(CPUState* cpu) {
     fprintf(f, "distance %.0f\n", sqrtf(d2));
     for (u32 off = 0; off < 0x800u; off += 4u)
         fprintf(f, "%03X %08X\n", off, mem_read32(cpu, object + off));
+    // ... and its model instance (object +60), 0x800 bytes.
+    const u32 model = mem_read32(cpu, object + 60u);
+    for (u32 off = 0; guest_ram_range_valid(cpu, model, 0x800u) && off < 0x800u; off += 4u)
+        fprintf(f, "m%03X %08X\n", off, mem_read32(cpu, model + off));
     fclose(f);
 }
 
@@ -6623,6 +6657,15 @@ static void find_coop(CPUState* cpu) {
     } else {
         fprintf(stderr, "[coop] the characters' step not found: player 2 finds no doors\n");
     }
+    // The copy of a position (lwz r5,0(r4); lwz r0,4(r4); stw r5,0(r3)), and
+    // the share's call of it (bl at 0x8011CB70).
+    HleDispatchEntry* copy = hle_dispatch_entry(COOP_POSITION_COPY);
+    if (mem_read32(cpu, COOP_POSITION_COPY) == 0x80A40000u && mem_read32(cpu, COOP_POSITION_COPY + 4u) == 0x80040004u &&
+        mem_read32(cpu, COOP_POSITION_COPY + 8u) == 0x90A30000u && mem_read32(cpu, COOP_DETAIL_CALL - 4u) == 0x4BFFB705u &&
+        copy != NULL && copy->intercept == NULL && copy->notify == NULL)
+        copy->intercept = coop_position_copy;
+    else
+        fprintf(stderr, "[coop] the detail share not found: player 2 can be the low-detail model\n");
     // The event call (stwu r1,-48(r1); mflr; stw; li r0,-1) for the threat
     // search, and the search's call of it (bl at 0x8003230C).
     HleDispatchEntry* send = hle_dispatch_entry(COOP_SEND_EVENT);
