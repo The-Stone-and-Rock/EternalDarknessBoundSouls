@@ -3610,12 +3610,38 @@ static bool cutscene_playing(CPUState* cpu) {
 
 #ifdef ED_AURORA
 static void coop_pad_read(CPUState* cpu, bool playing);
+// Split-screen co-op: while player 2's turn reads the pad (coop_player_turn),
+// the game's pad 1 is player 2's controller.
+static bool g_coop_pad_p2;
 #endif
 
 static void hle_PADRead(CPUState* cpu) {
     u32 out = hle_arg_u32(cpu, 0);
     DolPadState state[4];
     memset(state, 0, sizeof state);
+#ifdef ED_AURORA
+    if (g_coop_pad_p2) {
+        controls_read_player2(&state[0]);
+        for (u32 i = 1; i < 4; i++)
+            state[i].error = -1;  // PAD_ERR_NO_CONTROLLER
+        for (u32 i = 0; i < 4; i++) {
+            const u32 p = out + i * 12u;
+            mem_write16(cpu, p, state[i].button);
+            mem_write8(cpu, p + 2u, (u8)state[i].stick_x);
+            mem_write8(cpu, p + 3u, (u8)state[i].stick_y);
+            mem_write8(cpu, p + 4u, (u8)state[i].substick_x);
+            mem_write8(cpu, p + 5u, (u8)state[i].substick_y);
+            mem_write8(cpu, p + 6u, state[i].trigger_left);
+            mem_write8(cpu, p + 7u, state[i].trigger_right);
+            mem_write8(cpu, p + 8u, state[i].analog_a);
+            mem_write8(cpu, p + 9u, state[i].analog_b);
+            mem_write8(cpu, p + 10u, (u8)state[i].error);
+            mem_write8(cpu, p + 11u, 0);
+        }
+        hle_set_u32(cpu, 0u);
+        return;
+    }
+#endif
     const bool menu = game_menu_open(cpu), cutscene = cutscene_playing(cpu);
     controls_set_game_menu(menu);
     controls_set_cutscene(cutscene);
@@ -4690,8 +4716,41 @@ static bool hle_dispatch(CPUState* cpu, u32 address) {
 
     // ED_TRACE_FN=name[,name...]: log each call of those functions with its
     // caller and first arguments, without the full ED_HLE_LOG firehose.
+    // ED_TRACE_CHAIN=1: instead, each distinct chain of callers once (the
+    // return address, then each saved one up the stack's back chain).
     if (g_trace_fn_count != 0u) {
-        for (u32 i = 0; i < g_trace_fn_count; i++)
+        static int chain = -1;
+        if (chain < 0)
+            chain = getenv("ED_TRACE_CHAIN") != NULL;
+        for (u32 i = 0; chain && i < g_trace_fn_count; i++)
+            if (g_trace_fn[i] == address) {
+                u32 lrs[10] = {cpu->lr};
+                int n = 1;
+                for (u32 sp = cpu->gpr[1]; n < 10;) {
+                    const u32 back = guest_ram_range_valid(cpu, sp, 4u) ? mem_read32(cpu, sp) : 0u;
+                    if (!guest_ram_range_valid(cpu, back, 8u) || back <= sp)
+                        break;
+                    lrs[n++] = mem_read32(cpu, back + 4u);
+                    sp = back;
+                }
+                u64 h = address;
+                for (int k = 0; k < n; k++)
+                    h = (h ^ lrs[k]) * 1099511628211ull;
+                static u64 seen[64];
+                static unsigned count;
+                bool known = false;
+                for (unsigned k = 0; k < count; k++)
+                    known = known || seen[k] == h;
+                if (known || count >= 64u)
+                    break;
+                seen[count++] = h;
+                fprintf(stderr, "[chain] 0x%08X r3=0x%08X frame=%llu <-", address, cpu->gpr[3],
+                        (unsigned long long)(cpu->timebase / 675000ull));
+                for (int k = 0; k < n; k++)
+                    fprintf(stderr, " 0x%08X", lrs[k]);
+                fputc('\n', stderr);
+            }
+        for (u32 i = 0; !chain && i < g_trace_fn_count; i++)
             if (g_trace_fn[i] == address)
             {
                 char name[16];
@@ -5916,6 +5975,87 @@ static void coop_spawn(CPUState* cpu, u32 player) {
     coop_describe(cpu, coop_listed(cpu, made) ? "player 2 (listed)" : "player 2 (not in the list)", made);
 }
 
+// Player 2's turn. The game controls the player each frame from the
+// per-character update (0x80007490): the player controller (0x80045BC4,
+// fn(node)) pumps the game's input channels, which turn the pad into the
+// player's control block (its intent: heading, speed, walk or run; 0x805D7BA0,
+// the data at r13 - 25660), and sends the player's character events with that
+// block (0x801F59B0(event, from, to, data)), which its behaviour carries out.
+// The pad itself is read and processed once a frame after the game's frame
+// (0x8013E518, fn(): PADRead into 0x805880A0, then the input channels).
+//
+// Each time the game is about to control player 1, player 2 has a turn first:
+// player 1's input buffers, control blocks and the controller's globals are
+// put aside and player 2's put in their place (the first time, player 1's as
+// they are); the pad is read and processed with PADRead answering with player
+// 2's controller; the controller runs for player 2's character; then player
+// 2's state is kept for their next turn and player 1's put back.
+#define COOP_CONTROLLER 0x80045BC4u
+#define COOP_PAD_UPDATE 0x8013E518u
+#define COOP_INPUT 0x805880A0u       // raw pads, processed pads, the input channels
+#define COOP_INPUT_SIZE 816u
+#define COOP_CONTROL 0x805D7900u     // the control blocks (0x805D7BA0 among them)
+#define COOP_CONTROL_SIZE 0x300u
+#define COOP_AIM_SIZE 208u           // the block channel 3 drives (its +12)
+
+typedef struct {
+    u8 input[COOP_INPUT_SIZE];
+    u8 control[COOP_CONTROL_SIZE];
+    u8 aim[COOP_AIM_SIZE];
+    u8 globals[48];       // r13 - 25680 .. - 25632: the controller's state
+    u8 pad_globals[56];   // r13 - 23604 .. - 23548: the pad routine's
+} CoopPlayerState;
+
+static CoopPlayerState g_coop_state[2];
+static bool g_coop_p2_state;  // player 2's has been kept since they were made
+static bool g_coop_turn;      // player 2's turn is running
+
+static void coop_bytes(CPUState* cpu, u32 address, u8* buffer, u32 size, bool save) {
+    if (!guest_ram_range_valid(cpu, address, size))
+        return;
+    u8* guest = cpu->ram + (address - GC_RAM_BASE);
+    if (save)
+        memcpy(buffer, guest, size);
+    else
+        memcpy(guest, buffer, size);
+}
+
+static void coop_state(CPUState* cpu, CoopPlayerState* s, bool save) {
+    const u32 aim = mem_read32(cpu, COOP_INPUT + 176u + 3u * 32u + 12u);  // channel 3's context
+    coop_bytes(cpu, COOP_INPUT, s->input, COOP_INPUT_SIZE, save);
+    coop_bytes(cpu, COOP_CONTROL, s->control, COOP_CONTROL_SIZE, save);
+    if (aim != 0u)
+        coop_bytes(cpu, aim, s->aim, COOP_AIM_SIZE, save);
+    coop_bytes(cpu, cpu->gpr[13] - 25680u, s->globals, sizeof s->globals, save);
+    coop_bytes(cpu, cpu->gpr[13] - 23604u, s->pad_globals, sizeof s->pad_globals, save);
+}
+
+static void coop_player_turn(CPUState* cpu) {
+    if (g_coop_turn || g_coop_p2 == 0u || !g_settings.mod_coop || !coop_listed(cpu, g_coop_p2))
+        return;
+    g_coop_turn = true;
+    const u32 node = cpu->gpr[3];
+    coop_state(cpu, &g_coop_state[0], true);
+    if (g_coop_p2_state)
+        coop_state(cpu, &g_coop_state[1], false);
+    u32 ignore = 0u;
+    g_coop_pad_p2 = true;
+    hle_guest_call(cpu, COOP_PAD_UPDATE, NULL, 0, 0.0, &ignore);
+    g_coop_pad_p2 = false;
+    const u32 p2 = g_coop_p2;
+    const bool ran = hle_guest_call(cpu, COOP_CONTROLLER, &p2, 1, 0.0, &ignore);
+    coop_state(cpu, &g_coop_state[1], true);
+    g_coop_p2_state = true;
+    coop_state(cpu, &g_coop_state[0], false);
+    g_coop_turn = false;
+    static bool told;
+    if (!told) {
+        told = true;
+        fprintf(stderr, "[coop] player 2's first turn %s (player 1's node 0x%08X, player 2's 0x%08X)\n",
+                ran ? "ran" : "did not return", node, p2);
+    }
+}
+
 // Player 2's feet, for their camera (camera.c); false while they have none.
 bool hle_coop_player2_position(CPUState* cpu, float out[3]) {
     if (g_coop_p2 == 0u)
@@ -5937,6 +6077,7 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         fprintf(stderr, "[coop] player 2 is gone (an area change?)\n");
         g_coop_p2 = 0u;
         g_coop_attempts = 0u;
+        g_coop_p2_state = false;
     }
     if (!playing)
         return;
@@ -5955,6 +6096,43 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
     if (log && g_coop_p2 != 0u && frame % 60u == 0u) {
         coop_describe(cpu, "player 1", player);
         coop_describe(cpu, "player 2", g_coop_p2);
+    }
+    // ED_COOP_LOG=2: the game's input channels (32-byte records from
+    // 0x80588150), once, in play.
+    static bool channels;
+    if (log && !channels && getenv("ED_COOP_LOG")[0] == '2' && frame % 60u == 30u) {
+        channels = true;
+        // The characters' commands: a list from the root at r13 - 21524
+        // (+36 the first, each +36 the next), each targeting a character by
+        // its id (+8; a character's id is its node's +16).
+        fprintf(stderr, "[coop] ids: player 1 %d, player 2 %d\n", (s32)mem_read32(cpu, player + 16u),
+                g_coop_p2 != 0u ? (s32)mem_read32(cpu, g_coop_p2 + 16u) : -1);
+        const u32 root = mem_read32(cpu, cpu->gpr[13] - 21524u);
+        u32 cmd = guest_ram_range_valid(cpu, root, 40u) ? mem_read32(cpu, root + 36u) : 0u;
+        for (int i = 0; i < 64 && guest_ram_range_valid(cpu, cmd, 48u); i++, cmd = mem_read32(cpu, cmd + 36u)) {
+            fprintf(stderr, "[coop] command 0x%08X:", cmd);
+            for (u32 w = 0; w < 12u; w++)
+                fprintf(stderr, " %08X", mem_read32(cpu, cmd + w * 4u));
+            fputc('\n', stderr);
+        }
+        // Where the player's control block (channel 3's context) is pointed
+        // to from their node and object, and the same words in player 2's.
+        const u32 control = mem_read32(cpu, 0x805881B0u + 12u);
+        const u32 bases[2][2] = {{player, mem_read32(cpu, player + 52u)},
+                                 {g_coop_p2, g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + 52u) : 0u}};
+        for (int b = 0; b < 2; b++)
+            for (u32 off = 0; off < 0x1000u; off += 4u)
+                if (guest_ram_range_valid(cpu, bases[0][b] + off, 4u) &&
+                    mem_read32(cpu, bases[0][b] + off) == control)
+                    fprintf(stderr, "[coop] control block 0x%08X at player 1's %s +0x%X; player 2's has 0x%08X\n",
+                            control, b == 0 ? "node" : "object", off,
+                            bases[1][b] != 0u ? mem_read32(cpu, bases[1][b] + off) : 0u);
+        for (u32 c = 0; c < 20u; c++) {
+            fprintf(stderr, "[coop] channel %2u at 0x%08X:", c, 0x80588150u + c * 32u);
+            for (u32 w = 0; w < 8u; w++)
+                fprintf(stderr, " %08X", mem_read32(cpu, 0x80588150u + c * 32u + w * 4u));
+            fputc('\n', stderr);
+        }
     }
 }
 
@@ -5994,6 +6172,16 @@ static void find_coop(CPUState* cpu) {
     g_coop_actor_offset = (s16)(mem_read32(cpu, actor) & 0xFFFFu);
     g_coop_list_offset = (s16)(head & 0xFFFFu);
     g_coop_room_offset = (s16)(room & 0xFFFFu);
+    // Player 2's turn, as the game controls player 1: the controller's start
+    // (stwu r1,-160(r1); ... bl id (0x801F62C8)) and the pad routine's
+    // (stwu r1,-32(r1); ... bl PADRead).
+    HleDispatchEntry* controller = hle_dispatch_entry(COOP_CONTROLLER);
+    if (mem_read32(cpu, COOP_CONTROLLER) == 0x9421FF60u && mem_read32(cpu, COOP_CONTROLLER + 0xA8u) == 0x481B065Du &&
+        mem_read32(cpu, COOP_PAD_UPDATE) == 0x9421FFE0u && controller != NULL && controller->notify == NULL &&
+        controller->intercept == NULL)
+        controller->notify = coop_player_turn;
+    else
+        fprintf(stderr, "[coop] the player controller not found: player 2 cannot move\n");
     g_coop_found = true;
     fprintf(stderr, "[coop] the player object's pointer is at 0x%08X; the characters' list at 0x%08X\n",
             ED_GUEST_R13 + (u32)(s32)g_camera_player_offset, ED_GUEST_R13 + (u32)(s32)g_coop_list_offset);

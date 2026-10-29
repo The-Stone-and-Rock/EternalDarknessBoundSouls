@@ -1269,6 +1269,37 @@ extern "C" void controls_player2_look(float* turn_x, float* turn_y, float* in_ou
     *in_out = io;
 }
 
+extern "C" void controls_read_player2(DolPadState* state) {
+    using namespace controls;
+    const Player& p = g_players[1];
+    SDL_Gamepad* pad = gamepad(1);
+    const bool keys = player_has_keyboard(1);
+    DolPadState s{};
+    int x = stick(pad, SDL_GAMEPAD_AXIS_LEFTX, false);
+    int y = stick(pad, SDL_GAMEPAD_AXIS_LEFTY, true);
+    if (keys && key_down(p.moves[kMoveLeft])) x = -127;
+    if (keys && key_down(p.moves[kMoveRight])) x = 127;
+    if (keys && key_down(p.moves[kMoveUp])) y = 127;
+    if (keys && key_down(p.moves[kMoveDown])) y = -127;
+    for (int a = 0; a < kActionCount; a++) {
+        int v = std::max(native_value(pad, p.bindings[a].pad[0]), native_value(pad, p.bindings[a].pad[1]));
+        if (keys && key_down(p.bindings[a].key))
+            v = 255;
+        if (a == kSprint || a == kTarget) {
+            (a == kSprint ? s.trigger_left : s.trigger_right) = static_cast<u8>(v);
+            if (v >= 230)
+                s.button |= kGcButton[a];
+        } else if (v >= 128) {
+            s.button |= kGcButton[a];
+        }
+    }
+    s.analog_a = (s.button & 0x0100) ? 255 : 0;
+    s.analog_b = (s.button & 0x0200) ? 255 : 0;
+    s.stick_x = static_cast<s8>(x);
+    s.stick_y = static_cast<s8>(y);
+    *state = s;
+}
+
 extern "C" void controls_note_frame(unsigned long long frame) {
     controls::g_frame.store(frame, std::memory_order_relaxed);
 }

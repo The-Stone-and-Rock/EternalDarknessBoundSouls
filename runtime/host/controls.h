@@ -135,6 +135,11 @@ void controls_init(void);
 // keys; right and up positive) and in or out (left stick or movement keys up
 // and down; up is in).
 void controls_player2_look(float* turn_x, float* turn_y, float* in_out);
+// Player 2's GameCube pad (split-screen co-op): their buttons and main stick
+// through their own layout, on their controller or the keyboard. The C-stick
+// stays centred: their right stick turns their split-screen camera.
+struct DolPadState;
+void controls_read_player2(struct DolPadState* state);
 // Whether the game's pause menu is open (hle.c, each pad read).
 void controls_set_game_menu(bool open);
 // Whether a cutscene is playing (hle.c, each pad read), and whether the player
