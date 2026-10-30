@@ -1885,6 +1885,9 @@ void render() {
     g_doc->SetClass("spread", spread);
     // The main menu opens with the emblem instead of a heading.
     g_doc->SetClass("branded", g_screen == Screen::Launcher);
+    // The launcher: its picture behind it (res/ui/launcher.png), the menu on
+    // the picture's blank parchment, no frame, notes or directions.
+    g_doc->SetClass("launcher", g_screen == Screen::Launcher);
     // The mapping list is long: tighten the rows.
     g_doc->SetClass("compact", g_screen == Screen::Mapping);
     // Character select: one wide page, every frame at once.

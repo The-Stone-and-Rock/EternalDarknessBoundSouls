@@ -401,3 +401,54 @@ body.branded .row.big {
 	font-size: 34dp;
 	padding: 6dp 2dp;
 }
+
+/* The launcher: the picture fills the window and the menu sits on its blank
+   parchment (the middle third across, 41% to 88% down); no Tome page, notes
+   or directions. */
+body.launcher {
+	decorator: image(launcher.png cover);
+	background-color: #000000;
+}
+
+body.launcher #book {
+	position: absolute;
+	left: 34%;
+	top: 41%;
+	width: 32%;
+	height: 47%;
+	padding: 0;
+	border-width: 0;
+	background-color: transparent;
+	align-items: center;
+	justify-content: center;
+}
+
+body.launcher .page {
+	width: 100%;
+	padding: 0;
+	border-width: 0;
+	decorator: none;
+	background-color: transparent;
+	justify-content: center;
+}
+
+body.launcher .rule,
+body.launcher #emblem,
+body.launcher #emblem-divider,
+body.launcher .note,
+body.launcher #hint {
+	display: none;
+}
+
+body.launcher .row {
+	font-size: 30dp;
+	color: #2a1810;
+}
+
+body.launcher .row.big {
+	font-size: 42dp;
+}
+
+body.launcher .row.selected {
+	color: #8e1b12;
+}
