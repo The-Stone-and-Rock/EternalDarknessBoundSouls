@@ -15776,10 +15776,23 @@ index 2c0e5ff..be88d3e 100644
      if (ax != NULL)
          ax->log = enabled;
 diff --git a/src/core/cpu.c b/src/core/cpu.c
-index 2f13110..2424912 100644
+index 2f13110..412bcf8 100644
 --- a/src/core/cpu.c
 +++ b/src/core/cpu.c
-@@ -168,7 +168,12 @@ static u32 exception_msr(u32 old_msr, u32 exception) {
+@@ -17,6 +17,12 @@ bool cpu_init(CPUState* cpu) {
+     memset(cpu, 0, sizeof(*cpu));
+ 
+     cpu->ram_size = GC_MAIN_RAM_SIZE;
++    // GXRuntime recomp patch: ED_EXTRA_RAM=1 (Eternal Darkness mods) gives
++    // the host 8 MB more past the game's 24 MB, as scratch the game is never
++    // told of (its OS sees 24 MB): a character from another chapter is
++    // unpacked there. The generated code's fast path stays at 24 MB.
++    if (getenv("ED_EXTRA_RAM") != NULL)
++        cpu->ram_size += 8u * 1024u * 1024u;
+     cpu->ram = (u8*)calloc(1, cpu->ram_size);
+     if (!cpu->ram) {
+         fprintf(stderr, "error: failed to allocate %u bytes for RAM\n", cpu->ram_size);
+@@ -168,7 +174,12 @@ static u32 exception_msr(u32 old_msr, u32 exception) {
      return next;
  }
  
@@ -15792,7 +15805,7 @@ index 2f13110..2424912 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host || avail < 8) {
-@@ -180,6 +185,79 @@ u64 mem_read64(CPUState* cpu, u32 addr) {
+@@ -180,6 +191,79 @@ u64 mem_read64(CPUState* cpu, u32 addr) {
      return read_be64(host);
  }
  
@@ -15872,7 +15885,7 @@ index 2f13110..2424912 100644
  void mem_write64(CPUState* cpu, u32 addr, u64 value) {
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
-@@ -191,11 +269,15 @@ void mem_write64(CPUState* cpu, u32 addr, u64 value) {
+@@ -191,11 +275,15 @@ void mem_write64(CPUState* cpu, u32 addr, u64 value) {
          fprintf(stderr, "warn: write64 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -15888,7 +15901,7 @@ index 2f13110..2424912 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host || avail < 4) {
-@@ -218,11 +300,15 @@ void mem_write32(CPUState* cpu, u32 addr, u32 value) {
+@@ -218,11 +306,15 @@ void mem_write32(CPUState* cpu, u32 addr, u32 value) {
          fprintf(stderr, "warn: write32 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -15904,7 +15917,7 @@ index 2f13110..2424912 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host || avail < 2) {
-@@ -245,11 +331,15 @@ void mem_write16(CPUState* cpu, u32 addr, u16 value) {
+@@ -245,11 +337,15 @@ void mem_write16(CPUState* cpu, u32 addr, u16 value) {
          fprintf(stderr, "warn: write16 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -15920,7 +15933,7 @@ index 2f13110..2424912 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host) {
-@@ -272,6 +362,8 @@ void mem_write8(CPUState* cpu, u32 addr, u8 value) {
+@@ -272,6 +368,8 @@ void mem_write8(CPUState* cpu, u32 addr, u8 value) {
          fprintf(stderr, "warn: write8 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -15929,7 +15942,7 @@ index 2f13110..2424912 100644
      clear_matching_reservation(cpu, addr);
      *host = value;
  }
-@@ -562,18 +654,33 @@ static bool psq_access_is_valid(CPUState* cpu, u8 type, u32 ea, u32 cia) {
+@@ -562,18 +660,33 @@ static bool psq_access_is_valid(CPUState* cpu, u8 type, u32 ea, u32 cia) {
      return true;
  }
  
@@ -15967,7 +15980,7 @@ index 2f13110..2424912 100644
      default:
          return 0.0;
      }
-@@ -585,7 +692,7 @@ static s64 psq_quantize_int(f64 value, s64 min_value, s64 max_value, s32 scale)
+@@ -585,7 +698,7 @@ static s64 psq_quantize_int(f64 value, s64 min_value, s64 max_value, s32 scale)
      if (isinf(value))
          return value < 0.0 ? min_value : max_value;
  

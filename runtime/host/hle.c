@@ -348,7 +348,9 @@ static bool mash_to_gameplay_apply(CPUState* cpu,
 #define HLE_GX_BEGIN_RETURN     0x7FFF0020u
 #define HLE_BOOK_RETURN         0x7FFF0030u
 #define HLE_CHARACTER_RETURN    0x7FFF0040u
+#define HLE_PACK_RETURN         0x7FFF0050u
 static bool continue_character_load(CPUState* cpu);
+static bool continue_pack_load(CPUState* cpu);
 static u32 g_gx_dirty_state_helper;  // __GXSetDirtyState
 static u32 g_gx_flush_prim_helper;   // __GXSendFlushPrim
 #define GX_DATA_SDA_OFFSET      ED_GX_DATA_SDA_OFFSET
@@ -4817,6 +4819,8 @@ static bool hle_dispatch(CPUState* cpu, u32 address) {
         return true;
     if (address == HLE_CHARACTER_RETURN && continue_character_load(cpu))
         return true;
+    if (address == HLE_PACK_RETURN && continue_pack_load(cpu))
+        return true;
 #endif
 
     // Call through a NULL (or near-NULL) function pointer. GameCube SDK code
@@ -6129,6 +6133,20 @@ static void coop_adopt(CPUState* cpu, u32 player) {
 // the disc): the pad read hands over to it and runs again after
 // (HLE_CHARACTER_RETURN).
 #define COOP_CHARACTER_LOAD 0x801318C0u
+// A playable character's (the game's list, 0x80044378) has one slot of its
+// own: 0x80132ED8(model) opens /Chars/char%04d.cpk, reads its first 1 KB and
+// keeps the file to stream the rest from; the slot at 0x80582760 (+0 the
+// file, +4 the model in it).
+#define COOP_PLAYABLE_LOAD 0x80132ED8u
+#define COOP_PLAYABLE_SLOT 0x80582760u
+
+static bool coop_playable(int model) {
+    static const int kPlayable[] = {0, 9, 18, 69, 70, 73, 74, 75, 76, 81, 85, 119, 120, 121, 122, 150};
+    for (size_t i = 0; i < sizeof kPlayable / sizeof kPlayable[0]; i++)
+        if (kPlayable[i] == model)
+            return true;
+    return false;
+}
 static struct {
     bool active;
     int tried;  // the model last asked for
@@ -6143,15 +6161,25 @@ static int coop_wanted_character(void) {
 }
 
 static bool coop_character_loaded(CPUState* cpu, int model) {
+    if (coop_playable(model))
+        return (s16)mem_read16(cpu, COOP_PLAYABLE_SLOT + 4u) == model;
     const u32 record = mem_read32(cpu, cpu->gpr[13] - 23680u) + (u32)model * 760u;
     return guest_ram_range_valid(cpu, record, 760u) && mem_read32(cpu, record + 72u) != 0u;
 }
 
 static bool coop_character_load(CPUState* cpu) {
-    const int model = coop_wanted_character();
-    if (g_character_load.active || model < 0 || model > 159 || model == g_character_load.tried ||
+    int model = coop_wanted_character();
+    // ED_EXTRA_CHAR=n (testing): an area character's file loaded once in play.
+    static int extra = -2;
+    if (extra == -2)
+        extra = getenv("ED_EXTRA_CHAR") != NULL ? atoi(getenv("ED_EXTRA_CHAR")) : -1;
+    if (extra >= 0 && g_coop_found && sda_ready(cpu) && coop_player(cpu) != 0u && !game_menu_open(cpu) &&
+        !cutscene_playing(cpu) && !g_character_load.active && !coop_character_loaded(cpu, extra)) {
+        model = extra;
+        extra = -1;
+    } else if (g_character_load.active || model < 0 || model > 159 || model == g_character_load.tried ||
         !g_coop_found || !g_settings.mod_coop || !sda_ready(cpu) || game_menu_open(cpu) ||
-        cutscene_playing(cpu) || coop_character_loaded(cpu, model))
+        cutscene_playing(cpu) || coop_character_loaded(cpu, model) || g_coop_p2 != 0u || coop_player(cpu) == 0u)
         return false;
     g_character_load.tried = model;
     g_character_load.active = true;
@@ -6161,7 +6189,7 @@ static bool coop_character_load(CPUState* cpu) {
     cpu->gpr[3] = (u32)model;
     cpu->gpr[4] = 0u;
     cpu->lr = HLE_CHARACTER_RETURN;
-    cpu->pc = COOP_CHARACTER_LOAD;
+    cpu->pc = coop_playable(model) ? COOP_PLAYABLE_LOAD : COOP_CHARACTER_LOAD;
     return true;
 }
 
@@ -6205,6 +6233,211 @@ static void coop_park(CPUState* cpu, u32 player, bool park) {
         guest_write_f32(cpu, o2 + i * 4u, at[i]);
     g_coop_parked = park;
     fprintf(stderr, "[coop] player 2 %s\n", park ? "put out of the way (co-op is off)" : "back beside player 1");
+}
+
+// ED_PLAYER_MODEL=n (testing): the chapter's playable character is n. The
+// chapter loads its one (0x80132ED8(model), as it starts) and makes the player
+// from a spawn record (COOP_SPAWN_CREATE: model at +20); both are given n.
+static int g_player_model = -2;  // -2 not read, -1 the chapter's own
+static int g_chapter_model = -1; // the playable the chapter asked for
+
+static int player_model(void) {
+    if (g_player_model == -2) {
+        const char* m = getenv("ED_PLAYER_MODEL");
+        g_player_model = m != NULL ? atoi(m) : -1;
+    }
+    return g_player_model;
+}
+
+// The chapter's playable character: 0x80007C8C(chapter) answers from a table
+// (Alex 9, Pius 0, ...); the chapter's load takes its file and body from it.
+#define CHAPTER_CHARACTER 0x80007C8Cu
+// The chapter's body: 0x801326E0(model, part) loads that part of the
+// character's file, the part by the chapter's era (0x80007DC4(chapter) is the
+// chapter itself, 0 to 11; the part for an era is the word at
+// CHAPTER_PARTS + 4 * era). Another chapter's character is given the part of
+// their own chapter.
+#define CHAPTER_BODY_LOAD 0x801326E0u
+#define CHAPTER_PARTS 0x80308DB8u
+static const u8 kChapterModel[17] = {9, 0, 70, 85, 150, 18, 73, 74, 76, 69, 75, 81, 9, 9, 9, 75, 9};
+
+static void hle_chapter_body(CPUState* cpu) {
+    const int want = player_model();
+    if (want >= 0 && (s16)(cpu->gpr[3] & 0xFFFFu) == want) {
+        for (u32 chapter = 0; chapter < 12u; chapter++)
+            if (kChapterModel[chapter] == want) {
+                const u32 part = mem_read32(cpu, CHAPTER_PARTS + chapter * 4u);
+                fprintf(stderr, "[player] body part %u (chapter %u's) for %d, not %u\n", part, chapter, want,
+                        cpu->gpr[4]);
+                cpu->gpr[4] = part;
+                break;
+            }
+    }
+    g_hle_passthrough = true;
+}
+
+// The chapter's level data, /levels/levelNN/U_LevelNN.bin (NN the chapter),
+// loaded by 0x8013209C(name, 0, 1) as the chapter loads (the call returning to
+// CHAPTER_PACK_CALL); its first list holds the bodies the chapter's characters
+// are made from, by character (0x801DCED0(pack, 0): count, 0x6B5, then 8 bytes
+// each). Another chapter's character has no body there: their own chapter's
+// pack is loaded too, and their body copied across.
+#define PACK_LOAD 0x8013209Cu
+#define CHAPTER_PACK_CALL 0x800408FCu
+// The chapter's level memory: a bump allocator, its base at r13 - 23736 and
+// what is used at r13 - 23656, 0x3D3100 bytes. Their chapter's level data
+// (3.6 MB unpacked for Roberto's) is loaded into the host's scratch past the
+// game's 24 MB (ED_EXTRA_RAM) instead, and only the body copied into it.
+#define LEVEL_HEAP_BASE 23736u
+#define LEVEL_HEAP_USED 23656u
+#define SCRATCH_RAM 0x81800000u
+static struct {
+    int stage;  // 0 none, 1 the chapter's own loading, 2 the character's
+    u32 caller, pack;
+    u32 base, used;  // the level memory's, put back after the scratch load
+} g_pack;
+
+// A loaded pack holds offsets: 0x801DCDD8(pack) makes the top level's
+// addresses (each entry's offset plus the pack's own, once), as the chapter
+// does right after its load, then the same for the list inside.
+#define PACK_RELOCATE 0x801DCDD8u
+
+static u32 pack_list(CPUState* cpu, u32 pack, bool relocated) {
+    if (!guest_ram_range_valid(cpu, pack, 16u) || mem_read32(cpu, pack + 4u) != 0x6B5u || mem_read32(cpu, pack) == 0u)
+        return 0u;
+    const u32 list = mem_read32(cpu, pack + 8u) + (relocated ? 0u : pack);
+    return guest_ram_range_valid(cpu, list, 8u) && mem_read32(cpu, list + 4u) == 0x6B5u ? list : 0u;
+}
+
+static void hle_pack_load(CPUState* cpu) {
+    const int want = player_model();
+    if (g_pack.stage == 0 && cpu->lr == CHAPTER_PACK_CALL && want >= 0 && g_chapter_model >= 0 &&
+        want != g_chapter_model) {
+        g_pack.caller = cpu->lr;
+        g_pack.stage = 1;
+        cpu->lr = HLE_PACK_RETURN;
+    }
+    g_hle_passthrough = true;
+}
+
+static bool continue_pack_load(CPUState* cpu) {
+    if (g_pack.stage == 1) {
+        g_pack.pack = cpu->gpr[3];
+        g_pack.base = mem_read32(cpu, cpu->gpr[13] - LEVEL_HEAP_BASE);
+        g_pack.used = mem_read32(cpu, cpu->gpr[13] - LEVEL_HEAP_USED);
+        // The character's own chapter (the first of theirs, 0 to 11).
+        int chapter = -1;
+        for (int c = 0; c < 12 && chapter < 0; c++)
+            if (kChapterModel[c] == player_model())
+                chapter = c;
+        if (chapter >= 0) {
+            char name[48];
+            snprintf(name, sizeof name, "/levels/level%02d/U_Level%02d.bin", chapter, chapter);
+            const u32 at = cpu->gpr[1] + 156u;  // the chapter's own name was built here
+            for (size_t i = 0; i <= strlen(name); i++)
+                mem_write8(cpu, at + (u32)i, (u8)name[i]);
+            if (cpu->ram_size < SCRATCH_RAM - GC_RAM_BASE + 0x3D3100u) {
+                fprintf(stderr, "[player] no scratch for their chapter's data (ED_EXTRA_RAM): %d keeps the chapter's body\n",
+                        player_model());
+                cpu->gpr[3] = g_pack.pack;
+                cpu->lr = cpu->pc = g_pack.caller;
+                g_pack.stage = 0;
+                return true;
+            }
+            fprintf(stderr, "[player] loading %s for %d's body\n", name, player_model());
+            mem_write32(cpu, cpu->gpr[13] - LEVEL_HEAP_BASE, SCRATCH_RAM);
+            mem_write32(cpu, cpu->gpr[13] - LEVEL_HEAP_USED, 0u);
+            g_pack.stage = 2;
+            cpu->gpr[3] = at;
+            cpu->gpr[4] = 0u;
+            cpu->gpr[5] = 1u;
+            cpu->lr = HLE_PACK_RETURN;
+            cpu->pc = PACK_LOAD;
+            return true;
+        }
+    } else if (g_pack.stage == 2) {
+        // Theirs made addresses (pack, then its list); the body's address goes
+        // into the chapter's list as an offset from it, which the chapter's own
+        // pass makes the address again.
+        const u32 other = cpu->gpr[3];
+        u32 ignore = 0u;
+        hle_guest_call(cpu, PACK_RELOCATE, &other, 1, 0.0, &ignore);
+        const u32 theirs = pack_list(cpu, other, true);
+        if (theirs != 0u)
+            hle_guest_call(cpu, PACK_RELOCATE, &theirs, 1, 0.0, &ignore);
+        const u32 own = pack_list(cpu, g_pack.pack, false);
+        const u32 want = (u32)player_model();
+        const u32 body = theirs != 0u && mem_read32(cpu, theirs) > want ? mem_read32(cpu, theirs + 8u + want * 8u) : 0u;
+        if (own != 0u && body != 0u && mem_read32(cpu, own) > want) {
+            // The body copied into the chapter's level memory; the scratch is
+            // given up.
+            const u32 size = mem_read32(cpu, theirs + 12u + want * 8u);
+            const u32 kept = g_pack.base + g_pack.used;
+            if (size != 0u && g_pack.used + size <= 0x3D3100u && guest_ram_range_valid(cpu, body, size) &&
+                guest_ram_range_valid(cpu, kept, size)) {
+                memcpy(cpu->ram + (kept - GC_RAM_BASE), cpu->ram + (body - GC_RAM_BASE), size);
+                g_pack.used += (size + 31u) & ~31u;
+                mem_write32(cpu, own + 8u + want * 8u, kept - own);
+                mem_write32(cpu, own + 12u + want * 8u, size);
+            }
+            fprintf(stderr, "[player] %u's body from their chapter's level data (%u bytes kept at 0x%08X; level memory %u of %u used)\n",
+                    want, size, kept, g_pack.used, 0x3D3100u);
+        } else {
+            fprintf(stderr, "[player] no body for %u in their chapter's pack\n", want);
+        }
+    } else {
+        return false;
+    }
+    mem_write32(cpu, cpu->gpr[13] - LEVEL_HEAP_BASE, g_pack.base);
+    mem_write32(cpu, cpu->gpr[13] - LEVEL_HEAP_USED, g_pack.used);
+    cpu->gpr[3] = g_pack.pack;
+    cpu->lr = g_pack.caller;
+    cpu->pc = g_pack.caller;
+    g_pack.stage = 0;
+    return true;
+}
+
+static void hle_chapter_character(CPUState* cpu) {
+    static const u8* const kModel = kChapterModel;
+    const u32 chapter = cpu->gpr[3];
+    const int own = chapter < 17u ? kModel[chapter] : 9;
+    const int want = player_model();
+    g_chapter_model = own;
+    if (want != own) {
+        static int told = -1;
+        if (told != (int)chapter)
+            fprintf(stderr, "[player] chapter %u's character %d played as %d\n", chapter, own, want);
+        told = (int)chapter;
+    }
+    hle_set_u32(cpu, (u32)want);
+}
+
+static void hle_spawn_create(CPUState* cpu) {
+    const u32 rec = cpu->gpr[3];
+    const int want = player_model();
+    if (want >= 0 && g_chapter_model >= 0 && guest_ram_range_valid(cpu, rec, 48u) &&
+        ((s32)mem_read32(cpu, rec + 20u) == g_chapter_model || (s32)mem_read32(cpu, rec + 20u) == want)) {
+        mem_write32(cpu, rec + 20u, (u32)want);
+        // The bodies the chapter loaded, by character (a list at r13 - 26452:
+        // count, 0x6B5, then 8 bytes each; 0x801DCED0 reads it): the body
+        // loaded for the chapter's character is filed under theirs, so the
+        // player's object (0x80007070) found none for another one.
+        const u32 list = mem_read32(cpu, cpu->gpr[13] - 26452u);
+        if (guest_ram_range_valid(cpu, list, 8u) && mem_read32(cpu, list + 4u) == 0x6B5u &&
+            mem_read32(cpu, list) > (u32)want && mem_read32(cpu, list) > (u32)g_chapter_model &&
+            mem_read32(cpu, list + 8u + (u32)want * 8u) == 0u) {
+            for (u32 i = 0; i < 8u; i += 4u)
+                mem_write32(cpu, list + 8u + (u32)want * 8u + i,
+                            mem_read32(cpu, list + 8u + (u32)g_chapter_model * 8u + i));
+            fprintf(stderr, "[player] body of %d filed under %d (0x%08X)\n", g_chapter_model, want,
+                    mem_read32(cpu, list + 8u + (u32)want * 8u));
+        }
+        const char* type = getenv("ED_PLAYER_TYPE");  // the character's kind (Alex 26, Roberto 54)
+        if (type != NULL)
+            mem_write32(cpu, rec + 16u, (u32)atoi(type));
+        fprintf(stderr, "[player] made as %d (the chapter's %d)\n", want, g_chapter_model);
+    }
+    g_hle_passthrough = true;
 }
 
 static void coop_spawn(CPUState* cpu, u32 player) {
@@ -6587,10 +6820,11 @@ static void coop_dump(CPUState* cpu, bool playing) {
     FILE* f = fopen(path, "w");
     if (f == NULL)
         return;
-    const u32 bases[3] = {player, mem_read32(cpu, player + (u32)(s32)g_coop_actor_offset),
-                          mem_read32(cpu, player + 52u)};
-    static const char* const kWhat[3] = {"node", "actor", "object"};
-    for (int b = 0; b < 3; b++)
+    const u32 object = mem_read32(cpu, player + 52u);
+    const u32 bases[4] = {player, mem_read32(cpu, player + (u32)(s32)g_coop_actor_offset), object,
+                          guest_ram_range_valid(cpu, object, 64u) ? mem_read32(cpu, object + 60u) : 0u};
+    static const char* const kWhat[4] = {"node", "actor", "object", "model"};
+    for (int b = 0; b < 4; b++)
         for (u32 off = 0; off < 0x600u && guest_ram_range_valid(cpu, bases[b] + off, 4u); off += 4u)
             fprintf(f, "%s+%03X %08X\n", kWhat[b], off, mem_read32(cpu, bases[b] + off));
     fclose(f);
@@ -6998,6 +7232,21 @@ static void find_coop(CPUState* cpu) {
     }
     // The copy of a position (lwz r5,0(r4); lwz r0,4(r4); stw r5,0(r3)), and
     // the share's call of it (bl at 0x8011CB70).
+    if (player_model() >= 0) {
+        HleDispatchEntry* chapter = hle_dispatch_entry(CHAPTER_CHARACTER);
+        HleDispatchEntry* create = hle_dispatch_entry(COOP_SPAWN_CREATE);
+        if (mem_read32(cpu, CHAPTER_CHARACTER) == 0x28030010u && chapter != NULL && chapter->intercept == NULL &&
+            create != NULL && create->intercept == NULL) {
+            chapter->intercept = hle_chapter_character;
+            create->intercept = hle_spawn_create;
+            HleDispatchEntry* body = hle_dispatch_entry(CHAPTER_BODY_LOAD);
+            if (body != NULL && body->intercept == NULL)
+                body->intercept = hle_chapter_body;
+            HleDispatchEntry* pack = hle_dispatch_entry(PACK_LOAD);
+            if (pack != NULL && pack->intercept == NULL && pack->notify == NULL)
+                pack->intercept = hle_pack_load;
+        }
+    }
     HleDispatchEntry* copy = hle_dispatch_entry(COOP_POSITION_COPY);
     if (mem_read32(cpu, COOP_POSITION_COPY) == 0x80A40000u && mem_read32(cpu, COOP_POSITION_COPY + 4u) == 0x80040004u &&
         mem_read32(cpu, COOP_POSITION_COPY + 8u) == 0x90A30000u && mem_read32(cpu, COOP_DETAIL_CALL - 4u) == 0x4BFFB705u &&
