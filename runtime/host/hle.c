@@ -349,8 +349,10 @@ static bool mash_to_gameplay_apply(CPUState* cpu,
 #define HLE_BOOK_RETURN         0x7FFF0030u
 #define HLE_CHARACTER_RETURN    0x7FFF0040u
 #define HLE_PACK_RETURN         0x7FFF0050u
+#define HLE_SPAWN_RETURN        0x7FFF0060u
 static bool continue_character_load(CPUState* cpu);
 static bool continue_pack_load(CPUState* cpu);
+static bool continue_spawn_create(CPUState* cpu);
 static u32 g_gx_dirty_state_helper;  // __GXSetDirtyState
 static u32 g_gx_flush_prim_helper;   // __GXSendFlushPrim
 #define GX_DATA_SDA_OFFSET      ED_GX_DATA_SDA_OFFSET
@@ -4821,6 +4823,8 @@ static bool hle_dispatch(CPUState* cpu, u32 address) {
         return true;
     if (address == HLE_PACK_RETURN && continue_pack_load(cpu))
         return true;
+    if (address == HLE_SPAWN_RETURN && continue_spawn_create(cpu))
+        return true;
 #endif
 
     // Call through a NULL (or near-NULL) function pointer. GameCube SDK code
@@ -6328,6 +6332,18 @@ static u32 pack_list(CPUState* cpu, u32 pack, bool relocated) {
 
 static void hle_pack_load(CPUState* cpu) {
     const int want = player_model();
+    // The chapter, from the name being loaded (/levels/levelNN/...): a save's
+    // load asks for its character only after this (0x80007C8C), so the
+    // chapter's character is not known from that yet.
+    if (g_pack.stage == 0 && cpu->lr == CHAPTER_PACK_CALL && want >= 0) {
+        char name[32] = {0};
+        for (u32 i = 0; i + 1u < sizeof name && guest_ram_range_valid(cpu, cpu->gpr[3] + i, 1u); i++)
+            if ((name[i] = (char)mem_read8(cpu, cpu->gpr[3] + i)) == '\0')
+                break;
+        int chapter = -1;
+        if (sscanf(name, "/levels/level%d", &chapter) == 1 && chapter >= 0 && chapter < 17)
+            g_chapter_model = kChapterModel[chapter];
+    }
     if (g_pack.stage == 0 && cpu->lr == CHAPTER_PACK_CALL && want >= 0 && g_chapter_model >= 0 &&
         want != g_chapter_model) {
         g_pack.caller = cpu->lr;
@@ -6472,6 +6488,11 @@ static void hle_chapter_character(CPUState* cpu) {
     hle_set_u32(cpu, (u32)(want >= 0 ? want : own));
 }
 
+static struct {
+    u32 caller;
+    int keep, type;
+} g_spawn_return;
+
 static void hle_spawn_create(CPUState* cpu) {
     const u32 rec = cpu->gpr[3];
     const int want = player_model();
@@ -6493,12 +6514,39 @@ static void hle_spawn_create(CPUState* cpu) {
                     mem_read32(cpu, list + 8u + (u32)want * 8u));
         }
         const char* type = getenv("ED_PLAYER_TYPE");  // testing: another kind
-        const int kind = type != NULL ? atoi(type) : player_type(want);
+        const int kind = type != NULL ? atoi(type) : -1;  // the chapter's own kind: its scripts ask for it
         if (kind >= 0)
             mem_write32(cpu, rec + 16u, (u32)kind);
         fprintf(stderr, "[player] made as %d (the chapter's %d)\n", want, g_chapter_model);
+        // TEST ED_PLAYER_KEEP=1 kind, 2 model, 3 both: the made character
+        // given back the chapter's character's.
+        if (getenv("ED_PLAYER_KEEP") != NULL && g_spawn_return.caller == 0u) {
+            g_spawn_return.caller = cpu->lr;
+            g_spawn_return.keep = atoi(getenv("ED_PLAYER_KEEP"));
+            g_spawn_return.type = player_type(g_chapter_model);
+            cpu->lr = HLE_SPAWN_RETURN;
+        }
     }
     g_hle_passthrough = true;
+}
+
+static bool continue_spawn_create(CPUState* cpu) {
+    if (g_spawn_return.caller == 0u)
+        return false;
+    const u32 made = cpu->gpr[3];
+    const u32 actor = guest_ram_range_valid(cpu, made + (u32)(s32)g_coop_actor_offset, 4u)
+                          ? mem_read32(cpu, made + (u32)(s32)g_coop_actor_offset) : 0u;
+    if (g_coop_actor_offset != 0 && guest_ram_range_valid(cpu, actor, 160u)) {
+        fprintf(stderr, "[player] TEST made 0x%08X actor 0x%08X kind %d model %d -> keep %d\n", made, actor,
+                (s16)mem_read16(cpu, actor + 152u), (s16)mem_read16(cpu, actor + 154u), g_spawn_return.keep);
+        if (g_spawn_return.keep & 1)
+            mem_write16(cpu, actor + 152u, (u16)g_spawn_return.type);
+        if (g_spawn_return.keep & 2)
+            mem_write16(cpu, actor + 154u, (u16)g_chapter_model);
+    }
+    cpu->lr = cpu->pc = g_spawn_return.caller;
+    g_spawn_return.caller = 0u;
+    return true;
 }
 
 static void coop_spawn(CPUState* cpu, u32 player) {
