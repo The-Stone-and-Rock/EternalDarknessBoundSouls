@@ -245,3 +245,60 @@ body.compact .page {
 body.compact #heading {
 	font-size: 32dp;
 }
+
+/* Character select: one wide page with every character at once, a frame for
+   their portrait over their name, six to a line. */
+body.roster .page {
+	width: 1040dp;
+	padding: 22dp 40dp 14dp 40dp;
+}
+
+.roster {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	margin-top: 10dp;
+}
+
+.tile {
+	width: 136dp;
+	margin: 6dp 6dp;
+	padding: 5dp;
+	border: 1dp #00000000;
+	text-align: center;
+}
+
+/* Where the character's portrait or model will show (empty for now). */
+.portrait {
+	height: 172dp;
+	border: 1dp #7a201266;
+	background-color: #3a24120f;
+}
+
+.name {
+	margin-top: 6dp;
+	font-family: "IM FELL English SC";
+	font-size: 24dp;
+}
+
+.tile.selected {
+	border-color: #8e1b12;
+	color: #8e1b12;
+}
+
+.tile.selected .portrait {
+	border-color: #8e1b12;
+	background-color: #8e1b1214;
+}
+
+/* The character in force: their name in red ink, under a red rule. */
+.tile.chosen .name,
+.row.chosen .label {
+	color: #8e1b12;
+	text-decoration: underline;
+}
+
+body.roster .row {
+	width: 300dp;
+	margin: 0 auto;
+}

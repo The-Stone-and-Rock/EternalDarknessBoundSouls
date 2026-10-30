@@ -260,7 +260,7 @@ std::string region_name(const std::string& id) {
 
 // --- Menu model -------------------------------------------------------------
 
-enum class Screen { Launcher, Play, Options, Controls, Mapping, InGame, Problem, Mods };
+enum class Screen { Launcher, Play, Options, Controls, Mapping, InGame, Problem, Mods, Characters };
 
 struct Row {
     std::string label;
@@ -273,6 +273,8 @@ struct Row {
     std::function<void()> activate;   // A / click; null: same as change(+1)
     std::string section;         // starts a section with this heading
     bool gap = false;            // an ornament before it: a new group
+    bool tile = false;           // a character's portrait frame (Character select)
+    bool chosen = false;         // the choice in force (Character select)
     int page = 0;                // 1: the right-hand page of a spread
 };
 
@@ -445,6 +447,72 @@ Row mods_row(Screen from) {
     return mods;
 }
 
+// The characters, as Jump to Game lists them (settings mod_p1_character 1-12;
+// 0 is each chapter's own).
+const char* const kCharacters[] = {"Chapter's own", "Pius", "Ellia", "Anthony", "Karim",
+                                   "Max", "Lindsey", "Paul", "Roberto", "Peter",
+                                   "Edward", "Michael", "Alex"};
+constexpr int kRosterCount = 12;    // portrait frames, then "Chapter's own" and Back
+constexpr int kRosterColumns = 6;
+int g_characters_return_row = 0;    // the Mods row to come back to
+
+// Character select: every character at once, a frame for their portrait (empty
+// until portraits come from dumped assets) with their name under it.
+void build_characters() {
+    auto leave = [] {
+        settings_save();
+        g_screen = Screen::Mods;
+        g_selected = g_characters_return_row;
+    };
+    for (int i = 1; i <= kRosterCount; i++) {
+        Row r{kCharacters[i]};
+        r.tile = true;
+        r.chosen = g_settings.mod_p1_character == i;
+        r.note = std::string("Play every chapter as ") + kCharacters[i] + ", in their own body.";
+        r.activate = [i, leave] {
+            g_settings.mod_p1_character = i;
+            leave();
+        };
+        g_rows.push_back(r);
+    }
+    Row own{kCharacters[0]};
+    own.gap = true;
+    own.chosen = g_settings.mod_p1_character == 0;
+    own.note = "Each chapter's own character, as the game tells it.";
+    own.activate = [leave] {
+        g_settings.mod_p1_character = 0;
+        leave();
+    };
+    g_rows.push_back(own);
+    Row back{"Back"};
+    back.note = "Keep the character chosen before.";
+    back.activate = leave;
+    g_rows.push_back(back);
+}
+
+// Arrows on Character select: left/right along the frames, up/down between
+// their two lines and the rows under them.
+void move_in_roster(int dx, int dy) {
+    const int n = static_cast<int>(g_rows.size());
+    int& at = g_selected;
+    if (dx != 0) {
+        if (at < kRosterCount)
+            at = (at + dx + kRosterCount) % kRosterCount;
+        return;
+    }
+    if (at < kRosterCount) {
+        at += dy * kRosterColumns;
+        if (at >= kRosterCount)
+            at = kRosterCount;
+        else if (at < 0)
+            at = n - 1;
+    } else if (at == kRosterCount) {
+        at = dy > 0 ? n - 1 : kRosterCount - kRosterColumns;
+    } else {
+        at = dy > 0 ? 0 : kRosterCount;
+    }
+}
+
 void build_mods() {
     // Every mod is still being made: each note says so, until it works.
     auto note = [](const std::string& text) { return text + " In development: no effect yet."; };
@@ -524,11 +592,8 @@ void build_mods() {
     g_rows.push_back(insanity);
 
     // Player 1's character (hle.c player_model): any of the twelve, in any
-    // chapter, in their own body.
-    static const char* const kCharacters[] = {"Chapter's own", "Pius", "Ellia", "Anthony", "Karim",
-                                              "Max", "Lindsey", "Paul", "Roberto", "Peter",
-                                              "Edward", "Michael", "Alex"};
-    Row p1_character{"Player 1 character", kCharacters[g_settings.mod_p1_character]};
+    // chapter, in their own body, chosen on its own page (build_characters).
+    Row p1_character{"Character select", kCharacters[g_settings.mod_p1_character]};
     p1_character.section = "III · Characters";
     p1_character.page = 1;
     p1_character.note = g_settings.mod_p1_character == 0
@@ -536,7 +601,11 @@ void build_mods() {
                             : "Every chapter is played as " + std::string(kCharacters[g_settings.mod_p1_character]) +
                                   ", in their own body, from the next chapter or save you load. They keep the "
                                   "chapter's weapons for now.";
-    p1_character.change = [](int dir) { cycle(g_settings.mod_p1_character, 13, dir); };
+    p1_character.activate = [at = static_cast<int>(g_rows.size())] {
+        g_characters_return_row = at;
+        g_screen = Screen::Characters;
+        g_selected = g_settings.mod_p1_character == 0 ? kRosterCount : g_settings.mod_p1_character - 1;
+    };
     g_rows.push_back(p1_character);
 
     static const char* const kStats[] = {"Character's own", "Custom"};
@@ -1319,13 +1388,28 @@ void render() {
                                                                 ? "Player 2 Mapping"
                                                                 : "Button Mapping")
                           : g_screen == Screen::Mods     ? "Mods"
+                          : g_screen == Screen::Characters ? "Character Select"
                           : g_screen == Screen::Problem  ? g_problem_heading.c_str()
                                                          : "Paused";
     g_doc->GetElementById("heading")->SetInnerRML(heading);
     std::string rml[2];
     bool spread = false;
+    bool in_roster = false;
     for (size_t i = 0; i < g_rows.size(); i++) {
         const Row& r = g_rows[i];
+        if (r.tile) {
+            // A portrait frame and the name under it, six to a line.
+            if (!in_roster)
+                rml[0] += "<div class=\"roster\">";
+            in_roster = true;
+            rml[0] += "<div class=\"tile" + std::string(static_cast<int>(i) == g_selected ? " selected" : "") +
+                      (r.chosen ? " chosen" : "") + "\" id=\"row" + std::to_string(i) +
+                      "\"><div class=\"portrait\"></div><div class=\"name\">" + escape(r.label) + "</div></div>";
+            continue;
+        }
+        if (in_roster)
+            rml[0] += "</div>";
+        in_roster = false;
         const int page = r.page == 1 ? 1 : 0;
         spread = spread || page == 1;
         std::string& out = rml[page];
@@ -1338,6 +1422,8 @@ void render() {
             out += " selected";
         if (!r.enabled)
             out += " disabled";
+        if (r.chosen)
+            out += " chosen";
         out += "\" id=\"row" + std::to_string(i) +
                "\"><img class=\"mark\" src=\"tome/mark.png\"/><span class=\"label\">" +
                escape(r.label) + "</span>";
@@ -1349,6 +1435,8 @@ void render() {
                    escape(r.value) + "</span>";
         out += "</div>";
     }
+    if (in_roster)
+        rml[0] += "</div>";
     g_doc->GetElementById("menu0")->SetInnerRML(rml[0]);
     g_doc->GetElementById("menu1")->SetInnerRML(rml[1]);
     // The help note sits under the page holding the chosen row.
@@ -1360,15 +1448,19 @@ void render() {
     g_doc->GetElementById("hint")->SetInnerRML(
         g_screen == Screen::InGame    ? "Up/Down choose &#183; Left/Right change &#183; A select &#183; B resume"
         : g_screen == Screen::Problem ? "Up/Down choose &#183; A select"
+        : g_screen == Screen::Characters ? "Arrows choose &#183; A select &#183; B back"
                                       : "Up/Down choose &#183; Left/Right change &#183; A select &#183; B back");
     g_doc->SetClass("spread", spread);
     // The main menu opens with the emblem instead of a heading.
     g_doc->SetClass("branded", g_screen == Screen::Launcher);
     // The mapping list is long: tighten the rows.
     g_doc->SetClass("compact", g_screen == Screen::Mapping);
+    // Character select: one wide page, every frame at once.
+    g_doc->SetClass("roster", g_screen == Screen::Characters);
     // Over the game the page lies on the dimmed, paused frame.
     g_doc->SetClass("overlay", g_screen == Screen::InGame || g_screen == Screen::Problem ||
                                    ((g_screen == Screen::Options || g_screen == Screen::Mods ||
+                                     g_screen == Screen::Characters ||
                                      g_screen == Screen::Controls ||
                                      g_screen == Screen::Mapping) &&
                                     g_options_return == Screen::InGame));
@@ -1385,6 +1477,7 @@ void build_rows() {
     case Screen::InGame: build_in_game(); break;
     case Screen::Problem: build_problem(); break;
     case Screen::Mods: build_mods(); break;
+    case Screen::Characters: build_characters(); break;
     }
     if (g_selected >= static_cast<int>(g_rows.size()))
         g_selected = 0;
@@ -1436,6 +1529,11 @@ void go_back() {
         settings_save();
         g_screen = g_mods_return;
         g_selected = 0;
+        break;
+    case Screen::Characters:
+        settings_save();
+        g_screen = Screen::Mods;
+        g_selected = g_characters_return_row;
         break;
     case Screen::InGame:
         g_close = true;
@@ -1591,15 +1689,25 @@ bool run_menu() {
         }
         g_input.poll(pressed);
         bool dirty = false;
-        if (pressed[kUp]) {
-            move_selection(-1);
-            dirty = true;
+        if (g_screen == Screen::Characters) {
+            // A grid: every arrow moves (and left/right change nothing).
+            if (pressed[kUp] || pressed[kDown] || pressed[kLeft] || pressed[kRight]) {
+                move_in_roster(pressed[kLeft] ? -1 : pressed[kRight] ? 1 : 0,
+                               pressed[kUp] ? -1 : pressed[kDown] ? 1 : 0);
+                dirty = true;
+            }
+        } else {
+            if (pressed[kUp]) {
+                move_selection(-1);
+                dirty = true;
+            }
+            if (pressed[kDown]) {
+                move_selection(+1);
+                dirty = true;
+            }
         }
-        if (pressed[kDown]) {
-            move_selection(+1);
-            dirty = true;
-        }
-        if ((pressed[kLeft] || pressed[kRight]) && g_selected < static_cast<int>(g_rows.size())) {
+        if (g_screen != Screen::Characters && (pressed[kLeft] || pressed[kRight]) &&
+            g_selected < static_cast<int>(g_rows.size())) {
             Row& r = g_rows[g_selected];
             if (r.change && (r.enabled || r.browse)) {
                 r.change(pressed[kLeft] ? -1 : +1);
@@ -1706,7 +1814,7 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
                        g_discs[g_disc].path == g_settings.disc);
     g_screen = Screen::Launcher;
     g_selected = g_disc_on_main && disc_playable() ? 1 : 0;
-    // ED_MENU_OPEN=options, controls, mapping or mods[,row] (testing): the
+    // ED_MENU_OPEN=options, controls, mapping, mods or characters[,row] (testing): the
     // launcher opens on that page, at that row; controls2 and mapping2 show
     // player 2's.
     if (const char* page = std::getenv("ED_MENU_OPEN"); page != nullptr) {
@@ -1715,7 +1823,8 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
         g_screen = std::strncmp(page, "controls", 8) == 0  ? Screen::Controls
                    : std::strncmp(page, "mapping", 7) == 0 ? Screen::Mapping
                    : std::strncmp(page, "mods", 4) == 0    ? Screen::Mods
-                                                           : Screen::Options;
+                   : std::strncmp(page, "characters", 10) == 0 ? Screen::Characters
+                                                               : Screen::Options;
         const char* digit = page + std::strcspn(page, "2,");
         controls::set_menu_player(*digit == '2' ? 1 : 0);
         const char* comma = std::strchr(page, ',');
