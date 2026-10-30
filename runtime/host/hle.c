@@ -207,6 +207,10 @@ static bool g_skip_intro_done;
 static bool g_skip_intro_armed;
 static unsigned g_skip_intro_memcard_text;
 static u64 g_skip_intro_start_frame;  // first frame it ran (0: not yet)
+// ED_TITLE_STATE=path (the launcher's Skip intro, first time): the machine
+// saved there once the title menu is up, for the next Start game to boot
+// straight into (frontend.cpp start_game).
+static u64 g_title_save_at;
 
 // The launcher's New game in a running process (frontend.cpp): skip the
 // intro movies or not, as at boot (the boot state it loads resets the rest).
@@ -216,6 +220,13 @@ void hle_set_skip_intro(bool on) {
     g_skip_intro_armed = false;
     g_skip_intro_memcard_text = 0;
     g_skip_intro_start_frame = 0;
+}
+
+// The start-up hidden (frontend.cpp: a black screen, no sound) while it is
+// passed over for the launcher's Skip intro, until the title menu is saved.
+bool hle_start_up_hidden(void) {
+    return getenv("ED_TITLE_STATE") != NULL &&
+           ((g_skip_intro && !g_skip_intro_done) || g_title_save_at != 0u);
 }
 
 static void skip_intro_note_open(const CPUState* cpu, const char* path) {
@@ -232,6 +243,9 @@ static void skip_intro_note_open(const CPUState* cpu, const char* path) {
         fprintf(stderr,
                 "[input] opening movie over (%s) at frame %llu; skip-intro off\n",
                 path, (unsigned long long)(cpu->timebase / 675000ull));
+        // Two seconds on, the menu drawn and still.
+        if (getenv("ED_TITLE_STATE") != NULL)
+            g_title_save_at = cpu->timebase / 675000ull + 120u;
     }
 }
 
@@ -242,6 +256,11 @@ static void skip_intro_note_open(const CPUState* cpu, const char* path) {
 // so does a minute and a half of tapping.
 static bool skip_intro_apply(CPUState* cpu, u16* buttons, s8 stick_x, s8 stick_y,
                              u8* analog_a) {
+    if (g_title_save_at != 0u && cpu->timebase / 675000ull >= g_title_save_at) {
+        g_title_save_at = 0u;
+        quickstate_request_save(getenv("ED_TITLE_STATE"));
+        fprintf(stderr, "[input] title menu saved to %s\n", getenv("ED_TITLE_STATE"));
+    }
     if (!g_skip_intro || g_skip_intro_done)
         return false;
     const u64 frame = cpu->timebase / 675000ull;
@@ -260,7 +279,8 @@ static bool skip_intro_apply(CPUState* cpu, u16* buttons, s8 stick_x, s8 stick_y
                 (unsigned long long)frame, why);
         return false;
     }
-    if (frame < 30u || (frame % 16u) >= 6u)
+    // A held two frames in every four: each screen ends almost as it opens.
+    if (frame < 30u || (frame % 4u) >= 2u)
         return false;
     *buttons |= 0x0100u;
     *analog_a = 0xFFu;

@@ -55,6 +55,8 @@ void quickstate_request_save(const char* path);
 void quickstate_request_load(const char* path);
 const char* quickstate_boot_path(void);
 void hle_set_skip_intro(bool on);
+bool hle_start_up_hidden(void);
+void audio_set_muted(bool muted);
 }
 
 namespace {
@@ -410,6 +412,9 @@ void restart_process() {
     std::fprintf(stderr, "[frontend] restart failed\n");
 }
 
+// The machine at the game's title menu (Mods' Skip intro).
+constexpr const char* kTitleState = "saves/title.state";
+
 void start_game(int slot) {
     snprintf(g_settings.disc, sizeof g_settings.disc, "%s", g_discs[g_disc].path.c_str());
     settings_save();
@@ -423,11 +428,25 @@ void start_game(int slot) {
         if (slot != 0) {
             quickstate_request_load(slot_path(slot).c_str());
         } else {
-            hle_set_skip_intro(false);
-            quickstate_request_load(quickstate_boot_path());
+            struct stat st;
+            const bool title = g_settings.mod_skip_intro && stat(kTitleState, &st) == 0;
+            hle_set_skip_intro(g_settings.mod_skip_intro != 0 && !title);
+            quickstate_request_load(title ? kTitleState : quickstate_boot_path());
         }
         g_close = true;
         return;
+    }
+    // Mods' Skip intro: straight into the title menu, from the machine saved
+    // there (saves/title.state) the first time, when the start-up was passed
+    // over and the menu saved as it came up (hle.c, ED_TITLE_STATE).
+    if (slot == 0 && g_settings.mod_skip_intro) {
+        struct stat st;
+        if (stat(kTitleState, &st) == 0) {
+            setenv("ED_QUICKLOAD", kTitleState, 1);
+        } else {
+            setenv("ED_SKIP_INTRO", "1", 1);
+            setenv("ED_TITLE_STATE", kTitleState, 1);
+        }
     }
     g_load_slot = slot;
     g_play = true;
@@ -920,6 +939,14 @@ void build_mods() {
     g_rows.push_back(page("Co-op", 1, "Split-screen for two: the split, player 2's controls and each player's camera."));
     g_rows.push_back(page("Challenge", 2, "Creatures and sanity effects."));
     g_rows.push_back(page("Characters", 3, "Each player's character, with their stats."));
+    // Only on the launcher: it is how Start game starts.
+    if (!g_in_game) {
+        Row skip{"Skip intro", on_off(g_settings.mod_skip_intro)};
+        skip.gap = true;
+        skip.note = "Start game goes past the opening movie straight to the game's main menu.";
+        skip.change = [](int) { g_settings.mod_skip_intro = !g_settings.mod_skip_intro; };
+        g_rows.push_back(skip);
+    }
     Row back{"Back"};
     back.gap = true;
     back.activate = [] {
@@ -3156,7 +3183,25 @@ void frame(bool start) {
 
 extern "C" bool frontend_photo_active(void) { return photo::g_state != photo::State::Off; }
 
+// Mods' Skip intro, the first time: the start-up passed over behind a black
+// screen with no sound, until the title menu is up and saved (hle.c).
+void update_start_up_cover() {
+    static bool covering = false;
+    const bool hide = hle_start_up_hidden();
+    if (hide != covering) {
+        covering = hide;
+        audio_set_muted(hide);
+    }
+    if (!hide)
+        return;
+    const ImGuiViewport* view = ImGui::GetMainViewport();
+    ImGui::GetForegroundDrawList(const_cast<ImGuiViewport*>(view))
+        ->AddRectFilled(view->Pos, ImVec2(view->Pos.x + view->Size.x, view->Pos.y + view->Size.y),
+                        IM_COL32(0, 0, 0, 255));
+}
+
 extern "C" void frontend_frame(void) {
+    update_start_up_cover();
     static Uint64 calibration_test_at = 0;
     static int calibration_test_step = 0;
     static bool calibration_test_checked = false;

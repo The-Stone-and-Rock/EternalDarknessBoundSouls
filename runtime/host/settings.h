@@ -62,6 +62,7 @@ typedef struct {
     int mod_p2_character; // player 2's (co-op), the same way: chosen, not yet played
     int mod_p1_stats;     // player 1's health, magick and sanity: 0 the chapter character's, 1 the chosen one's
     int mod_p2_stats;     // player 2's, the same way
+    int mod_skip_intro;   // 1: the launcher's Start game passes over the opening movie to the title
     char controls_custom[512];  // custom bindings (controls.cpp format)
     char disc[1024];      // last disc image chosen in the launcher
 } Settings;

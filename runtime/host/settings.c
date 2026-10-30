@@ -59,6 +59,7 @@ Settings g_settings = {
     .mod_p2_character = 0,
     .mod_p1_stats = 0,
     .mod_p2_stats = 0,
+    .mod_skip_intro = 0,
     .mod_insanity = 0,
     .controls_custom = "",
     .disc = "",
@@ -196,6 +197,8 @@ void settings_load(void) {
             g_settings.mod_p1_stats = clamp_int(n, 0, 1);
         else if (strcmp(key, "mod_p2_stats") == 0)
             g_settings.mod_p2_stats = clamp_int(n, 0, 1);
+        else if (strcmp(key, "mod_skip_intro") == 0)
+            g_settings.mod_skip_intro = clamp_int(n, 0, 1);
         else if (strcmp(key, "controls_custom") == 0)
             snprintf(g_settings.controls_custom, sizeof g_settings.controls_custom, "%s", value);
         else if (strcmp(key, "disc") == 0)
@@ -258,6 +261,7 @@ void settings_save(void) {
     fprintf(f, "mod_p2_character = %d\n", g_settings.mod_p2_character);
     fprintf(f, "mod_p1_stats = %d\n", g_settings.mod_p1_stats);
     fprintf(f, "mod_p2_stats = %d\n", g_settings.mod_p2_stats);
+    fprintf(f, "mod_skip_intro = %d\n", g_settings.mod_skip_intro);
     fprintf(f, "controls_custom = %s\n", g_settings.controls_custom);
     fprintf(f, "disc = %s\n", g_settings.disc);
     fclose(f);
