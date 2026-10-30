@@ -325,6 +325,7 @@ bool disc_playable() {
 }
 
 void build_rows();
+std::string res_dir();
 
 void cycle(int& value, int count, int dir) {
     value = (value + dir + count) % count;
@@ -449,16 +450,196 @@ Row mods_row(Screen from) {
 
 // The characters, as Jump to Game lists them (settings mod_p1_character 1-12;
 // 0 is each chapter's own).
-const char* const kCharacters[] = {"Chapter's own", "Pius", "Ellia", "Anthony", "Karim",
+const char* const kCharacters[] = {"Vanilla Character", "Pius", "Ellia", "Anthony", "Karim",
                                    "Max", "Lindsey", "Paul", "Roberto", "Peter",
                                    "Edward", "Michael", "Alex"};
-constexpr int kRosterCount = 12;    // portrait frames, then "Chapter's own" and Back
+constexpr int kRosterCount = 12;    // portrait frames, then "Vanilla Character" and Back
 constexpr int kRosterColumns = 6;
 int g_characters_return_row = 0;    // the Mods row to come back to
 
-// Character select: every character at once, a frame for their portrait (empty
-// until portraits come from dumped assets) with their name under it.
+// The characters' portraits, from the player's own disc: the main menu's
+// texture file (UMnMenu.tpl) holds the chapter portraits the save list shows,
+// 126x89 CMPR, stored upside down: Alex's (image 50), then the others in
+// Jump to Game order (51-61). They are written once as PNGs into
+// res/ui/portraits (git ignores it), so no game art is in the repository.
+constexpr const char* kPortraitDir = "/ui/portraits/";
+
+std::string portrait_file(int character) {
+    return std::string("portraits/") + kCharacters[character] + ".png";
+}
+
+// One image's RGBA as a PNG (stored, not compressed: the files are small).
+bool write_png(const std::string& path, int w, int h, const std::vector<uint8_t>& rgba) {
+    auto be32 = [](std::string& out, uint32_t v) {
+        for (int s = 24; s >= 0; s -= 8)
+            out += static_cast<char>((v >> s) & 0xFF);
+    };
+    auto crc = [](const std::string& data) {
+        uint32_t c = 0xFFFFFFFFu;
+        for (unsigned char b : data) {
+            c ^= b;
+            for (int k = 0; k < 8; k++)
+                c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
+        }
+        return ~c;
+    };
+    std::string raw;
+    for (int y = 0; y < h; y++) {
+        raw += '\0';
+        raw.append(reinterpret_cast<const char*>(&rgba[static_cast<size_t>(y) * w * 4]), static_cast<size_t>(w) * 4);
+    }
+    std::string z = "\x78\x01";
+    uint32_t a = 1, b = 0;
+    for (unsigned char c : raw) {
+        a = (a + c) % 65521u;
+        b = (b + a) % 65521u;
+    }
+    for (size_t at = 0; at < raw.size(); at += 65535) {
+        const size_t n = std::min<size_t>(65535, raw.size() - at);
+        z += static_cast<char>(at + n == raw.size() ? 1 : 0);
+        z += static_cast<char>(n & 0xFF);
+        z += static_cast<char>(n >> 8);
+        z += static_cast<char>(~n & 0xFF);
+        z += static_cast<char>((~n >> 8) & 0xFF);
+        z.append(raw, at, n);
+    }
+    be32(z, (b << 16) | a);
+    std::string png = "\x89PNG\r\n\x1a\n";
+    auto chunk = [&](const char* type, const std::string& body) {
+        be32(png, static_cast<uint32_t>(body.size()));
+        const std::string typed = std::string(type) + body;
+        png += typed;
+        be32(png, crc(typed));
+    };
+    std::string ihdr;
+    be32(ihdr, static_cast<uint32_t>(w));
+    be32(ihdr, static_cast<uint32_t>(h));
+    ihdr += std::string("\x08\x06\x00\x00\x00", 5);
+    chunk("IHDR", ihdr);
+    chunk("IDAT", z);
+    chunk("IEND", "");
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (f == nullptr)
+        return false;
+    const bool ok = std::fwrite(png.data(), 1, png.size(), f) == png.size();
+    return std::fclose(f) == 0 && ok;
+}
+
+// A file of a GameCube disc image, by its path from the root (FST lookup).
+std::vector<uint8_t> read_disc_file(const std::string& iso, const char* want) {
+    std::vector<uint8_t> out;
+    FILE* f = std::fopen(iso.c_str(), "rb");
+    if (f == nullptr)
+        return out;
+    auto u32_at = [](const std::vector<uint8_t>& d, size_t at) {
+        return at + 4 <= d.size() ? (uint32_t(d[at]) << 24) | (uint32_t(d[at + 1]) << 16) | (uint32_t(d[at + 2]) << 8) |
+                                        d[at + 3]
+                                  : 0u;
+    };
+    std::vector<uint8_t> head(8);
+    std::fseek(f, 0x424, SEEK_SET);
+    if (std::fread(head.data(), 1, 8, f) == 8) {
+        std::vector<uint8_t> fst(u32_at(head, 4));
+        std::fseek(f, static_cast<long>(u32_at(head, 0)), SEEK_SET);
+        if (!fst.empty() && std::fread(fst.data(), 1, fst.size(), f) == fst.size()) {
+            // Only root files are wanted: a directory's entries are skipped.
+            const uint32_t count = u32_at(fst, 8);
+            const size_t names = static_cast<size_t>(count) * 12;
+            for (uint32_t i = 1; i < count && names < fst.size(); i++) {
+                const size_t name = names + (u32_at(fst, i * 12) & 0xFFFFFF);
+                if (fst[i * 12] != 0) {
+                    i = u32_at(fst, i * 12 + 8) - 1;
+                    continue;
+                }
+                if (name < fst.size() && SDL_strcasecmp(reinterpret_cast<const char*>(&fst[name]), want) == 0) {
+                    out.resize(u32_at(fst, i * 12 + 8));
+                    std::fseek(f, static_cast<long>(u32_at(fst, i * 12 + 4)), SEEK_SET);
+                    if (std::fread(out.data(), 1, out.size(), f) != out.size())
+                        out.clear();
+                    break;
+                }
+            }
+        }
+    }
+    std::fclose(f);
+    return out;
+}
+
+// CMPR (S3TC blocks in 8x8 tiles) to RGBA, rows turned the right way up.
+std::vector<uint8_t> decode_cmpr(const std::vector<uint8_t>& d, size_t at, int w, int h) {
+    std::vector<uint8_t> rgba(static_cast<size_t>(w) * h * 4);
+    auto rgb = [](uint16_t v, uint8_t* c) {
+        c[0] = uint8_t(((v >> 11) & 31) * 255 / 31);
+        c[1] = uint8_t(((v >> 5) & 63) * 255 / 63);
+        c[2] = uint8_t((v & 31) * 255 / 31);
+        c[3] = 255;
+    };
+    for (int ty = 0; ty < h; ty += 8)
+        for (int tx = 0; tx < w; tx += 8)
+            for (int sb = 0; sb < 4; sb++, at += 8) {
+                if (at + 8 > d.size())
+                    return rgba;
+                const uint16_t c0 = uint16_t(d[at] << 8 | d[at + 1]), c1 = uint16_t(d[at + 2] << 8 | d[at + 3]);
+                uint8_t pal[4][4];
+                rgb(c0, pal[0]);
+                rgb(c1, pal[1]);
+                for (int k = 0; k < 4; k++) {
+                    pal[2][k] = uint8_t(c0 > c1 ? (2 * pal[0][k] + pal[1][k]) / 3 : (pal[0][k] + pal[1][k]) / 2);
+                    pal[3][k] = uint8_t(c0 > c1 ? (pal[0][k] + 2 * pal[1][k]) / 3 : 0);
+                }
+                for (int i = 0; i < 16; i++) {
+                    const int x = tx + (sb & 1) * 4 + i % 4, y = ty + (sb >> 1) * 4 + i / 4;
+                    if (x >= w || y >= h)
+                        continue;
+                    const int index = (d[at + 4 + i / 4] >> (6 - 2 * (i % 4))) & 3;
+                    std::memcpy(&rgba[(static_cast<size_t>(h - 1 - y) * w + x) * 4], pal[index], 4);
+                }
+            }
+    return rgba;
+}
+
+// Writes the portraits that are missing; true when all twelve are there.
+bool ensure_portraits() {
+    const std::string dir = res_dir() + kPortraitDir;
+    auto have_all = [&] {
+        for (int i = 1; i <= 12; i++) {
+            struct stat st;
+            if (stat((res_dir() + "/ui/" + portrait_file(i)).c_str(), &st) != 0)
+                return false;
+        }
+        return true;
+    };
+    static bool tried = false;
+    if (have_all() || tried || !disc_playable())
+        return have_all();
+    tried = true;
+    const std::vector<uint8_t> tpl = read_disc_file(g_discs[g_disc].path, "UMnMenu.tpl");
+    auto u32_at = [&](size_t at) {
+        return at + 4 <= tpl.size()
+                   ? (uint32_t(tpl[at]) << 24) | (uint32_t(tpl[at + 1]) << 16) | (uint32_t(tpl[at + 2]) << 8) | tpl[at + 3]
+                   : 0u;
+    };
+    if (u32_at(0) != 0x0020AF30u || u32_at(4) < 62u) {
+        std::fprintf(stderr, "[frontend] no portraits: UMnMenu.tpl not found or not as expected\n");
+        return false;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    for (int i = 1; i <= 12; i++) {
+        const size_t image = u32_at(u32_at(8) + static_cast<size_t>(i == 12 ? 50 : 50 + i) * 8);
+        const int h = int(tpl[image] << 8 | tpl[image + 1]), w = int(tpl[image + 2] << 8 | tpl[image + 3]);
+        if (u32_at(image + 4) != 14u || w != 126 || h != 89)
+            return false;
+        write_png(res_dir() + "/ui/" + portrait_file(i), w, h, decode_cmpr(tpl, u32_at(image + 8), w, h));
+    }
+    std::fprintf(stderr, "[frontend] character portraits written to %s\n", dir.c_str());
+    return have_all();
+}
+
+// Character select: every character at once, their portrait (from the disc,
+// ensure_portraits) with their name under it.
 void build_characters() {
+    ensure_portraits();
     auto leave = [] {
         settings_save();
         g_screen = Screen::Mods;
@@ -468,6 +649,9 @@ void build_characters() {
         Row r{kCharacters[i]};
         r.tile = true;
         r.chosen = g_settings.mod_p1_character == i;
+        struct stat st;
+        if (stat((res_dir() + "/ui/" + portrait_file(i)).c_str(), &st) == 0)
+            r.value_rml = "<img src=\"" + portrait_file(i) + "\"/>";
         r.note = std::string("Play every chapter as ") + kCharacters[i] + ", in their own body.";
         r.activate = [i, leave] {
             g_settings.mod_p1_character = i;
@@ -1404,7 +1588,8 @@ void render() {
             in_roster = true;
             rml[0] += "<div class=\"tile" + std::string(static_cast<int>(i) == g_selected ? " selected" : "") +
                       (r.chosen ? " chosen" : "") + "\" id=\"row" + std::to_string(i) +
-                      "\"><div class=\"portrait\"></div><div class=\"name\">" + escape(r.label) + "</div></div>";
+                      "\"><div class=\"portrait\">" + r.value_rml + "</div><div class=\"name\">" + escape(r.label) +
+                      "</div></div>";
             continue;
         }
         if (in_roster)

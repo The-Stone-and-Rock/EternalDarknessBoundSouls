@@ -1,5 +1,7 @@
 # Your disc image and everything translated from it stay on your machine.
 dump/
+# Character portraits, written from the disc by the menu.
+res/ui/portraits/
 generated/
 build*/
 .deps/

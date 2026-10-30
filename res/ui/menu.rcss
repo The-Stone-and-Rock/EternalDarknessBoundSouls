@@ -249,7 +249,7 @@ body.compact #heading {
 /* Character select: one wide page with every character at once, a frame for
    their portrait over their name, six to a line. */
 body.roster .page {
-	width: 1040dp;
+	width: 1120dp;
 	padding: 22dp 40dp 14dp 40dp;
 }
 
@@ -261,16 +261,17 @@ body.roster .page {
 }
 
 .tile {
-	width: 136dp;
+	width: 150dp;
 	margin: 6dp 6dp;
 	padding: 5dp;
 	border: 1dp #00000000;
 	text-align: center;
 }
 
-/* Where the character's portrait or model will show (empty for now). */
+/* The character's portrait (from the player's disc: frontend.cpp
+   ensure_portraits), the chapter pictures' 126x89 shape. */
 .portrait {
-	height: 172dp;
+	height: 106dp;
 	border: 1dp #7a201266;
 	background-color: #3a24120f;
 }
@@ -301,4 +302,9 @@ body.roster .page {
 body.roster .row {
 	width: 300dp;
 	margin: 0 auto;
+}
+
+.portrait img {
+	width: 100%;
+	height: 100%;
 }
