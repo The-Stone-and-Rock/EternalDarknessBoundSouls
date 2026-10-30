@@ -6180,8 +6180,12 @@ static void coop_place(CPUState* cpu, u32 object, float out[3]) {
 }
 
 // A save made in co-op keeps player 2 as one of the area's characters: a
-// second of the player's own type and model. That one is player 2 again,
-// rather than a new one beside it.
+// second of the player's own type, with the player's model or player 2's
+// character's (hle_spawn_create makes it so). That one is player 2 again,
+// rather than a new one beside it: a second player 2, left where the save
+// had them, was a stranger, and both players stood ready to fight.
+static int coop_wanted_character(void);
+
 static void coop_adopt(CPUState* cpu, u32 player) {
     if (getenv("ED_COOP_P2_KIND") != NULL)
         return;  // testing another character: a new player 2
@@ -6189,10 +6193,13 @@ static void coop_adopt(CPUState* cpu, u32 player) {
     if (!guest_ram_range_valid(cpu, actor, 160u))
         return;
     const u32 kind = mem_read32(cpu, actor + 152u);  // type and model
+    const int p2 = coop_wanted_character();
+    const u32 p2_kind = p2 >= 0 ? (kind & 0xFFFF0000u) | ((u32)p2 & 0xFFFFu) : kind;
     u32 node = 0u;
     for (int i = 0; i < 1024 && (node = coop_next(cpu, node)) != 0u; i++) {
         const u32 other = mem_read32(cpu, node + (u32)(s32)g_coop_actor_offset);
-        if (node != player && guest_ram_range_valid(cpu, other, 160u) && mem_read32(cpu, other + 152u) == kind) {
+        if (node != player && guest_ram_range_valid(cpu, other, 160u) &&
+            (mem_read32(cpu, other + 152u) == kind || mem_read32(cpu, other + 152u) == p2_kind)) {
             g_coop_p2 = node;
             coop_describe(cpu, "player 1", player);
             coop_describe(cpu, "player 2 (from the save)", node);
@@ -6592,6 +6599,8 @@ static int borrow_p2(void) {
     return p2 >= 0 && g_chapter_model >= 0 && p2 != g_chapter_model && p2 != p1 ? p2 : -1;
 }
 
+static unsigned g_playables_made;  // records of the chapter's kind made since the chapter loaded
+
 static void hle_pack_load(CPUState* cpu) {
     // The chapter, from the name being loaded (/levels/levelNN/...): a save's
     // load asks for its character only after this (0x80007C8C), so the
@@ -6604,6 +6613,7 @@ static void hle_pack_load(CPUState* cpu) {
         int chapter = -1;
         if (sscanf(name, "/levels/level%d", &chapter) == 1 && chapter >= 0 && chapter < 17)
             g_chapter_model = kChapterModel[chapter];
+        g_playables_made = 0u;
     }
     if (g_pack.stage == 0 && cpu->lr == CHAPTER_PACK_CALL && (borrow_p1() >= 0 || borrow_p2() >= 0)) {
         g_pack.caller = cpu->lr;
@@ -6847,7 +6857,7 @@ static void notify_stream_read(CPUState* cpu) {
 // holder set (0x80118F9C(object, holder)).
 static void notify_anim_load(CPUState* cpu) {
     static unsigned shown;
-    if (shown++ < 80u)
+    if (shown++ < 4000u)
         fprintf(stderr, "[anim] 0x%08X r3 0x%08X r4 0x%08X r5 0x%08X r6 0x%08X r7 0x%08X r8 0x%08X (lr 0x%08X)\n", cpu->pc,
                 cpu->gpr[3], cpu->gpr[4], cpu->gpr[5], cpu->gpr[6], cpu->gpr[7], cpu->gpr[8], cpu->lr);
 }
@@ -6900,6 +6910,20 @@ static void hle_spawn_create(CPUState* cpu) {
     const u32 rec = cpu->gpr[3];
     const int want = player_model();
     if (g_coop_spawning) {
+        g_hle_passthrough = true;
+        return;
+    }
+    // A co-op save has player 2 in it too: the second record of the
+    // chapter's kind is theirs, and is made as player 2's character (it was
+    // made as player 1's: Pius twice).
+    if (g_chapter_model >= 0 && guest_ram_range_valid(cpu, rec, 48u) &&
+        (s32)mem_read32(cpu, rec + 16u) == player_type(g_chapter_model) && g_playables_made++ > 0 &&
+        getenv("ED_COOP_SAVE_P2_OFF") == NULL) {  // testing: without
+        const int p2 = coop_wanted_character();
+        const int model = p2 >= 0 ? p2 : want >= 0 ? want : g_chapter_model;
+        fprintf(stderr, "[player] player 2 from the save (saved as %d) made as %d\n", (s32)mem_read32(cpu, rec + 20u),
+                model);
+        mem_write32(cpu, rec + 20u, (u32)model);
         g_hle_passthrough = true;
         return;
     }
@@ -7552,12 +7576,126 @@ static void coop_equip_record(CPUState* cpu) {
 #define FIND_BY_ID 0x801F5F88u
 static bool g_coop_tome_p2;
 
+// Each player has a copy of a weapon: there is one of each, and player 1
+// equipping what player 2 held took it out of their hand. Player 2's is
+// made (as the area loader makes one, like player 2 themself) the first time
+// they equip it, carried by them, and their equipping and letting go of
+// that weapon (the item's id: 0x800C994C, 0x800C9DD4 ask for its node) are
+// answered with their copy's node.
+static struct {
+    u32 id, node;
+} g_coop_copies[32];
+
+static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make) {
+    static u32 for_p2;
+    if (for_p2 != g_coop_p2) {  // another player 2 (another area): new copies
+        memset(g_coop_copies, 0, sizeof g_coop_copies);
+        for_p2 = g_coop_p2;
+    }
+    int free_at = -1;
+    for (int i = 0; i < 32; i++) {
+        if (g_coop_copies[i].node != 0u && g_coop_copies[i].id == id) {
+            if (coop_listed(cpu, g_coop_copies[i].node))
+                return g_coop_copies[i].node;
+            g_coop_copies[i].node = 0u;
+        }
+        if (g_coop_copies[i].node == 0u && free_at < 0)
+            free_at = i;
+    }
+    if (!make || free_at < 0)
+        return 0u;
+    u32 original = 0u;
+    for (u32 node = 0u, i = 0u; i < 1024u && (node = coop_next(cpu, node)) != 0u; i++)
+        if (mem_read32(cpu, node + 16u) == id)
+            original = node;
+    const u32 actor = original != 0u ? mem_read32(cpu, original + (u32)(s32)g_coop_actor_offset) : 0u;
+    const u32 object = original != 0u ? mem_read32(cpu, original + 52u) : 0u;
+    if (!guest_ram_range_valid(cpu, actor, 160u) || !guest_ram_range_valid(cpu, object, 64u))
+        return 0u;
+    const u32 rec = (cpu->gpr[1] - 0x400u) & ~15u;
+    u32 made = 0u, ignore = 0u;
+    if (!hle_guest_call(cpu, COOP_SPAWN_INIT, &rec, 1, 0.0, &ignore))
+        return 0u;
+    for (u32 i = 0; i < 3u; i++)
+        guest_write_f32(cpu, rec + i * 4u, guest_read_f32(cpu, object + i * 4u));
+    mem_write32(cpu, rec + 16u, mem_read16(cpu, actor + 152u));
+    mem_write32(cpu, rec + 20u, (u32)(s32)(s16)mem_read16(cpu, actor + 154u));
+    mem_write32(cpu, rec + 40u, mem_read32(cpu, original + 8u));
+    g_coop_spawning = true;
+    const bool created = hle_guest_call(cpu, COOP_SPAWN_CREATE, &rec, 1, 0.0, &made);
+    g_coop_spawning = false;
+    if (!created || made == 0u) {
+        fprintf(stderr, "[coop] no copy of %u made for player 2\n", id);
+        return 0u;
+    }
+    const u32 room_args[] = {made, mem_read32(cpu, cpu->gpr[13] + (u32)(s32)g_coop_room_offset)};
+    const u32 add_args[] = {1u, made};
+    hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, room_args, 2, 0.0, &ignore);
+    hle_guest_call(cpu, COOP_SPAWN_REGISTER, &made, 1, 0.0, &ignore);
+    hle_guest_call(cpu, COOP_SPAWN_ADD, add_args, 2, 0.0, &ignore);
+    // Its moves (part 0), as the area's making of things sets them
+    // (0x80118D98(object, part, 1)): without, it was in the hand unseen.
+    const u32 moves_args[3] = {mem_read32(cpu, made + 52u), 0u, 1u};
+    hle_guest_call(cpu, 0x80118D98u, moves_args, 3, 0.0, &ignore);
+    // ED_COOP_COPY_DRAW=1 (testing): the original's drawing fields too.
+    const u32 copy = mem_read32(cpu, made + 52u);
+    if (getenv("ED_COOP_COPY_DRAW") != NULL && guest_ram_range_valid(cpu, copy, 0x2E0u)) {
+        static const u32 kDraw[] = {64u, 340u, 344u, 352u, 668u, 672u, 680u};
+        for (size_t i = 0; i < sizeof kDraw / sizeof kDraw[0]; i++)
+            mem_write32(cpu, copy + kDraw[i], mem_read32(cpu, object + kDraw[i]));
+        mem_write32(cpu, copy + 596u, mem_read32(cpu, copy + 596u) | 0x400u);
+    }
+    fprintf(stderr, "[coop] copy object 0x%08X: +64 0x%08X +596 0x%08X\n", copy, mem_read32(cpu, copy + 64u),
+            mem_read32(cpu, copy + 596u));
+    // ED_COOP_COPY_OWN=1 (testing): carried by player 2's id (else as made).
+    if (getenv("ED_COOP_COPY_OWN") != NULL) {
+        const u32 p2_id = mem_read32(cpu, g_coop_p2 + 16u);
+        mem_write32(cpu, made + 20u, p2_id);
+        mem_write32(cpu, made + 24u, p2_id);
+    }
+    g_coop_copies[free_at].id = id;
+    g_coop_copies[free_at].node = made;
+    fprintf(stderr, "[coop] player 2's copy of %u: node 0x%08X (id %u)\n", id, made, mem_read32(cpu, made + 16u));
+    return made;
+}
+
 static void hle_find_by_id(CPUState* cpu) {
     g_hle_passthrough = true;
-    if (g_coop_tome_p2 && g_coop_p2 != 0u && (cpu->lr == 0x800C99ACu || cpu->lr == 0x800C9E34u) &&
-        cpu->gpr[3] == mem_read32(cpu, g_coop_p2 + 16u)) {
+    if (!g_coop_tome_p2 || g_coop_p2 == 0u)
+        return;
+    const u32 id = cpu->gpr[3];
+    u32 node = 0u;
+    if ((cpu->lr == 0x800C99ACu || cpu->lr == 0x800C9E34u) && id == mem_read32(cpu, g_coop_p2 + 16u))
+        node = g_coop_p2;  // whose hand
+    else if ((cpu->lr == 0x800C996Cu || cpu->lr == 0x800C9DF4u) && getenv("ED_COOP_COPIES") != NULL)
+        node = coop_weapon_copy(cpu, id, cpu->lr == 0x800C996Cu);  // what goes in it (testing: unseen yet)
+    if (node != 0u) {
         g_hle_passthrough = false;
-        hle_set_u32(cpu, g_coop_p2);
+        hle_set_u32(cpu, node);
+    }
+}
+
+// What player 2 holds names their copies (the drawing of what is held asks
+// for each by its id), but the Tome, which shows the originals, finds them
+// by the originals' ids: while their Tome is open their equipment names the
+// originals, then the copies again.
+static void coop_equip_names(CPUState* cpu, bool copies) {
+    u32 rec = 0u;
+    const u32 find[2] = {mem_read32(cpu, g_coop_p2 + 16u), 0u};
+    if (!hle_guest_call(cpu, EQUIP_FIND, find, 2, 0.0, &rec) || rec == 0u)
+        return;
+    const u32 n = mem_read32(cpu, rec + 388u);
+    for (u32 i = 0; i < n && i < 32u; i++) {
+        const u32 at = rec + 4u + i * 12u, id = mem_read32(cpu, at);
+        for (int k = 0; k < 32; k++) {
+            const u32 copy = g_coop_copies[k].node;
+            if (copy == 0u)
+                continue;
+            if (copies && id == g_coop_copies[k].id)
+                mem_write32(cpu, at, mem_read32(cpu, copy + 16u));
+            else if (!copies && id == mem_read32(cpu, copy + 16u))
+                mem_write32(cpu, at, g_coop_copies[k].id);
+        }
     }
 }
 
@@ -7566,6 +7704,7 @@ static void coop_tome_player(CPUState* cpu, bool p2) {
     const u32 who[2] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21496u};
     if (p2 && !g_coop_tome_p2 && g_coop_p2 != 0u) {
         coop_equip_record(cpu);
+        coop_equip_names(cpu, false);
         const u32 now[2] = {mem_read32(cpu, g_coop_p2 + 52u), mem_read32(cpu, g_coop_p2 + 16u)};
         for (int i = 0; i < 2; i++) {
             was[i] = mem_read32(cpu, who[i]);
@@ -7576,6 +7715,7 @@ static void coop_tome_player(CPUState* cpu, bool p2) {
         for (int i = 0; i < 2; i++)
             mem_write32(cpu, who[i], was[i]);
         g_coop_tome_p2 = false;
+        coop_equip_names(cpu, true);
     }
 }
 
@@ -7901,8 +8041,8 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* stream = hle_dispatch_entry(0x80154118u);
             if (getenv("ED_STREAM_LOG") != NULL && stream != NULL && stream->notify == NULL)
                 stream->notify = notify_stream_read;
-            static const u32 kAnimLoads[] = {0x801318C0u, 0x80132ED8u, 0x80133028u, 0x80118F9Cu, 0x800C994Cu, 0x801516F4u};
-            for (size_t i = 0; getenv("ED_ANIM_LOG") != NULL && i < 6; i++) {
+            static const u32 kAnimLoads[] = {0x801318C0u, 0x80132ED8u, 0x80133028u, 0x80118F9Cu, 0x800C994Cu, 0x8003121Cu, 0x80117F64u};
+            for (size_t i = 0; getenv("ED_ANIM_LOG") != NULL && i < 7; i++) {
                 HleDispatchEntry* e = hle_dispatch_entry(kAnimLoads[i]);
                 if (e != NULL && e->notify == NULL)
                     e->notify = notify_anim_load;
