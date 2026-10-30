@@ -1129,6 +1129,8 @@ static void hle_DVDFastOpen(CPUState* cpu) {
 // DVDOpen(path, fileInfo). The SDK resolves the entry through the FST in guest
 // memory, which the host never loads (there is no apploader); resolve it from
 // the disc image instead.
+static bool guest_ram_range_valid(const CPUState* cpu, u32 address, u32 size);
+
 static void hle_DVDOpen(CPUState* cpu) {
     char path[256];
     dvd_guest_path(cpu, hle_arg_u32(cpu, 0), path, sizeof path);
@@ -1139,9 +1141,20 @@ static void hle_DVDOpen(CPUState* cpu) {
         hle_set_u32(cpu, 0);
         return;
     }
-    if (g_dvd_log)
-        fprintf(stderr, "[dvd] open '%s' (frame %llu)\n", path,
-                (unsigned long long)(cpu->timebase / 675000ull));
+    if (g_dvd_log) {
+        fprintf(stderr, "[dvd] open '%s' (frame %llu) calls: 0x%08X", path,
+                (unsigned long long)(cpu->timebase / 675000ull), cpu->lr);
+        // Who asked: the return addresses up the stack.
+        u32 sp = cpu->gpr[1];
+        for (int f = 0; f < 10 && guest_ram_range_valid(cpu, sp, 8u); f++) {
+            const u32 caller = mem_read32(cpu, sp);
+            if (caller <= sp || !guest_ram_range_valid(cpu, caller, 8u))
+                break;
+            fprintf(stderr, " 0x%08X", mem_read32(cpu, caller + 4u));
+            sp = caller;
+        }
+        fputc('\n', stderr);
+    }
     skip_intro_note_open(cpu, path);
     const size_t length = strlen(path);
     if (strncmp(path, "/fmv/", 5) == 0 && length > 4u &&
@@ -4690,6 +4703,7 @@ static const HleAddrEntry kNotify[] = {
 #define HLE_DISPATCH_COUNT ((HLE_CODE_LIMIT - HLE_CODE_BASE) / 4u)
 
 static HleDispatchEntry g_hle_dispatch[HLE_DISPATCH_COUNT];
+static unsigned g_script_watch;  // ED_ROOM_LOG: script calls left to list
 
 // Table entries name their function; the address comes from the symbol table
 // built from the user's DOL (tools/symbols.py), so one table serves every build.
@@ -6431,6 +6445,25 @@ static bool continue_pack_load(CPUState* cpu) {
     return true;
 }
 
+// Chapter scripts ask which character an object is (script function
+// 0x8000C724 reads object +580, the character's file number, via 0x80117C64)
+// and take another route when the player is not the chapter's own: Anthony's
+// stairs go to the desk room instead of the tomb. While another character is
+// played, scripts are told the player is the chapter's own.
+#define OBJECT_MODEL 0x80117C64u
+#define SCRIPT_MODEL_CALL 0x8000C7ACu
+
+static void hle_object_model(CPUState* cpu) {
+    const u32 object = cpu->gpr[3];
+    if (cpu->lr == SCRIPT_MODEL_CALL && g_chapter_model >= 0 && player_model() >= 0 &&
+        object == mem_read32(cpu, cpu->gpr[13] - 26524u) && guest_ram_range_valid(cpu, object + 580u, 4u) &&
+        (s32)mem_read32(cpu, object + 580u) == player_model()) {
+        hle_set_u32(cpu, (u32)g_chapter_model);
+        return;
+    }
+    hle_set_u32(cpu, guest_ram_range_valid(cpu, object + 580u, 4u) ? mem_read32(cpu, object + 580u) : 0u);
+}
+
 // An animation another chapter's character does not have. 0x80123224(object,
 // animation, ...) plays one: its resource (animation +184, then +4) names the
 // character file (+280) and offset (+284) to stream it from, as needed
@@ -6462,6 +6495,57 @@ static void hle_play_animation(CPUState* cpu) {
     if (told++ < 8u)
         fprintf(stderr, "[player] an animation the character does not have, passed over (0x%08X)\n", resource);
     g_hle_passthrough = false;
+}
+
+// ED_ROOM_LOG=1 (testing): who asks the room loader (OSSendMessage to its
+// queue, 0x8058AFDC) for a room, or calls the room change (0x80152298),
+// with the return addresses up the stack.
+static void room_log(CPUState* cpu, const char* what) {
+    fprintf(stderr, "[room] %s 0x%08X 0x%08X (frame %llu) calls: 0x%08X", what, cpu->gpr[3], cpu->gpr[4],
+            (unsigned long long)(cpu->timebase / 675000ull), cpu->lr);
+    u32 sp = cpu->gpr[1];
+    for (int f = 0; f < 14 && guest_ram_range_valid(cpu, sp, 8u); f++) {
+        const u32 caller = mem_read32(cpu, sp);
+        if (caller <= sp || !guest_ram_range_valid(cpu, caller, 8u))
+            break;
+        fprintf(stderr, " 0x%08X", mem_read32(cpu, caller + 4u));
+        sp = caller;
+    }
+    fputc('\n', stderr);
+}
+
+static void notify_send_message(CPUState* cpu) {
+    if (cpu->gpr[3] == 0x8058AFDCu)
+        room_log(cpu, "request");
+}
+
+static void notify_room_change(CPUState* cpu) {
+    room_log(cpu, "change");
+}
+
+static void notify_room_ticket(CPUState* cpu) {
+    room_log(cpu, "ticket");
+}
+
+static void notify_script_later(CPUState* cpu) {
+    room_log(cpu, "later");
+}
+
+// While the stairs script runs: each game function it calls (0x8015974C's
+// second argument names it; arguments follow on the script's stack).
+static void notify_script_call(CPUState* cpu) {
+    if (g_script_watch == 0u || !guest_ram_range_valid(cpu, cpu->gpr[4], 16u))
+        return;
+    g_script_watch--;
+    fprintf(stderr, "[script] calls 0x%08X (%d args)\n", mem_read32(cpu, cpu->gpr[4]),
+            (int)(s16)mem_read16(cpu, cpu->gpr[4] + 14u));
+}
+
+static void notify_script_run(CPUState* cpu) {
+    if (cpu->lr == 0x80134B38u) {
+        room_log(cpu, "trigger");
+        g_script_watch = 200u;
+    }
 }
 
 // ED_STREAM_LOG=1 (testing): each streamed read the game asks its reader for
@@ -7354,6 +7438,27 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* play = hle_dispatch_entry(PLAY_ANIMATION);
             if (mem_read32(cpu, PLAY_ANIMATION) == 0x9421FFD0u && play != NULL && play->intercept == NULL)
                 play->intercept = hle_play_animation;
+            HleDispatchEntry* model = hle_dispatch_entry(OBJECT_MODEL);
+            if (mem_read32(cpu, OBJECT_MODEL) == 0x80630244u && model != NULL && model->intercept == NULL)
+                model->intercept = hle_object_model;
+            HleDispatchEntry* send = hle_dispatch_entry(sdk_symbol_address("OSSendMessage"));
+            if (getenv("ED_ROOM_LOG") != NULL && send != NULL && send->notify == NULL)
+                send->notify = notify_send_message;
+            HleDispatchEntry* room = hle_dispatch_entry(0x80152298u);
+            if (getenv("ED_ROOM_LOG") != NULL && room != NULL && room->notify == NULL && room->intercept == NULL)
+                room->notify = notify_room_change;
+            HleDispatchEntry* ticket = hle_dispatch_entry(0x80155770u);
+            if (getenv("ED_ROOM_LOG") != NULL && ticket != NULL && ticket->notify == NULL && ticket->intercept == NULL)
+                ticket->notify = notify_room_ticket;
+            HleDispatchEntry* later = hle_dispatch_entry(0x80163C6Cu);
+            if (getenv("ED_ROOM_LOG") != NULL && later != NULL && later->notify == NULL && later->intercept == NULL)
+                later->notify = notify_script_later;
+            HleDispatchEntry* run = hle_dispatch_entry(0x801642D4u);
+            if (getenv("ED_ROOM_LOG") != NULL && run != NULL && run->notify == NULL && run->intercept == NULL)
+                run->notify = notify_script_run;
+            HleDispatchEntry* call = hle_dispatch_entry(0x8015974Cu);
+            if (getenv("ED_ROOM_LOG") != NULL && call != NULL && call->notify == NULL && call->intercept == NULL)
+                call->notify = notify_script_call;
             HleDispatchEntry* stream = hle_dispatch_entry(0x80154118u);
             if (getenv("ED_STREAM_LOG") != NULL && stream != NULL && stream->notify == NULL)
                 stream->notify = notify_stream_read;
