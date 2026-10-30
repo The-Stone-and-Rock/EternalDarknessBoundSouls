@@ -260,7 +260,8 @@ std::string region_name(const std::string& id) {
 
 // --- Menu model -------------------------------------------------------------
 
-enum class Screen { Launcher, Play, Options, OptionsPage, Controls, Mapping, InGame, Problem, Mods, Characters };
+enum class Screen { Launcher, Play, Options, OptionsPage, Controls, Mapping, InGame, Problem, Mods, ModsPage,
+                    Characters };
 
 struct Row {
     std::string label;
@@ -274,6 +275,7 @@ struct Row {
     std::string section;         // starts a section with this heading
     bool gap = false;            // an ornament before it: a new group
     bool tile = false;           // a character's portrait frame (Character select)
+    bool big = false;            // larger than the rows round it (the main menu's Start game)
     bool chosen = false;         // the choice in force (Character select)
     int page = 0;                // 1: the right-hand page of a spread
 };
@@ -434,6 +436,9 @@ void start_game(int slot) {
 // The Mods page: from the launcher, the in-game menu and Options, back to the
 // one it came from. Options keeps its own way back (g_options_return).
 Screen g_mods_return = Screen::Launcher;
+int g_mods_section = 1;  // the Mods page open: 1 Co-op, 2 Challenge, 3 Characters
+int g_mods_row = 0;      // the Mods row to come back to
+int section_number(const std::string& heading);
 int g_options_row = 0;  // the Options row to come back to (its pages, Controls, Mods)
 // Controls: player 1's from Options, player 2's from Mods (co-op), and back.
 Screen g_controls_return = Screen::Options;
@@ -490,7 +495,7 @@ const CharacterInfo kCharacterInfo[13] = {
     {"1760 A.D.", "Maximillian Roivas, who uncovers a horror beneath the family mansion in Rhode Island.", 125, 100, 125},
     {"1983 A.D.", "Dr. Edwin Lindsey, an archaeologist exploring the ruins of Angkor Thom.", 125, 100, 125},
     {"1485 A.D.", "Paul Luther, a Franciscan monk on pilgrimage to a cathedral in France.", 75, 125, 100},
-    {"1460 A.D.", "Roberto Bianchi, a Venetian architect held prisoner in Cambodia.", 125, 75, 100},
+    {"1460 A.D.", "Roberto Bianchi, a Venetian architect held prisoner in the Forbidden City of Persia.", 125, 75, 100},
     {"1916 A.D.", "Peter Jacob, a journalist on the Western Front of the First World War.", 100, 125, 75},
     {"1952 A.D.", "Edward Roivas, a clinical psychologist and Alex's grandfather, who studies the Tome in the family "
                   "mansion.", 75, 125, 125},
@@ -709,7 +714,7 @@ void build_characters() {
     ensure_portraits();
     auto leave = [] {
         settings_save();
-        g_screen = Screen::Mods;
+        g_screen = Screen::ModsPage;
         g_selected = g_characters_return_row;
     };
     for (int i = 1; i <= kRosterCount; i++) {
@@ -779,7 +784,7 @@ void move_in_roster(int dx, int dy) {
     }
 }
 
-void build_mods() {
+void build_mods_rows() {
     // Every mod is still being made: each note says so, until it works.
     auto note = [](const std::string& text) { return text + " In development: no effect yet."; };
     Row coop{"Split-screen co-op", on_off(g_settings.mod_coop)};
@@ -805,10 +810,10 @@ void build_mods() {
 
     Row p2_controls{"Player 2 controls"};
     p2_controls.note = "Player 2's controller or keys, their button layout and their button mapping.";
-    p2_controls.activate = [at = static_cast<int>(g_rows.size())] {
+    p2_controls.activate = [] {
         controls::set_menu_player(1);
-        g_controls_return = Screen::Mods;
-        g_controls_return_row = at;
+        g_controls_return = Screen::ModsPage;
+        g_controls_return_row = g_selected;
         g_screen = Screen::Controls;
         g_selected = 0;
     };
@@ -874,9 +879,9 @@ void build_mods() {
             r.note = chosen == 0 ? "Each chapter's own character, as the game tells it."
                                  : "Every chapter played as " + std::string(kCharacters[chosen]) +
                                        ", from the next chapter or save you load (with the chapter's weapons).";
-        r.activate = [player, at = static_cast<int>(g_rows.size())] {
+        r.activate = [player] {
             g_characters_player = player;
-            g_characters_return_row = at;
+            g_characters_return_row = g_selected;
             g_screen = Screen::Characters;
             g_selected = chosen_character() == 0 ? kRosterVanillaRow : chosen_character() - 1;
         };
@@ -898,6 +903,66 @@ void build_mods() {
     g_rows.push_back(back);
 }
 
+// Mods: its sections, each a page of its own, then Back.
+void build_mods() {
+    auto page = [](const char* label, int section, const char* note) {
+        Row r{label};
+        r.note = note;
+        r.activate = [section] {
+            g_mods_section = section;
+            g_mods_row = g_selected;
+            g_screen = Screen::ModsPage;
+            g_selected = 0;
+        };
+        return r;
+    };
+    g_rows.push_back(page("Co-op", 1, "Split-screen for two: the split, player 2's controls and each player's camera."));
+    g_rows.push_back(page("Challenge", 2, "Creatures and sanity effects."));
+    g_rows.push_back(page("Characters", 3, "Each player's character, with their stats."));
+    Row back{"Back"};
+    back.gap = true;
+    back.activate = [] {
+        settings_save();
+        g_screen = g_mods_return;
+        g_selected = g_mods_return == Screen::Options ? g_options_row : 0;
+    };
+    g_rows.push_back(back);
+}
+
+// One Mods section's rows, from the full list (build_mods_rows), on one page.
+void build_mods_page() {
+    std::vector<Row> all;
+    std::swap(all, g_rows);
+    build_mods_rows();
+    std::swap(all, g_rows);
+    int section = 0;
+    for (Row& r : all) {
+        if (!r.section.empty())
+            section = section_number(r.section);
+        if (section != g_mods_section || r.label == "Back")
+            continue;
+        r.section.clear();
+        r.page = 0;
+        g_rows.push_back(r);
+    }
+    Row back{"Back"};
+    back.gap = true;
+    back.activate = [] {
+        settings_save();
+        g_screen = Screen::Mods;
+        g_selected = g_mods_row;
+    };
+    g_rows.push_back(back);
+}
+
+const char* mods_page_name() {
+    switch (g_mods_section) {
+    case 1: return "Co-op";
+    case 2: return "Challenge";
+    default: return "Characters";
+    }
+}
+
 void build_launcher() {
     if (g_disc_on_main)
         g_rows.push_back(disc_row());
@@ -912,6 +977,7 @@ void build_launcher() {
     }
 
     Row fresh{"Start game"};
+    fresh.big = true;
     fresh.enabled = disc_playable();
     fresh.note = "Start from the title screen (your memory card saves are there).";
     fresh.activate = [] { start_game(0); };
@@ -1748,6 +1814,7 @@ void render() {
                                                                 ? "Player 2 Mapping"
                                                                 : "Button Mapping")
                           : g_screen == Screen::Mods     ? "Mods"
+                          : g_screen == Screen::ModsPage ? mods_page_name()
                           : g_screen == Screen::Characters ? (g_characters_player == 1 ? "Player 2 Character"
                                                                                        : "Player 1 Character")
                           : g_screen == Screen::Problem  ? g_problem_heading.c_str()
@@ -1786,6 +1853,8 @@ void render() {
             out += " disabled";
         if (r.chosen)
             out += " chosen";
+        if (r.big)
+            out += " big";
         out += "\" id=\"row" + std::to_string(i) +
                "\"><img class=\"mark\" src=\"tome/mark.png\"/><span class=\"label\">" +
                escape(r.label) + "</span>";
@@ -1822,7 +1891,7 @@ void render() {
     // Over the game the page lies on the dimmed, paused frame.
     g_doc->SetClass("overlay", g_screen == Screen::InGame || g_screen == Screen::Problem ||
                                    ((g_screen == Screen::Options || g_screen == Screen::OptionsPage ||
-                                     g_screen == Screen::Mods ||
+                                     g_screen == Screen::Mods || g_screen == Screen::ModsPage ||
                                      g_screen == Screen::Characters ||
                                      g_screen == Screen::Controls ||
                                      g_screen == Screen::Mapping) &&
@@ -1841,6 +1910,7 @@ void build_rows() {
     case Screen::InGame: build_in_game(); break;
     case Screen::Problem: build_problem(); break;
     case Screen::Mods: build_mods(); break;
+    case Screen::ModsPage: build_mods_page(); break;
     case Screen::Characters: build_characters(); break;
     }
     if (g_selected >= static_cast<int>(g_rows.size()))
@@ -1901,8 +1971,13 @@ void go_back() {
         break;
     case Screen::Characters:
         settings_save();
-        g_screen = Screen::Mods;
+        g_screen = Screen::ModsPage;
         g_selected = g_characters_return_row;
+        break;
+    case Screen::ModsPage:
+        settings_save();
+        g_screen = Screen::Mods;
+        g_selected = g_mods_row;
         break;
     case Screen::InGame:
         g_close = true;

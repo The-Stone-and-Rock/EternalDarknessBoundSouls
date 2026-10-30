@@ -386,3 +386,18 @@ body.roster .row {
 	font-size: 19dp;
 	color: #5a3a20;
 }
+
+/* The main menu: its rows centred, Start game larger. */
+body.branded .row {
+	justify-content: center;
+}
+
+body.branded .row .leader {
+	flex: 0;
+	width: 16dp;
+}
+
+body.branded .row.big {
+	font-size: 34dp;
+	padding: 6dp 2dp;
+}
