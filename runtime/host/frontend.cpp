@@ -523,9 +523,24 @@ void build_mods() {
     insanity.change = [](int dir) { cycle(g_settings.mod_insanity, 3, dir); };
     g_rows.push_back(insanity);
 
+    // Player 1's character (hle.c player_model): any of the twelve, in any
+    // chapter, in their own body.
+    static const char* const kCharacters[] = {"Chapter's own", "Pius", "Ellia", "Anthony", "Karim",
+                                              "Max", "Lindsey", "Paul", "Roberto", "Peter",
+                                              "Edward", "Michael", "Alex"};
+    Row p1_character{"Player 1 character", kCharacters[g_settings.mod_p1_character]};
+    p1_character.section = "III · Characters";
+    p1_character.page = 1;
+    p1_character.note = g_settings.mod_p1_character == 0
+                            ? "Each chapter's own character, as the game tells it."
+                            : "Every chapter is played as " + std::string(kCharacters[g_settings.mod_p1_character]) +
+                                  ", in their own body, from the next chapter or save you load. They keep the "
+                                  "chapter's weapons for now.";
+    p1_character.change = [](int dir) { cycle(g_settings.mod_p1_character, 13, dir); };
+    g_rows.push_back(p1_character);
+
     static const char* const kStats[] = {"Character's own", "Custom"};
     Row stats{"Stats", kStats[g_settings.mod_stats]};
-    stats.section = "III · Characters";
     stats.page = 1;
     stats.note = note(g_settings.mod_stats == 0
                           ? "Each player has the health, magick and sanity of the character they play as."

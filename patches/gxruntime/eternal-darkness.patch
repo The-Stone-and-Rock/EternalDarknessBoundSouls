@@ -15776,19 +15776,19 @@ index 2c0e5ff..be88d3e 100644
      if (ax != NULL)
          ax->log = enabled;
 diff --git a/src/core/cpu.c b/src/core/cpu.c
-index 2f13110..412bcf8 100644
+index 2f13110..54bceda 100644
 --- a/src/core/cpu.c
 +++ b/src/core/cpu.c
 @@ -17,6 +17,12 @@ bool cpu_init(CPUState* cpu) {
      memset(cpu, 0, sizeof(*cpu));
  
      cpu->ram_size = GC_MAIN_RAM_SIZE;
-+    // GXRuntime recomp patch: ED_EXTRA_RAM=1 (Eternal Darkness mods) gives
-+    // the host 8 MB more past the game's 24 MB, as scratch the game is never
-+    // told of (its OS sees 24 MB): a character from another chapter is
-+    // unpacked there. The generated code's fast path stays at 24 MB.
-+    if (getenv("ED_EXTRA_RAM") != NULL)
-+        cpu->ram_size += 8u * 1024u * 1024u;
++    // GXRuntime recomp patch (Eternal Darkness mods): 8 MB more past the
++    // game's 24 MB, as scratch the game is never told of (its OS sees 24 MB):
++    // a character from another chapter is unpacked there. The generated
++    // code's fast path stays at 24 MB. (A quick state from before, of 24 MB,
++    // is refused: its MEM1 is another size.)
++    cpu->ram_size += 8u * 1024u * 1024u;
      cpu->ram = (u8*)calloc(1, cpu->ram_size);
      if (!cpu->ram) {
          fprintf(stderr, "error: failed to allocate %u bytes for RAM\n", cpu->ram_size);

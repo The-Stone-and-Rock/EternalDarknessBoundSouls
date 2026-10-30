@@ -6235,18 +6235,33 @@ static void coop_park(CPUState* cpu, u32 player, bool park) {
     fprintf(stderr, "[coop] player 2 %s\n", park ? "put out of the way (co-op is off)" : "back beside player 1");
 }
 
-// ED_PLAYER_MODEL=n (testing): the chapter's playable character is n. The
-// chapter loads its one (0x80132ED8(model), as it starts) and makes the player
-// from a spawn record (COOP_SPAWN_CREATE: model at +20); both are given n.
-static int g_player_model = -2;  // -2 not read, -1 the chapter's own
-static int g_chapter_model = -1; // the playable the chapter asked for
+// Player 1's character (Mods, Player 1 character; ED_PLAYER_MODEL=n for
+// testing): the chapter's playable character is theirs. The chapter loads its
+// one (0x80132ED8(model), as it starts) and makes the player from a spawn
+// record (COOP_SPAWN_CREATE: type at +16, model at +20); both are theirs.
+// The twelve, in Jump to Game's order: their character file (the model) and
+// their kind (the type).
+static const s16 kPlayerModel[12] = {0, 70, 85, 150, 18, 73, 74, 76, 69, 75, 81, 9};
+static const s16 kPlayerType[12] = {1, 49, 46, 27, 44, 55, 47, 54, 45, 53, 48, 26};
+static int g_chapter_model = -1;  // the playable the chapter asked for
 
 static int player_model(void) {
-    if (g_player_model == -2) {
+    static int test = -2;
+    if (test == -2) {
         const char* m = getenv("ED_PLAYER_MODEL");
-        g_player_model = m != NULL ? atoi(m) : -1;
+        test = m != NULL ? atoi(m) : -1;
     }
-    return g_player_model;
+    if (test >= 0)
+        return test;
+    const int choice = g_settings.mod_p1_character;
+    return choice >= 1 && choice <= 12 ? kPlayerModel[choice - 1] : -1;
+}
+
+static int player_type(int model) {
+    for (int i = 0; i < 12; i++)
+        if (kPlayerModel[i] == model)
+            return kPlayerType[i];
+    return -1;
 }
 
 // The chapter's playable character: 0x80007C8C(chapter) answers from a table
@@ -6287,10 +6302,12 @@ static void hle_chapter_body(CPUState* cpu) {
 // The chapter's level memory: a bump allocator, its base at r13 - 23736 and
 // what is used at r13 - 23656, 0x3D3100 bytes. Their chapter's level data
 // (3.6 MB unpacked for Roberto's) is loaded into the host's scratch past the
-// game's 24 MB (ED_EXTRA_RAM) instead, and only the body copied into it.
+// game's 24 MB instead, and the body kept there too (SCRATCH_BODY).
 #define LEVEL_HEAP_BASE 23736u
 #define LEVEL_HEAP_USED 23656u
 #define SCRATCH_RAM 0x81800000u
+#define SCRATCH_BODY 0x81C00000u  // past the most level data unpacks to (0x3D3100 bytes)
+#define SCRATCH_BODY_SIZE 0x400000u
 static struct {
     int stage;  // 0 none, 1 the chapter's own loading, 2 the character's
     u32 caller, pack;
@@ -6337,7 +6354,7 @@ static bool continue_pack_load(CPUState* cpu) {
             for (size_t i = 0; i <= strlen(name); i++)
                 mem_write8(cpu, at + (u32)i, (u8)name[i]);
             if (cpu->ram_size < SCRATCH_RAM - GC_RAM_BASE + 0x3D3100u) {
-                fprintf(stderr, "[player] no scratch for their chapter's data (ED_EXTRA_RAM): %d keeps the chapter's body\n",
+                fprintf(stderr, "[player] no scratch for their chapter's data: %d keeps the chapter's body\n",
                         player_model());
                 cpu->gpr[3] = g_pack.pack;
                 cpu->lr = cpu->pc = g_pack.caller;
@@ -6369,19 +6386,20 @@ static bool continue_pack_load(CPUState* cpu) {
         const u32 want = (u32)player_model();
         const u32 body = theirs != 0u && mem_read32(cpu, theirs) > want ? mem_read32(cpu, theirs + 8u + want * 8u) : 0u;
         if (own != 0u && body != 0u && mem_read32(cpu, own) > want) {
-            // The body copied into the chapter's level memory; the scratch is
-            // given up.
+            // The body kept in the host's scratch too, above where their level
+            // data unpacks (SCRATCH_BODY): the chapter's level memory stays
+            // all its own (Karim's chapter, with Michael's body in it, ran out
+            // as its rooms loaded).
             const u32 size = mem_read32(cpu, theirs + 12u + want * 8u);
-            const u32 kept = g_pack.base + g_pack.used;
-            if (size != 0u && g_pack.used + size <= 0x3D3100u && guest_ram_range_valid(cpu, body, size) &&
+            const u32 kept = SCRATCH_BODY;
+            if (size != 0u && size <= SCRATCH_BODY_SIZE && guest_ram_range_valid(cpu, body, size) &&
                 guest_ram_range_valid(cpu, kept, size)) {
-                memcpy(cpu->ram + (kept - GC_RAM_BASE), cpu->ram + (body - GC_RAM_BASE), size);
-                g_pack.used += (size + 31u) & ~31u;
+                memmove(cpu->ram + (kept - GC_RAM_BASE), cpu->ram + (body - GC_RAM_BASE), size);
                 mem_write32(cpu, own + 8u + want * 8u, kept - own);
                 mem_write32(cpu, own + 12u + want * 8u, size);
             }
-            fprintf(stderr, "[player] %u's body from their chapter's level data (%u bytes kept at 0x%08X; level memory %u of %u used)\n",
-                    want, size, kept, g_pack.used, 0x3D3100u);
+            fprintf(stderr, "[player] %u's body from their chapter's level data (%u bytes kept at 0x%08X)\n", want,
+                    size, kept);
         } else {
             fprintf(stderr, "[player] no body for %u in their chapter's pack\n", want);
         }
@@ -6403,13 +6421,13 @@ static void hle_chapter_character(CPUState* cpu) {
     const int own = chapter < 17u ? kModel[chapter] : 9;
     const int want = player_model();
     g_chapter_model = own;
-    if (want != own) {
+    if (want >= 0 && want != own) {
         static int told = -1;
         if (told != (int)chapter)
             fprintf(stderr, "[player] chapter %u's character %d played as %d\n", chapter, own, want);
         told = (int)chapter;
     }
-    hle_set_u32(cpu, (u32)want);
+    hle_set_u32(cpu, (u32)(want >= 0 ? want : own));
 }
 
 static void hle_spawn_create(CPUState* cpu) {
@@ -6432,9 +6450,10 @@ static void hle_spawn_create(CPUState* cpu) {
             fprintf(stderr, "[player] body of %d filed under %d (0x%08X)\n", g_chapter_model, want,
                     mem_read32(cpu, list + 8u + (u32)want * 8u));
         }
-        const char* type = getenv("ED_PLAYER_TYPE");  // the character's kind (Alex 26, Roberto 54)
-        if (type != NULL)
-            mem_write32(cpu, rec + 16u, (u32)atoi(type));
+        const char* type = getenv("ED_PLAYER_TYPE");  // testing: another kind
+        const int kind = type != NULL ? atoi(type) : player_type(want);
+        if (kind >= 0)
+            mem_write32(cpu, rec + 16u, (u32)kind);
         fprintf(stderr, "[player] made as %d (the chapter's %d)\n", want, g_chapter_model);
     }
     g_hle_passthrough = true;
@@ -7232,7 +7251,7 @@ static void find_coop(CPUState* cpu) {
     }
     // The copy of a position (lwz r5,0(r4); lwz r0,4(r4); stw r5,0(r3)), and
     // the share's call of it (bl at 0x8011CB70).
-    if (player_model() >= 0) {
+    {
         HleDispatchEntry* chapter = hle_dispatch_entry(CHAPTER_CHARACTER);
         HleDispatchEntry* create = hle_dispatch_entry(COOP_SPAWN_CREATE);
         if (mem_read32(cpu, CHAPTER_CHARACTER) == 0x28030010u && chapter != NULL && chapter->intercept == NULL &&

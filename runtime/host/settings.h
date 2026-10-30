@@ -58,6 +58,7 @@ typedef struct {
     int mod_sanity;
     int mod_enemies;      // 0 vanilla, 1 enhanced (harder hits, more creatures)
     int mod_insanity;     // sanity effects: 0 the game's own, 1 more often, 2 off
+    int mod_p1_character; // player 1's character: 0 the chapter's own, 1-12 Pius .. Alex (Jump to Game order)
     char controls_custom[512];  // custom bindings (controls.cpp format)
     char disc[1024];      // last disc image chosen in the launcher
 } Settings;
