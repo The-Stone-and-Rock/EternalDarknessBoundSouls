@@ -6407,95 +6407,164 @@ static struct {
 } g_pack;
 
 // Player 2's moves, as another character. A playable's moves come in parts
-// streamed from their file (0x80132970): the file's first 1 KB lists them
-// (+16 how many, +20 where: 16 bytes each, +0 offset, +4 size, +8 the id). A
-// part read is made ready by 0x8011E89C(part, 0), its sets listed after it
-// by 0x8012484C(part, sets) (16 bytes each: the animation's id, its
-// resource, the part, flags), and 0x80133310(object, part, table, sets, 170)
-// gives an object the table of sets by id (+648) it plays from. There is one
-// table, from player 1's file, and player 2 (of the chapter's kind too) was
-// given it: their character's own part is read again from their file into
-// the scratch, with a table of its own. Their kind stays the chapter's, as
-// the story's checks want.
-#define MOVES_PUT 0x80133310u
+// (the base moves, a weapon's, ...) streamed from their file: 0x80132970
+// (object, part) asks for one, into one of two slots kept for the one
+// player (0x80582000, +696 each: the id, +764 the part made ready, 80 bytes
+// each), and once it is in, gives the object the table of the part's sets
+// by id it plays from (0x80133310: +644 the part, +648 the table, +652 the
+// sets, +726 how many). The file's first 1 KB lists the parts (+16 how
+// many, +20 where: 16 bytes each, +0 offset, +4 size, +8 the id); a part
+// read is made ready by 0x8011E89C(part, 0) and its sets listed after it by
+// 0x8012484C(part, sets) (16 bytes each: the animation's id, its resource,
+// the part, flags). Player 2 asking too took player 1's slots from them
+// (player 1 twisted when player 2 took a sword) and got player 1's moves:
+// their asks are answered here instead, from their own character's file,
+// into two slots of their own in the scratch. Their kind stays the
+// chapter's, as the story's checks want.
+#define MOVES_WANT 0x80132970u
 #define MOVES_READY 0x8011E89Cu
 #define MOVES_SETS 0x8012484Cu
-#define MOVES_STREAM 0x80582000u  // the two parts' slots: +696 the id, +764 the part, 80 bytes each
-#define P2_MOVES_TABLE SCRATCH_RAM  // 170 sets; the scratch is the other chapters' only while one loads
-#define P2_MOVES_PART (SCRATCH_RAM + 0x400u)
+#define MOVES_ENTRY 0x8012E414u  // a resource's streamed animation (cache entry), or 0
+#define MOVES_FREE 0x8012E9ACu
+#define P2_MOVES_SLOT 0x200000u  // each: the table (170 sets), then the part from +0x400
 static struct {
-    int model, part;  // what is in the scratch, -1 nothing
+    int model, part;  // what is in the slot, -1 nothing
     u32 ready, sets;
-} g_p2_moves = {-1, -1, 0u, 0u};
+} g_p2_moves[2] = {{-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}};
 
-static bool p2_moves_load(CPUState* cpu, int model, int part) {
+// A part's place in a file's list (16 bytes each, the id at +8), or -1.
+static int moves_listed(CPUState* cpu, u32 list, u32 count, int part) {
+    for (u32 i = 0; i < count && i < 64u; i++)
+        if (mem_read16(cpu, list + i * 16u + 8u) == (u32)part)
+            return (int)i;
+    return -1;
+}
+
+// Parts come in sevens, one seven to a kind of weapon. Each character's
+// file has only the kinds they hold in their own chapter (Pius's and Alex's
+// none of Anthony's sword's): another's weapon in their hands asked for a
+// part their file has not, and the moves twisted. Theirs of the same place
+// in the sword's seven (14), else the bare hands' (0), is played instead.
+static int moves_part(CPUState* cpu, u32 list, u32 count, int part) {
+    static const int kInstead[2] = {14, 0};
+    for (int i = 0; i < 2 && moves_listed(cpu, list, count, part) < 0; i++)
+        if (moves_listed(cpu, list, count, kInstead[i] + part % 7) >= 0)
+            part = kInstead[i] + part % 7;
+    return part;
+}
+
+static void p2_moves_clear(void) {
+    for (int k = 0; k < 2; k++)
+        g_p2_moves[k].model = g_p2_moves[k].part = -1;
+}
+
+static bool p2_moves_load(CPUState* cpu, int k, int model, int part) {
+    const u32 table = SCRATCH_RAM + (u32)k * P2_MOVES_SLOT;
+    const u32 at = table + 0x400u;
+    const u32 end = table + P2_MOVES_SLOT;
+    // What was in it lets go of its animations first.
+    if (g_p2_moves[k].model >= 0) {
+        const u32 n = mem_read16(cpu, g_p2_moves[k].ready + 20u);
+        for (u32 i = 0; i < n; i++) {
+            const u32 resource = mem_read32(cpu, g_p2_moves[k].sets + i * 16u + 4u);
+            u32 entry = 0u, ignore = 0u;
+            if (hle_guest_call(cpu, MOVES_ENTRY, &resource, 1, 0.0, &entry) && entry != 0u) {
+                mem_write8(cpu, entry + 22u, 0u);
+                hle_guest_call(cpu, MOVES_FREE, &entry, 1, 0.0, &ignore);
+            }
+        }
+        g_p2_moves[k].model = g_p2_moves[k].part = -1;
+    }
     char path[32];
     snprintf(path, sizeof path, "/Chars/char%04d.cpk", model);
-    const s32 entry = dvd_path_to_entrynum(path);
+    const s32 file = dvd_path_to_entrynum(path);
     u32 start = 0u, length = 0u;
-    if (entry < 0 || !dvd_entry_info(entry, &start, &length) || length < 1024u) {
+    if (file < 0 || !dvd_entry_info(file, &start, &length) || length < 1024u) {
         fprintf(stderr, "[coop] player 2's moves: no %s\n", path);
         return false;
     }
     // The list, then the part over it.
-    dvd_read_to_guest(cpu, P2_MOVES_PART, start, 1024u);
-    const u32 count = mem_read32(cpu, P2_MOVES_PART + 16u);
-    const u32 list = mem_read32(cpu, P2_MOVES_PART + 20u);
+    dvd_read_to_guest(cpu, at, start, 1024u);
+    const u32 count = mem_read32(cpu, at + 16u);
+    const u32 list = mem_read32(cpu, at + 20u);
     u32 offset = 0u, size = 0u;
-    for (u32 i = 0; i < count && list + i * 16u + 16u <= 1024u; i++)
-        if (mem_read16(cpu, P2_MOVES_PART + list + i * 16u + 8u) == (u32)part) {
-            offset = mem_read32(cpu, P2_MOVES_PART + list + i * 16u);
-            size = mem_read32(cpu, P2_MOVES_PART + list + i * 16u + 4u);
-        }
-    const u32 sets = (P2_MOVES_PART + size + 31u) & ~31u;
-    if (size == 0u || offset + size > length || sets + 0x2000u > SCRATCH_BODY) {
+    const u32 listed = count <= 64u && list + count * 16u <= 1024u ? count : 0u;
+    const int i = moves_listed(cpu, at + list, listed, moves_part(cpu, at + list, listed, part));
+    if (i >= 0) {
+        offset = mem_read32(cpu, at + list + (u32)i * 16u);
+        size = mem_read32(cpu, at + list + (u32)i * 16u + 4u);
+    }
+    const u32 sets = (at + size + 31u) & ~31u;
+    if (size == 0u || offset + size > length || sets + 0x2000u > end) {
         fprintf(stderr, "[coop] player 2's moves: no part %d in %s\n", part, path);
         return false;
     }
-    dvd_read_to_guest(cpu, P2_MOVES_PART, start + offset, size);
-    const u32 ready_args[2] = {P2_MOVES_PART, 0u};
+    dvd_read_to_guest(cpu, at, start + offset, size);
+    const u32 ready_args[2] = {at, 0u};
     u32 ready = 0u, ignore = 0u;
     if (!hle_guest_call(cpu, MOVES_READY, ready_args, 2, 0.0, &ready) || ready == 0u)
         return false;
     const u32 sets_args[2] = {ready, sets};
     hle_guest_call(cpu, MOVES_SETS, sets_args, 2, 0.0, &ignore);
     for (u32 i = 0; i < 170u; i++)
-        mem_write32(cpu, P2_MOVES_TABLE + i * 4u, 0u);
+        mem_write32(cpu, table + i * 4u, 0u);
     const u32 n = mem_read16(cpu, ready + 20u);
-    for (u32 i = 0; i < n && sets + i * 16u + 16u <= SCRATCH_BODY; i++) {
+    for (u32 i = 0; i < n && sets + i * 16u + 16u <= end; i++) {
         const u32 id = mem_read32(cpu, sets + i * 16u);
         if (id < 170u)
-            mem_write32(cpu, P2_MOVES_TABLE + id * 4u, sets + i * 16u);
+            mem_write32(cpu, table + id * 4u, sets + i * 16u);
     }
-    g_p2_moves.model = model;
-    g_p2_moves.part = part;
-    g_p2_moves.ready = ready;
-    g_p2_moves.sets = sets;
+    g_p2_moves[k].model = model;
+    g_p2_moves[k].part = part;
+    g_p2_moves[k].ready = ready;
+    g_p2_moves[k].sets = sets;
     fprintf(stderr, "[coop] player 2's moves: part %d of %s (%u bytes, %u sets)\n", part, path, size, n);
     return true;
 }
 
-static void hle_moves_put(CPUState* cpu) {
+static void hle_moves_want(CPUState* cpu) {
     g_hle_passthrough = true;
     const u32 object = cpu->gpr[3];
-    if (!guest_ram_range_valid(cpu, object + 580u, 4u) || cpu->ram_size < SCRATCH_BODY - GC_RAM_BASE)
+    const int part = (s32)cpu->gpr[4];
+    if (part < 0 || !guest_ram_range_valid(cpu, object + 580u, 4u) || cpu->ram_size < SCRATCH_BODY - GC_RAM_BASE)
         return;
-    // Someone playing a playable's moves who is not the one whose file they
-    // are from: player 2 as another character.
+    // Player 2, or anyone else playing a playable's moves who is not the one
+    // whose file they are from.
     const int model = (s32)mem_read32(cpu, object + 580u);
-    if (!coop_playable(model) || model == (s16)mem_read16(cpu, COOP_PLAYABLE_SLOT + 4u))
+    const bool p2 = g_coop_p2 != 0u && mem_read32(cpu, g_coop_p2 + 52u) == object;
+    if (!coop_playable(model))
         return;
-    int part = -1;
-    for (u32 k = 0; k < 2u; k++)
-        if (mem_read32(cpu, MOVES_STREAM + 764u + k * 80u) == cpu->gpr[4])
-            part = (s32)mem_read32(cpu, MOVES_STREAM + 696u + k * 80u);
-    if (part < 0)
+    if (!p2 && model == (s16)mem_read16(cpu, COOP_PLAYABLE_SLOT + 4u)) {
+        // Player 1, from the playable's file (its list kept at 0x80582360).
+        const u32 header = 0x80582360u;
+        const u32 list = mem_read32(cpu, header + 20u);
+        const u32 count = mem_read32(cpu, header + 16u);
+        if (guest_ram_range_valid(cpu, list, 16u) && count != 0u && count <= 64u)
+            cpu->gpr[4] = (u32)moves_part(cpu, list, count, part);
+        if ((int)cpu->gpr[4] != part) {
+            static int told = -1;
+            if (told != part)
+                fprintf(stderr, "[player] moves part %d not in %d's file: %d instead\n", part, model, (int)cpu->gpr[4]);
+            told = part;
+        }
         return;
-    if ((g_p2_moves.model != model || g_p2_moves.part != part) && !p2_moves_load(cpu, model, part))
-        return;
-    cpu->gpr[4] = g_p2_moves.ready;
-    cpu->gpr[5] = P2_MOVES_TABLE;
-    cpu->gpr[6] = g_p2_moves.sets;
+    }
+    int k = -1;
+    for (int i = 0; i < 2 && k < 0; i++)
+        if (g_p2_moves[i].model == model && g_p2_moves[i].part == part)
+            k = i;
+    if (k < 0) {
+        // Into the slot they are not playing from.
+        k = mem_read32(cpu, object + 648u) == SCRATCH_RAM ? 1 : 0;
+        if (!p2_moves_load(cpu, k, model, part))
+            return;
+    }
+    mem_write32(cpu, object + 644u, g_p2_moves[k].ready);
+    mem_write32(cpu, object + 648u, SCRATCH_RAM + (u32)k * P2_MOVES_SLOT);
+    mem_write32(cpu, object + 652u, g_p2_moves[k].sets);
+    mem_write16(cpu, object + 726u, 170u);
+    g_hle_passthrough = false;
+    hle_set_u32(cpu, 1u);
 }
 
 // A loaded pack holds offsets: 0x801DCDD8(pack) makes the top level's
@@ -6566,7 +6635,7 @@ static bool start_borrow(CPUState* cpu, int model, u32 kept) {
     mem_write32(cpu, cpu->gpr[13] - LEVEL_HEAP_BASE, SCRATCH_RAM);
     mem_write32(cpu, cpu->gpr[13] - LEVEL_HEAP_USED, 0u);
     g_pack.stage = 2;
-    g_p2_moves.model = -1;  // player 2's moves, in the same scratch
+    p2_moves_clear();  // player 2's moves, in the same scratch
     g_pack.model = model;
     g_pack.kept = kept;
     cpu->gpr[3] = at;
@@ -6774,7 +6843,8 @@ static void notify_stream_read(CPUState* cpu) {
 
 // ED_ANIM_LOG=1 (testing): the loads that build characters' animation
 // tables: a character's file (0x801318C0(model, flag)), a playable's
-// (0x80132ED8(model)) and each table of a file (0x80133028).
+// (0x80132ED8(model)), each table of a file (0x80133028), and an object's
+// holder set (0x80118F9C(object, holder)).
 static void notify_anim_load(CPUState* cpu) {
     static unsigned shown;
     if (shown++ < 80u)
@@ -7423,12 +7493,99 @@ static void coop_door_proxy(CPUState* cpu) {
 #define COOP_START_WAIT 30u      // pad reads for the Tome to open after player 2's Start
 void aurora_split_menu(int player, int layout);
 
+// ED_COOP_SNAP_DIR=dir (testing): memory as player 2's Tome opens and as
+// play goes on again (snapN.ram, the first 24 MB).
+static void coop_snapshot(CPUState* cpu) {
+    static int n;
+    const char* dir = getenv("ED_COOP_SNAP_DIR");
+    if (dir == NULL || n >= 8)
+        return;
+    char path[512];
+    snprintf(path, sizeof path, "%s/snap%d.ram", dir, n++);
+    FILE* f = fopen(path, "wb");
+    if (f != NULL) {
+        fwrite(cpu->ram, 1, 24u * 1024u * 1024u, f);
+        fclose(f);
+        fprintf(stderr, "[coop] memory written to %s\n", path);
+    }
+}
+
+// What each character holds is kept by their id (node +16) in a table of
+// 20 (0x80588DF0, 408 bytes each: +0 the id, +4 what is held, 12 bytes each,
+// +388 how many, +392/+396 the hands, +400/+404 what holding and letting go
+// call: 0x800C994C puts the weapon in the hand of the one whose id it is).
+// 0x80151500(id, make) finds one; the player's is made with play, and player
+// 2 had none: what the Tome equipped for them went nowhere. Theirs is made
+// as player 1's is.
+#define EQUIP_FIND 0x80151500u
+#define EQUIP_SET_UP 0x80151634u
+
+static void coop_equip_record(CPUState* cpu) {
+    const u32 player = coop_player(cpu);
+    if (player == 0u || g_coop_p2 == 0u)
+        return;
+    u32 p1 = 0u, own = 0u, ignore = 0u;
+    const u32 find1[2] = {mem_read32(cpu, player + 16u), 0u};
+    const u32 find2[2] = {mem_read32(cpu, g_coop_p2 + 16u), 0u};
+    if (!hle_guest_call(cpu, EQUIP_FIND, find1, 2, 0.0, &p1) || p1 == 0u ||
+        !hle_guest_call(cpu, EQUIP_FIND, find2, 2, 0.0, &own) || own != 0u)
+        return;
+    const u32 make[2] = {find2[0], 1u};
+    if (!hle_guest_call(cpu, EQUIP_FIND, make, 2, 0.0, &own) || own == 0u)
+        return;
+    const u32 set_up[4] = {own, mem_read32(cpu, p1 + 392u), mem_read32(cpu, p1 + 400u), mem_read32(cpu, p1 + 404u)};
+    hle_guest_call(cpu, EQUIP_SET_UP, set_up, 4, 0.0, &ignore);
+    fprintf(stderr, "[coop] player 2's own equipment (id %u) at 0x%08X\n", find2[0], own);
+}
+
+// While player 2 has the Tome it works for them: the player's object and id
+// (r13 - 26524, r13 - 21496) are theirs, so what they equip goes in their
+// own equipment (coop_equip_record) and their hand. The player's node (r13 -
+// 21492) stays player 1's: the Tome lists what that node carries, and both
+// players have the same things. The game finds the one an id names by
+// 0x801F5F88(id), which answers the player's node for the player's id: in
+// the equipping and letting go (0x800C994C, 0x800C9DD4), whose hand the
+// weapon is in, player 2's id is answered with their node meanwhile
+// (hle_find_by_id). (Everywhere, the Tome found nothing to equip: it asks
+// which things the player's id carries the same way.) Player 1 is the
+// player again as play goes on.
+#define FIND_BY_ID 0x801F5F88u
+static bool g_coop_tome_p2;
+
+static void hle_find_by_id(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (g_coop_tome_p2 && g_coop_p2 != 0u && (cpu->lr == 0x800C99ACu || cpu->lr == 0x800C9E34u) &&
+        cpu->gpr[3] == mem_read32(cpu, g_coop_p2 + 16u)) {
+        g_hle_passthrough = false;
+        hle_set_u32(cpu, g_coop_p2);
+    }
+}
+
+static void coop_tome_player(CPUState* cpu, bool p2) {
+    static u32 was[2];
+    const u32 who[2] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21496u};
+    if (p2 && !g_coop_tome_p2 && g_coop_p2 != 0u) {
+        coop_equip_record(cpu);
+        const u32 now[2] = {mem_read32(cpu, g_coop_p2 + 52u), mem_read32(cpu, g_coop_p2 + 16u)};
+        for (int i = 0; i < 2; i++) {
+            was[i] = mem_read32(cpu, who[i]);
+            mem_write32(cpu, who[i], now[i]);
+        }
+        g_coop_tome_p2 = true;
+    } else if (!p2 && g_coop_tome_p2) {
+        for (int i = 0; i < 2; i++)
+            mem_write32(cpu, who[i], was[i]);
+        g_coop_tome_p2 = false;
+    }
+}
+
 static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState* pad) {
     static int owner = -1;  // -1 the game's own, 0 player 1, 1 player 2
     static unsigned start_wait;
     static bool start_was;
     g_coop_screen = false;
     if (!g_settings.mod_coop || g_coop_p2 == 0u) {
+        coop_tome_player(cpu, false);
         if (owner >= 0)
             aurora_split_menu(-1, 0);
         owner = -1;
@@ -7463,13 +7620,17 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             if (owner == 1)
                 g_coop_b_release = true;
             fprintf(stderr, "[coop] play goes on: the pad is player 1's again\n");
+            coop_snapshot(cpu);
+            coop_tome_player(cpu, false);
             owner = -1;
             aurora_split_menu(-1, 0);
         }
         if (start_pressed && (pad->button & 0x1000u) == 0u) {
             start_wait = COOP_START_WAIT;
             owner = 1;
+            coop_tome_player(cpu, true);
             fprintf(stderr, "[coop] player 2 opens the Tome\n");
+            coop_snapshot(cpu);
         }
         return;
     }
@@ -7740,15 +7901,18 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* stream = hle_dispatch_entry(0x80154118u);
             if (getenv("ED_STREAM_LOG") != NULL && stream != NULL && stream->notify == NULL)
                 stream->notify = notify_stream_read;
-            static const u32 kAnimLoads[] = {0x801318C0u, 0x80132ED8u, 0x80133028u};
-            for (size_t i = 0; getenv("ED_ANIM_LOG") != NULL && i < 3; i++) {
+            static const u32 kAnimLoads[] = {0x801318C0u, 0x80132ED8u, 0x80133028u, 0x80118F9Cu, 0x800C994Cu, 0x801516F4u};
+            for (size_t i = 0; getenv("ED_ANIM_LOG") != NULL && i < 6; i++) {
                 HleDispatchEntry* e = hle_dispatch_entry(kAnimLoads[i]);
                 if (e != NULL && e->notify == NULL)
                     e->notify = notify_anim_load;
             }
-            HleDispatchEntry* moves = hle_dispatch_entry(MOVES_PUT);
+            HleDispatchEntry* find = hle_dispatch_entry(FIND_BY_ID);
+            if (find != NULL && find->intercept == NULL && find->notify == NULL)
+                find->intercept = hle_find_by_id;
+            HleDispatchEntry* moves = hle_dispatch_entry(MOVES_WANT);
             if (moves != NULL && moves->intercept == NULL && moves->notify == NULL)
-                moves->intercept = hle_moves_put;
+                moves->intercept = hle_moves_want;
             HleDispatchEntry* pack = hle_dispatch_entry(PACK_LOAD);
             if (pack != NULL && pack->intercept == NULL && pack->notify == NULL)
                 pack->intercept = hle_pack_load;
