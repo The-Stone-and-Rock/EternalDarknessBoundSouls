@@ -6349,7 +6349,7 @@ static void hle_pack_load(CPUState* cpu) {
     // The chapter, from the name being loaded (/levels/levelNN/...): a save's
     // load asks for its character only after this (0x80007C8C), so the
     // chapter's character is not known from that yet.
-    if (g_pack.stage == 0 && cpu->lr == CHAPTER_PACK_CALL && want >= 0) {
+    if (g_pack.stage == 0 && cpu->lr == CHAPTER_PACK_CALL) {
         char name[32] = {0};
         for (u32 i = 0; i + 1u < sizeof name && guest_ram_range_valid(cpu, cpu->gpr[3] + i, 1u); i++)
             if ((name[i] = (char)mem_read8(cpu, cpu->gpr[3] + i)) == '\0')
@@ -6577,9 +6577,42 @@ static struct {
     int keep, type;
 } g_spawn_return;
 
+// The player's file (moves, streamed as needed) is opened from the spawn
+// record (0x80007844 → 0x80132ED8(model)) just before the record is made into
+// the player. From Jump to Game the record already names the chosen character;
+// a save's names the one it was saved with, and the chosen body then played
+// the chapter character's moves (contorted). The same choice is made here.
+#define PLAYER_FILE_CALL 0x80007848u
+
+static void hle_player_file(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (cpu->lr != PLAYER_FILE_CALL || g_chapter_model < 0)
+        return;
+    const s32 model = (s16)cpu->gpr[3];
+    const int want = player_model();
+    const s32 now = want >= 0 && (model == g_chapter_model || player_type(model) >= 0) ? want
+                    : want < 0 && player_type(model) >= 0                            ? g_chapter_model
+                                                                                     : model;
+    if (now != model) {
+        fprintf(stderr, "[player] file %d opened for %d\n", now, model);
+        cpu->gpr[3] = (u32)now;
+    }
+}
+
 static void hle_spawn_create(CPUState* cpu) {
     const u32 rec = cpu->gpr[3];
     const int want = player_model();
+    // A save made while another character was played remembers them: the
+    // player's record has the chapter's kind but that character's number.
+    // The chapter's own is put back (and the chosen one, if any, below).
+    if (g_chapter_model >= 0 && guest_ram_range_valid(cpu, rec, 48u)) {
+        const s32 saved = (s32)mem_read32(cpu, rec + 20u);
+        if (saved != g_chapter_model && player_type(saved) >= 0 &&
+            (s32)mem_read32(cpu, rec + 16u) == player_type(g_chapter_model)) {
+            mem_write32(cpu, rec + 20u, (u32)g_chapter_model);
+            fprintf(stderr, "[player] saved as %d, back to the chapter's %d\n", saved, g_chapter_model);
+        }
+    }
     if (want >= 0 && g_chapter_model >= 0 && guest_ram_range_valid(cpu, rec, 48u) &&
         ((s32)mem_read32(cpu, rec + 20u) == g_chapter_model || (s32)mem_read32(cpu, rec + 20u) == want)) {
         mem_write32(cpu, rec + 20u, (u32)want);
@@ -7438,6 +7471,10 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* play = hle_dispatch_entry(PLAY_ANIMATION);
             if (mem_read32(cpu, PLAY_ANIMATION) == 0x9421FFD0u && play != NULL && play->intercept == NULL)
                 play->intercept = hle_play_animation;
+            HleDispatchEntry* file = hle_dispatch_entry(COOP_PLAYABLE_LOAD);
+            if (mem_read32(cpu, PLAYER_FILE_CALL - 4u) == 0x4812B695u && file != NULL && file->intercept == NULL &&
+                file->notify == NULL)
+                file->intercept = hle_player_file;
             HleDispatchEntry* model = hle_dispatch_entry(OBJECT_MODEL);
             if (mem_read32(cpu, OBJECT_MODEL) == 0x80630244u && model != NULL && model->intercept == NULL)
                 model->intercept = hle_object_model;
