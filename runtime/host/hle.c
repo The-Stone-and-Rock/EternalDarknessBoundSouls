@@ -347,6 +347,8 @@ static bool mash_to_gameplay_apply(CPUState* cpu,
 #define HLE_DISPLAY_LIST_RETURN 0x7FFF0010u
 #define HLE_GX_BEGIN_RETURN     0x7FFF0020u
 #define HLE_BOOK_RETURN         0x7FFF0030u
+#define HLE_CHARACTER_RETURN    0x7FFF0040u
+static bool continue_character_load(CPUState* cpu);
 static u32 g_gx_dirty_state_helper;  // __GXSetDirtyState
 static u32 g_gx_flush_prim_helper;   // __GXSendFlushPrim
 #define GX_DATA_SDA_OFFSET      ED_GX_DATA_SDA_OFFSET
@@ -3723,7 +3725,15 @@ static void coop_watch(CPUState* cpu, const DolPadState* pad) {
 }
 #endif
 
+#ifdef ED_AURORA
+static bool coop_character_load(CPUState* cpu);
+#endif
+
 static void hle_PADRead(CPUState* cpu) {
+#ifdef ED_AURORA
+    if (coop_character_load(cpu))
+        return;  // the game loads a character's file first; this read runs after
+#endif
     u32 out = hle_arg_u32(cpu, 0);
     DolPadState state[4];
     memset(state, 0, sizeof state);
@@ -4804,6 +4814,8 @@ static bool hle_dispatch(CPUState* cpu, u32 address) {
         return true;
     }
     if (address == HLE_BOOK_RETURN && continue_book_reload(cpu))
+        return true;
+    if (address == HLE_CHARACTER_RETURN && continue_character_load(cpu))
         return true;
 #endif
 
@@ -6093,6 +6105,8 @@ static void coop_place(CPUState* cpu, u32 object, float out[3]) {
 // second of the player's own type and model. That one is player 2 again,
 // rather than a new one beside it.
 static void coop_adopt(CPUState* cpu, u32 player) {
+    if (getenv("ED_COOP_P2_KIND") != NULL)
+        return;  // testing another character: a new player 2
     const u32 actor = mem_read32(cpu, player + (u32)(s32)g_coop_actor_offset);
     if (!guest_ram_range_valid(cpu, actor, 160u))
         return;
@@ -6107,6 +6121,90 @@ static void coop_adopt(CPUState* cpu, u32 player) {
             return;
         }
     }
+}
+
+// A character's file (chars/char%04d.cpk), loaded by 0x801318C0(model, 0) as
+// the area loader loads one: a table of 760-byte records from r13 - 23680, the
+// file's data at +72 once loaded. The game thread runs the load (it waits on
+// the disc): the pad read hands over to it and runs again after
+// (HLE_CHARACTER_RETURN).
+#define COOP_CHARACTER_LOAD 0x801318C0u
+static struct {
+    bool active;
+    int tried;  // the model last asked for
+    HleSavedContext saved;
+} g_character_load = {.tried = -1};
+
+// The character player 2 is made as, -1 player 1's (ED_COOP_P2_KIND=model,
+// testing).
+static int coop_wanted_character(void) {
+    const char* kind = getenv("ED_COOP_P2_KIND");
+    return kind != NULL ? atoi(kind) : -1;
+}
+
+static bool coop_character_loaded(CPUState* cpu, int model) {
+    const u32 record = mem_read32(cpu, cpu->gpr[13] - 23680u) + (u32)model * 760u;
+    return guest_ram_range_valid(cpu, record, 760u) && mem_read32(cpu, record + 72u) != 0u;
+}
+
+static bool coop_character_load(CPUState* cpu) {
+    const int model = coop_wanted_character();
+    if (g_character_load.active || model < 0 || model > 159 || model == g_character_load.tried ||
+        !g_coop_found || !g_settings.mod_coop || !sda_ready(cpu) || game_menu_open(cpu) ||
+        cutscene_playing(cpu) || coop_character_loaded(cpu, model))
+        return false;
+    g_character_load.tried = model;
+    g_character_load.active = true;
+    save_callback_context(&g_character_load.saved, cpu);
+    fprintf(stderr, "[coop] loading character file %d for player 2\n", model);
+    g_hle_tail_call = true;
+    cpu->gpr[3] = (u32)model;
+    cpu->gpr[4] = 0u;
+    cpu->lr = HLE_CHARACTER_RETURN;
+    cpu->pc = COOP_CHARACTER_LOAD;
+    return true;
+}
+
+static bool continue_character_load(CPUState* cpu) {
+    if (!g_character_load.active)
+        return false;
+    const HleSavedContext* saved = &g_character_load.saved;
+    memcpy(cpu->gpr, saved->gpr, sizeof saved->gpr);
+    memcpy(cpu->fpr, saved->fpr, sizeof saved->fpr);
+    memcpy(cpu->ps1, saved->ps1, sizeof saved->ps1);
+    cpu->lr = saved->lr;
+    cpu->ctr = saved->ctr;
+    cpu->cr = saved->cr;
+    cpu->xer = saved->xer;
+    cpu->fpscr = saved->fpscr;
+    cpu->pc = saved->pc;  // the pad read, again
+    g_character_load.active = false;
+    fprintf(stderr, "[coop] character file %d %s\n", g_character_load.tried,
+            coop_character_loaded(cpu, g_character_load.tried) ? "loaded" : "did not load");
+    return true;
+}
+
+// Player 2 out of the way while co-op is off: a save made in co-op keeps them
+// as one of the area's characters, who would stand there squaring up to
+// player 1. They are kept as player 2 (so not player 1's threat,
+// coop_send_event) but put far off; back beside player 1 when co-op is on.
+#define COOP_PARK_DISTANCE 50000.0f
+static bool g_coop_parked;
+
+static void coop_park(CPUState* cpu, u32 player, bool park) {
+    if (g_coop_p2 == 0u || park == g_coop_parked)
+        return;
+    const u32 o1 = mem_read32(cpu, player + 52u), o2 = mem_read32(cpu, g_coop_p2 + 52u);
+    if (!guest_ram_range_valid(cpu, o1, 64u) || !guest_ram_range_valid(cpu, o2, 64u))
+        return;
+    float at[3];
+    coop_place(cpu, o1, at);
+    if (park)
+        at[0] += COOP_PARK_DISTANCE;
+    for (u32 i = 0; i < 3u; i++)
+        guest_write_f32(cpu, o2 + i * 4u, at[i]);
+    g_coop_parked = park;
+    fprintf(stderr, "[coop] player 2 %s\n", park ? "put out of the way (co-op is off)" : "back beside player 1");
 }
 
 static void coop_spawn(CPUState* cpu, u32 player) {
@@ -6124,6 +6222,10 @@ static void coop_spawn(CPUState* cpu, u32 player) {
         guest_write_f32(cpu, rec + i * 4u, at[i]);
     mem_write32(cpu, rec + 16u, mem_read16(cpu, actor + 152u));
     mem_write32(cpu, rec + 20u, (u32)(s32)(s16)mem_read16(cpu, actor + 154u));
+    // Player 2 as another character (coop_character_load has loaded them).
+    const int model = coop_wanted_character();
+    if (model >= 0)
+        mem_write32(cpu, rec + 20u, (u32)model);
     mem_write32(cpu, rec + 40u, mem_read32(cpu, player + 8u));
     if (!hle_guest_call(cpu, COOP_SPAWN_CREATE, &rec, 1, 0.0, &made) || made == 0u) {
         fprintf(stderr, "[coop] the game made no player 2\n");
@@ -6738,13 +6840,14 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         if (playing)
             coop_snap(cpu);
     }
-    if (!g_coop_found || !g_settings.mod_coop || !sda_ready(cpu))
+    if (!g_coop_found || !sda_ready(cpu))
         return;
     if (g_coop_p2 != 0u && !coop_listed(cpu, g_coop_p2)) {
         fprintf(stderr, "[coop] player 2 is gone (an area change?)\n");
         g_coop_p2 = 0u;
         g_coop_attempts = 0u;
         g_coop_p2_state = false;
+        g_coop_parked = false;
     }
     if (!playing)
         return;
@@ -6753,7 +6856,13 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         return;
     if (g_coop_p2 == 0u)
         coop_adopt(cpu, player);
-    if (g_coop_p2 == 0u && g_coop_attempts < 3u) {
+    if (!g_settings.mod_coop) {
+        coop_park(cpu, player, true);  // a save made in co-op, played alone
+        return;
+    }
+    coop_park(cpu, player, false);
+    if (g_coop_p2 == 0u && g_coop_attempts < 3u &&
+        (coop_wanted_character() < 0 || coop_character_loaded(cpu, coop_wanted_character()))) {
         g_coop_attempts++;
         coop_spawn(cpu, player);
     }
