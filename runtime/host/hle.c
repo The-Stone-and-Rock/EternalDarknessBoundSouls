@@ -6099,11 +6099,38 @@ static void coop_describe(CPUState* cpu, const char* what, u32 node) {
                 : -1,
             mem_read32(cpu, node + 8u), at[0], at[1], at[2]);
     // ED_COOP_STATS (testing): the stats round health, for magick and sanity.
-    if (getenv("ED_COOP_STATS") != NULL && guest_ram_range_valid(cpu, stats, 96u)) {
-        fprintf(stderr, "[coop] %s stats (health at +%d):", what, g_coop_health_offset);
-        for (u32 i = 0; i < 96u; i += 2u)
-            fprintf(stderr, " %d", (s16)mem_read16(cpu, stats + i));
-        fputc('\n', stderr);
+    // The playing character's record (0x8030A940): their most health (+68),
+    // sanity (+70) and magick (+72), copied into the player's stats at +224..
+    // (0x80032098; 0x80034E20(character, kind) reads them: 0 health, 1
+    // sanity, 2 magick).
+    if (getenv("ED_COOP_STATS") != NULL && strcmp(what, "player 1") == 0)
+        fprintf(stderr, "[coop] player 1 most: health %d sanity %d magick %d (+74 %d)\n",
+                (s16)mem_read16(cpu, 0x8030A984u), (s16)mem_read16(cpu, 0x8030A986u),
+                (s16)mem_read16(cpu, 0x8030A988u), (s16)mem_read16(cpu, 0x8030A98Au));
+    // ED_RAM_DUMP=file (testing): all of memory, once, as player 1 is first seen.
+    static bool dumped;
+    if (getenv("ED_RAM_DUMP") != NULL && !dumped && strcmp(what, "player 1") == 0) {
+        dumped = true;
+        FILE* f = fopen(getenv("ED_RAM_DUMP"), "wb");
+        if (f != NULL) {
+            fwrite(cpu->ram, 1, 24u * 1024u * 1024u, f);
+            fclose(f);
+        }
+    }
+    if (getenv("ED_COOP_STATS") != NULL) {
+        const u32 blocks[2] = {stats, actor};
+        const char* names[2] = {"stats", "actor"};
+        for (int b = 0; b < 2; b++) {
+            if (!guest_ram_range_valid(cpu, blocks[b], 512u))
+                continue;
+            fprintf(stderr, "[coop] %s %s:", what, names[b]);
+            for (u32 i = 0; i < 512u; i += 2u) {
+                const s16 v = (s16)mem_read16(cpu, blocks[b] + i);
+                if (v != 0)
+                    fprintf(stderr, " +%u=%d", i, v);
+            }
+            fputc('\n', stderr);
+        }
     }
 }
 

@@ -476,8 +476,9 @@ int& chosen_stats() {
 }
 
 // Each character's details (Character select's i): when they lived, who
-// they are, and their health, magick and sanity as their own chapter starts
-// (measured in the game; -1 not yet).
+// they are, and their most health, magick and sanity as their own chapter
+// starts (measured in the game: the playing character's record, 0x8030A940
+// +68 health, +70 sanity, +72 magick).
 struct CharacterInfo {
     const char* year;
     const char* about;
@@ -486,23 +487,20 @@ struct CharacterInfo {
 const CharacterInfo kCharacterInfo[13] = {
     {"", "", -1, -1, -1},
     {"26 B.C.", "Pius Augustus, a Roman centurion whose search of a forgotten city in Persia sets the darkness in "
-                "motion.", 125, -1, -1},
-    {"1150 A.D.", "Ellia, a Khmer temple dancer drawn into the hidden chambers beneath Angkor Thom.", 75, -1, -1},
+                "motion.", 125, 100, 125},
+    {"1150 A.D.", "Ellia, a Khmer temple dancer drawn into the hidden chambers beneath Angkor Thom.", 75, 100, 75},
     {"814 A.D.", "Anthony, a messenger to Charlemagne's court, carrying a cursed scroll through a cathedral in France.",
-     125, -1, -1},
-    {"565 A.D.", "Karim, a Persian swordsman who braves a forbidden city hoping to win his beloved's hand.", 150, -1,
-     -1},
-    {"1760 A.D.", "Maximillian Roivas, who uncovers a horror beneath the family mansion in Rhode Island.", 125, -1,
-     -1},
-    {"1983 A.D.", "Dr. Edwin Lindsey, an archaeologist exploring the ruins of Angkor Thom.", 125, -1, -1},
-    {"1485 A.D.", "Paul Luther, a Franciscan monk on pilgrimage to a cathedral in France.", 75, -1, -1},
-    {"1460 A.D.", "Roberto Bianchi, a Venetian architect held prisoner in Cambodia.", 125, -1, -1},
-    {"1916 A.D.", "Peter Jacob, a journalist on the Western Front of the First World War.", 100, -1, -1},
+     125, 100, 125},
+    {"565 A.D.", "Karim, a Persian swordsman who braves a forbidden city hoping to win his beloved's hand.", 150, 100, 100},
+    {"1760 A.D.", "Maximillian Roivas, who uncovers a horror beneath the family mansion in Rhode Island.", 125, 100, 125},
+    {"1983 A.D.", "Dr. Edwin Lindsey, an archaeologist exploring the ruins of Angkor Thom.", 125, 100, 125},
+    {"1485 A.D.", "Paul Luther, a Franciscan monk on pilgrimage to a cathedral in France.", 75, 125, 100},
+    {"1460 A.D.", "Roberto Bianchi, a Venetian architect held prisoner in Cambodia.", 125, 75, 100},
+    {"1916 A.D.", "Peter Jacob, a journalist on the Western Front of the First World War.", 100, 125, 75},
     {"1952 A.D.", "Edward Roivas, a clinical psychologist and Alex's grandfather, who studies the Tome in the family "
-                  "mansion.", 75, -1, -1},
-    {"1991 A.D.", "Michael Edwards, a firefighter serving with the Canadian forces in the Gulf War.", 125, -1, -1},
-    {"2000 A.D.", "Alexandra Roivas, who returns to her grandfather's Rhode Island mansion to solve his murder.", 100, -1,
-     -1},
+                  "mansion.", 75, 125, 125},
+    {"1991 A.D.", "Michael Edwards, a firefighter serving with the Canadian forces in the Gulf War.", 125, 75, 75},
+    {"2000 A.D.", "Alexandra Roivas, who returns to her grandfather's Rhode Island mansion to solve his murder.", 100, 125, 125},
 };
 int g_info_character = 1;  // whose details are open
 std::string portrait_file(int character);
