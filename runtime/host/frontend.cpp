@@ -2429,11 +2429,11 @@ void update_fps_counter() {
     draw->AddText(font, size, ImVec2{at.x + pad.x, at.y + pad.y}, IM_COL32(0xf0, 0xe6, 0xc8, 0xff), text);
 }
 
-// While a cutscene plays, the fast-forward prompt at the screen's bottom right
-// (in the letterbox bar): RB's icon (Tab's on the keyboard) and a
-// fast-forward sign, which brightens while it is held. Through ImGui, as the FPS counter.
-void update_fast_forward_prompt() {
-    const std::string file = controls::fast_forward_glyph();
+// While a cutscene plays, the Skip prompt at the screen's bottom right (in the
+// letterbox bar): Start's icon (its key's on the keyboard) and "Skip", as Start
+// ends the scene for every save (hle.c). Through ImGui, as the FPS counter.
+void update_skip_prompt() {
+    const std::string file = controls::skip_glyph();
     if (file.empty() || ImGui::GetCurrentContext() == nullptr)
         return;
     static std::map<std::string, ImTextureID> icons;  // 0: the file did not load
@@ -2449,26 +2449,21 @@ void update_fast_forward_prompt() {
     if (it->second == 0)
         return;
     const float dp = overlay_dp();
-    const bool fast = controls::fast_forwarding();
     const ImVec2 screen = ImGui::GetMainViewport()->Size;
     const float icon = 44.f * dp;
-    const float arrow = 14.f * dp;  // each triangle's width; height is icon / 2
     const float gap = 8.f * dp;
+    ImFont* font = g_fps_font != nullptr ? g_fps_font : ImGui::GetFont();
+    const float size = 30.f * dp;
+    const char* label = "Skip";
+    const ImVec2 text = font->CalcTextSizeA(size, FLT_MAX, 0.f, label);
     const float right = screen.x - 24.f * dp;
     const float top = screen.y - 18.f * dp - icon;
-    const float sign_left = right - 2.f * arrow;
-    const float icon_left = sign_left - gap - icon;
+    const float text_left = right - text.x;
+    const float icon_left = text_left - gap - icon;
     ImDrawList* draw = ImGui::GetForegroundDrawList(ImGui::GetMainViewport());
-    const ImU32 alpha = fast ? 0xff : 0x99;
-    draw->AddImage(it->second, ImVec2{icon_left, top}, ImVec2{icon_left + icon, top + icon},
-                   ImVec2{0, 0}, ImVec2{1, 1}, IM_COL32(0xff, 0xff, 0xff, alpha));
-    const float mid = top + icon / 2.f;
-    const ImU32 cream = IM_COL32(0xf0, 0xe6, 0xc8, alpha);
-    for (int i = 0; i < 2; i++) {
-        const float x = sign_left + i * arrow;
-        draw->AddTriangleFilled(ImVec2{x, mid - icon / 4.f}, ImVec2{x + arrow, mid},
-                                ImVec2{x, mid + icon / 4.f}, cream);
-    }
+    draw->AddImage(it->second, ImVec2{icon_left, top}, ImVec2{icon_left + icon, top + icon});
+    draw->AddText(font, size, ImVec2{text_left, top + (icon - text.y) / 2.f}, IM_COL32(0xf0, 0xe6, 0xc8, 0xee),
+                  label);
 }
 
 namespace {
@@ -3220,7 +3215,7 @@ extern "C" void frontend_frame(void) {
         run_hdr_calibration(calibration_test_step);
     }
     update_fps_counter();
-    update_fast_forward_prompt();
+    update_skip_prompt();
     update_cursor();
     static bool menu_was_held = false;
     bool held[kButtonCount];

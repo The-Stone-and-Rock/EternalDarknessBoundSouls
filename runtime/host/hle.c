@@ -6499,6 +6499,33 @@ static bool continue_pack_load(CPUState* cpu) {
     return true;
 }
 
+// A cutscene's skip (Start, A or B: the scene's input table at 0x802436E0,
+// all calling 0x800507DC; a narrated scene's, Start: 0x800505F0) is allowed
+// once the game is finished: one of the
+// three endings seen (0x80042190(1..3): bits of the progress block's byte at
+// +6424). Every save may skip: that check, from there, is told yes; the scenes
+// still play unless skipped.
+#define ENDING_SEEN 0x80042190u
+
+static void hle_ending_seen(CPUState* cpu) {
+    // From the cutscenes' skip and the narrated scenes' (the "CinSubtitles"
+    // table at 0x80243770: Start calls 0x800505F0, the same check).
+    if (cpu->lr == 0x80050800u || cpu->lr == 0x8005080Cu || cpu->lr == 0x80050818u || cpu->lr == 0x80050614u ||
+        cpu->lr == 0x80050620u || cpu->lr == 0x8005062Cu) {
+        if (getenv("ED_SKIP_LOG") != NULL)
+            fprintf(stderr, "[scene] skip asked (lr 0x%08X)\n", cpu->lr);
+        hle_set_u32(cpu, 1u);
+        return;
+    }
+    g_hle_passthrough = true;
+}
+
+// ED_SKIP_LOG (testing): each cutscene button press (0x800507DC(button)).
+static void notify_scene_button(CPUState* cpu) {
+    fprintf(stderr, "[scene] button 0x%X, end state %d, scene %u\n", cpu->gpr[3],
+            (s8)mem_read8(cpu, 0x803162C0u + 472u), mem_read8(cpu, 0x803162C0u + 474u));
+}
+
 // Chapter scripts ask which character an object is (script function
 // 0x8000C724 reads object +580, the character's file number, via 0x80117C64)
 // and take another route when the player is not the chapter's own: Anthony's
@@ -7529,6 +7556,13 @@ static void find_coop(CPUState* cpu) {
             if (mem_read32(cpu, PLAYER_FILE_CALL - 4u) == 0x4812B695u && file != NULL && file->intercept == NULL &&
                 file->notify == NULL)
                 file->intercept = hle_player_file;
+            HleDispatchEntry* ending = hle_dispatch_entry(ENDING_SEEN);
+            if (mem_read32(cpu, ENDING_SEEN) == 0x3C808030u && mem_read32(cpu, 0x800507FCu) == 0x4BFF1995u &&
+                ending != NULL && ending->intercept == NULL && ending->notify == NULL)
+                ending->intercept = hle_ending_seen;
+            HleDispatchEntry* scene_button = hle_dispatch_entry(0x800507DCu);
+            if (getenv("ED_SKIP_LOG") != NULL && scene_button != NULL && scene_button->notify == NULL)
+                scene_button->notify = notify_scene_button;
             HleDispatchEntry* model = hle_dispatch_entry(OBJECT_MODEL);
             if (mem_read32(cpu, OBJECT_MODEL) == 0x80630244u && model != NULL && model->intercept == NULL)
                 model->intercept = hle_object_model;

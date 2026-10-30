@@ -98,11 +98,9 @@ uint64_t bindings_signature();
 // Changes whenever the icons to show would change (layout, bindings,
 // controller family plugged in or out, the pause menu opening or closing).
 uint64_t glyph_signature();
-// The fast-forward prompt (frontend.cpp): RB's icon under res/ui/glyphs while
-// a cutscene plays ("ink/xbox/rb.png"), Tab's on the keyboard, "" when no
-// cutscene plays; and whether RB or Tab is fast-forwarding now.
-std::string fast_forward_glyph();
-bool fast_forwarding();
+// The Skip prompt (frontend.cpp): Start's icon under res/ui/glyphs while a
+// cutscene plays (the key's on the keyboard), "" when none plays.
+std::string skip_glyph();
 
 // Switch the menu player's layout (Custom starts from the layout in use).
 void set_layout(int layout);
