@@ -6129,11 +6129,13 @@ static void coop_describe(CPUState* cpu, const char* what, u32 node) {
                 (s16)mem_read16(cpu, 0x8030A988u), (s16)mem_read16(cpu, 0x8030A98Au));
     // ED_RAM_DUMP=file (testing): all of memory, once, as player 1 is first seen.
     static bool dumped;
-    if (getenv("ED_RAM_DUMP") != NULL && !dumped && strcmp(what, "player 1") == 0) {
+    // ED_RAM_DUMP_P2: once player 2 is seen instead (all of it, the scratch too).
+    const char* dump_at = getenv("ED_RAM_DUMP_P2") != NULL ? "player 2" : "player 1";
+    if (getenv("ED_RAM_DUMP") != NULL && !dumped && strcmp(what, dump_at) == 0) {
         dumped = true;
         FILE* f = fopen(getenv("ED_RAM_DUMP"), "wb");
         if (f != NULL) {
-            fwrite(cpu->ram, 1, 24u * 1024u * 1024u, f);
+            fwrite(cpu->ram, 1, cpu->ram_size, f);
             fclose(f);
         }
     }
@@ -6225,16 +6227,24 @@ static struct {
     HleSavedContext saved;
 } g_character_load = {.tried = -1};
 
-// The character player 2 is made as, -1 player 1's (ED_COOP_P2_KIND=model,
-// testing).
+// The character player 2 is made as, -1 player 1's: Mods' Player 2
+// character (coop_p2_choice), or ED_COOP_P2_KIND=model (testing).
+static int coop_p2_choice(void);
 static int coop_wanted_character(void) {
     const char* kind = getenv("ED_COOP_P2_KIND");
-    return kind != NULL ? atoi(kind) : -1;
+    return kind != NULL ? atoi(kind) : coop_p2_choice();
+}
+
+// A body in the chapter's list of bodies (r13 - 26452), by character.
+static bool chapter_has_body(CPUState* cpu, int model) {
+    const u32 list = mem_read32(cpu, cpu->gpr[13] - 26452u);
+    return model >= 0 && guest_ram_range_valid(cpu, list, 8u) && mem_read32(cpu, list + 4u) == 0x6B5u &&
+           mem_read32(cpu, list) > (u32)model && mem_read32(cpu, list + 8u + (u32)model * 8u) != 0u;
 }
 
 static bool coop_character_loaded(CPUState* cpu, int model) {
     if (coop_playable(model))
-        return (s16)mem_read16(cpu, COOP_PLAYABLE_SLOT + 4u) == model;
+        return (s16)mem_read16(cpu, COOP_PLAYABLE_SLOT + 4u) == model || chapter_has_body(cpu, model);
     const u32 record = mem_read32(cpu, cpu->gpr[13] - 23680u) + (u32)model * 760u;
     return guest_ram_range_valid(cpu, record, 760u) && mem_read32(cpu, record + 72u) != 0u;
 }
@@ -6251,7 +6261,8 @@ static bool coop_character_load(CPUState* cpu) {
         extra = -1;
     } else if (g_character_load.active || model < 0 || model > 159 || model == g_character_load.tried ||
         !g_coop_found || !g_settings.mod_coop || !sda_ready(cpu) || game_menu_open(cpu) ||
-        cutscene_playing(cpu) || coop_character_loaded(cpu, model) || g_coop_p2 != 0u || coop_player(cpu) == 0u)
+        cutscene_playing(cpu) || coop_character_loaded(cpu, model) || g_coop_p2 != 0u || coop_player(cpu) == 0u ||
+        coop_playable(model))
         return false;
     g_character_load.tried = model;
     g_character_load.active = true;
@@ -6317,6 +6328,12 @@ static const s16 kPlayerModel[12] = {0, 70, 85, 150, 18, 73, 74, 76, 69, 75, 81,
 static const s16 kPlayerType[12] = {1, 49, 46, 27, 44, 55, 47, 54, 45, 53, 48, 26};
 static int g_chapter_model = -1;  // the playable the chapter asked for
 
+// Mods' Player 2 character (co-op), -1 for player 1's.
+static int coop_p2_choice(void) {
+    const int choice = g_settings.mod_p2_character;
+    return g_settings.mod_coop && choice >= 1 && choice <= 12 ? kPlayerModel[choice - 1] : -1;
+}
+
 static int player_model(void) {
     static int test = -2;
     if (test == -2) {
@@ -6379,12 +6396,107 @@ static void hle_chapter_body(CPUState* cpu) {
 #define LEVEL_HEAP_USED 23656u
 #define SCRATCH_RAM 0x81800000u
 #define SCRATCH_BODY 0x81C00000u  // past the most level data unpacks to (0x3D3100 bytes)
-#define SCRATCH_BODY_SIZE 0x400000u
+#define SCRATCH_BODY2 0x81E00000u  // player 2's (co-op), when theirs is another chapter's too
+#define SCRATCH_END 0x82000000u
 static struct {
-    int stage;  // 0 none, 1 the chapter's own loading, 2 the character's
+    int stage;  // 0 none, 1 the chapter's own loading, 2 a character's
     u32 caller, pack;
     u32 base, used;  // the level memory's, put back after the scratch load
+    int model;       // whose body the load in stage 2 is for
+    u32 kept;        // where it is kept
 } g_pack;
+
+// Player 2's moves, as another character. A playable's moves come in parts
+// streamed from their file (0x80132970): the file's first 1 KB lists them
+// (+16 how many, +20 where: 16 bytes each, +0 offset, +4 size, +8 the id). A
+// part read is made ready by 0x8011E89C(part, 0), its sets listed after it
+// by 0x8012484C(part, sets) (16 bytes each: the animation's id, its
+// resource, the part, flags), and 0x80133310(object, part, table, sets, 170)
+// gives an object the table of sets by id (+648) it plays from. There is one
+// table, from player 1's file, and player 2 (of the chapter's kind too) was
+// given it: their character's own part is read again from their file into
+// the scratch, with a table of its own. Their kind stays the chapter's, as
+// the story's checks want.
+#define MOVES_PUT 0x80133310u
+#define MOVES_READY 0x8011E89Cu
+#define MOVES_SETS 0x8012484Cu
+#define MOVES_STREAM 0x80582000u  // the two parts' slots: +696 the id, +764 the part, 80 bytes each
+#define P2_MOVES_TABLE SCRATCH_RAM  // 170 sets; the scratch is the other chapters' only while one loads
+#define P2_MOVES_PART (SCRATCH_RAM + 0x400u)
+static struct {
+    int model, part;  // what is in the scratch, -1 nothing
+    u32 ready, sets;
+} g_p2_moves = {-1, -1, 0u, 0u};
+
+static bool p2_moves_load(CPUState* cpu, int model, int part) {
+    char path[32];
+    snprintf(path, sizeof path, "/Chars/char%04d.cpk", model);
+    const s32 entry = dvd_path_to_entrynum(path);
+    u32 start = 0u, length = 0u;
+    if (entry < 0 || !dvd_entry_info(entry, &start, &length) || length < 1024u) {
+        fprintf(stderr, "[coop] player 2's moves: no %s\n", path);
+        return false;
+    }
+    // The list, then the part over it.
+    dvd_read_to_guest(cpu, P2_MOVES_PART, start, 1024u);
+    const u32 count = mem_read32(cpu, P2_MOVES_PART + 16u);
+    const u32 list = mem_read32(cpu, P2_MOVES_PART + 20u);
+    u32 offset = 0u, size = 0u;
+    for (u32 i = 0; i < count && list + i * 16u + 16u <= 1024u; i++)
+        if (mem_read16(cpu, P2_MOVES_PART + list + i * 16u + 8u) == (u32)part) {
+            offset = mem_read32(cpu, P2_MOVES_PART + list + i * 16u);
+            size = mem_read32(cpu, P2_MOVES_PART + list + i * 16u + 4u);
+        }
+    const u32 sets = (P2_MOVES_PART + size + 31u) & ~31u;
+    if (size == 0u || offset + size > length || sets + 0x2000u > SCRATCH_BODY) {
+        fprintf(stderr, "[coop] player 2's moves: no part %d in %s\n", part, path);
+        return false;
+    }
+    dvd_read_to_guest(cpu, P2_MOVES_PART, start + offset, size);
+    const u32 ready_args[2] = {P2_MOVES_PART, 0u};
+    u32 ready = 0u, ignore = 0u;
+    if (!hle_guest_call(cpu, MOVES_READY, ready_args, 2, 0.0, &ready) || ready == 0u)
+        return false;
+    const u32 sets_args[2] = {ready, sets};
+    hle_guest_call(cpu, MOVES_SETS, sets_args, 2, 0.0, &ignore);
+    for (u32 i = 0; i < 170u; i++)
+        mem_write32(cpu, P2_MOVES_TABLE + i * 4u, 0u);
+    const u32 n = mem_read16(cpu, ready + 20u);
+    for (u32 i = 0; i < n && sets + i * 16u + 16u <= SCRATCH_BODY; i++) {
+        const u32 id = mem_read32(cpu, sets + i * 16u);
+        if (id < 170u)
+            mem_write32(cpu, P2_MOVES_TABLE + id * 4u, sets + i * 16u);
+    }
+    g_p2_moves.model = model;
+    g_p2_moves.part = part;
+    g_p2_moves.ready = ready;
+    g_p2_moves.sets = sets;
+    fprintf(stderr, "[coop] player 2's moves: part %d of %s (%u bytes, %u sets)\n", part, path, size, n);
+    return true;
+}
+
+static void hle_moves_put(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const u32 object = cpu->gpr[3];
+    if (!guest_ram_range_valid(cpu, object + 580u, 4u) || cpu->ram_size < SCRATCH_BODY - GC_RAM_BASE)
+        return;
+    // Someone playing a playable's moves who is not the one whose file they
+    // are from: player 2 as another character.
+    const int model = (s32)mem_read32(cpu, object + 580u);
+    if (!coop_playable(model) || model == (s16)mem_read16(cpu, COOP_PLAYABLE_SLOT + 4u))
+        return;
+    int part = -1;
+    for (u32 k = 0; k < 2u; k++)
+        if (mem_read32(cpu, MOVES_STREAM + 764u + k * 80u) == cpu->gpr[4])
+            part = (s32)mem_read32(cpu, MOVES_STREAM + 696u + k * 80u);
+    if (part < 0)
+        return;
+    if ((g_p2_moves.model != model || g_p2_moves.part != part) && !p2_moves_load(cpu, model, part))
+        return;
+    cpu->gpr[4] = g_p2_moves.ready;
+    cpu->gpr[5] = P2_MOVES_TABLE;
+    cpu->gpr[6] = g_p2_moves.sets;
+}
 
 // A loaded pack holds offsets: 0x801DCDD8(pack) makes the top level's
 // addresses (each entry's offset plus the pack's own, once), as the chapter
@@ -6398,8 +6510,20 @@ static u32 pack_list(CPUState* cpu, u32 pack, bool relocated) {
     return guest_ram_range_valid(cpu, list, 8u) && mem_read32(cpu, list + 4u) == 0x6B5u ? list : 0u;
 }
 
-static void hle_pack_load(CPUState* cpu) {
+// The bodies to borrow, as the chapter loads: player 1's character's, and in
+// co-op player 2's when they are another again. -1 when there is none.
+static int borrow_p1(void) {
     const int want = player_model();
+    return want >= 0 && g_chapter_model >= 0 && want != g_chapter_model ? want : -1;
+}
+
+static int borrow_p2(void) {
+    const int p2 = coop_wanted_character();
+    const int p1 = player_model() >= 0 ? player_model() : g_chapter_model;
+    return p2 >= 0 && g_chapter_model >= 0 && p2 != g_chapter_model && p2 != p1 ? p2 : -1;
+}
+
+static void hle_pack_load(CPUState* cpu) {
     // The chapter, from the name being loaded (/levels/levelNN/...): a save's
     // load asks for its character only after this (0x80007C8C), so the
     // chapter's character is not known from that yet.
@@ -6412,8 +6536,7 @@ static void hle_pack_load(CPUState* cpu) {
         if (sscanf(name, "/levels/level%d", &chapter) == 1 && chapter >= 0 && chapter < 17)
             g_chapter_model = kChapterModel[chapter];
     }
-    if (g_pack.stage == 0 && cpu->lr == CHAPTER_PACK_CALL && want >= 0 && g_chapter_model >= 0 &&
-        want != g_chapter_model) {
+    if (g_pack.stage == 0 && cpu->lr == CHAPTER_PACK_CALL && (borrow_p1() >= 0 || borrow_p2() >= 0)) {
         g_pack.caller = cpu->lr;
         g_pack.stage = 1;
         cpu->lr = HLE_PACK_RETURN;
@@ -6421,41 +6544,47 @@ static void hle_pack_load(CPUState* cpu) {
     g_hle_passthrough = true;
 }
 
+// Their own chapter's level data (the first chapter that is theirs, 0 to 11)
+// loaded into the host's scratch, for `model`'s body, kept at `kept`.
+static bool start_borrow(CPUState* cpu, int model, u32 kept) {
+    int chapter = -1;
+    for (int c = 0; c < 12 && chapter < 0; c++)
+        if (kChapterModel[c] == model)
+            chapter = c;
+    if (chapter < 0)
+        return false;
+    if (cpu->ram_size < SCRATCH_END - GC_RAM_BASE) {
+        fprintf(stderr, "[player] no scratch for their chapter's data: %d has no body\n", model);
+        return false;
+    }
+    char name[48];
+    snprintf(name, sizeof name, "/levels/level%02d/U_Level%02d.bin", chapter, chapter);
+    const u32 at = cpu->gpr[1] + 156u;  // the chapter's own name was built here
+    for (size_t i = 0; i <= strlen(name); i++)
+        mem_write8(cpu, at + (u32)i, (u8)name[i]);
+    fprintf(stderr, "[player] loading %s for %d's body\n", name, model);
+    mem_write32(cpu, cpu->gpr[13] - LEVEL_HEAP_BASE, SCRATCH_RAM);
+    mem_write32(cpu, cpu->gpr[13] - LEVEL_HEAP_USED, 0u);
+    g_pack.stage = 2;
+    g_p2_moves.model = -1;  // player 2's moves, in the same scratch
+    g_pack.model = model;
+    g_pack.kept = kept;
+    cpu->gpr[3] = at;
+    cpu->gpr[4] = 0u;
+    cpu->gpr[5] = 1u;
+    cpu->lr = HLE_PACK_RETURN;
+    cpu->pc = PACK_LOAD;
+    return true;
+}
+
 static bool continue_pack_load(CPUState* cpu) {
     if (g_pack.stage == 1) {
         g_pack.pack = cpu->gpr[3];
         g_pack.base = mem_read32(cpu, cpu->gpr[13] - LEVEL_HEAP_BASE);
         g_pack.used = mem_read32(cpu, cpu->gpr[13] - LEVEL_HEAP_USED);
-        // The character's own chapter (the first of theirs, 0 to 11).
-        int chapter = -1;
-        for (int c = 0; c < 12 && chapter < 0; c++)
-            if (kChapterModel[c] == player_model())
-                chapter = c;
-        if (chapter >= 0) {
-            char name[48];
-            snprintf(name, sizeof name, "/levels/level%02d/U_Level%02d.bin", chapter, chapter);
-            const u32 at = cpu->gpr[1] + 156u;  // the chapter's own name was built here
-            for (size_t i = 0; i <= strlen(name); i++)
-                mem_write8(cpu, at + (u32)i, (u8)name[i]);
-            if (cpu->ram_size < SCRATCH_RAM - GC_RAM_BASE + 0x3D3100u) {
-                fprintf(stderr, "[player] no scratch for their chapter's data: %d keeps the chapter's body\n",
-                        player_model());
-                cpu->gpr[3] = g_pack.pack;
-                cpu->lr = cpu->pc = g_pack.caller;
-                g_pack.stage = 0;
-                return true;
-            }
-            fprintf(stderr, "[player] loading %s for %d's body\n", name, player_model());
-            mem_write32(cpu, cpu->gpr[13] - LEVEL_HEAP_BASE, SCRATCH_RAM);
-            mem_write32(cpu, cpu->gpr[13] - LEVEL_HEAP_USED, 0u);
-            g_pack.stage = 2;
-            cpu->gpr[3] = at;
-            cpu->gpr[4] = 0u;
-            cpu->gpr[5] = 1u;
-            cpu->lr = HLE_PACK_RETURN;
-            cpu->pc = PACK_LOAD;
+        if ((borrow_p1() >= 0 && start_borrow(cpu, borrow_p1(), SCRATCH_BODY)) ||
+            (borrow_p2() >= 0 && start_borrow(cpu, borrow_p2(), SCRATCH_BODY2)))
             return true;
-        }
     } else if (g_pack.stage == 2) {
         // Theirs made addresses (pack, then its list); the body's address goes
         // into the chapter's list as an offset from it, which the chapter's own
@@ -6467,16 +6596,18 @@ static bool continue_pack_load(CPUState* cpu) {
         if (theirs != 0u)
             hle_guest_call(cpu, PACK_RELOCATE, &theirs, 1, 0.0, &ignore);
         const u32 own = pack_list(cpu, g_pack.pack, false);
-        const u32 want = (u32)player_model();
+        const u32 want = (u32)g_pack.model;
         const u32 body = theirs != 0u && mem_read32(cpu, theirs) > want ? mem_read32(cpu, theirs + 8u + want * 8u) : 0u;
         if (own != 0u && body != 0u && mem_read32(cpu, own) > want) {
             // The body kept in the host's scratch too, above where their level
-            // data unpacks (SCRATCH_BODY): the chapter's level memory stays
-            // all its own (Karim's chapter, with Michael's body in it, ran out
-            // as its rooms loaded).
+            // data unpacks: the chapter's level memory stays all its own
+            // (Karim's chapter, with Michael's body in it, ran out as its rooms
+            // loaded). A body needs nothing else of its chapter's data, so the
+            // next one unpacks over it.
             const u32 size = mem_read32(cpu, theirs + 12u + want * 8u);
-            const u32 kept = SCRATCH_BODY;
-            if (size != 0u && size <= SCRATCH_BODY_SIZE && guest_ram_range_valid(cpu, body, size) &&
+            const u32 kept = g_pack.kept;
+            const u32 room = (g_pack.kept == SCRATCH_BODY ? SCRATCH_BODY2 : SCRATCH_END) - kept;
+            if (size != 0u && size <= room && guest_ram_range_valid(cpu, body, size) &&
                 guest_ram_range_valid(cpu, kept, size)) {
                 memmove(cpu->ram + (kept - GC_RAM_BASE), cpu->ram + (body - GC_RAM_BASE), size);
                 mem_write32(cpu, own + 8u + want * 8u, kept - own);
@@ -6487,6 +6618,9 @@ static bool continue_pack_load(CPUState* cpu) {
         } else {
             fprintf(stderr, "[player] no body for %u in their chapter's pack\n", want);
         }
+        // Then player 2's, when theirs is borrowed too.
+        if (g_pack.kept == SCRATCH_BODY && borrow_p2() >= 0 && start_borrow(cpu, borrow_p2(), SCRATCH_BODY2))
+            return true;
     } else {
         return false;
     }
@@ -6638,6 +6772,16 @@ static void notify_stream_read(CPUState* cpu) {
                 (s32)cpu->gpr[4], cpu->gpr[5], cpu->gpr[6], cpu->lr);
 }
 
+// ED_ANIM_LOG=1 (testing): the loads that build characters' animation
+// tables: a character's file (0x801318C0(model, flag)), a playable's
+// (0x80132ED8(model)) and each table of a file (0x80133028).
+static void notify_anim_load(CPUState* cpu) {
+    static unsigned shown;
+    if (shown++ < 80u)
+        fprintf(stderr, "[anim] 0x%08X r3 0x%08X r4 0x%08X r5 0x%08X r6 0x%08X r7 0x%08X r8 0x%08X (lr 0x%08X)\n", cpu->pc,
+                cpu->gpr[3], cpu->gpr[4], cpu->gpr[5], cpu->gpr[6], cpu->gpr[7], cpu->gpr[8], cpu->lr);
+}
+
 static void hle_chapter_character(CPUState* cpu) {
     static const u8* const kModel = kChapterModel;
     const u32 chapter = cpu->gpr[3];
@@ -6680,9 +6824,15 @@ static void hle_player_file(CPUState* cpu) {
     }
 }
 
+static bool g_coop_spawning;  // coop_spawn is making player 2
+
 static void hle_spawn_create(CPUState* cpu) {
     const u32 rec = cpu->gpr[3];
     const int want = player_model();
+    if (g_coop_spawning) {
+        g_hle_passthrough = true;
+        return;
+    }
     // A save made while another character was played remembers them: the
     // player's record has the chapter's kind but that character's number.
     // The chapter's own is put back (and the chosen one, if any, below).
@@ -6767,7 +6917,10 @@ static void coop_spawn(CPUState* cpu, u32 player) {
     if (model >= 0)
         mem_write32(cpu, rec + 20u, (u32)model);
     mem_write32(cpu, rec + 40u, mem_read32(cpu, player + 8u));
-    if (!hle_guest_call(cpu, COOP_SPAWN_CREATE, &rec, 1, 0.0, &made) || made == 0u) {
+    g_coop_spawning = true;
+    const bool created = hle_guest_call(cpu, COOP_SPAWN_CREATE, &rec, 1, 0.0, &made);
+    g_coop_spawning = false;
+    if (!created || made == 0u) {
         fprintf(stderr, "[coop] the game made no player 2\n");
         return;
     }
@@ -7587,6 +7740,15 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* stream = hle_dispatch_entry(0x80154118u);
             if (getenv("ED_STREAM_LOG") != NULL && stream != NULL && stream->notify == NULL)
                 stream->notify = notify_stream_read;
+            static const u32 kAnimLoads[] = {0x801318C0u, 0x80132ED8u, 0x80133028u};
+            for (size_t i = 0; getenv("ED_ANIM_LOG") != NULL && i < 3; i++) {
+                HleDispatchEntry* e = hle_dispatch_entry(kAnimLoads[i]);
+                if (e != NULL && e->notify == NULL)
+                    e->notify = notify_anim_load;
+            }
+            HleDispatchEntry* moves = hle_dispatch_entry(MOVES_PUT);
+            if (moves != NULL && moves->intercept == NULL && moves->notify == NULL)
+                moves->intercept = hle_moves_put;
             HleDispatchEntry* pack = hle_dispatch_entry(PACK_LOAD);
             if (pack != NULL && pack->intercept == NULL && pack->notify == NULL)
                 pack->intercept = hle_pack_load;
