@@ -3615,6 +3615,112 @@ static void coop_pad_read(CPUState* cpu, bool playing);
 static bool g_coop_pad_p2;
 // Player 1's B held for them (coop_door_proxy: player 2 using a door).
 static bool g_coop_press_b;
+// Who has the screens that stop play (coop_menu_input).
+static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState* pad);
+// Player 2 has a close-up their action press opened (coop_menu_input): the
+// split is off (camera.c) and the close-up shows in their half.
+static bool g_coop_screen;
+bool hle_coop_screen(void) { return g_coop_screen; }
+// A close-up of a thing looked at or taken: the player is busy, a mask of
+// reasons at r13 - 23344 (set and cleared by 0x801556CC, read by 0x80155738,
+// which the per-character update 0x80007490 asks before it runs the player's
+// controller). Found with ED_COOP_WATCH and ED_COOP_LOG, examining the clock.
+static bool coop_busy(CPUState* cpu) { return mem_read32(cpu, cpu->gpr[13] - 23344u) != 0u; }
+
+// ED_COOP_WATCH=1 (testing): what a close-up changes, in the game's globals
+// (0x80500000 up to 0x80640000, the small data among them) and in player 1's
+// node, object and actor. Player 1's B is the press. Kept: before (about 40
+// and 1 pad reads before it), during (45, 90 and 135 after), after (once
+// they walk again, the stick held a half second). Words alike in all of
+// before and after, alike in all of during and different between, are
+// logged: what holds while a close-up shows, not a timer that flips.
+#define WATCH_FROM 0x80500000u
+#define WATCH_GLOBALS 0x140000u
+#define WATCH_SIZE (WATCH_GLOBALS + 0x200u + 0x800u + 0x400u)
+static bool g_coop_found;
+static s16 g_coop_actor_offset;
+static u32 coop_player(CPUState* cpu);
+enum { WATCH_OLD, WATCH_LAST, WATCH_B1, WATCH_B2, WATCH_D1, WATCH_D2, WATCH_D3, WATCH_COUNT };
+
+static void coop_watch(CPUState* cpu, const DolPadState* pad) {
+    static int on = -1;
+    static u8* keep[WATCH_COUNT + 1];  // and the present
+    static u32 from[4];
+    static const u32 size[4] = {WATCH_GLOBALS, 0x200u, 0x800u, 0x400u};
+    static const char* const kWhere[4] = {"global", "node", "object", "actor"};
+    static unsigned step, walking, reads;
+    static bool b_was;
+    if (on < 0) {
+        on = getenv("ED_COOP_WATCH") != NULL;
+        for (int i = 0; on && i <= WATCH_COUNT; i++)
+            on = (keep[i] = (u8*)malloc(WATCH_SIZE)) != NULL;
+    }
+    if (!on || !g_coop_found || !sda_ready(cpu))
+        return;
+    const u32 player = coop_player(cpu);
+    if (player == 0u)
+        return;
+    // The regions as they are now (the player's, at the press).
+    if (step == 0u) {
+        from[0] = WATCH_FROM;
+        from[1] = player;
+        from[2] = mem_read32(cpu, player + 52u);
+        from[3] = mem_read32(cpu, player + (u32)(s32)g_coop_actor_offset);
+    }
+    u8* now = keep[WATCH_COUNT];
+    for (u32 r = 0, at = 0; r < 4u; at += size[r], r++) {
+        if (guest_ram_range_valid(cpu, from[r], size[r]))
+            memcpy(now + at, cpu->ram + (from[r] - GC_RAM_BASE), size[r]);
+        else
+            memset(now + at, 0, size[r]);
+    }
+    const bool b = (pad->button & 0x0200u) != 0u;
+    const bool pressed = b && !b_was;
+    b_was = b;
+    if (step == 0u) {
+        if (pressed) {
+            memcpy(keep[WATCH_B1], keep[WATCH_OLD], WATCH_SIZE);
+            memcpy(keep[WATCH_B2], keep[WATCH_LAST], WATCH_SIZE);
+            step = 1u;
+            fprintf(stderr, "[watch] B pressed\n");
+            return;
+        }
+        if (++reads % 40u == 0u)
+            memcpy(keep[WATCH_OLD], keep[WATCH_LAST], WATCH_SIZE);
+        memcpy(keep[WATCH_LAST], now, WATCH_SIZE);
+        return;
+    }
+    step++;
+    if (step == 45u || step == 90u || step == 135u)
+        memcpy(keep[step == 45u ? WATCH_D1 : step == 90u ? WATCH_D2 : WATCH_D3], now, WATCH_SIZE);
+    if (step == 135u)
+        fprintf(stderr, "[watch] during kept; walk to finish\n");
+    if (step <= 135u)
+        return;
+    const bool moving = pad->stick_x * pad->stick_x + pad->stick_y * pad->stick_y > 40 * 40;
+    walking = moving ? walking + 1u : 0u;
+    if (walking < 30u)
+        return;
+    unsigned shown = 0u;
+    for (u32 r = 0, at = 0; r < 4u; at += size[r], r++)
+        for (u32 off = 0; off < size[r] && shown < 300u; off += 4u) {
+            u32 v[WATCH_COUNT + 1];
+            for (int i = 0; i <= WATCH_COUNT; i++)
+                memcpy(&v[i], keep[i] + at + off, 4);
+            const u32 before = v[WATCH_B1], during = v[WATCH_D1];
+            if (v[WATCH_B2] == before && v[WATCH_COUNT] == before && v[WATCH_D2] == during &&
+                v[WATCH_D3] == during && during != before) {
+                fprintf(stderr, "[watch] %s +0x%X (0x%08X): %08X -> %08X -> back\n", kWhere[r], off, from[r] + off,
+                        __builtin_bswap32(before), __builtin_bswap32(during));
+                shown++;
+            }
+        }
+    fprintf(stderr, "[watch] %u word(s); press B again for another\n", shown);
+    step = 0u;
+    reads = 0u;
+    memcpy(keep[WATCH_OLD], now, WATCH_SIZE);
+    memcpy(keep[WATCH_LAST], now, WATCH_SIZE);
+}
 #endif
 
 static void hle_PADRead(CPUState* cpu) {
@@ -3630,6 +3736,9 @@ static void hle_PADRead(CPUState* cpu) {
         if (pad_log && (state[0].button != 0u || state[0].stick_x != 0 || state[0].stick_y != 0))
             fprintf(stderr, "[coop] player 2's pad: buttons 0x%04X stick %d %d\n", state[0].button,
                     state[0].stick_x, state[0].stick_y);
+        state[0].button &= (u16)~0x1000u;  // their Start opens their own Tome (coop_menu_input)
+        if (g_coop_screen)
+            memset(&state[0], 0, sizeof state[0]);  // their pad runs the close-up instead
         for (u32 i = 1; i < 4; i++)
             state[i].error = -1;  // PAD_ERR_NO_CONTROLLER
         for (u32 i = 0; i < 4; i++) {
@@ -3663,6 +3772,9 @@ static void hle_PADRead(CPUState* cpu) {
 #endif
     controls_note_frame(cpu->timebase / 675000ull);
     u32 motor_mask = dol_platform_pad_read(state);
+#ifdef ED_AURORA
+    coop_watch(cpu, &state[0]);
+#endif
     if (camera_pad_buttons(cpu, state[0].button))
         state[0].stick_x = state[0].stick_y = 0;
     interrupt_set_speed(controls_fast_forward() ? 4u : 1u);
@@ -3731,6 +3843,7 @@ static void hle_PADRead(CPUState* cpu) {
         state[0].analog_b = 0xFFu;
         state[0].error = 0;
     }
+    coop_menu_input(cpu, menu, cutscene, &state[0]);
 #endif
     if (g_mash_to_gameplay)
         state[0].error = 0;
@@ -5976,6 +6089,26 @@ static void coop_place(CPUState* cpu, u32 object, float out[3]) {
     }
 }
 
+// A save made in co-op keeps player 2 as one of the area's characters: a
+// second of the player's own type and model. That one is player 2 again,
+// rather than a new one beside it.
+static void coop_adopt(CPUState* cpu, u32 player) {
+    const u32 actor = mem_read32(cpu, player + (u32)(s32)g_coop_actor_offset);
+    if (!guest_ram_range_valid(cpu, actor, 160u))
+        return;
+    const u32 kind = mem_read32(cpu, actor + 152u);  // type and model
+    u32 node = 0u;
+    for (int i = 0; i < 1024 && (node = coop_next(cpu, node)) != 0u; i++) {
+        const u32 other = mem_read32(cpu, node + (u32)(s32)g_coop_actor_offset);
+        if (node != player && guest_ram_range_valid(cpu, other, 160u) && mem_read32(cpu, other + 152u) == kind) {
+            g_coop_p2 = node;
+            coop_describe(cpu, "player 1", player);
+            coop_describe(cpu, "player 2 (from the save)", node);
+            return;
+        }
+    }
+}
+
 static void coop_spawn(CPUState* cpu, u32 player) {
     const u32 actor = mem_read32(cpu, player + (u32)(s32)g_coop_actor_offset);
     const u32 object = mem_read32(cpu, player + 52u);
@@ -6095,6 +6228,11 @@ static void coop_state(CPUState* cpu, CoopPlayerState* s, bool save) {
 
 static void coop_player_turn(CPUState* cpu) {
     if (g_coop_turn || g_coop_p2 == 0u || !g_settings.mod_coop || !coop_listed(cpu, g_coop_p2))
+        return;
+    // While the player is busy (a close-up, a thing taken) the game runs it
+    // for player 1 alone: player 2's turn, which pumps the game's input with
+    // their pad and is "the player" for a while, kept it from going on.
+    if (coop_busy(cpu))
         return;
     g_coop_turn = true;
     const u32 node = cpu->gpr[3];
@@ -6421,6 +6559,11 @@ static bool coop_trade_places(CPUState* cpu) {
 #define COOP_PROXY_PRESS_UNTIL 26u
 #define COOP_PROXY_DONE 60u
 
+// Pad reads in play since the assist pressed B for player 2 (0: none lately),
+// and player 2's B still held from a screen they had (not a new press).
+static unsigned g_coop_assist_at;
+static bool g_coop_b_release;
+
 static void coop_door_proxy(CPUState* cpu) {
     static unsigned step;
     static bool b_was;
@@ -6428,7 +6571,9 @@ static void coop_door_proxy(CPUState* cpu) {
     DolPadState p2;
     controls_read_player2(&p2);
     const bool b = (p2.button & 0x0200u) != 0u;
-    const bool pressed = b && !b_was;
+    if (!b)
+        g_coop_b_release = false;
+    const bool pressed = b && !b_was && !g_coop_b_release;
     b_was = b;
     const u32 player = coop_player(cpu);
     const u32 o1 = player != 0u ? mem_read32(cpu, player + 52u) : 0u;
@@ -6443,6 +6588,8 @@ static void coop_door_proxy(CPUState* cpu) {
     }
     step++;
     g_coop_press_b = step >= COOP_PROXY_PRESS_FROM && step < COOP_PROXY_PRESS_UNTIL;
+    if (step == COOP_PROXY_PRESS_FROM)
+        g_coop_assist_at = 1u;
     if (step == COOP_PROXY_PRESS_FROM && getenv("ED_COOP_LOG") != NULL)
         fprintf(stderr, "[coop] assist presses B: player 1 at %.0f %.0f, next to 0x%08X (who 0x%08X)\n",
                 guest_read_f32(cpu, o1), guest_read_f32(cpu, o1 + 4u), mem_read32(cpu, cpu->gpr[13] - 23192u),
@@ -6450,6 +6597,10 @@ static void coop_door_proxy(CPUState* cpu) {
     if (step < COOP_PROXY_DONE)
         return;
     g_coop_press_b = false;
+    if (g_coop_screen) {
+        step = COOP_PROXY_DONE - 1u;  // a close-up of what was there: once it is over
+        return;
+    }
     step = 0u;
     if (!guest_ram_range_valid(cpu, o1, 64u))
         return;
@@ -6464,6 +6615,83 @@ static void coop_door_proxy(CPUState* cpu) {
     } else {
         fprintf(stderr, "[coop] player 1 went on (%.0f units)\n", sqrtf(moved));
     }
+}
+
+// The screens that stop play (the Tome; what an action press opens: a thing
+// looked at, a thing taken) are run by the game's one pad. Player 2 has them
+// when they opened them (their Start, or their B through the assist): their
+// pad is the game's until play goes on, and the screen shows in their half,
+// the other half keeping player 1's view as it was (aurora_split_menu).
+// Player 1's Tome shows in player 1's half the same way.
+#define COOP_ASSIST_WINDOW 120u  // pad reads after the assist's B that a screen is player 2's
+#define COOP_START_WAIT 30u      // pad reads for the Tome to open after player 2's Start
+void aurora_split_menu(int player, int layout);
+
+static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState* pad) {
+    static int owner = -1;  // -1 the game's own, 0 player 1, 1 player 2
+    static unsigned start_wait;
+    static bool start_was;
+    g_coop_screen = false;
+    if (!g_settings.mod_coop || g_coop_p2 == 0u) {
+        if (owner >= 0)
+            aurora_split_menu(-1, 0);
+        owner = -1;
+        start_wait = 0u;
+        return;
+    }
+    // A close-up player 2's press opened stops play for them; a moment
+    // without (between its pages) does not end it.
+    static unsigned closeup_grace;
+    bool closeup = !menu && !cutscene && (owner == 1 || g_coop_assist_at != 0u) && coop_busy(cpu);
+    if (closeup && owner == 1)
+        closeup_grace = 20u;
+    else if (!closeup && owner == 1 && closeup_grace > 0u && !menu && !cutscene) {
+        closeup_grace--;
+        closeup = true;
+    }
+    DolPadState p2;
+    controls_read_player2(&p2);
+    const bool start = (p2.button & 0x1000u) != 0u;
+    const bool start_pressed = start && !start_was;
+    start_was = start;
+    if (!menu && !cutscene && !closeup) {
+        if (g_coop_assist_at != 0u && ++g_coop_assist_at > COOP_ASSIST_WINDOW)
+            g_coop_assist_at = 0u;
+        if (start_wait > 0u) {
+            start_wait--;
+            pad->button |= 0x1000u;  // player 2's Start, as the game's
+            pad->error = 0;
+            return;
+        }
+        if (owner >= 0) {
+            if (owner == 1)
+                g_coop_b_release = true;
+            fprintf(stderr, "[coop] play goes on: the pad is player 1's again\n");
+            owner = -1;
+            aurora_split_menu(-1, 0);
+        }
+        if (start_pressed && (pad->button & 0x1000u) == 0u) {
+            start_wait = COOP_START_WAIT;
+            owner = 1;
+            fprintf(stderr, "[coop] player 2 opens the Tome\n");
+        }
+        return;
+    }
+    start_wait = 0u;
+    if (owner < 0) {
+        owner = g_coop_assist_at != 0u ? 1 : menu ? 0 : -1;
+        g_coop_assist_at = 0u;
+        if (owner >= 0)
+            fprintf(stderr, "[coop] %s has the %s\n", owner == 1 ? "player 2" : "player 1",
+                    closeup ? "close-up" : "screen");
+    }
+    g_coop_screen = closeup && owner == 1;
+    if (owner == 1) {
+        *pad = p2;
+        pad->error = 0;
+    }
+    if (owner >= 0)
+        aurora_split_menu(owner, g_settings.mod_split);
 }
 
 static void coop_test_swap(CPUState* cpu) {
@@ -6523,6 +6751,8 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
     const u32 player = coop_player(cpu);
     if (player == 0u)
         return;
+    if (g_coop_p2 == 0u)
+        coop_adopt(cpu, player);
     if (g_coop_p2 == 0u && g_coop_attempts < 3u) {
         g_coop_attempts++;
         coop_spawn(cpu, player);
@@ -6531,10 +6761,10 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         coop_door_proxy(cpu);
         coop_follow(cpu, player);
     }
-    // ED_COOP_LOG=1: both players, once a second.
     static int log = -1;
     if (log < 0)
         log = getenv("ED_COOP_LOG") != NULL;
+    // ED_COOP_LOG=1: both players, once a second.
     const unsigned long long frame = cpu->timebase / 675000ull;
     if (log && g_coop_p2 != 0u && frame % 60u == 0u) {
         coop_describe(cpu, "player 1", player);

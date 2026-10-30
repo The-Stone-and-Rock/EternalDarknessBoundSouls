@@ -1519,6 +1519,7 @@ void aurora_split_set_view(int player, const float rot[9], float x, float y, flo
 #endif
 
 bool hle_coop_player2_position(CPUState* cpu, float out[3]);  // hle.c
+bool hle_coop_screen(void);                                     // hle.c
 
 #define SPLIT_PITCH_LOW 0.05f
 #define SPLIT_PITCH_HIGH 1.30f
@@ -1571,6 +1572,12 @@ void camera_split_update(CPUState* cpu) {
         split_off(frame, g_menu_open ? "the Tome" : "a cutscene");
         return;
     }
+#ifdef ED_AURORA
+    if (hle_coop_screen()) {
+        split_off(frame, "player 2's close-up");
+        return;
+    }
+#endif
     if (!player_position(cpu, &player)) {
         split_off(frame, "no player");
         return;

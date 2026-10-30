@@ -3519,10 +3519,10 @@ index b86b214..f6b70de 100644
  AuroraBackend aurora_get_backend();
  const AuroraBackend* aurora_get_available_backends(size_t* count);
 diff --git a/graphics/aurora/include/aurora/gfx.h b/graphics/aurora/include/aurora/gfx.h
-index a13ce39..ac3a1d6 100644
+index a13ce39..c7a75c3 100644
 --- a/graphics/aurora/include/aurora/gfx.h
 +++ b/graphics/aurora/include/aurora/gfx.h
-@@ -29,10 +29,83 @@ typedef struct {
+@@ -29,10 +29,86 @@ typedef struct {
  } AuroraStats;
  
  const AuroraStats* aurora_get_stats();
@@ -3590,6 +3590,9 @@ index a13ce39..ac3a1d6 100644
 + */
 +void aurora_split_set(bool on, int layout);
 +void aurora_split_set_view(int player, const float rot[9], float x, float y, float z, float zoom, bool hide_hud);
++/* A menu one player opened (the Tome) in their half (0 or 1, -1 none), the
++ * other half keeping the other player's last view; layout as above. */
++void aurora_split_menu(int player, int layout);
 +/* HD texture pack images waiting their turn to be uploaded (a few a frame; all
 + * at once while photo mode steps). */
 +unsigned aurora_texture_pack_pending(void);
@@ -3607,7 +3610,7 @@ index a13ce39..ac3a1d6 100644
   * EFB readback (GXRuntime recomp patch): arm a one-shot copy of the next
   * submitted frame's present source; take returns tightly packed RGBA8 rows
 diff --git a/graphics/aurora/lib/aurora.cpp b/graphics/aurora/lib/aurora.cpp
-index b09ef4d..1d5ba1d 100644
+index b09ef4d..c3599eb 100644
 --- a/graphics/aurora/lib/aurora.cpp
 +++ b/graphics/aurora/lib/aurora.cpp
 @@ -1,6 +1,17 @@
@@ -3938,7 +3941,21 @@ index b09ef4d..1d5ba1d 100644
  uint32_t clamp_scissor_coord(double value, uint32_t maximum) noexcept {
    if (!std::isfinite(value)) {
      return 0;
-@@ -106,7 +413,14 @@ AuroraInfo initialize(int argc, char* argv[], const AuroraConfig& config) noexce
+@@ -48,6 +355,13 @@ uint32_t clamp_scissor_coord(double value, uint32_t maximum) noexcept {
+   return static_cast<uint32_t>(std::clamp(value, 0.0, static_cast<double>(maximum)));
+ }
+ 
++// GXRuntime recomp patch (split-screen): the player whose menu shows in their
++// half (aurora_split_menu), -1 none, and the halves' layout.
++static std::atomic<int> g_splitMenu{-1};
++static std::atomic<int> g_splitMenuLayout{0};
++static int split_menu_player() noexcept { return g_splitMenu.load(); }
++static int split_menu_layout() noexcept { return g_splitMenuLayout.load(); }
++
+ void set_present_viewport(const wgpu::RenderPassEncoder& pass, const gfx::Viewport& viewport, uint32_t surfaceWidth,
+                           uint32_t surfaceHeight) noexcept {
+   pass.SetViewport(viewport.left, viewport.top, viewport.width, viewport.height, viewport.znear, viewport.zfar);
+@@ -106,7 +420,14 @@ AuroraInfo initialize(int argc, char* argv[], const AuroraConfig& config) noexce
    } else {
      g_config.userPath = strdup(g_config.userPath);
    }
@@ -3954,7 +3971,7 @@ index b09ef4d..1d5ba1d 100644
      g_config.cachePath = SDL_GetPrefPath(nullptr, g_config.appName);
    } else {
      g_config.cachePath = strdup(g_config.cachePath);
-@@ -248,6 +562,33 @@ bool begin_frame() noexcept {
+@@ -248,6 +569,33 @@ bool begin_frame() noexcept {
    return true;
  }
  
@@ -3988,7 +4005,7 @@ index b09ef4d..1d5ba1d 100644
  void end_frame() noexcept {
    ZoneScoped;
  #ifdef AURORA_ENABLE_GX
-@@ -257,10 +598,43 @@ void end_frame() noexcept {
+@@ -257,10 +605,43 @@ void end_frame() noexcept {
  
    // E7 present-from-XFB: VI current → GPU Virtual-XFB, else YUYV-from-RAM
    // decode, else EFB-direct (Strikers when no RAM XFB / match fails).
@@ -4034,7 +4051,7 @@ index b09ef4d..1d5ba1d 100644
    const uint32_t contentW =
        xfbTex && *xfbTex ? (*xfbTex)->size.width : efbSource.size.width;
    const uint32_t contentH =
-@@ -269,11 +643,21 @@ void end_frame() noexcept {
+@@ -269,11 +650,21 @@ void end_frame() noexcept {
        webgpu::g_graphicsConfig.surfaceConfiguration.width,
        webgpu::g_graphicsConfig.surfaceConfiguration.height, contentW, contentH);
  
@@ -4057,7 +4074,7 @@ index b09ef4d..1d5ba1d 100644
      rmlBindGroup = std::move(rmlFrame.bindGroup);
      rmlOverlay = rmlFrame.overlay;
    }
-@@ -281,29 +665,106 @@ void end_frame() noexcept {
+@@ -281,29 +672,146 @@ void end_frame() noexcept {
  
    // Capture XFB handle by value for the worker lambda (shared_ptr).
    gfx::TextureHandle xfbHandle = (xfbTex && *xfbTex) ? *xfbTex : nullptr;
@@ -4103,29 +4120,35 @@ index b09ef4d..1d5ba1d 100644
 +        if (out.status == wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal) {
 +          out.texture = std::move(surfaceTexture.texture);
 +          out.view = out.texture.CreateView();
-+        }
-+      }
+         }
+       }
 +      return out;
 +    };
 +    // GXRuntime recomp patch (split-screen): each player's view is drawn into
 +    // its half of the surface's next texture as it is replayed; the game's own
 +    // frame then lays the menus over that picture and shows it.
 +    static Acquired s_split;
++    // Each player's last view, kept for while a menu one of them opened shows
++    // in their half (aurora_split_menu): the other half shows theirs.
++    static gfx::TextureHandle s_held[2];
++    const auto half_of = [](int player, int layout, float w, float h) {
++      const bool side = layout != 1;
++      return webgpu::Viewport{
++          .left = side ? w * 0.5f * player : 0.f,
++          .top = side ? 0.f : h * 0.5f * player,
++          .width = side ? w * 0.5f : w,
++          .height = side ? h : h * 0.5f,
++          .znear = 0.f,
++          .zfar = 1.f,
++      };
++    };
 +    const float surfaceW = static_cast<float>(webgpu::g_graphicsConfig.surfaceConfiguration.width);
 +    const float surfaceH = static_cast<float>(webgpu::g_graphicsConfig.surfaceConfiguration.height);
 +    if (info.splitView >= 0) {
 +      if (info.splitView == 0 || !s_split.texture)
 +        s_split = acquire();
 +      if (s_split.texture && s_split.view) {
-+        const bool side = info.splitLayout != 1;
-+        const webgpu::Viewport half{
-+            .left = side ? surfaceW * 0.5f * info.splitView : 0.f,
-+            .top = side ? 0.f : surfaceH * 0.5f * info.splitView,
-+            .width = side ? surfaceW * 0.5f : surfaceW,
-+            .height = side ? surfaceH : surfaceH * 0.5f,
-+            .znear = 0.f,
-+            .zfar = 1.f,
-+        };
++        const webgpu::Viewport half = half_of(info.splitView, info.splitLayout, surfaceW, surfaceH);
 +        const std::array attachments{
 +            wgpu::RenderPassColorAttachment{
 +                .view = s_split.view,
@@ -4154,9 +4177,43 @@ index b09ef4d..1d5ba1d 100644
 +            pass.SetBindGroup(0, bindGroup, 0, nullptr);
 +            pass.Draw(3);
 +          }
-         }
++        }
 +        pass.End();
-       }
++      }
++      // The view kept (a copy of it), for a menu's time.
++      if (splitHandle && !viBlack && info.splitView < 2) {
++        auto& held = s_held[info.splitView];
++        if (!held || held->size.width != splitHandle->size.width || held->size.height != splitHandle->size.height ||
++            held->format != splitHandle->format)
++          held = gfx::new_render_texture(splitHandle->size.width, splitHandle->size.height, splitHandle->gxFormat,
++                                         "Split-screen held view");
++        if (held && held->format == splitHandle->format) {
++          const webgpu::TextureWithSampler src{
++              .texture = splitHandle->texture,
++              .view = splitHandle->sampleTextureView,
++              .size = splitHandle->size,
++              .format = splitHandle->format,
++              .sampler = webgpu::present_source().sampler,
++          };
++          const std::array keep{
++              wgpu::RenderPassColorAttachment{
++                  .view = held->attachmentTextureView,
++                  .loadOp = wgpu::LoadOp::Clear,
++                  .storeOp = wgpu::StoreOp::Store,
++              },
++          };
++          const wgpu::RenderPassDescriptor keepDesc{
++              .label = "Split-screen held view",
++              .colorAttachmentCount = keep.size(),
++              .colorAttachments = keep.data(),
++          };
++          const auto kept = encoder.BeginRenderPass(&keepDesc);
++          kept.SetPipeline(webgpu::g_CopyPipeline);
++          kept.SetBindGroup(0, webgpu::create_copy_bind_group(src), 0, nullptr);
++          kept.Draw(3);
++          kept.End();
++        }
++      }
 +      const wgpu::CommandBufferDescriptor splitBufDescriptor{.label = "Split-screen view command buffer"};
 +      const auto splitBuffer = encoder.Finish(&splitBufDescriptor);
 +      g_queue.Submit(1, &splitBuffer);
@@ -4177,7 +4234,7 @@ index b09ef4d..1d5ba1d 100644
        wgpu::BindGroup presentBindGroup;
        if (rmlBindGroup && !rmlOverlay) {
          presentBindGroup = rmlBindGroup;
-@@ -318,14 +779,17 @@ void end_frame() noexcept {
+@@ -318,14 +826,21 @@ void end_frame() noexcept {
          };
          presentBindGroup = webgpu::create_copy_bind_group(xfbSrc);
        } else {
@@ -4189,6 +4246,10 @@ index b09ef4d..1d5ba1d 100644
 +        // Split-screen: the views are already there, unless a menu page
 +        // takes the whole window.
 +        const bool keepViews = splitShown && !(rmlBindGroup && !rmlOverlay);
++        // A menu one player opened (aurora_split_menu): in their half, the
++        // other half their partner's last view.
++        const int menuPlayer = split_menu_player();
++        const bool menuHalf = !splitShown && menuPlayer >= 0 && !(rmlBindGroup && !rmlOverlay);
          const std::array attachments{
              wgpu::RenderPassColorAttachment{
                  .view = currentView,
@@ -4197,7 +4258,7 @@ index b09ef4d..1d5ba1d 100644
                  .storeOp = wgpu::StoreOp::Store,
              },
          };
-@@ -333,20 +797,33 @@ void end_frame() noexcept {
+@@ -333,20 +848,73 @@ void end_frame() noexcept {
              .label = xfbHandle ? "XFB present render pass" : "EFB copy render pass",
              .colorAttachmentCount = attachments.size(),
              .colorAttachments = attachments.data(),
@@ -4217,7 +4278,47 @@ index b09ef4d..1d5ba1d 100644
 +        // the source.
 +        // GXRuntime recomp patch: HDR draws onto the float surface, the
 +        // game's frame with its glow past white (gfx/glow.hpp).
-+        if (!keepViews && (!viBlack || (rmlBindGroup && !rmlOverlay))) {
++        if (menuHalf) {
++          const uint32_t sw = webgpu::g_graphicsConfig.surfaceConfiguration.width;
++          const uint32_t sh = webgpu::g_graphicsConfig.surfaceConfiguration.height;
++          const int layout = split_menu_layout();
++          const auto& other = s_held[1 - menuPlayer];
++          if (other) {
++            const webgpu::TextureWithSampler src{
++                .texture = other->texture,
++                .view = other->sampleTextureView,
++                .size = other->size,
++                .format = other->format,
++                .sampler = webgpu::present_source().sampler,
++            };
++            const auto bindGroup = webgpu::create_copy_bind_group(src);
++            set_present_viewport(pass, half_of(1 - menuPlayer, layout, sw, sh), sw, sh);
++            if (!webgpu::g_hdrActive || !gfx::glow::present_hdr(pass, bindGroup, false)) {
++              pass.SetPipeline(webgpu::g_CopyPipeline);
++              pass.SetBindGroup(0, bindGroup, 0, nullptr);
++              pass.Draw(3);
++            }
++          }
++          if (!viBlack && viewport.width > 0.f && viewport.height > 0.f) {
++            // The menu as the window would show it, fitted into the half.
++            const auto half = half_of(menuPlayer, layout, sw, sh);
++            const float scale = std::min(half.width / viewport.width, half.height / viewport.height);
++            const webgpu::Viewport fit{
++                .left = half.left + (half.width - viewport.width * scale) * 0.5f,
++                .top = half.top + (half.height - viewport.height * scale) * 0.5f,
++                .width = viewport.width * scale,
++                .height = viewport.height * scale,
++                .znear = 0.f,
++                .zfar = 1.f,
++            };
++            set_present_viewport(pass, fit, sw, sh);
++            if (!webgpu::g_hdrActive || !gfx::glow::present_hdr(pass, presentBindGroup, true)) {
++              pass.SetPipeline(webgpu::g_CopyPipeline);
++              pass.SetBindGroup(0, presentBindGroup, 0, nullptr);
++              pass.Draw(3);
++            }
++          }
++        } else if (!keepViews && (!viBlack || (rmlBindGroup && !rmlOverlay))) {
 +          set_present_viewport(pass, rmlBindGroup && !rmlOverlay ? uiViewport : viewport,
 +                               webgpu::g_graphicsConfig.surfaceConfiguration.width,
 +                               webgpu::g_graphicsConfig.surfaceConfiguration.height);
@@ -4242,7 +4343,7 @@ index b09ef4d..1d5ba1d 100644
          }
          pass.End();
        }
-@@ -362,67 +839,230 @@ void end_frame() noexcept {
+@@ -362,67 +930,230 @@ void end_frame() noexcept {
              .label = "ImGui render pass",
              .colorAttachmentCount = attachments.size(),
              .colorAttachments = attachments.data(),
@@ -4494,7 +4595,7 @@ index b09ef4d..1d5ba1d 100644
      gfx::after_submit();
  
      TracyPlotConfig("aurora: lastVertSize", tracy::PlotFormatType::Memory, false, true, 0);
-@@ -440,7 +1080,7 @@ void end_frame() noexcept {
+@@ -440,7 +1171,7 @@ void end_frame() noexcept {
      TracyPlot("aurora: lastIndexSize", static_cast<int64_t>(gfx::g_stats.lastIndexSize));
      TracyPlot("aurora: lastStorageSize", static_cast<int64_t>(gfx::g_stats.lastStorageSize));
      TracyPlot("aurora: lastTextureUploadSize", static_cast<int64_t>(gfx::g_stats.lastTextureUploadSize));
@@ -4503,7 +4604,7 @@ index b09ef4d..1d5ba1d 100644
  
  #endif
  }
-@@ -475,6 +1115,80 @@ void aurora_set_resampler(AuroraSampler sampler) {
+@@ -475,6 +1206,84 @@ void aurora_set_resampler(AuroraSampler sampler) {
    (void)sampler;
  #endif
  }
@@ -4528,6 +4629,10 @@ index b09ef4d..1d5ba1d 100644
 +}
 +void aurora_photo_save(const char* path) { aurora::gfx::photo_save(path); }
 +void aurora_split_set(bool on, int layout) { aurora::gfx::split_set(on, layout); }
++void aurora_split_menu(int player, int layout) {
++  aurora::g_splitMenuLayout.store(layout == 1 ? 1 : 0);
++  aurora::g_splitMenu.store(player == 0 || player == 1 ? player : -1);
++}
 +void aurora_split_set_view(int player, const float rot[9], float x, float y, float z, float zoom, bool hide_hud) {
 +  aurora::gfx::PhotoView v;
 +  for (int i = 0; i < 3; ++i)
