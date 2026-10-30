@@ -6203,6 +6203,20 @@ static void coop_adopt(CPUState* cpu, u32 player) {
             g_coop_p2 = node;
             coop_describe(cpu, "player 1", player);
             coop_describe(cpu, "player 2 (from the save)", node);
+            // Beside player 1, in their room (ED_COOP_P2_STAYS=1, testing:
+            // where the save had them): the game runs player 1's room, and in
+            // another one what player 2 held was not in their hand.
+            const u32 o1 = mem_read32(cpu, player + 52u), o2 = mem_read32(cpu, node + 52u);
+            if (getenv("ED_COOP_P2_STAYS") == NULL && guest_ram_range_valid(cpu, o1, 64u) &&
+                guest_ram_range_valid(cpu, o2, 64u)) {
+                float at[3];
+                coop_place(cpu, o1, at);
+                for (u32 i = 0; i < 3u; i++)
+                    guest_write_f32(cpu, o2 + i * 4u, at[i]);
+                const u32 room_args[] = {node, mem_read32(cpu, cpu->gpr[13] + (u32)(s32)g_coop_room_offset)};
+                u32 ignore = 0u;
+                hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, room_args, 2, 0.0, &ignore);
+            }
             return;
         }
     }
@@ -7578,8 +7592,8 @@ static bool g_coop_tome_p2;
 
 // Each player has a copy of a weapon: there is one of each, and player 1
 // equipping what player 2 held took it out of their hand. Player 2's is
-// made (as the area loader makes one, like player 2 themself) the first time
-// they equip it, carried by them, and their equipping and letting go of
+// made (as the story makes one) the first time they equip it, and their
+// equipping and letting go of
 // that weapon (the item's id: 0x800C994C, 0x800C9DD4 ask for its node) are
 // answered with their copy's node.
 static struct {
@@ -7616,8 +7630,11 @@ static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make) {
     u32 made = 0u, ignore = 0u;
     if (!hle_guest_call(cpu, COOP_SPAWN_INIT, &rec, 1, 0.0, &ignore))
         return 0u;
+    // At player 2, in their room (an object's +592): a copy made in player
+    // 1's room, with player 2 in another, stayed there.
+    const u32 holder = mem_read32(cpu, g_coop_p2 + 52u);
     for (u32 i = 0; i < 3u; i++)
-        guest_write_f32(cpu, rec + i * 4u, guest_read_f32(cpu, object + i * 4u));
+        guest_write_f32(cpu, rec + i * 4u, guest_read_f32(cpu, holder + i * 4u));
     mem_write32(cpu, rec + 16u, mem_read16(cpu, actor + 152u));
     mem_write32(cpu, rec + 20u, (u32)(s32)(s16)mem_read16(cpu, actor + 154u));
     mem_write32(cpu, rec + 40u, mem_read32(cpu, original + 8u));
@@ -7628,35 +7645,55 @@ static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make) {
         fprintf(stderr, "[coop] no copy of %u made for player 2\n", id);
         return 0u;
     }
-    const u32 room_args[] = {made, mem_read32(cpu, cpu->gpr[13] + (u32)(s32)g_coop_room_offset)};
+    const u32 room_args[] = {made, mem_read32(cpu, holder + 592u)};
     const u32 add_args[] = {1u, made};
+    // As the story's making of a thing does (the Scramasax from the casket,
+    // 0x8000E6CC on): its size, room, register, 0x800CA8D8(node), add, and its
+    // model readied (0x8011F460(object)); without the last two it was held
+    // unseen.
+    const u32 made_object = mem_read32(cpu, made + 52u);
+    u32 sized = 0u;
+    if (hle_guest_call(cpu, 0x80118AB0u, &made_object, 1, 0.0, &sized) && sized != 0u)
+        hle_guest_call(cpu, 0x80124BE4u, &made_object, 1, guest_read_f32(cpu, rec + 12u), &ignore);
     hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, room_args, 2, 0.0, &ignore);
     hle_guest_call(cpu, COOP_SPAWN_REGISTER, &made, 1, 0.0, &ignore);
+    hle_guest_call(cpu, 0x800CA8D8u, &made, 1, 0.0, &ignore);
+    hle_guest_call(cpu, 0x8011F460u, &made_object, 1, 0.0, &ignore);
     hle_guest_call(cpu, COOP_SPAWN_ADD, add_args, 2, 0.0, &ignore);
     // Its moves (part 0), as the area's making of things sets them
-    // (0x80118D98(object, part, 1)): without, it was in the hand unseen.
-    const u32 moves_args[3] = {mem_read32(cpu, made + 52u), 0u, 1u};
+    // (0x80118D98(object, part, 1)).
+    const u32 moves_args[3] = {made_object, 0u, 1u};
     hle_guest_call(cpu, 0x80118D98u, moves_args, 3, 0.0, &ignore);
-    // ED_COOP_COPY_DRAW=1 (testing): the original's drawing fields too.
-    const u32 copy = mem_read32(cpu, made + 52u);
-    if (getenv("ED_COOP_COPY_DRAW") != NULL && guest_ram_range_valid(cpu, copy, 0x2E0u)) {
-        static const u32 kDraw[] = {64u, 340u, 344u, 352u, 668u, 672u, 680u};
-        for (size_t i = 0; i < sizeof kDraw / sizeof kDraw[0]; i++)
-            mem_write32(cpu, copy + kDraw[i], mem_read32(cpu, object + kDraw[i]));
-        mem_write32(cpu, copy + 596u, mem_read32(cpu, copy + 596u) | 0x400u);
-    }
-    fprintf(stderr, "[coop] copy object 0x%08X: +64 0x%08X +596 0x%08X\n", copy, mem_read32(cpu, copy + 64u),
-            mem_read32(cpu, copy + 596u));
-    // ED_COOP_COPY_OWN=1 (testing): carried by player 2's id (else as made).
-    if (getenv("ED_COOP_COPY_OWN") != NULL) {
-        const u32 p2_id = mem_read32(cpu, g_coop_p2 + 16u);
-        mem_write32(cpu, made + 20u, p2_id);
-        mem_write32(cpu, made + 24u, p2_id);
-    }
     g_coop_copies[free_at].id = id;
     g_coop_copies[free_at].node = made;
     fprintf(stderr, "[coop] player 2's copy of %u: node 0x%08X (id %u)\n", id, made, mem_read32(cpu, made + 16u));
     return made;
+}
+
+// ED_COPY_WATCH=1 (testing): the readying and letting go of a copy's
+// animation buffers (0x8011F460, 0x8011FC8C), and who called.
+static void notify_copy_watch(CPUState* cpu) {
+    static unsigned shown;
+    // The hand link: a held thing's bone found in its holder (0x8011D33C(
+    // holder, tag)) and a bone's matrix (0x8012123C(object, bone, out)), for
+    // player 2 and the held things.
+    if (cpu->pc == 0x8011D33Cu || cpu->pc == 0x8012123Cu) {
+        static unsigned linked;
+        const u32 o = cpu->gpr[3];
+        const bool p2 = g_coop_p2 != 0u && o == mem_read32(cpu, g_coop_p2 + 52u);
+        const bool held = guest_ram_range_valid(cpu, o + 372u, 4u) && mem_read32(cpu, o + 372u) != o &&
+                          g_coop_p2 != 0u && mem_read32(cpu, o + 372u) == mem_read32(cpu, g_coop_p2 + 52u);
+        if ((held || (p2 && cpu->lr == 0x80121334u)) && linked++ < 300u)
+            fprintf(stderr, "[link] 0x%08X on 0x%08X%s r4 0x%08X (lr 0x%08X)\n", cpu->pc, o, p2 ? " (p2)" : " (held)",
+                    cpu->gpr[4], cpu->lr);
+        return;
+    }
+    for (int i = 0; i < 32 && shown < 200u; i++)
+        if (g_coop_copies[i].node != 0u && mem_read32(cpu, g_coop_copies[i].node + 52u) == cpu->gpr[3]) {
+            shown++;
+            fprintf(stderr, "[copy] 0x%08X on 0x%08X +672 0x%08X (lr 0x%08X)\n", cpu->pc, cpu->gpr[3],
+                    mem_read32(cpu, cpu->gpr[3] + 672u), cpu->lr);
+        }
 }
 
 static void hle_find_by_id(CPUState* cpu) {
@@ -7667,8 +7704,8 @@ static void hle_find_by_id(CPUState* cpu) {
     u32 node = 0u;
     if ((cpu->lr == 0x800C99ACu || cpu->lr == 0x800C9E34u) && id == mem_read32(cpu, g_coop_p2 + 16u))
         node = g_coop_p2;  // whose hand
-    else if ((cpu->lr == 0x800C996Cu || cpu->lr == 0x800C9DF4u) && getenv("ED_COOP_COPIES") != NULL)
-        node = coop_weapon_copy(cpu, id, cpu->lr == 0x800C996Cu);  // what goes in it (testing: unseen yet)
+    else if ((cpu->lr == 0x800C996Cu || cpu->lr == 0x800C9DF4u) && getenv("ED_COOP_NO_COPIES") == NULL)
+        node = coop_weapon_copy(cpu, id, cpu->lr == 0x800C996Cu);  // what goes in it (ED_COOP_NO_COPIES=1: the one)
     if (node != 0u) {
         g_hle_passthrough = false;
         hle_set_u32(cpu, node);
@@ -8041,11 +8078,17 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* stream = hle_dispatch_entry(0x80154118u);
             if (getenv("ED_STREAM_LOG") != NULL && stream != NULL && stream->notify == NULL)
                 stream->notify = notify_stream_read;
-            static const u32 kAnimLoads[] = {0x801318C0u, 0x80132ED8u, 0x80133028u, 0x80118F9Cu, 0x800C994Cu, 0x8003121Cu, 0x80117F64u};
+            static const u32 kAnimLoads[] = {0x801318C0u, 0x80132ED8u, 0x80133028u, 0x80118F9Cu, 0x800C994Cu, 0x80118D98u, 0x801258BCu};
             for (size_t i = 0; getenv("ED_ANIM_LOG") != NULL && i < 7; i++) {
                 HleDispatchEntry* e = hle_dispatch_entry(kAnimLoads[i]);
                 if (e != NULL && e->notify == NULL)
                     e->notify = notify_anim_load;
+            }
+            static const u32 kWatch[] = {0x8011F460u, 0x8011FC8Cu, 0x8011D33Cu, 0x8012123Cu};
+            for (int i = 0; getenv("ED_COPY_WATCH") != NULL && i < 4; i++) {
+                HleDispatchEntry* e = hle_dispatch_entry(kWatch[i]);
+                if (e != NULL && e->notify == NULL)
+                    e->notify = notify_copy_watch;
             }
             HleDispatchEntry* find = hle_dispatch_entry(FIND_BY_ID);
             if (find != NULL && find->intercept == NULL && find->notify == NULL)
