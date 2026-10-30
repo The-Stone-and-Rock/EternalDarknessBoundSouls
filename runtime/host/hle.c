@@ -6415,6 +6415,48 @@ static bool continue_pack_load(CPUState* cpu) {
     return true;
 }
 
+// An animation another chapter's character does not have. 0x80123224(object,
+// animation, ...) plays one: its resource (animation +184, then +4) names the
+// character file (+280) and offset (+284) to stream it from, as needed
+// (0x8012E504). Karim's chapter starts by playing one of Karim's own; for
+// Michael its resource names nothing, and the stream asked for nothing at all
+// was waited on for ever. While another character is played, such an
+// animation is passed over: the character carries on as they were.
+#define PLAY_ANIMATION 0x80123224u
+
+static void hle_play_animation(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (player_model() < 0)
+        return;
+    const u32 animation = cpu->gpr[4];
+    const u32 set = guest_ram_range_valid(cpu, animation + 184u, 4u) ? mem_read32(cpu, animation + 184u) : 0u;
+    const u32 resource = guest_ram_range_valid(cpu, set + 4u, 4u) ? mem_read32(cpu, set + 4u) : 0u;
+    static unsigned seen;
+    if (getenv("ED_STREAM_LOG") != NULL && seen++ < 40u)
+        fprintf(stderr, "[play] object 0x%08X animation 0x%08X set 0x%08X resource 0x%08X file %d offset 0x%X (lr 0x%08X)\n",
+                cpu->gpr[3], animation, set, resource,
+                guest_ram_range_valid(cpu, resource, 296u) ? (s32)mem_read32(cpu, resource + 280u) : -9,
+                guest_ram_range_valid(cpu, resource, 296u) ? mem_read32(cpu, resource + 284u) : 0u, cpu->lr);
+    // No set at all (Michael, Karim's chapter's first animation), or a
+    // resource naming no file.
+    if (set != 0u && (!guest_ram_range_valid(cpu, resource, 296u) || mem_read32(cpu, resource + 280u) != 0u ||
+                      mem_read32(cpu, resource + 284u) != 0u))
+        return;
+    static unsigned told;
+    if (told++ < 8u)
+        fprintf(stderr, "[player] an animation the character does not have, passed over (0x%08X)\n", resource);
+    g_hle_passthrough = false;
+}
+
+// ED_STREAM_LOG=1 (testing): each streamed read the game asks its reader for
+// (0x80154118(offset, file entry, dest, size, ...)).
+static void notify_stream_read(CPUState* cpu) {
+    static unsigned shown;
+    if (shown++ < 200u)
+        fprintf(stderr, "[stream] offset 0x%08X file %d dest 0x%08X size 0x%X (lr 0x%08X)\n", cpu->gpr[3],
+                (s32)cpu->gpr[4], cpu->gpr[5], cpu->gpr[6], cpu->lr);
+}
+
 static void hle_chapter_character(CPUState* cpu) {
     static const u8* const kModel = kChapterModel;
     const u32 chapter = cpu->gpr[3];
@@ -7261,6 +7303,12 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* body = hle_dispatch_entry(CHAPTER_BODY_LOAD);
             if (body != NULL && body->intercept == NULL)
                 body->intercept = hle_chapter_body;
+            HleDispatchEntry* play = hle_dispatch_entry(PLAY_ANIMATION);
+            if (mem_read32(cpu, PLAY_ANIMATION) == 0x9421FFD0u && play != NULL && play->intercept == NULL)
+                play->intercept = hle_play_animation;
+            HleDispatchEntry* stream = hle_dispatch_entry(0x80154118u);
+            if (getenv("ED_STREAM_LOG") != NULL && stream != NULL && stream->notify == NULL)
+                stream->notify = notify_stream_read;
             HleDispatchEntry* pack = hle_dispatch_entry(PACK_LOAD);
             if (pack != NULL && pack->intercept == NULL && pack->notify == NULL)
                 pack->intercept = hle_pack_load;

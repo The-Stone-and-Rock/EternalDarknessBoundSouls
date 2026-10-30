@@ -210,6 +210,19 @@ static void dump_threads_to(FILE* out, CPUState* cpu) {
                 mem_read32(cpu, thread + 0x2D0u), mem_read32(cpu, thread + 0x2DCu),
                 mem_read32(cpu, thread + 0x198u), mem_read32(cpu, thread + 0x84u),
                 mem_read32(cpu, thread + 0x04u));
+        // Where a waiting thread is: the return addresses up its stack.
+        if (thread != current) {
+            u32 sp = mem_read32(cpu, thread + 0x04u);
+            fprintf(out, "         calls:");
+            for (int f = 0; f < 12 && sp >= GC_RAM_BASE && sp < GC_RAM_BASE + cpu->ram_size - 8u; f++) {
+                const u32 caller = mem_read32(cpu, sp);
+                if (caller <= sp || caller >= GC_RAM_BASE + cpu->ram_size - 8u)
+                    break;
+                fprintf(out, " 0x%08X", mem_read32(cpu, caller + 4u));
+                sp = caller;
+            }
+            fprintf(out, "\n");
+        }
         thread = mem_read32(cpu, thread + 0x2FCu);
     }
 }
