@@ -7,7 +7,10 @@
 #   python3 tools/gci.py import CARD FILE...       adds them, replacing a save of the same
 #                                                  game and name (the card is copied to
 #                                                  CARD.bak first); FILE is a .gci, a
-#                                                  MaxDrive .sav or a GameShark .gcs
+#                                                  MaxDrive .sav, a GameShark .gcs, or a
+#                                                  whole card image (Dolphin's
+#                                                  MemoryCardA.EUR.raw: its Eternal
+#                                                  Darkness saves)
 #   python3 tools/gci.py import --as GEDP01 CARD FILE...
 #                                                  the same, retagged for another region's
 #                                                  disc (the save data is left as it is)
@@ -124,6 +127,42 @@ def from_file(raw):
     return from_gci(raw)
 
 
+def from_raw_card(raw):
+    # A whole card image: block 0 the header, 1 and 2 the directory (the newer
+    # by its update counter), 3 and 4 the block map (likewise), then the data.
+    # Each directory entry is a GCI header; a file's blocks run from its first
+    # through the map (next block of block b at map[b - 5]).
+    def newer(a, b, counter):
+        ca = struct.unpack_from(">h", raw, a + counter)[0]
+        cb = struct.unpack_from(">h", raw, b + counter)[0]
+        return a if ca >= cb else b
+    directory = newer(SECTOR, 2 * SECTOR, 0x1FFA)
+    bat = newer(3 * SECTOR, 4 * SECTOR, 0x04)
+    saves = []
+    for i in range(MAX_FILES):
+        entry = raw[directory + i * 64:directory + i * 64 + 64]
+        if entry[:4] == b"\xff\xff\xff\xff" or not entry[:3] == b"GED":
+            continue
+        first, count = struct.unpack_from(">HH", entry, 0x36)
+        data, block = b"", first
+        for _ in range(count):
+            if block < 5 or (block + 1) * SECTOR > len(raw):
+                raise SystemExit(f"card image: entry {i} runs off the card")
+            data += raw[block * SECTOR:(block + 1) * SECTOR]
+            block = struct.unpack_from(">H", raw, bat + 0x0A + (block - 5) * 2)[0]
+        saves.append(from_gci(entry + data))
+    if not saves:
+        raise SystemExit("card image: no Eternal Darkness saves on it")
+    return saves
+
+
+def saves_in(raw):
+    # A card image is a whole number of 8 KiB blocks, 0.5 MiB or more.
+    if len(raw) >= 0x80000 and len(raw) % 0x80000 == 0 and not raw.startswith((b"DATELGC_SAVE", b"GCSAVE")):
+        return from_raw_card(raw)
+    return [from_file(raw)]
+
+
 def main():
     args = sys.argv[1:]
     retag = None
@@ -158,8 +197,7 @@ def main():
             print(out)
     else:
         shutil.copy2(card_path, card_path + ".bak")
-        for path in args[2:]:
-            new = from_file(open(path, "rb").read())
+        for new, path in [(n, p) for p in args[2:] for n in saves_in(open(p, "rb").read())]:
             if retag is not None:
                 new["game"], new["company"] = retag[:4], retag[4:]
             card["files"] = [f for f in card["files"]
