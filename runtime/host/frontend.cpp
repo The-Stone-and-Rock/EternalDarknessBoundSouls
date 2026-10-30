@@ -19,6 +19,7 @@
 
 #include <RmlUi/Core.h>
 #include <RmlUi_Platform_SDL.h>
+#include <SDL3/SDL_audio.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_mouse.h>
@@ -2107,6 +2108,50 @@ void update_cursor() {
 // (test runs without a controller).
 static Uint64 g_test_close_at = 0;
 
+// The first launcher's music: the song of the game's own Options screen
+// (MusyX music, taken from the player's own game: one loop, cut by
+// tools/launcher_music.py into res/music/launcher.wav, which git ignores),
+// played in a loop at the Music volume. Only the launcher the program opens
+// with: not the menus over a running game.
+struct LauncherMusic {
+    SDL_AudioStream* stream = nullptr;
+    Uint8* data = nullptr;
+    Uint32 length = 0;
+
+    void start() {
+        SDL_AudioSpec spec;
+        const std::string path = res_dir() + "/music/launcher.wav";
+        if (!SDL_LoadWAV(path.c_str(), &spec, &data, &length))
+            return;
+        stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+        if (stream == nullptr) {
+            stop();
+            return;
+        }
+        tick();
+        SDL_ResumeAudioStreamDevice(stream);
+    }
+
+    // Keeps a whole loop queued ahead, at the Music volume as set now.
+    void tick() {
+        if (stream == nullptr)
+            return;
+        SDL_SetAudioStreamGain(stream, g_settings.music_volume / 100.f);
+        if (SDL_GetAudioStreamQueued(stream) < static_cast<int>(length))
+            SDL_PutAudioStreamData(stream, data, static_cast<int>(length));
+    }
+
+    void stop() {
+        if (stream != nullptr)
+            SDL_DestroyAudioStream(stream);
+        stream = nullptr;
+        SDL_free(data);
+        data = nullptr;
+        length = 0;
+    }
+};
+LauncherMusic g_launcher_music;
+
 bool run_menu() {
     g_close = false;
     build_rows();
@@ -2116,6 +2161,7 @@ bool run_menu() {
     g_input.poll(pressed);
     bool open = true;
     while (!g_close) {
+        g_launcher_music.tick();
         update_cursor();
         if (controls::capturing()) {
             const bool done = controls::poll_capture();
@@ -2276,7 +2322,10 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
     }
     g_play = false;
     g_load_slot = 0;
-    if (!run_menu() || !g_play)
+    g_launcher_music.start();
+    const bool played = run_menu();
+    g_launcher_music.stop();
+    if (!played || !g_play)
         return false;
     snprintf(iso_out, iso_cap, "%s", g_discs[g_disc].path.c_str());
     g_running_disc = g_discs[g_disc].path;

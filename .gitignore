@@ -2,6 +2,8 @@
 dump/
 # Character portraits, written from the disc by the menu.
 res/ui/portraits/
+# The launcher's music, converted from the disc (tools/launcher_music.py).
+res/music/
 generated/
 build*/
 .deps/
