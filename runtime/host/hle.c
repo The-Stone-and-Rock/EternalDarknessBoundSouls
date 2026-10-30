@@ -6098,6 +6098,13 @@ static void coop_describe(CPUState* cpu, const char* what, u32 node) {
                 ? (s16)mem_read16(cpu, stats + (u32)(s32)g_coop_health_offset)
                 : -1,
             mem_read32(cpu, node + 8u), at[0], at[1], at[2]);
+    // ED_COOP_STATS (testing): the stats round health, for magick and sanity.
+    if (getenv("ED_COOP_STATS") != NULL && guest_ram_range_valid(cpu, stats, 96u)) {
+        fprintf(stderr, "[coop] %s stats (health at +%d):", what, g_coop_health_offset);
+        for (u32 i = 0; i < 96u; i += 2u)
+            fprintf(stderr, " %d", (s16)mem_read16(cpu, stats + i));
+        fputc('\n', stderr);
+    }
 }
 
 // Player 2 beside player 1: the first of eight directions round them (ahead

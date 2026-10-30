@@ -60,7 +60,7 @@ namespace {
 
 // --- Input ------------------------------------------------------------------
 
-enum Button { kUp, kDown, kLeft, kRight, kAccept, kBack, kMenu, kButtonCount };
+enum Button { kUp, kDown, kLeft, kRight, kAccept, kBack, kMenu, kInfo, kButtonCount };
 
 SDL_Gamepad* g_pad = nullptr;
 
@@ -95,6 +95,7 @@ void read_buttons(bool held[kButtonCount]) {
     held[kBack] = btn(SDL_GAMEPAD_BUTTON_EAST);
     // The GameCube pad has no Back/Select, so the game never sees it.
     held[kMenu] = btn(SDL_GAMEPAD_BUTTON_BACK);
+    held[kInfo] = btn(SDL_GAMEPAD_BUTTON_NORTH);
 }
 
 // Keyboard presses since the last poll, from RmlUi key events.
@@ -140,6 +141,7 @@ public:
             g_key_pressed[kMenu] = true;
             break;
         case KI_BACK: case KI_K: g_key_pressed[kBack] = true; break;
+        case KI_I: g_key_pressed[kInfo] = true; break;
         default: break;
         }
     }
@@ -260,7 +262,8 @@ std::string region_name(const std::string& id) {
 
 // --- Menu model -------------------------------------------------------------
 
-enum class Screen { Launcher, Play, Options, Controls, Mapping, InGame, Problem, Mods, Characters };
+enum class Screen { Launcher, Play, Options, OptionsPage, Controls, Mapping, InGame, Problem, Mods, Characters,
+                    CharacterInfo };
 
 struct Row {
     std::string label;
@@ -275,6 +278,8 @@ struct Row {
     bool gap = false;            // an ornament before it: a new group
     bool tile = false;           // a character's portrait frame (Character select)
     bool chosen = false;         // the choice in force (Character select)
+    std::function<void()> info;  // its details (Character select: the i button, Y or I)
+    std::string block_rml;       // markup shown in place of a row (not chosen)
     int page = 0;                // 1: the right-hand page of a spread
 };
 
@@ -434,6 +439,10 @@ void start_game(int slot) {
 // The Mods page: from the launcher, the in-game menu and Options, back to the
 // one it came from. Options keeps its own way back (g_options_return).
 Screen g_mods_return = Screen::Launcher;
+int g_options_row = 0;  // the Options row to come back to (its pages, Controls, Mods)
+// Controls: player 1's from Options, player 2's from Mods (co-op), and back.
+Screen g_controls_return = Screen::Options;
+int g_controls_return_row = 0;
 
 Row mods_row(Screen from) {
     Row mods{"Mods"};
@@ -453,9 +462,77 @@ Row mods_row(Screen from) {
 const char* const kCharacters[] = {"Vanilla Character", "Pius", "Ellia", "Anthony", "Karim",
                                    "Max", "Lindsey", "Paul", "Roberto", "Peter",
                                    "Edward", "Michael", "Alex"};
-constexpr int kRosterCount = 12;    // portrait frames, then "Vanilla Character" and Back
+constexpr int kRosterCount = 12;    // portrait frames, then Stats, "Vanilla Character" and Back
 constexpr int kRosterColumns = 6;
 int g_characters_return_row = 0;    // the Mods row to come back to
+int g_characters_player = 0;        // whose character the page chooses: 0 player 1, 1 player 2
+
+int& chosen_character() {
+    return g_characters_player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
+}
+
+int& chosen_stats() {
+    return g_characters_player == 1 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats;
+}
+
+// Each character's details (Character select's i): when they lived, who
+// they are, and their health, magick and sanity as their own chapter starts
+// (measured in the game; -1 not yet).
+struct CharacterInfo {
+    const char* year;
+    const char* about;
+    int health, magick, sanity;
+};
+const CharacterInfo kCharacterInfo[13] = {
+    {"", "", -1, -1, -1},
+    {"26 B.C.", "Pius Augustus, a Roman centurion whose search of a forgotten city in Persia sets the darkness in "
+                "motion.", 125, -1, -1},
+    {"1150 A.D.", "Ellia, a Khmer temple dancer drawn into the hidden chambers beneath Angkor Thom.", 75, -1, -1},
+    {"814 A.D.", "Anthony, a messenger to Charlemagne's court, carrying a cursed scroll through a cathedral in France.",
+     125, -1, -1},
+    {"565 A.D.", "Karim, a Persian swordsman who braves a forbidden city hoping to win his beloved's hand.", 150, -1,
+     -1},
+    {"1760 A.D.", "Maximillian Roivas, who uncovers a horror beneath the family mansion in Rhode Island.", 125, -1,
+     -1},
+    {"1983 A.D.", "Dr. Edwin Lindsey, an archaeologist exploring the ruins of Angkor Thom.", 125, -1, -1},
+    {"1485 A.D.", "Paul Luther, a Franciscan monk on pilgrimage to a cathedral in France.", 75, -1, -1},
+    {"1460 A.D.", "Roberto Bianchi, a Venetian architect held prisoner in Cambodia.", 125, -1, -1},
+    {"1916 A.D.", "Peter Jacob, a journalist on the Western Front of the First World War.", 100, -1, -1},
+    {"1952 A.D.", "Edward Roivas, a clinical psychologist and Alex's grandfather, who studies the Tome in the family "
+                  "mansion.", 75, -1, -1},
+    {"1991 A.D.", "Michael Edwards, a firefighter serving with the Canadian forces in the Gulf War.", 125, -1, -1},
+    {"2000 A.D.", "Alexandra Roivas, who returns to her grandfather's Rhode Island mansion to solve his murder.", 100, -1,
+     -1},
+};
+int g_info_character = 1;  // whose details are open
+std::string portrait_file(int character);
+
+std::string character_details_rml(int i) {
+    const CharacterInfo& c = kCharacterInfo[i];
+    std::string out = "<div class=\"bio\"><div class=\"bio-top\"><div class=\"bio-portrait\">";
+    struct stat st;
+    if (stat((res_dir() + "/ui/" + portrait_file(i)).c_str(), &st) == 0)
+        out += "<img src=\"" + portrait_file(i) + "\"/>";
+    out += "</div><div class=\"bio-text\"><div class=\"bio-year\">" + escape(c.year) +
+           "</div><div class=\"bio-about\">" + escape(c.about) + "</div></div></div><div class=\"meters\">";
+    // Bars on one scale (150, the most any has), in the game's own colours.
+    const struct {
+        const char* name;
+        const char* kind;
+        int value;
+    } meters[] = {{"Health", "health", c.health}, {"Magick", "magick", c.magick}, {"Sanity", "sanity", c.sanity}};
+    for (const auto& m : meters) {
+        const int width = m.value < 0 ? 0 : std::min(100, m.value * 100 / 150);
+        out += std::string("<div class=\"meter\"><span class=\"meter-name\">") + m.name +
+               "</span><div class=\"meter-bar\"><div class=\"meter-fill " + m.kind + "\" style=\"width: " +
+               std::to_string(width) + "%;\"></div></div><span class=\"meter-value\">" +
+               (m.value < 0 ? std::string("not measured yet") : std::to_string(m.value)) + "</span></div>";
+    }
+    return out + "</div></div>";
+}
+
+// The page's rows under the frames: Stats, the vanilla character, Back.
+constexpr int kRosterVanillaRow = 13;
 
 // The characters' portraits, from the player's own disc: the main menu's
 // texture file (UMnMenu.tpl) holds the chapter portraits the save list shows,
@@ -648,29 +725,71 @@ void build_characters() {
     for (int i = 1; i <= kRosterCount; i++) {
         Row r{kCharacters[i]};
         r.tile = true;
-        r.chosen = g_settings.mod_p1_character == i;
+        r.chosen = chosen_character() == i;
         struct stat st;
         if (stat((res_dir() + "/ui/" + portrait_file(i)).c_str(), &st) == 0)
             r.value_rml = "<img src=\"" + portrait_file(i) + "\"/>";
-        r.note = std::string("Play every chapter as ") + kCharacters[i] + ", in their own body.";
+        r.note = g_characters_player == 1
+                     ? std::string("Player 2 as ") + kCharacters[i] + " (chosen now, played in a later update)."
+                     : std::string("Play every chapter as ") + kCharacters[i] + ", in their own body.";
         r.activate = [i, leave] {
-            g_settings.mod_p1_character = i;
+            chosen_character() = i;
             leave();
+        };
+        r.info = [i] {
+            g_info_character = i;
+            g_screen = Screen::CharacterInfo;
+            g_selected = 1;
         };
         g_rows.push_back(r);
     }
+    static const char* const kStatsChoice[] = {"Vanilla", "Chosen character's"};
+    Row stats{"Stats", "\u2039 " + std::string(kStatsChoice[chosen_stats()]) + " \u203a"};
+    stats.gap = true;
+    stats.note = std::string(chosen_stats() == 0
+                                 ? "The chapter's own character's health, magick and sanity."
+                                 : "The chosen character's own health, magick and sanity (Roberto's lower stamina, ...).") +
+                 " In development: no effect yet.";
+    stats.change = [](int) { chosen_stats() = 1 - chosen_stats(); };
+    g_rows.push_back(stats);
     Row own{kCharacters[0]};
-    own.gap = true;
-    own.chosen = g_settings.mod_p1_character == 0;
-    own.note = "Each chapter's own character, as the game tells it.";
+    own.chosen = chosen_character() == 0;
+    own.note = g_characters_player == 1 ? "Player 2 as the chapter's own character, as now."
+                                        : "Each chapter's own character, as the game tells it.";
     own.activate = [leave] {
-        g_settings.mod_p1_character = 0;
+        chosen_character() = 0;
         leave();
     };
     g_rows.push_back(own);
     Row back{"Back"};
     back.note = "Keep the character chosen before.";
     back.activate = leave;
+    g_rows.push_back(back);
+}
+
+// One character's details: who they are and their meters, then Choose
+// (as their frame does) and Back to the frames.
+void build_character_info() {
+    const int i = g_info_character;
+    Row block{""};
+    block.enabled = false;
+    block.block_rml = character_details_rml(i);
+    g_rows.push_back(block);
+    Row choose{std::string("Choose ") + kCharacters[i]};
+    choose.gap = true;
+    choose.note = g_characters_player == 1 ? "Player 2's character (no effect yet)." : "Player 1's character.";
+    choose.activate = [i] {
+        chosen_character() = i;
+        settings_save();
+        g_screen = Screen::Mods;
+        g_selected = g_characters_return_row;
+    };
+    g_rows.push_back(choose);
+    Row back{"Back"};
+    back.activate = [i] {
+        g_screen = Screen::Characters;
+        g_selected = i - 1;
+    };
     g_rows.push_back(back);
 }
 
@@ -682,6 +801,8 @@ void move_in_roster(int dx, int dy) {
     if (dx != 0) {
         if (at < kRosterCount)
             at = (at + dx + kRosterCount) % kRosterCount;
+        else if (g_rows[at].change)
+            g_rows[at].change(dx);
         return;
     }
     if (at < kRosterCount) {
@@ -690,25 +811,18 @@ void move_in_roster(int dx, int dy) {
             at = kRosterCount;
         else if (at < 0)
             at = n - 1;
-    } else if (at == kRosterCount) {
-        at = dy > 0 ? n - 1 : kRosterCount - kRosterColumns;
     } else {
-        at = dy > 0 ? 0 : kRosterCount;
+        at += dy;
+        if (at < kRosterCount)
+            at = kRosterCount - kRosterColumns;
+        else if (at >= n)
+            at = 0;
     }
 }
 
 void build_mods() {
     // Every mod is still being made: each note says so, until it works.
     auto note = [](const std::string& text) { return text + " In development: no effect yet."; };
-    // Custom stats: a percent of the character's own, 50% to 300% in steps of 25.
-    auto percent_row = [&](const char* label, int& value, const char* what) {
-        Row r{label, std::to_string(value) + "%"};
-        r.enabled = g_settings.mod_stats == 1;
-        r.note = note(std::string("Each player's most ") + what + ", as a share of their character's own.");
-        r.change = [&value](int dir) { value = std::clamp(value + dir * 25, 50, 300); };
-        return r;
-    };
-
     Row coop{"Split-screen co-op", on_off(g_settings.mod_coop)};
     coop.section = "I · Co-op";
     coop.note = "A second player in the same world, each with their own view and controls. (Their own health, "
@@ -726,9 +840,20 @@ void build_mods() {
     static const char* const kInput[] = {"Controller", "Keyboard"};
     Row input{"Player 2 plays with", kInput[g_settings.mod_p2_input]};
     input.enabled = g_settings.mod_coop;
-    input.note = "Which controller, its type and the buttons: Options, Controls, Player 2.";
+    input.note = "A controller or the keyboard (more in Player 2 controls, below).";
     input.change = [](int dir) { cycle(g_settings.mod_p2_input, 2, dir); };
     g_rows.push_back(input);
+
+    Row p2_controls{"Player 2 controls"};
+    p2_controls.note = "Player 2's controller or keys, their button layout and their button mapping.";
+    p2_controls.activate = [at = static_cast<int>(g_rows.size())] {
+        controls::set_menu_player(1);
+        g_controls_return = Screen::Mods;
+        g_controls_return_row = at;
+        g_screen = Screen::Controls;
+        g_selected = 0;
+    };
+    g_rows.push_back(p2_controls);
 
     // Each player's camera: player 1's is Options' Camera, player 2's their own.
     Row p1_camera{"Player 1 camera", camera_mode_name(g_settings.camera)};
@@ -775,38 +900,33 @@ void build_mods() {
     insanity.change = [](int dir) { cycle(g_settings.mod_insanity, 3, dir); };
     g_rows.push_back(insanity);
 
-    // Player 1's character (hle.c player_model): any of the twelve, in any
-    // chapter, in their own body, chosen on its own page (build_characters).
-    Row p1_character{"Character select", kCharacters[g_settings.mod_p1_character]};
-    p1_character.section = "III · Characters";
-    p1_character.page = 1;
-    p1_character.note = g_settings.mod_p1_character == 0
-                            ? "Each chapter's own character, as the game tells it."
-                            : "Every chapter is played as " + std::string(kCharacters[g_settings.mod_p1_character]) +
-                                  ", in their own body, from the next chapter or save you load. They keep the "
-                                  "chapter's weapons for now.";
-    p1_character.activate = [at = static_cast<int>(g_rows.size())] {
-        g_characters_return_row = at;
-        g_screen = Screen::Characters;
-        g_selected = g_settings.mod_p1_character == 0 ? kRosterCount : g_settings.mod_p1_character - 1;
-    };
-    g_rows.push_back(p1_character);
-
-    static const char* const kStats[] = {"Character's own", "Custom"};
-    Row stats{"Stats", kStats[g_settings.mod_stats]};
-    stats.page = 1;
-    stats.note = note(g_settings.mod_stats == 0
-                          ? "Each player has the health, magick and sanity of the character they play as."
-                          : "Each player's health, magick and sanity, set below as a share of their "
-                            "character's own.");
-    stats.change = [](int dir) { cycle(g_settings.mod_stats, 2, dir); };
-    g_rows.push_back(stats);
-    for (Row r : {percent_row("Health", g_settings.mod_health, "health"),
-                  percent_row("Magick", g_settings.mod_magick, "magick"),
-                  percent_row("Sanity", g_settings.mod_sanity, "sanity")}) {
+    // Each player's character, chosen on its own page (build_characters).
+    // Player 1's (hle.c player_model): any of the twelve, in any chapter, in
+    // their own body. Player 2's is kept for when player 2 can be another.
+    auto character_row = [](int player) {
+        const int chosen = player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
+        Row r{player == 1 ? "Player 2 character" : "Player 1 character", kCharacters[chosen]};
+        if ((player == 1 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats) == 1)
+            r.value += " (own stats)";
         r.page = 1;
-        g_rows.push_back(r);
-    }
+        if (player == 1)
+            r.note = "Player 2's character in co-op. In development: no effect yet (player 2 plays as player 1's).";
+        else
+            r.note = chosen == 0 ? "Each chapter's own character, as the game tells it."
+                                 : "Every chapter played as " + std::string(kCharacters[chosen]) +
+                                       ", from the next chapter or save you load (with the chapter's weapons).";
+        r.activate = [player, at = static_cast<int>(g_rows.size())] {
+            g_characters_player = player;
+            g_characters_return_row = at;
+            g_screen = Screen::Characters;
+            g_selected = chosen_character() == 0 ? kRosterVanillaRow : chosen_character() - 1;
+        };
+        return r;
+    };
+    Row p1_character = character_row(0);
+    p1_character.section = "III · Characters";
+    g_rows.push_back(p1_character);
+    g_rows.push_back(character_row(1));
 
     Row back{"Back"};
     back.gap = true;
@@ -814,7 +934,7 @@ void build_mods() {
     back.activate = [] {
         settings_save();
         g_screen = g_mods_return;
-        g_selected = 0;
+        g_selected = g_mods_return == Screen::Options ? g_options_row : 0;
     };
     g_rows.push_back(back);
 }
@@ -832,7 +952,7 @@ void build_launcher() {
         g_rows.push_back(cont);
     }
 
-    Row fresh{"New game"};
+    Row fresh{"Start game"};
     fresh.enabled = disc_playable();
     fresh.note = "Start from the title screen (your memory card saves are there).";
     fresh.activate = [] { start_game(0); };
@@ -917,17 +1037,6 @@ Row layout_row() {
         controls::set_layout(l);
     };
     return layout;
-}
-
-// Whose controls the Controls pages show: player 2's are their own layout and
-// bindings, on the second controller or the keyboard (the Mods page's co-op).
-Row player_row() {
-    const int player = controls::menu_player();
-    Row r{"Player", "\u2039 Player " + std::to_string(player + 1) + " \u203a"};
-    r.note = player == 0 ? "Player 1's controls. Left/Right: player 2's, for split-screen co-op (Mods)."
-                         : "Player 2's controls, for split-screen co-op (Mods).";
-    r.change = [player](int) { controls::set_menu_player(1 - player); };
-    return r;
 }
 
 // What the menu player plays with: player 1 a controller, the keyboard or
@@ -1074,7 +1183,7 @@ const char* const kNotes[kCount] = {
 
 void run_hdr_calibration(int first_step);
 
-void build_options() {
+void build_options_rows() {
     static const char* const kAspect[] = {"16:9", "4:3", "16:9", "16:9", "21:9"};
     // Each resolution as the pixels it draws at, for the display shape in use:
     // the window's own, or a standard height at 4:3 or 16:9. The shape comes
@@ -1321,10 +1430,107 @@ void build_options() {
     g_rows.push_back(back);
 }
 
+// Options: its sections, each a page of its own (Controls and Mods their
+// own pages as before), then the disc and Back.
+int g_options_section = 1;  // the section page open: 1 Display, 2 Sound, 3 Graphics, 5 Game
+
+int section_number(const std::string& heading) {
+    static const char* const kNumerals[] = {"I ", "II ", "III ", "IV ", "V ", "VI "};
+    for (int n = 6; n >= 1; n--)
+        if (heading.rfind(kNumerals[n - 1], 0) == 0)
+            return n;
+    return 0;
+}
+
+// One section's rows, from the full list (build_options_rows), on one page.
+void build_options_page() {
+    std::vector<Row> all;
+    std::swap(all, g_rows);
+    build_options_rows();
+    std::swap(all, g_rows);
+    int section = 0;
+    for (Row& r : all) {
+        if (!r.section.empty())
+            section = section_number(r.section);
+        if (section != g_options_section || r.label == "Back")
+            continue;
+        r.section.clear();
+        r.page = 0;
+        g_rows.push_back(r);
+    }
+    Row back{"Back"};
+    back.gap = true;
+    back.activate = [] {
+        settings_save();
+        g_screen = Screen::Options;
+        g_selected = g_options_row;
+    };
+    g_rows.push_back(back);
+}
+
+const char* options_page_name() {
+    switch (g_options_section) {
+    case 1: return "Display";
+    case 2: return "Sound";
+    case 3: return "Graphics";
+    default: return "Game";
+    }
+}
+
+void build_options() {
+    auto page = [](const char* label, int section, const char* note) {
+        Row r{label};
+        r.note = note;
+        r.activate = [section] {
+            g_options_section = section;
+            g_options_row = g_selected;
+            g_screen = Screen::OptionsPage;
+            g_selected = 0;
+        };
+        return r;
+    };
+    g_rows.push_back(page("Display", 1, "Fullscreen, resolution, frame rate, aspect ratio and HDR."));
+    g_rows.push_back(page("Sound", 2, "Music, and effects and voices."));
+    g_rows.push_back(page("Graphics", 3, "HD textures, shadows, ambient occlusion and glow."));
+    Row controls{"Controls"};
+    controls.note = "Player 1's controller or keys, the button layout, vibration, hold or toggle, "
+                    "stick deadzone and button mapping. (Player 2's: Mods.)";
+    controls.activate = [] {
+        g_options_row = g_selected;
+        controls::set_menu_player(0);
+        g_controls_return = Screen::Options;
+        g_controls_return_row = g_selected;
+        g_screen = Screen::Controls;
+        g_selected = 0;
+    };
+    g_rows.push_back(controls);
+    g_rows.push_back(page("Game", 5, "The camera, the game's text and the FPS counter."));
+    Row mods = mods_row(Screen::Options);
+    mods.activate = [inner = mods.activate] {
+        g_options_row = g_selected;
+        inner();
+    };
+    g_rows.push_back(mods);
+
+    if (g_options_return == Screen::Launcher && !g_disc_on_main) {
+        Row disc = disc_row();
+        disc.gap = true;
+        g_rows.push_back(disc);
+    }
+
+    Row back{"Back"};
+    back.gap = true;
+    back.activate = [] {
+        settings_save();
+        g_screen = g_options_return;
+        g_selected = 0;
+    };
+    g_rows.push_back(back);
+}
+
 void build_controls_mapping_and_back();
 
 void build_controls() {
-    g_rows.push_back(player_row());
     const bool p2 = controls::menu_player() == 1;
     g_rows.push_back(device_row());
     if (controls::player_has_controller(controls::menu_player())) {
@@ -1386,8 +1592,8 @@ void build_controls_mapping_and_back() {
     back.gap = true;
     back.activate = [] {
         controls::set_menu_player(0);
-        g_screen = Screen::Options;
-        g_selected = 0;
+        g_screen = g_controls_return;
+        g_selected = g_controls_return_row;
     };
     g_rows.push_back(back);
 }
@@ -1567,12 +1773,17 @@ void render() {
     const char* heading = g_screen == Screen::Launcher   ? ""
                           : g_screen == Screen::Play     ? "Load Game"
                           : g_screen == Screen::Options  ? "Options"
-                          : g_screen == Screen::Controls ? "Controls"
+                          : g_screen == Screen::OptionsPage ? options_page_name()
+                          : g_screen == Screen::Controls ? (controls::menu_player() == 1
+                                                                ? "Player 2 Controls"
+                                                                : "Controls")
                           : g_screen == Screen::Mapping  ? (controls::menu_player() == 1
                                                                 ? "Player 2 Mapping"
                                                                 : "Button Mapping")
                           : g_screen == Screen::Mods     ? "Mods"
-                          : g_screen == Screen::Characters ? "Character Select"
+                          : g_screen == Screen::Characters ? (g_characters_player == 1 ? "Player 2 Character"
+                                                                                       : "Player 1 Character")
+                          : g_screen == Screen::CharacterInfo ? kCharacters[g_info_character]
                           : g_screen == Screen::Problem  ? g_problem_heading.c_str()
                                                          : "Paused";
     g_doc->GetElementById("heading")->SetInnerRML(heading);
@@ -1588,8 +1799,8 @@ void render() {
             in_roster = true;
             rml[0] += "<div class=\"tile" + std::string(static_cast<int>(i) == g_selected ? " selected" : "") +
                       (r.chosen ? " chosen" : "") + "\" id=\"row" + std::to_string(i) +
-                      "\"><div class=\"portrait\">" + r.value_rml + "</div><div class=\"name\">" + escape(r.label) +
-                      "</div></div>";
+                      "\"><div class=\"portrait\">" + r.value_rml + "<div class=\"info\" id=\"info" +
+                      std::to_string(i) + "\">i</div></div><div class=\"name\">" + escape(r.label) + "</div></div>";
             continue;
         }
         if (in_roster)
@@ -1598,6 +1809,10 @@ void render() {
         const int page = r.page == 1 ? 1 : 0;
         spread = spread || page == 1;
         std::string& out = rml[page];
+        if (!r.block_rml.empty()) {
+            out += r.block_rml;
+            continue;
+        }
         if (!r.section.empty())
             out += "<div class=\"section\">" + escape(r.section) + "</div>";
         else if (r.gap)
@@ -1633,7 +1848,7 @@ void render() {
     g_doc->GetElementById("hint")->SetInnerRML(
         g_screen == Screen::InGame    ? "Up/Down choose &#183; Left/Right change &#183; A select &#183; B resume"
         : g_screen == Screen::Problem ? "Up/Down choose &#183; A select"
-        : g_screen == Screen::Characters ? "Arrows choose &#183; A select &#183; B back"
+        : g_screen == Screen::Characters ? "Arrows choose &#183; A select &#183; Y or I details &#183; B back"
                                       : "Up/Down choose &#183; Left/Right change &#183; A select &#183; B back");
     g_doc->SetClass("spread", spread);
     // The main menu opens with the emblem instead of a heading.
@@ -1641,11 +1856,12 @@ void render() {
     // The mapping list is long: tighten the rows.
     g_doc->SetClass("compact", g_screen == Screen::Mapping);
     // Character select: one wide page, every frame at once.
-    g_doc->SetClass("roster", g_screen == Screen::Characters);
+    g_doc->SetClass("roster", g_screen == Screen::Characters || g_screen == Screen::CharacterInfo);
     // Over the game the page lies on the dimmed, paused frame.
     g_doc->SetClass("overlay", g_screen == Screen::InGame || g_screen == Screen::Problem ||
-                                   ((g_screen == Screen::Options || g_screen == Screen::Mods ||
-                                     g_screen == Screen::Characters ||
+                                   ((g_screen == Screen::Options || g_screen == Screen::OptionsPage ||
+                                     g_screen == Screen::Mods ||
+                                     g_screen == Screen::Characters || g_screen == Screen::CharacterInfo ||
                                      g_screen == Screen::Controls ||
                                      g_screen == Screen::Mapping) &&
                                     g_options_return == Screen::InGame));
@@ -1657,12 +1873,14 @@ void build_rows() {
     case Screen::Launcher: build_launcher(); break;
     case Screen::Play: build_play(); break;
     case Screen::Options: build_options(); break;
+    case Screen::OptionsPage: build_options_page(); break;
     case Screen::Controls: build_controls(); break;
     case Screen::Mapping: build_mapping(); break;
     case Screen::InGame: build_in_game(); break;
     case Screen::Problem: build_problem(); break;
     case Screen::Mods: build_mods(); break;
     case Screen::Characters: build_characters(); break;
+    case Screen::CharacterInfo: build_character_info(); break;
     }
     if (g_selected >= static_cast<int>(g_rows.size()))
         g_selected = 0;
@@ -1698,8 +1916,13 @@ void go_back() {
         break;
     case Screen::Controls:
         controls::set_menu_player(0);
+        g_screen = g_controls_return;
+        g_selected = g_controls_return_row;
+        break;
+    case Screen::OptionsPage:
+        settings_save();
         g_screen = Screen::Options;
-        g_selected = 0;
+        g_selected = g_options_row;
         break;
     case Screen::Mapping:
         g_screen = Screen::Controls;
@@ -1713,12 +1936,16 @@ void go_back() {
     case Screen::Mods:
         settings_save();
         g_screen = g_mods_return;
-        g_selected = 0;
+        g_selected = g_mods_return == Screen::Options ? g_options_row : 0;
         break;
     case Screen::Characters:
         settings_save();
         g_screen = Screen::Mods;
         g_selected = g_characters_return_row;
+        break;
+    case Screen::CharacterInfo:
+        g_screen = Screen::Characters;
+        g_selected = g_info_character - 1;
         break;
     case Screen::InGame:
         g_close = true;
@@ -1734,8 +1961,11 @@ class MenuListener final : public Rml::EventListener {
 public:
     void ProcessEvent(Rml::Event& event) override {
         Rml::Element* e = event.GetTargetElement();
-        while (e != nullptr && e->GetId().rfind("row", 0) != 0)
+        bool on_info = false;  // a frame's i button
+        while (e != nullptr && e->GetId().rfind("row", 0) != 0) {
+            on_info = on_info || e->GetId().rfind("info", 0) == 0;
             e = e->GetParentNode();
+        }
         if (e == nullptr)
             return;
         const int index = std::atoi(e->GetId().c_str() + 3);
@@ -1757,7 +1987,10 @@ public:
             }
         } else if (event.GetId() == Rml::EventId::Click) {
             g_selected = index;
-            activate_selected();
+            if (on_info && g_rows[index].info)
+                g_rows[index].info();
+            else
+                activate_selected();
             build_rows();
         }
     }
@@ -1899,7 +2132,10 @@ bool run_menu() {
                 dirty = true;
             }
         }
-        if (pressed[kAccept]) {
+        if (pressed[kInfo] && g_selected < static_cast<int>(g_rows.size()) && g_rows[g_selected].info) {
+            g_rows[g_selected].info();
+            dirty = true;
+        } else if (pressed[kAccept]) {
             activate_selected();
             dirty = true;
         } else if (pressed[kBack] || (pressed[kMenu] && g_screen == Screen::InGame)) {
