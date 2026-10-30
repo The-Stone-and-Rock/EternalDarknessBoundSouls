@@ -309,72 +309,47 @@ body.roster .row {
 	height: 100%;
 }
 
-/* A frame's details button (the i in its corner). */
-.portrait {
-	position: relative;
-}
-
-.info {
-	position: absolute;
-	right: 4dp;
-	bottom: 4dp;
-	width: 22dp;
-	height: 22dp;
-	border: 1dp #e8d8b0;
-	border-radius: 11dp;
-	background-color: #2a1810c0;
-	color: #e8d8b0;
-	font-family: "IM FELL English";
-	font-style: italic;
-	font-size: 17dp;
-	line-height: 20dp;
-	text-align: center;
-}
-
-.tile.selected .info {
-	background-color: #8e1b12;
-}
-
-/* A character's details: portrait and who they are, then their meters. */
-.bio {
-	width: 760dp;
-	margin: 6dp auto 0 auto;
-}
-
-.bio-top {
+/* Character select: the frames, and beside them the highlighted character's
+   details. */
+.roster-wrap {
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 }
 
-.bio-portrait {
-	width: 252dp;
-	height: 178dp;
-	border: 1dp #7a201266;
+.roster-wrap .roster {
+	width: 700dp;
 	flex-shrink: 0;
 }
 
-.bio-portrait img {
-	width: 100%;
-	height: 100%;
+.roster-details {
+	flex: 1;
+	margin: 14dp 0 0 18dp;
+	padding: 14dp 18dp;
+	border: 1dp #7a201266;
+	background-color: #3a24120f;
 }
 
-.bio-text {
-	margin-left: 24dp;
+.bio-name {
+	font-family: "IM FELL English SC";
+	font-size: 32dp;
+	color: #8e1b12;
 }
 
 .bio-year {
 	font-family: "IM FELL English SC";
-	font-size: 26dp;
+	font-size: 22dp;
 	color: #7a2012;
-	margin-bottom: 6dp;
+	margin-bottom: 8dp;
 }
 
 .bio-about {
-	font-size: 22dp;
+	font-size: 20dp;
+	height: 104dp;
+	overflow: hidden;
 }
 
 .meters {
-	margin-top: 22dp;
+	margin-top: 10dp;
 }
 
 .meter {
@@ -384,7 +359,7 @@ body.roster .row {
 }
 
 .meter-name {
-	width: 110dp;
+	width: 92dp;
 	font-family: "IM FELL English SC";
 	font-size: 22dp;
 }
@@ -405,8 +380,8 @@ body.roster .row {
 .meter-fill.sanity { background-color: #2d7a2a; }
 
 .meter-value {
-	width: 170dp;
-	margin-left: 12dp;
+	width: 40dp;
+	margin-left: 10dp;
 	font-style: italic;
 	font-size: 19dp;
 	color: #5a3a20;

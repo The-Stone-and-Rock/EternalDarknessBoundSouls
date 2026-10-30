@@ -60,7 +60,7 @@ namespace {
 
 // --- Input ------------------------------------------------------------------
 
-enum Button { kUp, kDown, kLeft, kRight, kAccept, kBack, kMenu, kInfo, kButtonCount };
+enum Button { kUp, kDown, kLeft, kRight, kAccept, kBack, kMenu, kButtonCount };
 
 SDL_Gamepad* g_pad = nullptr;
 
@@ -95,7 +95,6 @@ void read_buttons(bool held[kButtonCount]) {
     held[kBack] = btn(SDL_GAMEPAD_BUTTON_EAST);
     // The GameCube pad has no Back/Select, so the game never sees it.
     held[kMenu] = btn(SDL_GAMEPAD_BUTTON_BACK);
-    held[kInfo] = btn(SDL_GAMEPAD_BUTTON_NORTH);
 }
 
 // Keyboard presses since the last poll, from RmlUi key events.
@@ -141,7 +140,6 @@ public:
             g_key_pressed[kMenu] = true;
             break;
         case KI_BACK: case KI_K: g_key_pressed[kBack] = true; break;
-        case KI_I: g_key_pressed[kInfo] = true; break;
         default: break;
         }
     }
@@ -262,8 +260,7 @@ std::string region_name(const std::string& id) {
 
 // --- Menu model -------------------------------------------------------------
 
-enum class Screen { Launcher, Play, Options, OptionsPage, Controls, Mapping, InGame, Problem, Mods, Characters,
-                    CharacterInfo };
+enum class Screen { Launcher, Play, Options, OptionsPage, Controls, Mapping, InGame, Problem, Mods, Characters };
 
 struct Row {
     std::string label;
@@ -278,8 +275,6 @@ struct Row {
     bool gap = false;            // an ornament before it: a new group
     bool tile = false;           // a character's portrait frame (Character select)
     bool chosen = false;         // the choice in force (Character select)
-    std::function<void()> info;  // its details (Character select: the i button, Y or I)
-    std::string block_rml;       // markup shown in place of a row (not chosen)
     int page = 0;                // 1: the right-hand page of a spread
 };
 
@@ -463,7 +458,7 @@ const char* const kCharacters[] = {"Vanilla Character", "Pius", "Ellia", "Anthon
                                    "Max", "Lindsey", "Paul", "Roberto", "Peter",
                                    "Edward", "Michael", "Alex"};
 constexpr int kRosterCount = 12;    // portrait frames, then Stats, "Vanilla Character" and Back
-constexpr int kRosterColumns = 6;
+constexpr int kRosterColumns = 4;  // beside them, the details panel
 int g_characters_return_row = 0;    // the Mods row to come back to
 int g_characters_player = 0;        // whose character the page chooses: 0 player 1, 1 player 2
 
@@ -502,17 +497,14 @@ const CharacterInfo kCharacterInfo[13] = {
     {"1991 A.D.", "Michael Edwards, a firefighter serving with the Canadian forces in the Gulf War.", 125, 75, 75},
     {"2000 A.D.", "Alexandra Roivas, who returns to her grandfather's Rhode Island mansion to solve his murder.", 100, 125, 125},
 };
-int g_info_character = 1;  // whose details are open
-std::string portrait_file(int character);
 
+// Character select's panel beside the frames: the highlighted character's
+// name, when they lived, who they are and their meters.
 std::string character_details_rml(int i) {
     const CharacterInfo& c = kCharacterInfo[i];
-    std::string out = "<div class=\"bio\"><div class=\"bio-top\"><div class=\"bio-portrait\">";
-    struct stat st;
-    if (stat((res_dir() + "/ui/" + portrait_file(i)).c_str(), &st) == 0)
-        out += "<img src=\"" + portrait_file(i) + "\"/>";
-    out += "</div><div class=\"bio-text\"><div class=\"bio-year\">" + escape(c.year) +
-           "</div><div class=\"bio-about\">" + escape(c.about) + "</div></div></div><div class=\"meters\">";
+    std::string out = "<div class=\"bio\"><div class=\"bio-name\">" + escape(kCharacters[i]) +
+                      "</div><div class=\"bio-year\">" + escape(c.year) + "</div><div class=\"bio-about\">" +
+                      escape(c.about) + "</div><div class=\"meters\">";
     // Bars on one scale (150, the most any has), in the game's own colours.
     const struct {
         const char* name;
@@ -524,7 +516,7 @@ std::string character_details_rml(int i) {
         out += std::string("<div class=\"meter\"><span class=\"meter-name\">") + m.name +
                "</span><div class=\"meter-bar\"><div class=\"meter-fill " + m.kind + "\" style=\"width: " +
                std::to_string(width) + "%;\"></div></div><span class=\"meter-value\">" +
-               (m.value < 0 ? std::string("not measured yet") : std::to_string(m.value)) + "</span></div>";
+               (m.value < 0 ? std::string("?") : std::to_string(m.value)) + "</span></div>";
     }
     return out + "</div></div>";
 }
@@ -734,11 +726,6 @@ void build_characters() {
             chosen_character() = i;
             leave();
         };
-        r.info = [i] {
-            g_info_character = i;
-            g_screen = Screen::CharacterInfo;
-            g_selected = 1;
-        };
         g_rows.push_back(r);
     }
     static const char* const kStatsChoice[] = {"Vanilla", "Chosen character's"};
@@ -765,34 +752,8 @@ void build_characters() {
     g_rows.push_back(back);
 }
 
-// One character's details: who they are and their meters, then Choose
-// (as their frame does) and Back to the frames.
-void build_character_info() {
-    const int i = g_info_character;
-    Row block{""};
-    block.enabled = false;
-    block.block_rml = character_details_rml(i);
-    g_rows.push_back(block);
-    Row choose{std::string("Choose ") + kCharacters[i]};
-    choose.gap = true;
-    choose.note = g_characters_player == 1 ? "Player 2's character (no effect yet)." : "Player 1's character.";
-    choose.activate = [i] {
-        chosen_character() = i;
-        settings_save();
-        g_screen = Screen::Mods;
-        g_selected = g_characters_return_row;
-    };
-    g_rows.push_back(choose);
-    Row back{"Back"};
-    back.activate = [i] {
-        g_screen = Screen::Characters;
-        g_selected = i - 1;
-    };
-    g_rows.push_back(back);
-}
-
 // Arrows on Character select: left/right along the frames, up/down between
-// their two lines and the rows under them.
+// their lines and the rows under them.
 void move_in_roster(int dx, int dy) {
     const int n = static_cast<int>(g_rows.size());
     int& at = g_selected;
@@ -1765,6 +1726,14 @@ void build_problem() {
     g_rows.push_back(quit);
 }
 
+// The frames' end, then the panel: the highlighted character's details (the
+// chosen one's while a row under the frames is).
+std::string roster_panel_end() {
+    const int shown = g_selected < kRosterCount ? g_selected + 1 : chosen_character();
+    return "</div><div class=\"roster-details\">" + (shown > 0 ? character_details_rml(shown) : std::string()) +
+           "</div></div>";
+}
+
 void render() {
     if (g_doc == nullptr)
         return;
@@ -1781,7 +1750,6 @@ void render() {
                           : g_screen == Screen::Mods     ? "Mods"
                           : g_screen == Screen::Characters ? (g_characters_player == 1 ? "Player 2 Character"
                                                                                        : "Player 1 Character")
-                          : g_screen == Screen::CharacterInfo ? kCharacters[g_info_character]
                           : g_screen == Screen::Problem  ? g_problem_heading.c_str()
                                                          : "Paused";
     g_doc->GetElementById("heading")->SetInnerRML(heading);
@@ -1791,26 +1759,22 @@ void render() {
     for (size_t i = 0; i < g_rows.size(); i++) {
         const Row& r = g_rows[i];
         if (r.tile) {
-            // A portrait frame and the name under it, six to a line.
+            // A portrait frame and the name under it, four to a line.
             if (!in_roster)
-                rml[0] += "<div class=\"roster\">";
+                rml[0] += "<div class=\"roster-wrap\"><div class=\"roster\">";
             in_roster = true;
             rml[0] += "<div class=\"tile" + std::string(static_cast<int>(i) == g_selected ? " selected" : "") +
                       (r.chosen ? " chosen" : "") + "\" id=\"row" + std::to_string(i) +
-                      "\"><div class=\"portrait\">" + r.value_rml + "<div class=\"info\" id=\"info" +
-                      std::to_string(i) + "\">i</div></div><div class=\"name\">" + escape(r.label) + "</div></div>";
+                      "\"><div class=\"portrait\">" + r.value_rml + "</div><div class=\"name\">" + escape(r.label) +
+                      "</div></div>";
             continue;
         }
         if (in_roster)
-            rml[0] += "</div>";
+            rml[0] += roster_panel_end();
         in_roster = false;
         const int page = r.page == 1 ? 1 : 0;
         spread = spread || page == 1;
         std::string& out = rml[page];
-        if (!r.block_rml.empty()) {
-            out += r.block_rml;
-            continue;
-        }
         if (!r.section.empty())
             out += "<div class=\"section\">" + escape(r.section) + "</div>";
         else if (r.gap)
@@ -1834,7 +1798,7 @@ void render() {
         out += "</div>";
     }
     if (in_roster)
-        rml[0] += "</div>";
+        rml[0] += roster_panel_end();
     g_doc->GetElementById("menu0")->SetInnerRML(rml[0]);
     g_doc->GetElementById("menu1")->SetInnerRML(rml[1]);
     // The help note sits under the page holding the chosen row.
@@ -1846,7 +1810,7 @@ void render() {
     g_doc->GetElementById("hint")->SetInnerRML(
         g_screen == Screen::InGame    ? "Up/Down choose &#183; Left/Right change &#183; A select &#183; B resume"
         : g_screen == Screen::Problem ? "Up/Down choose &#183; A select"
-        : g_screen == Screen::Characters ? "Arrows choose &#183; A select &#183; Y or I details &#183; B back"
+        : g_screen == Screen::Characters ? "Arrows choose &#183; A select &#183; B back"
                                       : "Up/Down choose &#183; Left/Right change &#183; A select &#183; B back");
     g_doc->SetClass("spread", spread);
     // The main menu opens with the emblem instead of a heading.
@@ -1854,12 +1818,12 @@ void render() {
     // The mapping list is long: tighten the rows.
     g_doc->SetClass("compact", g_screen == Screen::Mapping);
     // Character select: one wide page, every frame at once.
-    g_doc->SetClass("roster", g_screen == Screen::Characters || g_screen == Screen::CharacterInfo);
+    g_doc->SetClass("roster", g_screen == Screen::Characters);
     // Over the game the page lies on the dimmed, paused frame.
     g_doc->SetClass("overlay", g_screen == Screen::InGame || g_screen == Screen::Problem ||
                                    ((g_screen == Screen::Options || g_screen == Screen::OptionsPage ||
                                      g_screen == Screen::Mods ||
-                                     g_screen == Screen::Characters || g_screen == Screen::CharacterInfo ||
+                                     g_screen == Screen::Characters ||
                                      g_screen == Screen::Controls ||
                                      g_screen == Screen::Mapping) &&
                                     g_options_return == Screen::InGame));
@@ -1878,7 +1842,6 @@ void build_rows() {
     case Screen::Problem: build_problem(); break;
     case Screen::Mods: build_mods(); break;
     case Screen::Characters: build_characters(); break;
-    case Screen::CharacterInfo: build_character_info(); break;
     }
     if (g_selected >= static_cast<int>(g_rows.size()))
         g_selected = 0;
@@ -1941,10 +1904,6 @@ void go_back() {
         g_screen = Screen::Mods;
         g_selected = g_characters_return_row;
         break;
-    case Screen::CharacterInfo:
-        g_screen = Screen::Characters;
-        g_selected = g_info_character - 1;
-        break;
     case Screen::InGame:
         g_close = true;
         break;
@@ -1959,11 +1918,8 @@ class MenuListener final : public Rml::EventListener {
 public:
     void ProcessEvent(Rml::Event& event) override {
         Rml::Element* e = event.GetTargetElement();
-        bool on_info = false;  // a frame's i button
-        while (e != nullptr && e->GetId().rfind("row", 0) != 0) {
-            on_info = on_info || e->GetId().rfind("info", 0) == 0;
+        while (e != nullptr && e->GetId().rfind("row", 0) != 0)
             e = e->GetParentNode();
-        }
         if (e == nullptr)
             return;
         const int index = std::atoi(e->GetId().c_str() + 3);
@@ -1985,10 +1941,7 @@ public:
             }
         } else if (event.GetId() == Rml::EventId::Click) {
             g_selected = index;
-            if (on_info && g_rows[index].info)
-                g_rows[index].info();
-            else
-                activate_selected();
+            activate_selected();
             build_rows();
         }
     }
@@ -2130,10 +2083,7 @@ bool run_menu() {
                 dirty = true;
             }
         }
-        if (pressed[kInfo] && g_selected < static_cast<int>(g_rows.size()) && g_rows[g_selected].info) {
-            g_rows[g_selected].info();
-            dirty = true;
-        } else if (pressed[kAccept]) {
+        if (pressed[kAccept]) {
             activate_selected();
             dirty = true;
         } else if (pressed[kBack] || (pressed[kMenu] && g_screen == Screen::InGame)) {
