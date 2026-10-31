@@ -183,6 +183,10 @@ SDL_Gamepad* gamepad(int player = 0) {
     if (ids != nullptr && index < count) {
         pad = SDL_OpenGamepad(ids[index]);
         g_pad_index[player] = index;
+        // Which controller each player has, of all those connected.
+        for (int i = 0; i < count; i++)
+            fprintf(stderr, "[controls] controller %d of %d: %s%s\n", i + 1, count,
+                    SDL_GetGamepadNameForID(ids[i]), i == index ? (player == 0 ? "  <- player 1" : "  <- player 2") : "");
     }
     SDL_free(ids);
     return pad;
