@@ -34,6 +34,10 @@ void frontend_imgui_init(void);
 // Photo mode is on (holding Back): the game sees no input.
 bool frontend_photo_active(void);
 
+// A short message in the screen's top right corner for a moment ("Saved to
+// slot 3"). Any thread.
+void frontend_toast(const char* text);
+
 #ifdef __cplusplus
 }
 #include <string>

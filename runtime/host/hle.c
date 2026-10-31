@@ -3647,6 +3647,61 @@ static bool cutscene_playing(CPUState* cpu) {
            guest_read_f32(cpu, g_letterbox_height) > 0.0f;
 }
 
+// Load Game goes straight to the saves: the memory card screen (Slot A or B)
+// is passed over. Its stage is 6 at 0x8061FE28 (5 on the title menu and the
+// save list), its loop waiting at 0x80170118 (the menu thread's saved pc at
+// 0x80607790); the save list's flag at 0x8061F234 is 1. Come from the title
+// menu, A is pressed for the player (Slot A); come back from the save list,
+// B (back to the title menu). Pressed every other few pad reads until the
+// screen has gone, as the screen takes no press while it fades in.
+#define CARD_STAGE 0x8061FE28u
+#define CARD_THREAD_PC 0x80607790u
+#define CARD_SELECT_PC 0x80170118u
+#define SAVE_LIST_FLAG 0x8061F234u
+
+// The memory card screen draws a frame round the chosen card (Slot A's, a
+// blue outline), over the save list too and for the moment the screen passes:
+// its draw (0x8019C9C8, called from the card screen's own, 0x8001D0E8) is
+// passed over.
+#define CARD_FRAME_DRAW 0x8019C9C8u
+#define CARD_SCREEN_DRAW 0x8001D0E8u
+#define CARD_SCREEN_DRAW_END 0x8001D4A4u
+
+static void hle_card_frame(CPUState* cpu) {
+    g_hle_passthrough = !(cpu->lr >= CARD_SCREEN_DRAW && cpu->lr < CARD_SCREEN_DRAW_END);
+}
+
+static void skip_card_select(CPUState* cpu, DolPadState* pad) {
+    static bool came_from_list;
+    static unsigned reads, since_list = ~0u;
+    if (strcmp(ED_GAME_ID, "GEDP01") != 0)
+        return;
+    // The save list seen in the last two seconds or so (the screens pass
+    // through a few reads of neither on the way back).
+    if (mem_read32(cpu, SAVE_LIST_FLAG) == 1u)
+        since_list = 0u;
+    else if (since_list != ~0u)
+        since_list++;
+    const bool card = mem_read32(cpu, CARD_STAGE) == 6u && mem_read32(cpu, CARD_THREAD_PC) == CARD_SELECT_PC;
+    if (!card) {
+        reads = 0u;
+        return;
+    }
+    if (reads++ == 0u) {
+        came_from_list = since_list < 120u;
+        fprintf(stderr, "[load] the memory card screen passed over (%s)\n",
+                came_from_list ? "back to the title menu" : "Slot A");
+    }
+    if (reads % 6u >= 3u)
+        return;  // released between presses
+    pad->button |= came_from_list ? 0x0200u : 0x0100u;  // B, else A
+    if (came_from_list)
+        pad->analog_b = 0xFFu;
+    else
+        pad->analog_a = 0xFFu;
+    pad->error = 0;
+}
+
 #ifdef ED_AURORA
 static void coop_pad_read(CPUState* cpu, bool playing);
 // Split-screen co-op: while player 2's turn reads the pad (coop_player_turn),
@@ -3892,6 +3947,7 @@ static void hle_PADRead(CPUState* cpu) {
     }
     coop_menu_input(cpu, menu, cutscene, &state[0]);
 #endif
+    skip_card_select(cpu, &state[0]);
     if (g_mash_to_gameplay)
         state[0].error = 0;
     for (u32 i = 0; i < 4; i++) {
@@ -8255,6 +8311,11 @@ static void find_coop(CPUState* cpu) {
                 HleDispatchEntry* e = hle_dispatch_entry(kAnimLoads[i]);
                 if (e != NULL && e->notify == NULL)
                     e->notify = notify_anim_load;
+            }
+            if (strcmp(ED_GAME_ID, "GEDP01") == 0) {
+                HleDispatchEntry* frame = hle_dispatch_entry(CARD_FRAME_DRAW);
+                if (frame != NULL && frame->intercept == NULL && frame->notify == NULL)
+                    frame->intercept = hle_card_frame;
             }
             static const u32 kWatch[] = {0x8011F460u, 0x8011FC8Cu, 0x8011D33Cu, 0x8012123Cu, 0x8011D394u};
             for (int i = 0; getenv("ED_COPY_WATCH") != NULL && i < 5; i++) {

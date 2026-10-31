@@ -36,6 +36,7 @@
 #include "host/compat.h"
 #ifdef ED_AURORA
 #include "host/controls.h"
+#include "host/frontend.h"
 #endif
 
 #define QS_MAGIC "EDQSTATE"
@@ -609,6 +610,14 @@ static bool save_state(CPUState* cpu, const char* path) {
     if (strcmp(path, QS_BOOT_PATH) == 0)
         g_boot_saved = true;
 #ifdef ED_AURORA
+    // A save state slot (the menus' Save states, F1-F10): say so on screen.
+    int slot = 0;
+    char tail[8] = "";
+    if (sscanf(path, "saves/slot%d.%7s", &slot, tail) == 2 && strcmp(tail, "state") == 0) {
+        char text[32];
+        snprintf(text, sizeof text, "Saved to slot %d", slot);
+        frontend_toast(text);
+    }
     if (g_record_pending && strcmp(path, QS_RECORD_STATE) == 0) {
         g_record_pending = false;
         controls_record_start(QS_RECORD_PAD);

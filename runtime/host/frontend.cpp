@@ -2507,7 +2507,40 @@ float overlay_dp() {
 // which covers the whole screen: the RmlUi context covers only the game
 // picture, so in 4:3 (and in the game's letterboxed scenes) the counter sat
 // inside the bars, not at the screen's corner.
+// A short message in the screen's top right corner ("Saved to slot 3"), for
+// two and a half seconds, fading over the last half. Set from any thread.
+std::mutex g_toast_mutex;
+std::string g_toast;
+Uint64 g_toast_at = 0;
+
+void draw_toast() {
+    std::string text;
+    Uint64 at_ms;
+    {
+        std::lock_guard<std::mutex> lock(g_toast_mutex);
+        text = g_toast;
+        at_ms = g_toast_at;
+    }
+    const Uint64 age = SDL_GetTicks() - at_ms;
+    if (text.empty() || age >= 2500 || ImGui::GetCurrentContext() == nullptr)
+        return;
+    const float fade = age < 2000 ? 1.0f : 1.0f - (age - 2000) / 500.0f;
+    const float dp = overlay_dp();
+    ImFont* font = g_fps_font != nullptr ? g_fps_font : ImGui::GetFont();
+    const float size = 18.f * dp;
+    const ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.f, text.c_str());
+    const ImVec2 pad{10.f * dp, 4.f * dp};
+    const float right = ImGui::GetMainViewport()->Size.x - 14.f * dp;
+    const ImVec2 at{right - extent.x - 2.f * pad.x, 10.f * dp};
+    ImDrawList* draw = ImGui::GetForegroundDrawList(ImGui::GetMainViewport());
+    draw->AddRectFilled(at, ImVec2{right, at.y + extent.y + 2.f * pad.y},
+                        IM_COL32(0, 0, 0, static_cast<int>(0x99 * fade)), 4.f * dp);
+    draw->AddText(font, size, ImVec2{at.x + pad.x, at.y + pad.y},
+                  IM_COL32(0xf0, 0xe6, 0xc8, static_cast<int>(0xff * fade)), text.c_str());
+}
+
 void update_fps_counter() {
+    draw_toast();
     static Uint64 mark = 0;
     static unsigned frames = 0;
     static int shown_fps = 0;
@@ -3294,6 +3327,12 @@ void frame(bool start) {
 }  // namespace photo
 
 extern "C" bool frontend_photo_active(void) { return photo::g_state != photo::State::Off; }
+
+extern "C" void frontend_toast(const char* text) {
+    std::lock_guard<std::mutex> lock(g_toast_mutex);
+    g_toast = text;
+    g_toast_at = SDL_GetTicks();
+}
 
 // Mods' Skip intro, the first time: the start-up passed over behind a black
 // screen with no sound, until the title menu is up and saved (hle.c).

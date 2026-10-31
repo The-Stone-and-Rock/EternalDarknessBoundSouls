@@ -285,7 +285,7 @@ bool claims_any(uint32_t format, uint32_t width, uint32_t height) {
 // Of the textures the size of a redrawn one, only that one: the rest keep the
 // HD pack's versions.
 bool claims_hash_any(uint32_t format, uint32_t width, uint32_t height, uint64_t hash) {
-    if (titlevideo_claims(format, width, height))
+    if (titlevideo_claims(format, width, height) && titlevideo_claims_hash(width, height, hash))
         return true;
     if (!tome_claims(format, width, height) && !art_claims(format, width, height))
         return true;
@@ -295,8 +295,8 @@ bool claims_hash_any(uint32_t format, uint32_t width, uint32_t height, uint64_t 
 
 int apply_any(const uint8_t* rgba, uint32_t width, uint32_t height, uint64_t hash,
               uint8_t** out_rgba, uint32_t* out_width, uint32_t* out_height) {
-    if (titlevideo_claims(kCmpr, width, height))
-        return titlevideo_apply(rgba, width, height, out_rgba, out_width, out_height);
+    if (titlevideo_claims(kCmpr, width, height) && titlevideo_claims_hash(width, height, hash))
+        return titlevideo_apply(rgba, width, height, hash, out_rgba, out_width, out_height);
     if (claims(kCmpr, width, height))
         return apply(rgba, width, height, out_rgba, out_width, out_height);
     if (fonts_claims(kCmpr, width, height))
@@ -312,7 +312,7 @@ int apply_any(const uint8_t* rgba, uint32_t width, uint32_t height, uint64_t has
 // opening) leaves the font sheets in the cache.
 uint64_t generation_any(uint32_t format, uint32_t width, uint32_t height) {
     if (titlevideo_claims(format, width, height))
-        return titlevideo_generation();
+        return titlevideo_generation(width, height);
     if (claims(format, width, height))
         return generation();
     if (fonts_claims(format, width, height))
