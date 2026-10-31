@@ -60,6 +60,12 @@ void hle_coop_state_load(const void* in);
 // save waits.
 bool hle_save_held(void);
 
+// Mods' Cheats, on or off from the in-game menu: kept at the player's frames in
+// play.
+enum { HLE_CHEAT_MAGICK = 1, HLE_CHEAT_FULL = 2, HLE_CHEATS };
+void hle_cheat_set(int which, bool on);
+bool hle_cheat_on(int which);
+
 // Run the guest function fn to its return, from the host, on the game thread
 // (a hook), with r3.. = args and f1, and every register as it was afterwards.
 // False when it did not return within its budget (main.c).

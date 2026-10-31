@@ -57,7 +57,10 @@ const char* quickstate_boot_path(void);
 void hle_set_skip_intro(bool on);
 bool hle_start_up_hidden(void);
 void audio_set_muted(bool muted);
+void hle_cheat_set(int which, bool on);  // hle.h: HLE_CHEAT_*
+bool hle_cheat_on(int which);
 }
+enum { kCheatMagick = 1, kCheatFull = 2 };  // hle.h's HLE_CHEAT_MAGICK, HLE_CHEAT_FULL
 
 namespace {
 
@@ -749,6 +752,7 @@ void build_characters() {
             r.value_rml = "<img src=\"" + portrait_file(i) + "\"/>";
         r.activate = [i, leave] {
             chosen_character() = i;
+            chosen_stats() = 1;  // a chosen character plays with their own stats
             leave();
         };
         g_rows.push_back(r);
@@ -756,7 +760,7 @@ void build_characters() {
     static const char* const kStatsChoice[] = {"Vanilla", "Chosen character's"};
     Row stats{"Stats", "\u2039 " + std::string(kStatsChoice[chosen_stats()]) + " \u203a"};
     stats.gap = true;
-    stats.note = "In development: no effect yet.";
+    stats.note = "Vanilla: the chapter character's health, sanity and magick. Chosen character's: their own, bars too.";
     stats.change = [](int) { chosen_stats() = 1 - chosen_stats(); };
     g_rows.push_back(stats);
     Row own{kCharacters[0]};
@@ -800,7 +804,7 @@ void move_in_roster(int dx, int dy) {
 
 void build_mods_rows() {
     Row coop{"Split-screen co-op", on_off(g_settings.mod_coop)};
-    coop.section = "I · Co-op";
+    coop.section = "I Â· Co-op";
     coop.change = [](int) { g_settings.mod_coop = !g_settings.mod_coop; };
     g_rows.push_back(coop);
 
@@ -847,7 +851,7 @@ void build_mods_rows() {
 
     static const char* const kEnemies[] = {"Vanilla", "Enhanced"};
     Row enemies{"Creatures", kEnemies[g_settings.mod_enemies]};
-    enemies.section = "II · Challenge";
+    enemies.section = "II Â· Challenge";
     enemies.note = "In development: no effect yet.";
     enemies.change = [](int dir) { cycle(g_settings.mod_enemies, 2, dir); };
     g_rows.push_back(enemies);
@@ -878,9 +882,25 @@ void build_mods_rows() {
         return r;
     };
     Row p1_character = character_row(0);
-    p1_character.section = "III · Characters";
+    p1_character.section = "III Â· Characters";
     g_rows.push_back(p1_character);
     g_rows.push_back(character_row(1));
+
+    // Cheats (hle.c cheat_apply), in a game: on or off, kept as play goes on.
+    auto cheat_row = [](const char* label, const char* note, int which) {
+        Row r{label, on_off(g_in_game && hle_cheat_on(which))};
+        r.page = 1;
+        r.enabled = g_in_game;
+        r.note = g_in_game ? note : "In a game, from its menu.";
+        r.change = [which](int) { hle_cheat_set(which, !hle_cheat_on(which)); };
+        return r;
+    };
+    Row magick = cheat_row("All magick",
+                           "Every rune, circle of power and spell, and the Tome's magick page. Off puts back what you had.",
+                           kCheatMagick);
+    magick.section = "IV Â· Cheats";
+    g_rows.push_back(magick);
+    g_rows.push_back(cheat_row("Full stats", "Health, sanity and magick kept at their most, for each player.", kCheatFull));
 
     Row back{"Back"};
     back.gap = true;
@@ -908,6 +928,7 @@ void build_mods() {
     g_rows.push_back(page("Co-op", 1));
     g_rows.push_back(page("Challenge", 2));
     g_rows.push_back(page("Characters", 3));
+    g_rows.push_back(page("Cheats", 4));
     // Only on the launcher: it is how Start game starts.
     if (!g_in_game) {
         Row skip{"Skip intro", on_off(g_settings.mod_skip_intro)};
@@ -967,7 +988,8 @@ const char* mods_page_name() {
     switch (g_mods_section) {
     case 1: return "Co-op";
     case 2: return "Challenge";
-    default: return "Characters";
+    case 3: return "Characters";
+    default: return "Cheats";
     }
 }
 
@@ -1163,7 +1185,7 @@ void build_slot() {
 void build_slot_delete() {
     const int slot = g_slot_chosen;
     Row keep{"Keep it"};
-    keep.note = "Slot " + std::to_string(slot) + " · " + slot_time(slot) + " stays.";
+    keep.note = "Slot " + std::to_string(slot) + " Â· " + slot_time(slot) + " stays.";
     keep.activate = [] {
         g_screen = Screen::Slot;
         g_selected = delete_row();
@@ -1252,7 +1274,7 @@ Row controller_row() {
         value = std::to_string(slot) + ": " +
                 (slot <= static_cast<int>(pads.size()) ? pads[slot - 1] : std::string("not connected"));
     }
-    Row r{"Controller", "‹ " + value + " ›"};
+    Row r{"Controller", "â€¹ " + value + " â€º"};
     if (pads.empty())
         r.note = "No controller is connected.";
     // Automatic, then a place for each connected controller (at least the
@@ -1274,7 +1296,7 @@ Row pad_type_row() {
         const std::string found = controls::detected_pad_type(player);
         value += found.empty() ? "" : " (" + found + ")";
     }
-    Row r{"Controller type", "‹ " + value + " ›"};
+    Row r{"Controller type", "â€¹ " + value + " â€º"};
     r.change = [&type](int dir) {
         cycle(type, controls::kPadTypeCount, dir);
         settings_save();
@@ -1567,7 +1589,7 @@ void build_options_rows() {
     g_rows.push_back(fps);
 
     Row mods = mods_row(Screen::Options);
-    mods.section = "VI · Mods";
+    mods.section = "VI Â· Mods";
     mods.page = 1;
     g_rows.push_back(mods);
 

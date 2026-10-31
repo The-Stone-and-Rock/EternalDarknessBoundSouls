@@ -6530,6 +6530,7 @@ static void hle_chapter_body(CPUState* cpu) {
 #define SCRATCH_RAM 0x81800000u
 #define SCRATCH_BODY 0x81C00000u  // past the most level data unpacks to (0x3D3100 bytes)
 #define SCRATCH_BODY2 0x81E00000u  // player 2's (co-op), when theirs is another chapter's too
+#define SCRATCH_HUD 0x81FFF000u  // player 2's bars (coop_bar_copy), COOP_BAR_SLOT each
 #define SCRATCH_END 0x82000000u
 static struct {
     int stage;  // 0 none, 1 the chapter's own loading, 2 a character's
@@ -6811,7 +6812,7 @@ static bool continue_pack_load(CPUState* cpu) {
             // next one unpacks over it.
             const u32 size = mem_read32(cpu, theirs + 12u + want * 8u);
             const u32 kept = g_pack.kept;
-            const u32 room = (g_pack.kept == SCRATCH_BODY ? SCRATCH_BODY2 : SCRATCH_END) - kept;
+            const u32 room = (g_pack.kept == SCRATCH_BODY ? SCRATCH_BODY2 : SCRATCH_HUD) - kept;
             if (size != 0u && size <= room && guest_ram_range_valid(cpu, body, size) &&
                 guest_ram_range_valid(cpu, kept, size)) {
                 memmove(cpu->ram + (kept - GC_RAM_BASE), cpu->ram + (body - GC_RAM_BASE), size);
@@ -7252,7 +7253,38 @@ static const s32 COOP_THREAT[2] = {-25008, -25004};
 static u32 g_coop_threat[2];
 static u32 g_coop_p1_id = ~0u;  // player 1's id, as it was before player 2's turn (coop_send_event)
 
+static void cheat_apply(CPUState* cpu);
+static void coop_own_stats(CPUState* cpu, u32 who);
+
 static void coop_player_turn(CPUState* cpu) {
+    cheat_apply(cpu);  // Mods' Cheats, at the player's frame
+    if (sda_ready(cpu)) {  // each player their own character's stats
+        coop_own_stats(cpu, mem_read32(cpu, cpu->gpr[13] - 21492u));
+        if (g_coop_p2 != 0u && g_settings.mod_coop && coop_listed(cpu, g_coop_p2)) {
+            coop_own_stats(cpu, g_coop_p2);
+            // ED_COOP_P2_MAGICK=n (testing): player 2's magick set to n once,
+            // as a spell's cost sets it, with them the player as in their turn
+            // (the setter tells only the player's bars).
+            static int test_magick = -2;
+            if (test_magick == -2)
+                test_magick = getenv("ED_COOP_P2_MAGICK") != NULL ? atoi(getenv("ED_COOP_P2_MAGICK")) : -1;
+            if (test_magick >= 0) {
+                const u32 args[4] = {g_coop_p2, 2u, (u32)test_magick, 1u};  // 1: tell their bar
+                const u32 who[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+                const u32 now[3] = {mem_read32(cpu, g_coop_p2 + 52u), g_coop_p2, mem_read32(cpu, g_coop_p2 + 16u)};
+                u32 was[3], ignore = 0u;
+                for (int i = 0; i < 3; i++) {
+                    was[i] = mem_read32(cpu, who[i]);
+                    mem_write32(cpu, who[i], now[i]);
+                }
+                hle_guest_call(cpu, 0x800354F8u, args, 4, 0.0, &ignore);
+                for (int i = 0; i < 3; i++)
+                    mem_write32(cpu, who[i], was[i]);
+                fprintf(stderr, "[coop] player 2's magick set to %d\n", test_magick);
+                test_magick = -1;
+            }
+        }
+    }
     if (g_coop_turn || g_coop_p2 == 0u || !g_settings.mod_coop || !coop_listed(cpu, g_coop_p2))
         return;
     // While the player is busy (a close-up, a thing taken) the game runs it
@@ -7589,6 +7621,442 @@ static void coop_seen_shared(CPUState* cpu) {
     hle_guest_call(cpu, COOP_SEND_EVENT, args, 4, 0.0, &ignore);
     for (int i = 0; i < 3 && other == g_coop_p2; i++)
         mem_write32(cpu, who[i], was[i]);
+}
+
+// Player 2's health, sanity and magick bars. Each bar is a node of its own (class 11,
+// handler 0x80029454): its info's +20 is its record (44 bytes: +0 the draw,
+// 0x80023348; +4, +8 its fill; +28 the kind, 0 health, 1 sanity, 2 magick;
+// +32, +34 where it is on the screen; +42 how much it shows), which its
+// frame's events (0x801F5D48(node): events 3 and 4 to itself) put in the
+// HUD's list (0x80022C50) for the HUD's draw (0x80022E60). A player's stats
+// are told to their bars: 0x80033758(node, kind, value) sends event 16 to the
+// id at their info's +140 list, +4 + kind * 4; player 1's has their bars'
+// ids, player 2's none. Player 2 has their own: copies of player 1's nodes,
+// info and records (in the scratch, SCRATCH_HUD), with ids of their own in
+// their list, which the game's look-up of a node by id (0x801F5F88) answers
+// with; each copy has its frame when player 1's bar has theirs. Their records
+// sit COOP_BAR_AWAY to the right, off the game's screen: the split screen's
+// renderer shows them in player 2's half, at the far right (mirroring where
+// player 1's are from the left), and player 1's not there.
+// ED_COOP_BAR_LOG=1 says when the copies are made.
+#define COOP_BAR_FRAME 0x801F5D48u
+#define COOP_FIND_NODE 0x801F5F88u
+#define COOP_BAR_HANDLER 0x80029454u
+#define COOP_BAR_CLASS 11u
+#define COOP_BARS 3              // health, sanity and magick
+#define COOP_BAR_ID 0x00FFFFF0u  // + kind: past the ids the game gives out
+#define COOP_BAR_AWAY 4096       // HUD units; the renderer's split-screen view brings them back
+#define COOP_BAR_SCREEN 640      // the HUD's width
+#define COOP_BAR_WIDTH 32        // a bar's, end cap to end cap
+#define COOP_NODE_SIZE 60u
+#define COOP_INFO_SIZE 160u
+#define COOP_RECORD_SIZE 44u
+#define COOP_BAR_SLOT 0x200u      // a copy's node (+0), info (+64) and record (+224)
+#define STAT_MOST 0x80034F7Cu     // (node, kind, out): a character's most health, sanity or magick
+static struct {
+    u32 from, p2;  // player 1's bar it was copied from, and for whom
+} g_coop_bar[COOP_BARS];
+static bool g_coop_bar_frame;
+
+static u32 coop_bar_list(CPUState* cpu, u32 node) {
+    const u32 info = guest_ram_range_valid(cpu, node, 44u) ? mem_read32(cpu, node + 40u) : 0u;
+    const u32 list = guest_ram_range_valid(cpu, info, 144u) ? mem_read32(cpu, info + 140u) : 0u;
+    return guest_ram_range_valid(cpu, list, 4u + COOP_BARS * 4u) ? list : 0u;
+}
+
+// Player 1's bar of this kind, or 0.
+static u32 coop_bar_source(CPUState* cpu, int kind) {
+    const u32 list = coop_bar_list(cpu, mem_read32(cpu, cpu->gpr[13] - 21492u));
+    const u32 id = list != 0u ? mem_read32(cpu, list + 4u + (u32)kind * 4u) : 0u;
+    for (u32 n = 0u, i = 0u; id != 0u && i < 1024u && (n = coop_next(cpu, n)) != 0u; i++)
+        if (mem_read32(cpu, n + 16u) == id)
+            return mem_read32(cpu, n + 8u) == COOP_BAR_CLASS ? n : 0u;
+    return 0u;
+}
+
+// Player 2's copy of a kind's bar, made from player 1's when there is none
+// for them yet, and its id in their list.
+static u32 coop_bar_copy(CPUState* cpu, int kind, u32 from) {
+    const u32 node = SCRATCH_HUD + (u32)kind * COOP_BAR_SLOT;
+    const u32 info = node + 64u, record = info + COOP_INFO_SIZE;
+    const u32 id = COOP_BAR_ID + (u32)kind;
+    const u32 list = coop_bar_list(cpu, g_coop_p2);
+    if (list == 0u || cpu->ram_size < SCRATCH_END - GC_RAM_BASE)
+        return 0u;
+    const u32 at = list + 4u + (u32)kind * 4u;
+    if (mem_read32(cpu, at) != 0u && mem_read32(cpu, at) != id)
+        return 0u;  // theirs already (not the game's way, but kept)
+    mem_write32(cpu, at, id);
+    if (g_coop_bar[kind].from == from && g_coop_bar[kind].p2 == g_coop_p2 && mem_read32(cpu, node + 16u) == id)
+        return node;
+    const u32 from_info = mem_read32(cpu, from + 40u);
+    const u32 from_record = guest_ram_range_valid(cpu, from_info, 24u) ? mem_read32(cpu, from_info + 20u) : 0u;
+    if (!guest_ram_range_valid(cpu, from_info, COOP_INFO_SIZE) || !guest_ram_range_valid(cpu, from_record, COOP_RECORD_SIZE))
+        return 0u;
+    memmove(cpu->ram + (node - GC_RAM_BASE), cpu->ram + (from - GC_RAM_BASE), COOP_NODE_SIZE);
+    memmove(cpu->ram + (info - GC_RAM_BASE), cpu->ram + (from_info - GC_RAM_BASE), COOP_INFO_SIZE);
+    memmove(cpu->ram + (record - GC_RAM_BASE), cpu->ram + (from_record - GC_RAM_BASE), COOP_RECORD_SIZE);
+    mem_write32(cpu, node + 0u, 0u);  // in no list: found by coop_find_node
+    mem_write32(cpu, node + 4u, 0u);
+    mem_write32(cpu, node + 16u, id);
+    mem_write32(cpu, node + 40u, info);
+    mem_write32(cpu, info + 20u, record);
+    const s16 x = (s16)mem_read16(cpu, from_record + 32u);
+    mem_write16(cpu, record + 32u, (u16)(s16)(COOP_BAR_AWAY + COOP_BAR_SCREEN - x - COOP_BAR_WIDTH));
+    g_coop_bar[kind].from = from;
+    g_coop_bar[kind].p2 = g_coop_p2;
+    if (getenv("ED_COOP_BAR_LOG") != NULL)
+        fprintf(stderr, "[coop] player 2's bar %d (id %u) from player 1's 0x%08X, at %d %d\n", kind, id, from,
+                COOP_BAR_SCREEN - x - COOP_BAR_WIDTH, (s16)mem_read16(cpu, record + 34u));
+    return node;
+}
+
+static int coop_most(CPUState* cpu, u32 node, int kind) {
+    const u32 out = (cpu->gpr[1] - 0x300u) & ~15u;
+    const u32 args[3] = {node, (u32)kind, out};
+    u32 ignore = 0u;
+    mem_write32(cpu, out, 0u);
+    hle_guest_call(cpu, STAT_MOST, args, 3, 0.0, &ignore);
+    return (s16)mem_read16(cpu, out);
+}
+
+// A kind's most health, sanity or magick (kind 0..2), from the game's table
+// of the kinds of character (0x80319EA0: 175 of 224 bytes, +4 the kind,
+// +68.. the most of each), as a character of that kind is made with; 0 when
+// not found.
+#define KIND_TABLE 0x80319EA0u
+#define KIND_SIZE 224u
+#define KINDS 175u
+
+static int coop_kind_most(CPUState* cpu, int type, int kind) {
+    for (u32 i = 0; i < KINDS; i++) {
+        const u32 entry = KIND_TABLE + i * KIND_SIZE;
+        if (guest_ram_range_valid(cpu, entry, KIND_SIZE) && mem_read32(cpu, entry + 4u) == (u32)type)
+            return (s16)mem_read16(cpu, entry + 68u + (u32)kind * 2u);
+    }
+    return 0;
+}
+
+// The kind of the playable a player is, by their model (Mods' characters:
+// the chapter's kind stays theirs, as the story's checks want), when their
+// Stats are their chosen character's (mod_p1_stats, mod_p2_stats); -1 when
+// they are the chapter character's (Vanilla).
+static int coop_player_kind(CPUState* cpu, u32 who) {
+    const bool p2 = g_coop_p2 != 0u && who == g_coop_p2;
+    if ((p2 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats) != 1)
+        return -1;
+    const u32 actor = guest_ram_range_valid(cpu, who, 56u) ? mem_read32(cpu, who + (u32)(s32)g_coop_actor_offset) : 0u;
+    const s16 model = guest_ram_range_valid(cpu, actor, 156u) ? (s16)mem_read16(cpu, actor + 154u) : -1;
+    for (int i = 0; i < 12; i++)
+        if (kPlayerModel[i] == model)
+            return kPlayerType[i];
+    return -1;
+}
+
+// A player is their own character, whatever the chapter: the game's most of a
+// character's health, sanity or magick (0x80034F7C(node, kind, out): health
+// their stats' +224, set from their kind as they are made; sanity and magick
+// their kind's own, +70, +72), which caps them and sizes their bars, answers
+// for each player with their character's (coop_kind_most). Others (the
+// chapter's Pius, say) keep theirs.
+static void coop_stat_most(CPUState* cpu) {
+    const u32 node = cpu->gpr[3], kind = cpu->gpr[4], out = cpu->gpr[5];
+    const bool player = sda_ready(cpu) && node != 0u &&
+                        (node == mem_read32(cpu, cpu->gpr[13] - 21492u) || node == coop_player(cpu) ||
+                         (g_coop_p2 != 0u && node == g_coop_p2));
+    const int type = player && kind < 3u ? coop_player_kind(cpu, node) : -1;
+    const int most = type >= 0 ? coop_kind_most(cpu, type, (int)kind) : 0;
+    if (most <= 0 || !guest_ram_range_valid(cpu, out, 2u)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    mem_write16(cpu, out, (u16)(s16)most);
+    cpu->gpr[3] = 1u;
+}
+
+// At each player's frame: their stored most health their character's too, and
+// none of the three above its most (one made as the chapter's character keeps
+// Karim's 150 health until then).
+static void coop_own_stats(CPUState* cpu, u32 who) {
+    const int type = coop_player_kind(cpu, who);
+    const u32 info = type >= 0 ? mem_read32(cpu, who + 40u) : 0u;
+    const u32 stats = guest_ram_range_valid(cpu, info, 144u) ? mem_read32(cpu, info + 140u) : 0u;
+    if (!guest_ram_range_valid(cpu, stats, 232u))
+        return;
+    const int health = coop_kind_most(cpu, type, 0);
+    if (health > 0)
+        mem_write16(cpu, stats + 224u, (u16)(s16)health);
+    for (u32 kind = 0; kind < 3u; kind++) {
+        const u32 out = (cpu->gpr[1] - 0x300u) & ~15u;
+        const u32 args[3] = {who, kind, out};
+        u32 ignore = 0u;
+        mem_write32(cpu, out, 0u);
+        hle_guest_call(cpu, 0x80034E20u, args, 3, 0.0, &ignore);
+        const s16 has = (s16)mem_read16(cpu, out);
+        const int most = coop_kind_most(cpu, type, (int)kind);
+        const u32 set_args[4] = {who, kind, (u32)(s32)most, 0u};
+        if (most > 0 && has > most)
+            hle_guest_call(cpu, 0x800354F8u, set_args, 4, 0.0, &ignore);
+    }
+}
+
+// Each character's bar is as long as their most: a record's +16 (and +12,
+// which the bar eases to it) is the most / 100 (Ellia's health 0.75, Karim's
+// 1.5). A player's is the game's most for them: their chosen character's
+// with their Stats so (coop_stat_most), else the chapter character's.
+static void coop_bar_length(CPUState* cpu, u32 record, u32 who, int kind) {
+    const int most = coop_most(cpu, who, kind);
+    const float length = (float)most / 100.0f;
+    if (most > 0 && guest_ram_range_valid(cpu, record, COOP_RECORD_SIZE) && guest_read_f32(cpu, record + 16u) != length) {
+        guest_write_f32(cpu, record + 12u, length);
+        guest_write_f32(cpu, record + 16u, length);
+    }
+}
+
+// Notify at a node's frame: when it is one of player 1's bars, its length;
+// player 2's copy has its frame too.
+static void coop_bar_frame(CPUState* cpu) {
+    const u32 node = cpu->gpr[3];
+    if (g_coop_bar_frame || !sda_ready(cpu) || !guest_ram_range_valid(cpu, node, COOP_NODE_SIZE) ||
+        mem_read32(cpu, node + 8u) != COOP_BAR_CLASS)
+        return;
+    // Player 1's own bars, played or not with player 2.
+    const u32 p1 = mem_read32(cpu, cpu->gpr[13] - 21492u);
+    const u32 p1_list = coop_bar_list(cpu, p1);
+    for (int kind = 0; kind < 3 && p1_list != 0u; kind++)
+        if (mem_read32(cpu, p1_list + 4u + (u32)kind * 4u) == mem_read32(cpu, node + 16u) &&
+            guest_ram_range_valid(cpu, mem_read32(cpu, node + 40u), 24u))
+            coop_bar_length(cpu, mem_read32(cpu, mem_read32(cpu, node + 40u) + 20u), p1, kind);
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !coop_listed(cpu, g_coop_p2))
+        return;
+    for (int kind = 0; kind < COOP_BARS; kind++) {
+        if (coop_bar_source(cpu, kind) != node)
+            continue;
+        const u32 copy = coop_bar_copy(cpu, kind, node);
+        if (copy == 0u)
+            return;
+        const u32 record = mem_read32(cpu, mem_read32(cpu, copy + 40u) + 20u);
+        coop_bar_length(cpu, record, g_coop_p2, kind);
+        u32 ignore = 0u;
+        g_coop_bar_frame = true;
+        hle_guest_call(cpu, COOP_BAR_FRAME, &copy, 1, 0.0, &ignore);
+        g_coop_bar_frame = false;
+        static unsigned frames[COOP_BARS];
+        if (getenv("ED_COOP_BAR_LOG") != NULL && frames[kind]++ % 60u == 0u) {
+            const u32 mine = mem_read32(cpu, mem_read32(cpu, node + 40u) + 20u);
+            fprintf(stderr,
+                    "[coop] bar %d: player 1's %.2f shown %u (most %d, length %.2f), player 2's %.2f shown %u "
+                    "(most %d, length %.2f, state %u)\n",
+                    kind, guest_read_f32(cpu, mine + 8u), mem_read8(cpu, mine + 42u),
+                    coop_most(cpu, mem_read32(cpu, cpu->gpr[13] - 21492u), kind), guest_read_f32(cpu, mine + 16u),
+                    guest_read_f32(cpu, record + 8u), mem_read8(cpu, record + 42u), coop_most(cpu, g_coop_p2, kind),
+                    guest_read_f32(cpu, record + 16u), mem_read32(cpu, copy + 20u));
+        }
+        return;
+    }
+}
+
+// The game's look-up of a node by id: player 2's bars by theirs.
+static void coop_find_node(CPUState* cpu) {
+    const u32 id = cpu->gpr[3];
+    if (id >= COOP_BAR_ID && id < COOP_BAR_ID + COOP_BARS && g_coop_p2 != 0u) {
+        const int kind = (int)(id - COOP_BAR_ID);
+        const u32 node = SCRATCH_HUD + (u32)kind * COOP_BAR_SLOT;
+        if (g_coop_bar[kind].p2 == g_coop_p2 && mem_read32(cpu, node + 16u) == id) {
+            cpu->gpr[3] = node;
+            return;
+        }
+    }
+    g_hle_passthrough = true;
+}
+
+// Mods' Cheats, each on or off (hle_cheat_set, from the in-game menu), kept
+// at the player controller's frame (coop_player_turn's notify), in play.
+//
+// All magick: the game's magick record (0x80334D50, the Tome's own; it reads
+// it as it opens) holds the runes found (+0: 0x3FFF3FFF all fourteen), the
+// circles of power (+4: 0x70000 the 3, 5 and 7 point), the twelve spells
+// written in the Tome (+8, a word each: its runes and the circles it takes)
+// and each spell's chosen circle (+0x38); the story's flags 599..602 are set
+// once a player has magick (599 the magick bar, 601 the Tome's magick page).
+// On, all of them is kept as a finished game has it (a spell new to the Tome
+// takes its smallest circle); off, the record and flags go back to what they
+// were when it came on.
+//
+// Full stats: each player's health, sanity and magick at their most whenever
+// they are below it (0x80034E20 (node, kind, out) one, 0x80034F7C its most,
+// 0x800354F8(node, kind, value, 0) sets one).
+#define MAGICK_RECORD 0x80334D50u
+#define MAGICK_RECORD_SIZE 0x68u
+#define MAGICK_SPELLS 12u
+#define MAGICK_FLAG_FIRST 599u
+#define MAGICK_FLAGS 4u
+#define STAT_GET 0x80034E20u
+#define STAT_SET 0x800354F8u
+static const u32 kAllSpells[MAGICK_SPELLS] = {0x0C070309u, 0x0C071049u, 0x0C070449u, 0x0C070419u,
+                                              0x0C070489u, 0x0C010824u, 0x0C07101Cu, 0x0C020828u,
+                                              0x0C07050Cu, 0x0C040828u, 0x0C07042Cu, 0x0C07081Cu};
+static volatile bool g_cheat_on[HLE_CHEATS];  // asked for by the menu
+static bool g_cheat_made[HLE_CHEATS];         // as made in the game
+static u8 g_magick_kept[MAGICK_RECORD_SIZE];   // the record and flags before All magick
+static bool g_magick_flags_kept[MAGICK_FLAGS];
+
+void hle_cheat_set(int which, bool on) {
+    if (which > 0 && which < HLE_CHEATS)
+        g_cheat_on[which] = on;
+}
+
+bool hle_cheat_on(int which) { return which > 0 && which < HLE_CHEATS && g_cheat_on[which]; }
+
+static void cheat_flag(CPUState* cpu, u32 flag, bool on) {
+    const u32 set = mem_read32(cpu, cpu->gpr[13] - 26528u);
+    const u32 at = set + 4u + (flag >> 5) * 4u, bit = 1u << (flag & 31u);
+    if (guest_ram_range_valid(cpu, set, 4u) && flag < mem_read32(cpu, set) && guest_ram_range_valid(cpu, at, 4u))
+        mem_write32(cpu, at, on ? (mem_read32(cpu, at) | bit) : (mem_read32(cpu, at) & ~bit));
+}
+
+static bool cheat_has_flag(CPUState* cpu, u32 flag) {
+    const u32 set = mem_read32(cpu, cpu->gpr[13] - 26528u);
+    const u32 at = set + 4u + (flag >> 5) * 4u;
+    return guest_ram_range_valid(cpu, at, 4u) && (mem_read32(cpu, at) >> (flag & 31u) & 1u) != 0u;
+}
+
+static void cheat_all_magick(CPUState* cpu) {
+    mem_write32(cpu, MAGICK_RECORD, 0x3FFF3FFFu);
+    mem_write32(cpu, MAGICK_RECORD + 4u, 0x00070000u);
+    for (u32 i = 0; i < MAGICK_SPELLS; i++) {
+        const u32 circle = MAGICK_RECORD + 0x38u + i * 4u;
+        mem_write32(cpu, MAGICK_RECORD + 8u + i * 4u, kAllSpells[i]);
+        if ((mem_read32(cpu, circle) & 0x00070000u & kAllSpells[i] << 16) == 0u) {
+            const u32 circles = kAllSpells[i] >> 16 & 7u;
+            mem_write32(cpu, circle, (circles & -circles) << 16);
+        }
+    }
+    for (u32 i = 0; i < MAGICK_FLAGS; i++)
+        cheat_flag(cpu, MAGICK_FLAG_FIRST + i, true);
+}
+
+// The Tome first: the magick page is only the Tome's. What a character
+// carries is a list (their node's +48: +4 the first entry, each +4 the next,
+// +8 the thing's id), each thing a node whose stats' +24 is its kind (733
+// the Tome). Without it, the chapter's Tome is given as the game gives what is
+// found (0x80024528(text, script, to, thing, 0, 0, 0), as the script's
+// acquire does: its words from 0x801DB374(r13 - 26492, the thing's two text
+// numbers 0x80150B2C / 0x80150B5C of its info, 0, 1, 0x8023C1B4)): the
+// message, then it is theirs. Once for each Tome node (a chapter with none
+// says so).
+#define TOME_KIND 733u
+#define CARRY_LIST 48u
+#define ACQUIRE 0x80024528u
+#define ACQUIRE_TEXT 0x801DB374u
+#define ACQUIRE_TEXT_ARG 0x8023C1B4u
+#define ITEM_TEXT_A 0x80150B2Cu
+#define ITEM_TEXT_B 0x80150B5Cu
+
+static u32 cheat_kind(CPUState* cpu, u32 node) {
+    const u32 stats = guest_ram_range_valid(cpu, node, 40u) ? mem_read32(cpu, node + 36u) : 0u;
+    return guest_ram_range_valid(cpu, stats, 28u) ? mem_read32(cpu, stats + 24u) : 0u;
+}
+
+static bool cheat_carries(CPUState* cpu, u32 who, u32 kind) {
+    const u32 list = guest_ram_range_valid(cpu, who, CARRY_LIST + 4u) ? mem_read32(cpu, who + CARRY_LIST) : 0u;
+    u32 entry = guest_ram_range_valid(cpu, list, 8u) ? mem_read32(cpu, list + 4u) : 0u;
+    for (int i = 0; i < 64 && guest_ram_range_valid(cpu, entry, 12u); i++, entry = mem_read32(cpu, entry + 4u))
+        for (u32 n = 0u, k = 0u; k < 1024u && (n = coop_next(cpu, n)) != 0u; k++)
+            if (mem_read32(cpu, n + 16u) == mem_read32(cpu, entry + 8u)) {
+                if (cheat_kind(cpu, n) == kind)
+                    return true;
+                break;
+            }
+    return false;
+}
+
+static void cheat_tome(CPUState* cpu) {
+    static u32 tried;  // the Tome node given (or looked for) last
+    const u32 player = mem_read32(cpu, cpu->gpr[13] - 21492u);
+    if (!guest_ram_range_valid(cpu, player, 56u) || cheat_carries(cpu, player, TOME_KIND))
+        return;
+    u32 tome = 0u;
+    for (u32 n = 0u, k = 0u; k < 1024u && (n = coop_next(cpu, n)) != 0u; k++)
+        if (cheat_kind(cpu, n) == TOME_KIND) {
+            tome = n;
+            break;
+        }
+    if (tome == tried)
+        return;
+    tried = tome;
+    if (tome == 0u) {
+        frontend_toast("No Tome in this chapter");
+        fprintf(stderr, "[cheat] no Tome to give in this chapter\n");
+        return;
+    }
+    u32 info = 0u, text_a = 0u, text_b = 0u, text = 0u, ignore = 0u;
+    hle_guest_call(cpu, 0x801F6398u, &tome, 1, 0.0, &info);
+    hle_guest_call(cpu, ITEM_TEXT_A, &info, 1, 0.0, &text_a);
+    hle_guest_call(cpu, ITEM_TEXT_B, &info, 1, 0.0, &text_b);
+    const u32 text_args[6] = {mem_read32(cpu, cpu->gpr[13] - 26492u), text_a, text_b, 0u, 1u, ACQUIRE_TEXT_ARG};
+    hle_guest_call(cpu, ACQUIRE_TEXT, text_args, 6, 0.0, &text);
+    const u32 args[7] = {text, 0u, mem_read32(cpu, player + 16u), mem_read32(cpu, tome + 16u), 0u, 0u, 0u};
+    hle_guest_call(cpu, ACQUIRE, args, 7, 0.0, &ignore);
+    fprintf(stderr, "[cheat] the Tome (node %u) given to player 1\n", mem_read32(cpu, tome + 16u));
+}
+
+static void cheat_full(CPUState* cpu, u32 node) {
+    if (!guest_ram_range_valid(cpu, node, 56u))
+        return;
+    for (u32 kind = 0; kind < 3u; kind++) {
+        const u32 out = (cpu->gpr[1] - 0x300u) & ~15u;
+        const u32 args[3] = {node, kind, out};
+        u32 ignore = 0u;
+        mem_write32(cpu, out, 0u);
+        hle_guest_call(cpu, STAT_GET, args, 3, 0.0, &ignore);
+        const s16 has = (s16)mem_read16(cpu, out);
+        hle_guest_call(cpu, STAT_MOST, args, 3, 0.0, &ignore);
+        const s16 most = (s16)mem_read16(cpu, out);
+        const u32 set_args[4] = {node, kind, (u32)(s32)most, 0u};
+        if (most > 0 && has < most)
+            hle_guest_call(cpu, STAT_SET, set_args, 4, 0.0, &ignore);
+    }
+}
+
+static void cheat_apply(CPUState* cpu) {
+    static int asked = -1;  // ED_CHEAT=n (testing): HleCheat n on from the start
+    if (asked < 0) {
+        asked = getenv("ED_CHEAT") != NULL ? atoi(getenv("ED_CHEAT")) : 0;
+        hle_cheat_set(asked, true);
+    }
+    if (!sda_ready(cpu))
+        return;
+    const bool magick = g_cheat_on[HLE_CHEAT_MAGICK];
+    if (magick && !g_cheat_made[HLE_CHEAT_MAGICK]) {
+        memcpy(g_magick_kept, cpu->ram + (MAGICK_RECORD - GC_RAM_BASE), MAGICK_RECORD_SIZE);
+        for (u32 i = 0; i < MAGICK_FLAGS; i++)
+            g_magick_flags_kept[i] = cheat_has_flag(cpu, MAGICK_FLAG_FIRST + i);
+        frontend_toast("All magick on");
+        fprintf(stderr, "[cheat] all magick on\n");
+    } else if (!magick && g_cheat_made[HLE_CHEAT_MAGICK]) {
+        memcpy(cpu->ram + (MAGICK_RECORD - GC_RAM_BASE), g_magick_kept, MAGICK_RECORD_SIZE);
+        for (u32 i = 0; i < MAGICK_FLAGS; i++)
+            cheat_flag(cpu, MAGICK_FLAG_FIRST + i, g_magick_flags_kept[i]);
+        frontend_toast("All magick off");
+        fprintf(stderr, "[cheat] all magick off\n");
+    }
+    g_cheat_made[HLE_CHEAT_MAGICK] = magick;
+    if (magick) {
+        cheat_tome(cpu);
+        cheat_all_magick(cpu);
+    }
+    const bool full = g_cheat_on[HLE_CHEAT_FULL];
+    if (full != g_cheat_made[HLE_CHEAT_FULL]) {
+        frontend_toast(full ? "Full stats on" : "Full stats off");
+        fprintf(stderr, "[cheat] full stats %s\n", full ? "on" : "off");
+    }
+    g_cheat_made[HLE_CHEAT_FULL] = full;
+    if (full) {
+        cheat_full(cpu, mem_read32(cpu, cpu->gpr[13] - 21492u));
+        if (g_coop_p2 != 0u && coop_listed(cpu, g_coop_p2))
+            cheat_full(cpu, g_coop_p2);
+    }
 }
 
 // Enemies go after either player. Who a character is after is an id in its
@@ -8552,6 +9020,30 @@ static void find_coop(CPUState* cpu) {
         g_coop_scan = true;
     } else {
         fprintf(stderr, "[coop] the characters' step not found: player 2 finds no doors\n");
+    }
+    // A node's frame (stwu r1,-16(r1); ... li r3,3 at +0x18), the look-up by
+    // id (... bl 0x801F5C20 at +0x18) and the bars' handler (stwu
+    // r1,-32(r1); ... bl 0x801F6300 at +0x34), for player 2's bars.
+    HleDispatchEntry* bar_frame = hle_dispatch_entry(COOP_BAR_FRAME);
+    HleDispatchEntry* find_node = hle_dispatch_entry(COOP_FIND_NODE);
+    if (mem_read32(cpu, COOP_BAR_FRAME) == 0x9421FFF0u && mem_read32(cpu, COOP_BAR_FRAME + 0x18u) == 0x38600003u &&
+        mem_read32(cpu, COOP_FIND_NODE) == 0x9421FFF0u && mem_read32(cpu, COOP_FIND_NODE + 0x18u) == 0x4BFFFC81u &&
+        mem_read32(cpu, COOP_BAR_HANDLER) == 0x9421FFE0u && mem_read32(cpu, COOP_BAR_HANDLER + 0x34u) == 0x481CCE79u &&
+        bar_frame != NULL && bar_frame->notify == NULL && bar_frame->intercept == NULL && find_node != NULL &&
+        find_node->notify == NULL && find_node->intercept == NULL) {
+        bar_frame->notify = coop_bar_frame;
+        find_node->intercept = coop_find_node;
+    } else {
+        fprintf(stderr, "[coop] the bars not found: player 2 has none\n");
+    }
+    // A character's most (stwu r1,-32(r1); ... lwz r3,144(r31) at +0x34), for
+    // each player their own character's.
+    HleDispatchEntry* most = hle_dispatch_entry(STAT_MOST);
+    if (mem_read32(cpu, STAT_MOST) == 0x9421FFE0u && mem_read32(cpu, STAT_MOST + 0x34u) == 0x807F0090u &&
+        most != NULL && most->intercept == NULL && most->notify == NULL) {
+        most->intercept = coop_stat_most;
+    } else {
+        fprintf(stderr, "[coop] the characters' most not found: chosen characters keep the chapter's stats\n");
     }
     // The copy of a position (lwz r5,0(r4); lwz r0,4(r4); stw r5,0(r3)), and
     // the share's call of it (bl at 0x8011CB70).

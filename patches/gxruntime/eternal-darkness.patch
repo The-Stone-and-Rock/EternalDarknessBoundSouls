@@ -9243,10 +9243,10 @@ index 0a23a3f..bb77937 100644
  unsigned long long dst_alpha_fallback_count() noexcept;
 diff --git a/graphics/aurora/lib/gfx/interp.cpp b/graphics/aurora/lib/gfx/interp.cpp
 new file mode 100644
-index 0000000..3e164fa
+index 0000000..db6d134
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/interp.cpp
-@@ -0,0 +1,612 @@
+@@ -0,0 +1,626 @@
 +#include "interp.hpp"
 +
 +#include <gxruntime/gxcore/shader.hpp>
@@ -9732,7 +9732,7 @@ index 0000000..3e164fa
 +
 +namespace {
 +Uniforms build_view(const Frame& f, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
-+                    PhotoFlare flare);
++                    PhotoFlare flare, bool away = false);
 +} // namespace
 +
 +Uniforms photo_build(size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare) {
@@ -9746,15 +9746,21 @@ index 0000000..3e164fa
 +Uniforms split_build(size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare) {
 +  if (!g_split || !g_recording || g_frames[g_cur].draws.empty())
 +    return nullptr;
-+  return build_view(g_frames[g_cur], uniformSize, fn, user, hideHud, flare);
++  // Player 2's view (the HUD hidden) shows player 2's own HUD: the game draws
++  // it off the screen to the right (away, below).
++  return build_view(g_frames[g_cur], uniformSize, fn, user, hideHud, flare, hideHud);
 +}
 +
 +namespace {
 +// A frame's uniforms for another camera: every perspective draw's projection
 +// through fn, a lens flare moved with it, the HUD (small 2D draws) left out
-+// when hideHud.
++// when hideHud. With away, the HUD the game drew kHudAway units to the right
++// of its screen (all of a draw past its right edge: player 2's bars, which
++// player 1's view leaves off) is brought back onto it instead, and with it
++// whatever else shares its uniforms (moved off the left).
++constexpr float kHudAway = 4096.f; // Eternal Darkness's COOP_BAR_AWAY (hle.c)
 +Uniforms build_view(const Frame& f, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
-+                    PhotoFlare flare) {
++                    PhotoFlare flare, bool away) {
 +  const size_t size = (uniformSize + 3u) & ~size_t{3u};
 +  auto buf = pooled_buffer(size);
 +  std::memset(buf->data(), 0, size);
@@ -9763,6 +9769,7 @@ index 0000000..3e164fa
 +  // once) is the HUD's only when every draw using it is.
 +  absl::flat_hash_map<uint32_t, bool> hud;
 +  absl::flat_hash_map<uint32_t, std::vector<std::pair<float, float>>> sprites;  // their middles on screen
++  absl::flat_hash_map<uint32_t, bool> offRight; // a draw using it lies past the screen's right edge
 +  for (const Draw& d : f.draws) {
 +    if (d.vs + sizeof(Vs) > f.uniforms.size() || d.vs + sizeof(Vs) > size)
 +      continue;
@@ -9773,6 +9780,8 @@ index 0000000..3e164fa
 +      it->second = it->second && isHud;
 +    if (isHud)
 +      sprites[d.vs].emplace_back((d.box[0] + d.box[2]) * 0.5f, (d.box[1] + d.box[3]) * 0.5f);
++    if (isHud && d.box[0] > 1.f)
++      offRight[d.vs] = true;
 +  }
 +  // The scene's projection: the first perspective draw's.
 +  const float(*scene)[4] = nullptr;
@@ -9846,6 +9855,11 @@ index 0000000..3e164fa
 +          out[1][j] = m[2] * src.projection[0][j] + m[3] * src.projection[1][j];
 +        }
 +      }
++      std::memcpy(dst.projection, out, sizeof out);
++    } else if (away && isHud && offRight.contains(offset)) {
++      float out[4][4];
++      std::memcpy(out, src.projection, sizeof out);
++      out[0][3] -= src.projection[0][0] * kHudAway;
 +      std::memcpy(dst.projection, out, sizeof out);
 +    } else if (hideHud && isHud) {
 +      // Off the screen: every vertex at x = 2.
