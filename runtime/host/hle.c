@@ -7264,17 +7264,16 @@ static u32 g_coop_p1_id = ~0u;  // player 1's id, as it was before player 2's tu
 // five quick spells (the magick record's 0x80334DE8..), which, when the player
 // may cast (event 185), casts it for the player (0x801C4250): the player's
 // magick pays for it and their bar shows it. Player 2's presses cast theirs in
-// their turn, with them the player, from five quick spells of their own (a
-// copy of player 1's at first; their Tome's Quick Spell page sets them: they
-// are the game's while their Tome is open, coop_quick_swap). ED_COOP_CAST_LOG
-// says each cast.
+// their turn, with them the player, from five quick spells of their own (none
+// at first; their Tome's Quick Spell page sets them: they are the game's
+// while their Tome is open, coop_quick_swap). ED_COOP_CAST_LOG says each
+// cast.
 #define COOP_QUICK 0x80334DE8u
 #define COOP_QUICKS 5u
 #define COOP_QUICK_CAST 0x800069DCu
 #define COOP_QUICK_SLOT (SCRATCH_HUD + 0xC00u)  // the one cast, for the handler to read
 static const u16 kCoopQuickButton[COOP_QUICKS] = {0x0800u, 0x0008u, 0x0004u, 0x0001u, 0x0002u};  // Y, up, down, left, right
 static u32 g_coop_quick[COOP_QUICKS];  // player 2's
-static bool g_coop_quick_set;
 static u32 g_coop_quick_p1[COOP_QUICKS];  // player 1's, while player 2's Tome has the game's
 static u32 g_coop_turn_p1;                // player 1's node, while player 2 is the player in their turn
 
@@ -7308,18 +7307,9 @@ static void coop_be_player2(CPUState* cpu, bool on, u32 was[5]) {
     }
 }
 
-static void coop_quick_init(CPUState* cpu) {
-    if (g_coop_quick_set)
-        return;
-    for (u32 i = 0; i < COOP_QUICKS; i++)
-        g_coop_quick[i] = mem_read32(cpu, COOP_QUICK + i * 4u);
-    g_coop_quick_set = true;
-}
-
 // Player 2's quick spells the game's (their Tome opens) or player 1's back
 // (it closes), player 2's kept as their Tome left them.
 static void coop_quick_swap(CPUState* cpu, bool p2) {
-    coop_quick_init(cpu);
     for (u32 i = 0; i < COOP_QUICKS; i++) {
         const u32 at = COOP_QUICK + i * 4u;
         if (p2) {
@@ -7330,6 +7320,11 @@ static void coop_quick_swap(CPUState* cpu, bool p2) {
             mem_write32(cpu, at, g_coop_quick_p1[i]);
         }
     }
+    if (getenv("ED_COOP_CAST_LOG") != NULL)
+        fprintf(stderr, "[coop] quick spells: player 2's %08X %08X %08X %08X %08X, player 1's %08X %08X %08X %08X %08X (%s)\n",
+                g_coop_quick[0], g_coop_quick[1], g_coop_quick[2], g_coop_quick[3], g_coop_quick[4], g_coop_quick_p1[0],
+                g_coop_quick_p1[1], g_coop_quick_p1[2], g_coop_quick_p1[3], g_coop_quick_p1[4],
+                p2 ? "player 2's Tome opens" : "it closes");
 }
 
 // In player 2's turn, with them the player: a quick spell's button pressed
@@ -7342,7 +7337,6 @@ static void coop_quick_cast(CPUState* cpu) {
     held = g_coop_p2_buttons;
     if (pressed == 0u || cpu->ram_size < SCRATCH_END - GC_RAM_BASE)
         return;
-    coop_quick_init(cpu);
     for (u32 i = 0; i < COOP_QUICKS; i++) {
         if ((pressed & kCoopQuickButton[i]) == 0u)
             continue;
@@ -7359,6 +7353,39 @@ static void coop_quick_cast(CPUState* cpu) {
                     spell != first ? "cast" : "not cast", (unsigned long long)(cpu->timebase / 675000ull));
         }
     }
+}
+
+// What player 2 casts from their Tome is theirs. The Tome's Cast puts the
+// spell in the magick record's next cast (0x80334DFC), which the frame after
+// the Tome closes casts (0x801C4250(1, &next), from 0x80008468) for the
+// controlled character, player 1. One put there while player 2 had the Tome
+// is cast with them the player, the controlled character and the one casting.
+#define COOP_CAST 0x801C4250u
+#define COOP_NEXT_CAST 0x80334DFCu
+#define COOP_NEXT_CAST_CALL 0x8000846Cu  // the return address in the frame's call
+static bool g_coop_next_cast_p2;
+static bool g_coop_tome_cast;  // casting it
+
+static void coop_cast(CPUState* cpu) {
+    if (!g_coop_next_cast_p2 || cpu->gpr[4] != COOP_NEXT_CAST || cpu->lr != COOP_NEXT_CAST_CALL || g_coop_p2 == 0u ||
+        !sda_ready(cpu) || !coop_listed(cpu, g_coop_p2)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    g_coop_next_cast_p2 = false;
+    const u32 args[2] = {cpu->gpr[3], cpu->gpr[4]};
+    u32 was[5], result = 0u;
+    coop_be_player2(cpu, true, was);
+    g_coop_turn_p1 = was[1];  // the Tome is player 1's (coop_has_tome)
+    g_coop_tome_cast = true;
+    hle_guest_call(cpu, COOP_CAST, args, 2, 0.0, &result);
+    g_coop_tome_cast = false;
+    coop_be_player2(cpu, false, was);
+    if (getenv("ED_COOP_CAST_LOG") != NULL)
+        fprintf(stderr, "[coop] player 2 casts from their Tome\n");
+    cpu->gpr[3] = result;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
 }
 
 // Player 2's spells play out as theirs. A spell cast is a record in the
@@ -8172,13 +8199,13 @@ static void cheat_tome(CPUState* cpu) {
 
 // The Tome is the players' together. Casting asks whether the player has it
 // (0x80109A68(), "<name> cannot cast spells without the Tome" when not):
-// player 2, the player in their turn, has it when player 1 has (the same ask,
-// with player 1 the player).
+// player 2, the player in their turn or casting from their Tome (coop_cast),
+// has it when player 1 has (the same ask, with player 1 the player).
 #define HAS_TOME 0x80109A68u
 
 static void coop_has_tome(CPUState* cpu) {
     static bool asking;
-    if (asking || g_coop_p2 == 0u || !g_coop_turn || !sda_ready(cpu) ||
+    if (asking || g_coop_p2 == 0u || !(g_coop_turn || g_coop_tome_cast) || !sda_ready(cpu) ||
         mem_read32(cpu, cpu->gpr[13] - 21492u) != g_coop_p2 || !guest_ram_range_valid(cpu, g_coop_turn_p1, 56u)) {
         g_hle_passthrough = true;
         return;
@@ -8933,6 +8960,7 @@ static void coop_tome_player(CPUState* cpu, bool p2) {
             mem_write32(cpu, who[i], was[i]);
         g_coop_tome_p2 = false;
         coop_quick_swap(cpu, false);
+        g_coop_next_cast_p2 = mem_read32(cpu, COOP_NEXT_CAST) != 0u;  // what they cast from it is theirs
         coop_equip_names(cpu, true);
     }
 }
@@ -9255,6 +9283,15 @@ static void find_coop(CPUState* cpu) {
     } else {
         fprintf(stderr, "[coop] the Tome's check not found: player 2 cannot cast\n");
     }
+    // The cast (stwu r1,-160(r1); ... lwz r29,0(r4) at +0x28), for what
+    // player 2 casts from their Tome.
+    HleDispatchEntry* cast = hle_dispatch_entry(COOP_CAST);
+    if (mem_read32(cpu, COOP_CAST) == 0x9421FF60u && mem_read32(cpu, COOP_CAST + 0x28u) == 0x83A40000u && cast != NULL &&
+        cast->intercept == NULL && cast->notify == NULL) {
+        cast->intercept = coop_cast;
+    } else {
+        fprintf(stderr, "[coop] the cast not found: what player 2 casts from their Tome is player 1's\n");
+    }
     // The spells' update (stwu r1,-32(r1); ... lwz r30,-22324(r13) at +0x1C),
     // player 2's spells stepped as theirs.
     HleDispatchEntry* spells = hle_dispatch_entry(COOP_SPELLS_UPDATE);
@@ -9453,7 +9490,7 @@ void hle_coop_state_save(void* out) {
 typedef struct {
     u32 quick[COOP_QUICKS];
     u32 casting[4];
-    u8 quick_set, pad[3];
+    u8 own, pad[3];  // 2: quick spells of their own (1: a copy of player 1's, from before they began with none)
 } HleCoopMagick;
 
 size_t hle_coop_magick_size(void) {
@@ -9465,7 +9502,7 @@ void hle_coop_magick_save(void* out) {
     memset(&s, 0, sizeof s);
     memcpy(s.quick, g_coop_quick, sizeof s.quick);
     memcpy(s.casting, g_coop_casting, sizeof s.casting);
-    s.quick_set = g_coop_quick_set;
+    s.own = 2u;
     memcpy(out, &s, sizeof s);
 }
 
@@ -9474,9 +9511,10 @@ void hle_coop_magick_load(const void* in) {
     memset(&s, 0, sizeof s);
     if (in != NULL)
         memcpy(&s, in, sizeof s);
+    if (s.own != 2u)
+        memset(s.quick, 0, sizeof s.quick);
     memcpy(g_coop_quick, s.quick, sizeof g_coop_quick);
     memcpy(g_coop_casting, s.casting, sizeof g_coop_casting);
-    g_coop_quick_set = s.quick_set != 0u;
 }
 
 // While player 2's Tome is open the player's object and id are theirs
@@ -9490,6 +9528,7 @@ bool hle_save_held(void) {
 void hle_coop_state_load(const void* in) {
     g_coop_turn = false;
     g_coop_tome_p2 = false;
+    g_coop_next_cast_p2 = false;
     g_coop_attempts = 0u;
     g_coop_restore.id = g_coop_restore.node = 0u;
     if (in == NULL) {
