@@ -6074,6 +6074,9 @@ static void find_camera(CPUState* cpu) {
 static bool g_coop_found;
 static s16 g_coop_list_offset, g_coop_actor_offset, g_coop_stats_offset, g_coop_health_offset, g_coop_room_offset;
 static u32 g_coop_p2;            // player 2's node, 0 when there is none
+static struct {
+    u32 id, node;  // the original's id, the copy (coop_restore_held)
+} g_coop_restore;
 static unsigned g_coop_attempts;  // spawns tried in this area
 
 // The list's nodes, in order: 0 past the last.
@@ -6186,6 +6189,41 @@ static void coop_place(CPUState* cpu, u32 object, float out[3]) {
 // had them, was a stranger, and both players stood ready to fight.
 static int coop_wanted_character(void);
 
+// What player 2 held in a co-op save: a thing lying not held (its holder,
+// object +372, itself) just where they were saved, with the model of another
+// thing, the original it copies (coop_restore_held).
+static void coop_find_saved_copy(CPUState* cpu, u32 player, u32 p2) {
+    const u32 o2 = mem_read32(cpu, p2 + 52u);
+    if (!guest_ram_range_valid(cpu, o2, 12u))
+        return;
+    u32 node = 0u;
+    for (int i = 0; i < 1024 && (node = coop_next(cpu, node)) != 0u; i++) {
+        const u32 object = mem_read32(cpu, node + 52u);
+        if (node == player || node == p2 || !guest_ram_range_valid(cpu, object, 376u) ||
+            mem_read32(cpu, object + 372u) != object)
+            continue;
+        float d = 0.0f;
+        for (u32 k = 0; k < 3u; k++) {
+            const float a = guest_read_f32(cpu, object + k * 4u) - guest_read_f32(cpu, o2 + k * 4u);
+            d += a * a;
+        }
+        if (!(d < 1.0f))
+            continue;
+        const u32 model = mem_read32(cpu, object + 60u);
+        u32 other = 0u;
+        for (int j = 0; j < 1024 && (other = coop_next(cpu, other)) != 0u; j++) {
+            const u32 o = mem_read32(cpu, other + 52u);
+            if (other != node && guest_ram_range_valid(cpu, o, 64u) && mem_read32(cpu, o + 60u) == model) {
+                g_coop_restore.id = mem_read32(cpu, other + 16u);
+                g_coop_restore.node = node;
+                fprintf(stderr, "[coop] player 2's copy of %u in the save: node 0x%08X (id %u)\n",
+                        g_coop_restore.id, node, mem_read32(cpu, node + 16u));
+                return;
+            }
+        }
+    }
+}
+
 static void coop_adopt(CPUState* cpu, u32 player) {
     if (getenv("ED_COOP_P2_KIND") != NULL)
         return;  // testing another character: a new player 2
@@ -6203,6 +6241,7 @@ static void coop_adopt(CPUState* cpu, u32 player) {
             g_coop_p2 = node;
             coop_describe(cpu, "player 1", player);
             coop_describe(cpu, "player 2 (from the save)", node);
+            coop_find_saved_copy(cpu, player, node);
             // Beside player 1, in their room (ED_COOP_P2_STAYS=1, testing:
             // where the save had them): the game runs player 1's room, and in
             // another one what player 2 held was not in their hand.
@@ -7130,6 +7169,7 @@ static void coop_state(CPUState* cpu, CoopPlayerState* s, bool save) {
 }
 
 static void coop_copies_follow(CPUState* cpu);
+static void coop_restore_held(CPUState* cpu);
 
 static void coop_player_turn(CPUState* cpu) {
     if (g_coop_turn || g_coop_p2 == 0u || !g_settings.mod_coop || !coop_listed(cpu, g_coop_p2))
@@ -7202,6 +7242,7 @@ static void coop_player_turn(CPUState* cpu) {
         mem_write32(cpu, who[i], was[i]);
     coop_bytes(cpu, COOP_CAMERA, camera, sizeof camera, false);
     coop_state(cpu, &g_coop_state[0], false);
+    coop_restore_held(cpu);
     coop_copies_follow(cpu);
     g_coop_turn = false;
     static bool told;
@@ -7605,13 +7646,17 @@ static bool g_coop_tome_p2;
 static struct {
     u32 id, node;
 } g_coop_copies[32];
+static u32 g_coop_copies_for;  // the player 2 they are for
+
+static void coop_copies_reset(void) {
+    if (g_coop_copies_for != g_coop_p2) {  // another player 2 (another area): new copies
+        memset(g_coop_copies, 0, sizeof g_coop_copies);
+        g_coop_copies_for = g_coop_p2;
+    }
+}
 
 static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make) {
-    static u32 for_p2;
-    if (for_p2 != g_coop_p2) {  // another player 2 (another area): new copies
-        memset(g_coop_copies, 0, sizeof g_coop_copies);
-        for_p2 = g_coop_p2;
-    }
+    coop_copies_reset();
     int free_at = -1;
     for (int i = 0; i < 32; i++) {
         if (g_coop_copies[i].node != 0u && g_coop_copies[i].id == id) {
@@ -7700,6 +7745,55 @@ static void coop_copies_follow(CPUState* cpu) {
             hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, args, 2, 0.0, &ignore);
         }
     }
+}
+
+// A save made in co-op keeps player 2's copy, but not that they held it: the
+// game keeps what each character holds by their id (coop_equip_record), and
+// player 2 is made anew, with another id, on every load. The copy comes back
+// as a thing lying where player 2 was saved, under them. coop_adopt finds it
+// there (a thing of the same model as another, the original); on player 2's
+// first turn it is theirs again and goes into their hand as the Tome puts it
+// there (0x80150D9C(equipment, id, ...): listed, then held), the original's id
+// answered with the copy (hle_find_by_id).
+#define EQUIP_ADD 0x80150D9Cu
+#define EQUIP_MOVES 0x8007A788u
+static void coop_tome_player(CPUState* cpu, bool p2);
+
+static u32 coop_equip_names_find(CPUState* cpu, u32 id);
+static void coop_restore_held(CPUState* cpu) {
+    const u32 id = g_coop_restore.id, node = g_coop_restore.node;
+    if (node == 0u)
+        return;
+    g_coop_restore.id = g_coop_restore.node = 0u;
+    if (!coop_listed(cpu, node))
+        return;
+    coop_copies_reset();
+    int free_at = -1;
+    for (int i = 0; i < 32 && free_at < 0; i++)
+        if (g_coop_copies[i].node == 0u || g_coop_copies[i].id == id)
+            free_at = i;
+    if (free_at < 0)
+        return;
+    g_coop_copies[free_at].id = id;
+    g_coop_copies[free_at].node = node;
+    // How player 1's equipment lists the same thing (the hands it takes),
+    // else as a sword.
+    u32 hands[2] = {2u, 0u};
+    const u32 entry = coop_equip_names_find(cpu, id);
+    if (entry != 0u)
+        hands[0] = mem_read32(cpu, entry + 4u), hands[1] = mem_read32(cpu, entry + 8u);
+    // As in their Tome: player 2 the player while it is put in their hand and
+    // their moves made for it (0x8007A788(node), what the Tome does after).
+    coop_tome_player(cpu, true);
+    u32 own = 0u, ignore = 0u;
+    const u32 find[2] = {mem_read32(cpu, g_coop_p2 + 16u), 0u};
+    if (hle_guest_call(cpu, EQUIP_FIND, find, 2, 0.0, &own) && own != 0u) {
+        const u32 add[4] = {own, id, hands[0], hands[1]};
+        hle_guest_call(cpu, EQUIP_ADD, add, 4, 0.0, &ignore);
+        hle_guest_call(cpu, EQUIP_MOVES, &g_coop_p2, 1, 0.0, &ignore);
+    }
+    coop_tome_player(cpu, false);
+    fprintf(stderr, "[coop] player 2's copy of %u from the save (node 0x%08X) back in their hand\n", id, node);
 }
 
 // ED_COPY_WATCH=1 (testing): the readying and letting go of a copy's
@@ -7798,6 +7892,20 @@ static void coop_equip_names(CPUState* cpu, bool copies) {
                 mem_write32(cpu, at, g_coop_copies[k].id);
         }
     }
+}
+
+// Player 1's equipment's entry for a thing (+0 the id, then 12 bytes), or 0.
+static u32 coop_equip_names_find(CPUState* cpu, u32 id) {
+    const u32 player = coop_player(cpu);
+    u32 rec = 0u;
+    const u32 find[2] = {player != 0u ? mem_read32(cpu, player + 16u) : 0u, 0u};
+    if (player == 0u || !hle_guest_call(cpu, EQUIP_FIND, find, 2, 0.0, &rec) || rec == 0u)
+        return 0u;
+    const u32 n = mem_read32(cpu, rec + 388u);
+    for (u32 i = 0; i < n && i < 32u; i++)
+        if (mem_read32(cpu, rec + 4u + i * 12u) == id)
+            return rec + 4u + i * 12u;
+    return 0u;
 }
 
 static void coop_tome_player(CPUState* cpu, bool p2) {
