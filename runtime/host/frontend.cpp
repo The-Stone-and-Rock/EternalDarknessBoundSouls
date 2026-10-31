@@ -871,8 +871,8 @@ void build_mods_rows() {
         if ((player == 1 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats) == 1)
             r.value += " (own stats)";
         r.page = 1;
-        if (chosen != 0)
-            r.note = "From the next chapter or save you load.";
+        r.note = g_in_game ? "A change reloads the game where you stand once the menu closes."
+                           : "Also applies to a save state you load: it reloads with them.";
         r.activate = [player] {
             g_characters_player = player;
             g_characters_return_row = g_selected;

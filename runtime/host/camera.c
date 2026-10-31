@@ -267,6 +267,10 @@ float camera_stick_turn(void) {
 #define TP_RADIUS 12.0f
 #define TP_MARGIN 30.0f
 #define TP_NEAREST 120.0f
+// Player 2's line test starts this far out, clear of their own body.
+#define P2_CLEAR 40.0f
+// A blocked line tries again this much lower (radians), down to level.
+#define P2_PITCH_STEP 0.15f
 // The second line of sight, to the player's hips (this far below the chest).
 #define TP_HIPS 70.0f
 // How far above the chest the camera turns about when fully close in.
@@ -1632,9 +1636,34 @@ void camera_split_update(CPUState* cpu) {
         eye2 = add(add(player, scale(k, FP_HEIGHT)), scale(normalize(flatten(look, k)), 25.0f));
         focus = add(eye2, scale(look, 100.0f));
     } else {
-        const Vec3 dir = add(scale(level, cosf(g_split_pitch)), scale(k, sinf(g_split_pitch)));
         focus = add(player, scale(k, TP_HEIGHT));
-        eye2 = add(focus, scale(dir, g_split_distance));
+        // In front of the first wall between them and it, as player 1's: in
+        // the church's stairwell it stood outside, both players floating
+        // over the church below. Its low ceiling stopped the line at once,
+        // so a blocked line tries lower ones, down to level, and the eye
+        // goes where it reaches furthest. The test leaves out player 1
+        // only, so it starts outside player 2.
+        Vec3 dir = add(scale(level, cosf(g_split_pitch)), scale(k, sinf(g_split_pitch)));
+        float reach = g_split_distance;
+        if (g_collide != NULL) {
+            const float full = g_split_distance + TP_MARGIN - P2_CLEAR;
+            float best = -1.0f;
+            for (float pitch = g_split_pitch; best < g_split_distance; pitch -= P2_PITCH_STEP) {
+                const float p = fmaxf(pitch, 0.0f);
+                const Vec3 d = add(scale(level, cosf(p)), scale(k, sinf(p)));
+                const Vec3 from = add(focus, scale(d, P2_CLEAR));
+                const float r = clampf(P2_CLEAR + line_reach(cpu, from, add(from, scale(d, full)), full) - TP_MARGIN,
+                                       TP_NEAREST, g_split_distance);
+                if (r > best + 1.0f) {
+                    best = r;
+                    dir = d;
+                }
+                if (p <= 0.0f)
+                    break;
+            }
+            reach = best;
+        }
+        eye2 = add(focus, scale(dir, reach));
     }
     g_p2_eye = eye2;
     g_p2_target = focus;

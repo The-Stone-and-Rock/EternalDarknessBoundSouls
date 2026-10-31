@@ -6239,26 +6239,55 @@ static void coop_describe(CPUState* cpu, const char* what, u32 node) {
 }
 
 // Player 2 beside player 1: the first of eight directions round them (ahead
-// first) clear in the game's collision, else where player 1 stands.
-static void coop_place(CPUState* cpu, u32 object, float out[3]) {
-    float at[3];
-    for (u32 i = 0; i < 3u; i++)
-        out[i] = at[i] = guest_read_f32(cpu, object + i * 4u);
-    const float qz = guest_read_f32(cpu, object + 52u), qw = guest_read_f32(cpu, object + 56u);
-    const float facing = isfinite(qz) && isfinite(qw) ? 2.0f * atan2f(qz, qw) - 1.5707963f : 0.0f;
+// first) clear in the game's collision with floor under it at player 1's
+// height, at that floor: then within a step of it, then at half the
+// distance; else where player 1 stands. On the stairs a clear way over the
+// drop let Paul fall to the floor below; in the Tome's room a rock a little
+// above the floor was taken, and he was pushed off it into the room's gap.
+#define COOP_PLACE_LEVEL 12.0f  // floor this near player 1's is level with them
+#define COOP_PLACE_STEP 50.0f   // the most the floor there may be above or below player 1's
+// The game's line test is in the characters' own frame (floors come back
+// about 50 below where a character stands on them), so the floor beside
+// player 1 is measured against the floor under them, the same way.
+static bool coop_floor(CPUState* cpu, float x, float y, float z, float* floor) {
+    const float from[3] = {x, y, z + 60.0f}, to[3] = {x, y, z - COOP_PLACE_STEP - 120.0f};
+    float hit[3];
+    if (!camera_collide(cpu, from, to, 5.0f, hit))
+        return false;
+    *floor = hit[2];
+    return true;
+}
+
+static bool coop_place_try(CPUState* cpu, const float at[3], float under, float facing, float distance, float rise,
+                           float out[3]) {
     static const float kTurns[8] = {1.571f, -1.571f, 0.785f, -0.785f, 0.0f, 2.356f, -2.356f, 3.142f};
     for (int i = 0; i < 8; i++) {
         const float a = facing + kTurns[i];
         const float from[3] = {at[0], at[1], at[2] + 60.0f};
-        const float to[3] = {at[0] + cosf(a) * COOP_SPAWN_DISTANCE, at[1] + sinf(a) * COOP_SPAWN_DISTANCE,
-                             at[2] + 60.0f};
-        float hit[3];
-        if (!camera_collide(cpu, from, to, 30.0f, hit)) {
-            out[0] = to[0];
-            out[1] = to[1];
-            return;
-        }
+        const float to[3] = {at[0] + cosf(a) * distance, at[1] + sinf(a) * distance, at[2] + 60.0f};
+        float hit[3], floor = under;
+        if (camera_collide(cpu, from, to, 30.0f, hit) || !coop_floor(cpu, to[0], to[1], at[2], &floor) ||
+            fabsf(floor - under) > rise)
+            continue;
+        out[0] = to[0];
+        out[1] = to[1];
+        out[2] = at[2] + (floor - under);
+        return true;
     }
+    return false;
+}
+
+static void coop_place(CPUState* cpu, u32 object, float out[3]) {
+    float at[3], under = 0.0f;
+    for (u32 i = 0; i < 3u; i++)
+        out[i] = at[i] = guest_read_f32(cpu, object + i * 4u);
+    const float qz = guest_read_f32(cpu, object + 52u), qw = guest_read_f32(cpu, object + 56u);
+    const float facing = isfinite(qz) && isfinite(qw) ? 2.0f * atan2f(qz, qw) - 1.5707963f : 0.0f;
+    if (!coop_floor(cpu, at[0], at[1], at[2], &under))
+        return;  // no floor known under player 1: where they stand
+    if (!coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE, COOP_PLACE_LEVEL, out) &&
+        !coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE, COOP_PLACE_STEP, out))
+        coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE * 0.5f, COOP_PLACE_STEP, out);
 }
 
 // A save made in co-op keeps player 2 as one of the area's characters: a
@@ -6567,11 +6596,17 @@ static struct {
 #define MOVES_SETS 0x8012484Cu
 #define MOVES_ENTRY 0x8012E414u  // a resource's streamed animation (cache entry), or 0
 #define MOVES_FREE 0x8012E9ACu
-#define P2_MOVES_SLOT 0x200000u  // each: the table (170 sets), then the part from +0x400
+// Two slots are player 2's and two anyone else's: player 1, once a story
+// scene has opened the chapter's own character's file again (Anthony's,
+// after his coffin), plays from them too, and one slot for both gave player
+// 2 player 1's moves (Paul twisted, kneeling, as Ellia's).
+#define P2_MOVES_SLOT 0x100000u  // each: the table (170 sets), then the part from +0x400
+#define P2_MOVES_SLOTS 4
+#define P2_MOVES_OTHERS 2        // the first of the others'
 static struct {
     int model, part;  // what is in the slot, -1 nothing
     u32 ready, sets;
-} g_p2_moves[2] = {{-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}};
+} g_p2_moves[P2_MOVES_SLOTS] = {{-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}};
 
 // A part's place in a file's list (16 bytes each, the id at +8), or -1.
 static int moves_listed(CPUState* cpu, u32 list, u32 count, int part) {
@@ -6595,7 +6630,7 @@ static int moves_part(CPUState* cpu, u32 list, u32 count, int part) {
 }
 
 static void p2_moves_clear(void) {
-    for (int k = 0; k < 2; k++)
+    for (int k = 0; k < P2_MOVES_SLOTS; k++)
         g_p2_moves[k].model = g_p2_moves[k].part = -1;
 }
 
@@ -6663,6 +6698,9 @@ static bool p2_moves_load(CPUState* cpu, int k, int model, int part) {
     return true;
 }
 
+static bool g_coop_turn;
+static u32 g_coop_turn_p1;
+
 static void hle_moves_want(CPUState* cpu) {
     g_hle_passthrough = true;
     const u32 object = cpu->gpr[3];
@@ -6671,8 +6709,14 @@ static void hle_moves_want(CPUState* cpu) {
         return;
     // Player 2, or anyone else playing a playable's moves who is not the one
     // whose file they are from.
+    // Player 2 is known by their character too: a load (a save, a reload for
+    // changed characters) makes them and asks their moves before they are
+    // found again as player 2, and theirs went into the others' slots, where
+    // player 1's next took them over (Paul twisted).
     const int model = (s32)mem_read32(cpu, object + 580u);
-    const bool p2 = g_coop_p2 != 0u && mem_read32(cpu, g_coop_p2 + 52u) == object;
+    const u32 p1 = g_coop_turn ? g_coop_turn_p1 : coop_player(cpu);
+    const bool p2 = (g_coop_p2 != 0u && mem_read32(cpu, g_coop_p2 + 52u) == object) ||
+                    (g_settings.mod_coop && model == coop_wanted_character() && (p1 == 0u || mem_read32(cpu, p1 + 52u) != object));
     if (!coop_playable(model))
         return;
     if (!p2 && model == (s16)mem_read16(cpu, COOP_PLAYABLE_SLOT + 4u)) {
@@ -6690,13 +6734,14 @@ static void hle_moves_want(CPUState* cpu) {
         }
         return;
     }
+    const int first = p2 ? 0 : P2_MOVES_OTHERS;
     int k = -1;
-    for (int i = 0; i < 2 && k < 0; i++)
+    for (int i = first; i < first + 2 && k < 0; i++)
         if (g_p2_moves[i].model == model && g_p2_moves[i].part == part)
             k = i;
     if (k < 0) {
-        // Into the slot they are not playing from.
-        k = mem_read32(cpu, object + 648u) == SCRATCH_RAM ? 1 : 0;
+        // Into the slot of theirs they are not playing from.
+        k = mem_read32(cpu, object + 648u) == SCRATCH_RAM + (u32)first * P2_MOVES_SLOT ? first + 1 : first;
         if (!p2_moves_load(cpu, k, model, part))
             return;
     }
@@ -6706,6 +6751,32 @@ static void hle_moves_want(CPUState* cpu) {
     mem_write16(cpu, object + 726u, 170u);
     g_hle_passthrough = false;
     hle_set_u32(cpu, 1u);
+}
+
+// A player playing from a slot not theirs (player 2 from the others', player
+// 1 from player 2's), or player 2 holding another's moves (a state saved
+// while they shared one): theirs asked for again, the same part.
+static void moves_repair(CPUState* cpu, u32 node, bool p2) {
+    static u32 tried[2];  // the table last asked again for, each player
+    const u32 object = node != 0u ? mem_read32(cpu, node + 52u) : 0u;
+    if (!guest_ram_range_valid(cpu, object + 648u, 4u))
+        return;
+    const u32 table = mem_read32(cpu, object + 648u);
+    const int model = (s32)mem_read32(cpu, object + 580u);
+    for (int k = 0; k < P2_MOVES_SLOTS; k++) {
+        if (table != SCRATCH_RAM + (u32)k * P2_MOVES_SLOT)
+            continue;
+        const bool own = p2 ? k < P2_MOVES_OTHERS : k >= P2_MOVES_OTHERS;
+        if ((own && g_p2_moves[k].model == model) || table == tried[p2])
+            return;
+        tried[p2] = table;
+        const u32 args[2] = {object, (u32)(g_p2_moves[k].part >= 0 ? g_p2_moves[k].part : 0)};
+        u32 ignore = 0u;
+        fprintf(stderr, "[coop] player %d (%d) played slot %d's moves (%d's): theirs again\n", p2 ? 2 : 1, model, k,
+                g_p2_moves[k].model);
+        hle_guest_call(cpu, MOVES_WANT, args, 2, 0.0, &ignore);
+        return;
+    }
 }
 
 // A loaded pack holds offsets: 0x801DCDD8(pack) makes the top level's
@@ -7716,20 +7787,66 @@ static void coop_send_event(CPUState* cpu) {
 // or player 2 did alone), player 2 is put in player 1's room, beside them.
 #define COOP_OBJECT_ROOM 592u
 
+#define COOP_FALLEN 2000.0f  // below where they last stood still by more, player 2 has fallen out
+#define COOP_INSIDE 30.0f    // nearer player 1 than this (across the floor), player 2 is inside them
+
 static void coop_follow(CPUState* cpu, u32 player) {
     const u32 o1 = mem_read32(cpu, player + 52u), o2 = mem_read32(cpu, g_coop_p2 + 52u);
     if (!guest_ram_range_valid(cpu, o1, 64u) || !guest_ram_range_valid(cpu, o2, 64u) ||
         !guest_ram_range_valid(cpu, o1 + COOP_OBJECT_ROOM, 4u) || !guest_ram_range_valid(cpu, o2 + COOP_OBJECT_ROOM, 4u))
         return;
     const u32 room = mem_read32(cpu, o1 + COOP_OBJECT_ROOM);
-    if (room == 0u || mem_read32(cpu, o2 + COOP_OBJECT_ROOM) == room)
+    if (room == 0u)
         return;
+    // Fallen out of the room (no floor under them: Paul, put beside Pius in
+    // the Tome's room, was pushed off a rock as its scene ended and fell for
+    // ever), or standing still inside player 1 for a second (the game does
+    // not part them): beside player 1 again. Fallen is far below where they
+    // last stood still: player 1 may be a floor above them (the church's
+    // stairs) and they have not fallen. Not in a scene, which may hold
+    // either player anywhere.
+    static float was[3], stood_z;
+    static unsigned inside;
+    const float z2 = guest_read_f32(cpu, o2 + 8u);
+    if (mem_read32(cpu, o2 + COOP_OBJECT_ROOM) == room) {
+        float now[3];
+        for (u32 i = 0; i < 3u; i++)
+            now[i] = guest_read_f32(cpu, o2 + i * 4u);
+        const bool still = fabsf(now[0] - was[0]) < 1.0f && fabsf(now[1] - was[1]) < 1.0f && fabsf(now[2] - was[2]) < 1.0f;
+        memcpy(was, now, sizeof was);
+        if (!isfinite(stood_z) || still)
+            stood_z = z2;
+        const float dx = now[0] - guest_read_f32(cpu, o1), dy = now[1] - guest_read_f32(cpu, o1 + 4u);
+        const float dz = z2 - guest_read_f32(cpu, o1 + 8u);
+        inside = dx * dx + dy * dy < COOP_INSIDE * COOP_INSIDE && fabsf(dz) < COOP_PLACE_STEP && still ? inside + 1u : 0u;
+        const bool fallen = !(z2 >= stood_z - COOP_FALLEN);
+        static unsigned long long retry;  // no place beside player 1 found: not again before this frame
+        const unsigned long long frame = cpu->timebase / 675000ull;
+        if ((fallen || (inside >= 60u && frame >= retry)) && !cutscene_playing(cpu)) {
+            float at[3];
+            coop_place(cpu, o1, at);
+            const float ax = at[0] - guest_read_f32(cpu, o1), ay = at[1] - guest_read_f32(cpu, o1 + 4u);
+            if (!fallen && ax * ax + ay * ay < COOP_INSIDE * COOP_INSIDE) {
+                retry = frame + 600u;
+                inside = 0u;
+                return;
+            }
+            for (u32 i = 0; i < 3u; i++)
+                guest_write_f32(cpu, o2 + i * 4u, at[i]);
+            fprintf(stderr, "[coop] player 2 %s (at %.0f, stood at %.0f): beside player 1, at %.0f %.0f %.0f\n",
+                    fallen ? "fell out of the room" : "stood inside player 1", z2, stood_z, at[0], at[1], at[2]);
+            stood_z = at[2];
+            inside = 0u;
+        }
+        return;
+    }
     float at[3];
     coop_place(cpu, o1, at);
     for (u32 i = 0; i < 3u; i++)
         guest_write_f32(cpu, o2 + i * 4u, at[i]);
     for (u32 i = 0; i < 4u; i++)  // facing as player 1
         mem_write32(cpu, o2 + 44u + i * 4u, mem_read32(cpu, o1 + 44u + i * 4u));
+    stood_z = at[2];
     const u32 args[] = {g_coop_p2, room};
     u32 ignore = 0u;
     hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, args, 2, 0.0, &ignore);
@@ -7744,30 +7861,42 @@ static void coop_follow(CPUState* cpu, u32 player) {
 // player 1's, so player 2 close in their own view but behind player 1's
 // camera was the low-detail model. Where that share reads a character's
 // position (0x80118274, a copy of object +0..11, called from 0x8011CB70),
-// player 2 is given player 1's position, so they get player 1's detail.
+// each player is given a place just in front of the game camera, so both
+// have full detail in both views: player 1's place was not enough when the
+// camera looks away from player 1 too (Anthony's chapter opens on a pan to
+// the windows; both players were low detail in player 2's view).
 // ED_COOP_LOD_LOG=1 says so once a second.
 #define COOP_POSITION_COPY 0x80118274u
 #define COOP_DETAIL_CALL 0x8011CB74u  // the return address in the share
 
 static void coop_position_copy(CPUState* cpu) {
-    u32 from = cpu->gpr[4];
-    // What player 2 holds (its holder, object +372, is them) too: out of
-    // player 1's view, their sword was left where they had been.
+    const u32 from = cpu->gpr[4];
+    u32 at[3];
+    for (u32 i = 0; i < 3u; i++)
+        at[i] = mem_read32(cpu, from + i * 4u);
+    // What a player holds (its holder, object +372, is them) too: out of
+    // player 1's view, player 2's sword was left where they had been.
     const u32 p2 = g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + 52u) : 0u;
-    if (cpu->lr == COOP_DETAIL_CALL && g_settings.mod_coop && p2 != 0u && sda_ready(cpu) &&
-        (from == p2 || (guest_ram_range_valid(cpu, from + 372u, 4u) && mem_read32(cpu, from + 372u) == p2))) {
+    if (cpu->lr == COOP_DETAIL_CALL && g_settings.mod_coop && p2 != 0u && sda_ready(cpu)) {
         const u32 player = coop_player(cpu);
         const u32 p1 = player != 0u ? mem_read32(cpu, player + 52u) : 0u;
-        if (guest_ram_range_valid(cpu, p1, 12u))
-            from = p1;
-        static unsigned n;
-        if (getenv("ED_COOP_LOD_LOG") != NULL && n++ % 60u == 0u)
-            fprintf(stderr, "[coop] player 2's detail by player 1's place (%s)\n", from == p1 ? "yes" : "no");
+        const u32 holder = guest_ram_range_valid(cpu, from + 372u, 4u) ? mem_read32(cpu, from + 372u) : 0u;
+        if (from == p2 || from == p1 || (holder != 0u && (holder == p2 || holder == p1))) {
+            for (u32 i = 0; i < 3u; i++) {  // a tenth of the way from the eye to what it looks at
+                const float eye = guest_read_f32(cpu, COOP_CAMERA + i * 4u);
+                const float look = guest_read_f32(cpu, COOP_CAMERA + 12u + i * 4u);
+                const float v = eye + (look - eye) * 0.1f;
+                memcpy(&at[i], &v, 4u);
+            }
+            static unsigned n;
+            if (getenv("ED_COOP_LOD_LOG") != NULL && n++ % 60u == 0u)
+                fprintf(stderr, "[coop] %s's detail by the camera\n", from == p1 || holder == p1 ? "player 1" : "player 2");
+        }
     }
-    for (u32 i = 0; i < 12u; i += 4u)
-        mem_write32(cpu, cpu->gpr[3] + i, mem_read32(cpu, from + i));
-    cpu->gpr[5] = mem_read32(cpu, from);
-    cpu->gpr[0] = mem_read32(cpu, from + 8u);
+    for (u32 i = 0; i < 3u; i++)
+        mem_write32(cpu, cpu->gpr[3] + i * 4u, at[i]);
+    cpu->gpr[5] = at[0];
+    cpu->gpr[0] = at[2];
 }
 
 // Player 2's object, for the skinning log (ED_COOP_SKIN_LOG).
@@ -9176,7 +9305,98 @@ static void coop_test_swap(CPUState* cpu) {
     fprintf(stderr, "[coop] the players traded places (read %u)\n", r);
 }
 
+// The characters changed in play (Mods, Player 1 / Player 2 character) or a
+// quick state made with others: the game is saved where it stands and loaded
+// again, so the chapter's load makes each player the chosen one (their body
+// borrowed, player 2 made again from the save). The save is the game's own:
+// its scratch for the card (0x801703D8), the picture's (0x80170190), the save
+// written there (0x800AE098(save, picture, flag), its size back). Then the
+// game loads it as the Load Game screen does (0x80022328(2)): the game ends
+// (mode 5, its sound and streams stopped), is reset for a load (the chapter
+// and room none, so both are loaded whole and the bodies borrowed anew) and
+// loads the save from that scratch (mode 9). From play straight to mode 9 the
+// chapter came back unseen; the reset from the host waited on the game's
+// other threads. Once for each choice, so a load that does not make them does
+// not loop.
+#define GAME_MODE_PLAY 2u
+#define GAME_END 0x80022328u
+#define GAME_END_LOAD 2u
+#define SAVE_SCRATCH 0x801703D8u
+#define SAVE_PICTURE 0x80170190u
+#define SAVE_WRITE 0x800AE098u
+#define SAVE_MAX 0x4000u
+
+static u32 g_reload_tried = ~0u;  // the choice last reloaded for (a quick load forgets it)
+
+static s32 actor_model(CPUState* cpu, u32 node) {
+    const u32 actor = node != 0u ? mem_read32(cpu, node + (u32)(s32)g_coop_actor_offset) : 0u;
+    return guest_ram_range_valid(cpu, actor, 160u) ? (s16)mem_read16(cpu, actor + 154u) : -1;
+}
+
+static void characters_reload(CPUState* cpu, u32 player) {
+    static unsigned settled;  // frames in play since the last reload or load
+    if (g_coop_actor_offset == 0 || g_chapter_model < 0 || mem_read32(cpu, cpu->gpr[13] - 26188u) != GAME_MODE_PLAY ||
+        coop_busy(cpu) || hle_save_held() || g_character_load.active || g_pack.stage != 0) {
+        settled = 0u;
+        return;
+    }
+    // ED_TEST_P1_CHARACTER=frame,choice (testing): Player 1 character changed
+    // to choice at that frame, as the in-game menu would.
+    static int test_frame = -2, test_choice;
+    if (test_frame == -2) {
+        const char* t = getenv("ED_TEST_P1_CHARACTER");
+        test_frame = t != NULL && sscanf(t, "%d,%d", &test_frame, &test_choice) == 2 ? test_frame : -1;
+    }
+    if (test_frame >= 0 && cpu->timebase / 675000ull >= (u64)test_frame) {
+        g_settings.mod_p1_character = test_choice;
+        test_frame = -1;
+        fprintf(stderr, "[player] TEST Player 1 character now %d\n", test_choice);
+    }
+    if (++settled < 60u)
+        return;
+    const s32 p1 = actor_model(cpu, player);
+    const s32 want1 = player_model() >= 0 ? player_model() : g_chapter_model;
+    const int want2 = coop_wanted_character();
+    bool p2_wrong = false;
+    if (g_settings.mod_coop && g_coop_found) {
+        if (g_coop_p2 != 0u && coop_listed(cpu, g_coop_p2))
+            p2_wrong = actor_model(cpu, g_coop_p2) != (want2 >= 0 ? want2 : p1);
+        else
+            p2_wrong = want2 >= 0 && !coop_character_loaded(cpu, want2);
+    }
+    const u32 choice = ((u32)(want1 & 0xFFFF) << 16) | (u32)(want2 & 0xFFFF);
+    if ((p1 == want1 && !p2_wrong) || choice == g_reload_tried)
+        return;
+    g_reload_tried = choice;
+    settled = 0u;
+    u32 save = 0u, picture = 0u, size = 0u, ignore = 0u;
+    if (!hle_guest_call(cpu, SAVE_SCRATCH, NULL, 0, 0.0, &save) || save == 0u ||
+        !hle_guest_call(cpu, SAVE_PICTURE, NULL, 0, 0.0, &picture)) {
+        fprintf(stderr, "[player] characters changed, but there is no save scratch to reload through\n");
+        return;
+    }
+    const u32 args[3] = {save, picture, mem_read32(cpu, cpu->gpr[13] - 24244u) == 3u ? 1u : 0u};
+    if (!hle_guest_call(cpu, SAVE_WRITE, args, 3, 0.0, &size) || (size & 0xFFFFu) == 0u || (size & 0xFFFFu) > SAVE_MAX) {
+        fprintf(stderr, "[player] characters changed, but the save to reload through was not written (%u)\n", size);
+        return;
+    }
+    const u32 load = GAME_END_LOAD;
+    hle_guest_call(cpu, GAME_END, &load, 1, 0.0, &ignore);
+    fprintf(stderr, "[player] characters changed (player 1 %d, now %d; player 2 %d%s): reloading where they stand\n",
+            want1, p1, want2, p2_wrong ? ", not them" : "");
+}
+
 static void coop_pad_read(CPUState* cpu, bool playing) {
+    // ED_MODE_LOG=1 (testing): the game's mode (r13 - 26240) and the one
+    // asked for (- 26188), as they change.
+    if (getenv("ED_MODE_LOG") != NULL && sda_ready(cpu)) {
+        static u32 was = ~0u;
+        const u32 now = mem_read32(cpu, cpu->gpr[13] - 26240u) << 8 | mem_read32(cpu, cpu->gpr[13] - 26188u);
+        if (now != was)
+            fprintf(stderr, "[mode] %d (asked %u) at frame %llu\n", (s32)now >> 8, now & 0xFFu,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        was = now;
+    }
     if (g_coop_found && sda_ready(cpu) && playing)
         coop_test_swap(cpu);
     if (g_coop_found && sda_ready(cpu)) {
@@ -9198,6 +9418,7 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
     const u32 player = coop_player(cpu);
     if (player == 0u)
         return;
+    characters_reload(cpu, player);
     if (g_coop_p2 == 0u)
         coop_adopt(cpu, player);
     if (!g_settings.mod_coop) {
@@ -9211,6 +9432,8 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         coop_spawn(cpu, player);
     }
     if (g_coop_p2 != 0u) {
+        moves_repair(cpu, g_coop_p2, true);
+        moves_repair(cpu, player, false);
         coop_door_proxy(cpu);
         coop_follow(cpu, player);
     }
@@ -9648,6 +9871,7 @@ bool hle_save_held(void) {
 // after a co-op save.
 void hle_coop_state_load(const void* in) {
     g_coop_turn = false;
+    g_reload_tried = ~0u;
     g_coop_tome_p2 = false;
     g_coop_next_cast_p2 = false;
     g_coop_attempts = 0u;
