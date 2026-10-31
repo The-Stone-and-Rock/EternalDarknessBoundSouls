@@ -1247,6 +1247,51 @@ extern "C" void controls_player2_look(float* turn_x, float* turn_y, float* in_ou
     *in_out = io;
 }
 
+// Test input for player 2: ED_PAD2_SCRIPT=start,end,input;... as
+// ED_PAD_SCRIPT, in the GameCube's own buttons (a, b, x, y, z, start, up,
+// down, left, right) and lup, ldown, lleft, lright.
+static void script_player2(DolPadState& s, int& x, int& y) {
+    using namespace controls;
+    struct Item {
+        unsigned long long start, end;
+        std::string id;
+    };
+    static std::vector<Item> items;
+    static bool read;
+    if (!read) {
+        read = true;
+        const char* text = std::getenv("ED_PAD2_SCRIPT");
+        const std::string all = text != nullptr ? text : "";
+        for (size_t pos = 0; pos < all.size();) {
+            size_t end = all.find(';', pos);
+            if (end == std::string::npos)
+                end = all.size();
+            unsigned long long a = 0, b = 0;
+            char id[16] = {};
+            if (std::sscanf(all.substr(pos, end - pos).c_str(), "%llu,%llu,%15s", &a, &b, id) == 3)
+                items.push_back({a, b, id});
+            pos = end + 1;
+        }
+    }
+    static const struct {
+        const char* id;
+        u16 button;
+    } kButtons[] = {{"a", 0x0100}, {"b", 0x0200}, {"x", 0x0400}, {"y", 0x0800}, {"z", 0x0010},
+                    {"start", 0x1000}, {"up", 0x0008}, {"down", 0x0004}, {"left", 0x0001}, {"right", 0x0002}};
+    const unsigned long long frame = g_frame.load(std::memory_order_relaxed);
+    for (const Item& item : items) {
+        if (frame < item.start || frame >= item.end)
+            continue;
+        for (const auto& b : kButtons)
+            if (item.id == b.id)
+                s.button |= b.button;
+        if (item.id == "lup") y = 127;
+        if (item.id == "ldown") y = -127;
+        if (item.id == "lleft") x = -127;
+        if (item.id == "lright") x = 127;
+    }
+}
+
 extern "C" void controls_read_player2(DolPadState* state) {
     using namespace controls;
     const Player& p = g_players[1];
@@ -1271,6 +1316,7 @@ extern "C" void controls_read_player2(DolPadState* state) {
             s.button |= kGcButton[a];
         }
     }
+    script_player2(s, x, y);
     s.analog_a = (s.button & 0x0100) ? 255 : 0;
     s.analog_b = (s.button & 0x0200) ? 255 : 0;
     s.stick_x = static_cast<s8>(x);

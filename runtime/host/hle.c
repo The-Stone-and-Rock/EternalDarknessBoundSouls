@@ -6177,6 +6177,23 @@ static void coop_describe(CPUState* cpu, const char* what, u32 node) {
                 ? (s16)mem_read16(cpu, stats + (u32)(s32)g_coop_health_offset)
                 : -1,
             mem_read32(cpu, node + 8u), at[0], at[1], at[2]);
+    // ED_COOP_ENEMY_LOG=1: their health, sanity and magick as the game reads
+    // them (0x80034E20(node, kind, out)).
+    static int sanity_log = -1;
+    if (sanity_log < 0)
+        sanity_log = getenv("ED_COOP_ENEMY_LOG") != NULL;
+    if (sanity_log && sda_ready(cpu)) {
+        s16 v[3];
+        for (u32 k = 0; k < 3u; k++) {
+            const u32 out = (cpu->gpr[1] - 0x300u) & ~15u;
+            const u32 args[3] = {node, k, out};
+            u32 ok = 0u;
+            mem_write16(cpu, out, 0u);
+            hle_guest_call(cpu, 0x80034E20u, args, 3, 0.0, &ok);
+            v[k] = (s16)mem_read16(cpu, out);
+        }
+        fprintf(stderr, "[coop] %s: health %d sanity %d magick %d\n", what, v[0], v[1], v[2]);
+    }
     // ED_COOP_STATS (testing): the stats round health, for magick and sanity.
     // The playing character's record (0x8030A940): their most health (+68),
     // sanity (+70) and magick (+72), copied into the player's stats at +224..
@@ -7227,6 +7244,13 @@ static void coop_state(CPUState* cpu, CoopPlayerState* s, bool save) {
 static void coop_copies_follow(CPUState* cpu);
 static void coop_restore_held(CPUState* cpu);
 
+// The player's look for threats round them (0x800CBE7C(node): the threat
+// search, 0x80032174, every 16th frame), and where it keeps what it found
+// (r13 - 25008, - 25004); each player has their own.
+#define COOP_THREAT_LOOK 0x800CBE7Cu
+static const s32 COOP_THREAT[2] = {-25008, -25004};
+static u32 g_coop_threat[2];
+
 static void coop_player_turn(CPUState* cpu) {
     if (g_coop_turn || g_coop_p2 == 0u || !g_settings.mod_coop || !coop_listed(cpu, g_coop_p2))
         return;
@@ -7289,7 +7313,20 @@ static void coop_player_turn(CPUState* cpu) {
             hle_guest_call(cpu, COOP_SCAN, args, 4, 0.0, &ignore);
         }
     }
+    // Their own look for threats round them (as the player's own step does it,
+    // every 16th frame), what it found theirs: they square up to enemies.
+    const u32 threat_at[2] = {cpu->gpr[13] + (u32)COOP_THREAT[0], cpu->gpr[13] + (u32)COOP_THREAT[1]};
+    u32 p1_threat[2];
+    for (int i = 0; i < 2; i++) {
+        p1_threat[i] = mem_read32(cpu, threat_at[i]);
+        mem_write32(cpu, threat_at[i], g_coop_threat[i]);
+    }
+    hle_guest_call(cpu, COOP_THREAT_LOOK, &p2, 1, 0.0, &ignore);
     const bool ran = hle_guest_call(cpu, COOP_CONTROLLER, &p2, 1, 0.0, &ignore);
+    for (int i = 0; i < 2; i++) {
+        g_coop_threat[i] = mem_read32(cpu, threat_at[i]);
+        mem_write32(cpu, threat_at[i], p1_threat[i]);
+    }
     coop_state(cpu, &g_coop_state[1], true);  // with what they found, for the next turn
     g_coop_p2_state = true;
     if (scan)
@@ -7404,6 +7441,216 @@ u32 hle_coop_player2_object(CPUState* cpu) {
 #define COOP_CHARACTER_STEP 0x80133434u
 static bool g_coop_step_running;
 
+// Seen by an enemy, a player loses sanity. A character's look round for the
+// one it is after (0x8003B1C8(node, ...)) marks it as having seen them, and
+// sends them its sanity hit (event 58, from it; their own answer is the hit,
+// event 39), only when that one is the player (0x800324B8(node, 0), its
+// quarry, against the player's id); for one after player 2, player 2 is the
+// player while it looks. When it sees one player, the other gets the hit too
+// if they are in its view as well.
+#define COOP_TARGET_A 12u
+#define COOP_TARGET_B 20u
+#define COOP_SIGHTING 0x8003B1C8u
+#define COOP_EVENTS 0x80058DD8u
+#define COOP_SEEN_EVENT 58u
+#define COOP_HIT_EVENT 39u
+#define COOP_VIEW_HALF 1.0471976f  // 60 degrees
+#define COOP_VIEW_REACH 1500.0f
+#define COOP_EYE_HEIGHT 60.0f
+static bool g_coop_sighting;
+
+// fn(r3..r10) in place of the call being made, with player 2 as the player
+// (their object, node and id where the game keeps the player's), its answer
+// the caller's.
+static void coop_as_player2(CPUState* cpu, u32 fn) {
+    u32 args[8];
+    for (int i = 0; i < 8; i++)
+        args[i] = cpu->gpr[3 + i];
+    const u32 who[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+    const u32 now[3] = {mem_read32(cpu, g_coop_p2 + 52u), g_coop_p2, mem_read32(cpu, g_coop_p2 + 16u)};
+    u32 was[3], result = 0u;
+    for (int i = 0; i < 3; i++) {
+        was[i] = mem_read32(cpu, who[i]);
+        mem_write32(cpu, who[i], now[i]);
+    }
+    hle_guest_call(cpu, fn, args, 8, cpu->fpr[1], &result);
+    for (int i = 0; i < 3; i++)
+        mem_write32(cpu, who[i], was[i]);
+    cpu->gpr[3] = result;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+static void coop_sighting(CPUState* cpu) {
+    const u32 node = cpu->gpr[3];
+    const u32 stats = guest_ram_range_valid(cpu, node, 56u) ? mem_read32(cpu, node + (u32)(s32)g_coop_stats_offset) : 0u;
+    if (g_coop_sighting || g_coop_turn || !g_settings.mod_coop || g_coop_p2 == 0u || !g_coop_p2_state ||
+        !sda_ready(cpu) || !guest_ram_range_valid(cpu, stats, COOP_TARGET_B + 4u) ||
+        mem_read32(cpu, stats + COOP_TARGET_B) != mem_read32(cpu, g_coop_p2 + 16u)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    g_coop_sighting = true;
+    coop_as_player2(cpu, COOP_SIGHTING);
+    g_coop_sighting = false;
+}
+
+static void coop_seen_shared(CPUState* cpu);
+static bool g_coop_seen_p2;
+
+static void coop_events(CPUState* cpu) {
+    const u32 node = cpu->gpr[3], message = cpu->gpr[5];
+    if (!g_coop_seen_p2)  // not again for the call made here
+        coop_seen_shared(cpu);
+    if (g_coop_seen_p2 || !g_settings.mod_coop || g_coop_p2 == 0u || node != g_coop_p2 || !sda_ready(cpu) ||
+        !guest_ram_range_valid(cpu, message, 4u) || mem_read32(cpu, message) != COOP_SEEN_EVENT) {
+        g_hle_passthrough = true;
+        return;
+    }
+    g_coop_seen_p2 = true;
+    coop_as_player2(cpu, COOP_EVENTS);
+    g_coop_seen_p2 = false;
+}
+
+static void coop_seen_shared(CPUState* cpu) {
+    const u32 node = cpu->gpr[3], message = cpu->gpr[5];
+    // Each event comes twice, asked (r4 1) then taken (r4 0): the second.
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || cpu->gpr[4] != 0u || !sda_ready(cpu) ||
+        !guest_ram_range_valid(cpu, message, 32u) || mem_read32(cpu, message) != COOP_SEEN_EVENT)
+        return;
+    const u32 p1 = mem_read32(cpu, cpu->gpr[13] - 21492u);
+    if (node != p1 && node != g_coop_p2)
+        return;
+    const u32 other = node == p1 ? g_coop_p2 : p1;
+    if (!guest_ram_range_valid(cpu, other, 56u) || mem_read32(cpu, message + 8u) != mem_read32(cpu, node + 16u))
+        return;
+    // The other only when the one who saw is looking their way too: within
+    // its view (60 degrees either side of its facing), in reach, nothing
+    // between.
+    const u32 seer_id = mem_read32(cpu, message + 4u);
+    u32 seer = 0u;
+    for (u32 n = 0u, i = 0u; i < 1024u && (n = coop_next(cpu, n)) != 0u; i++)
+        if (mem_read32(cpu, n + 16u) == seer_id) {
+            seer = mem_read32(cpu, n + 52u);
+            break;
+        }
+    const u32 them = mem_read32(cpu, other + 52u);
+    if (!guest_ram_range_valid(cpu, seer, 60u) || !guest_ram_range_valid(cpu, them, 16u))
+        return;
+    float to[3], from[3], at[3];
+    for (u32 i = 0; i < 3u; i++) {
+        from[i] = guest_read_f32(cpu, seer + i * 4u);
+        at[i] = guest_read_f32(cpu, them + i * 4u);
+        to[i] = at[i] - from[i];
+    }
+    const float qz = guest_read_f32(cpu, seer + 52u), qw = guest_read_f32(cpu, seer + 56u);
+    const float facing = 2.0f * atan2f(qz, qw) - 1.5707963f;
+    const float reach = sqrtf(to[0] * to[0] + to[1] * to[1]);
+    float off = atan2f(to[1], to[0]) - facing;
+    while (off > 3.14159265f)
+        off -= 6.2831853f;
+    while (off < -3.14159265f)
+        off += 6.2831853f;
+    from[2] += COOP_EYE_HEIGHT;
+    at[2] += COOP_EYE_HEIGHT;
+    float hit[3];
+    const bool in_view = isfinite(off) && fabsf(off) <= COOP_VIEW_HALF && reach <= COOP_VIEW_REACH &&
+                         !camera_collide(cpu, from, at, 0.0f, hit);
+    static int log = -1;
+    if (log < 0)
+        log = getenv("ED_COOP_ENEMY_LOG") != NULL;
+    if (log)
+        fprintf(stderr, "[coop] %u saw player %d; player %d %s (%.0f away, %.0f degrees off)\n", seer_id,
+                node == p1 ? 1 : 2, node == p1 ? 2 : 1, in_view ? "in its view too" : "not in its view", reach,
+                off * 57.29578f);
+    if (!in_view)
+        return;
+    const u32 args[4] = {COOP_HIT_EVENT, mem_read32(cpu, message + 4u), mem_read32(cpu, other + 16u),
+                         mem_read32(cpu, message + 28u)};
+    // Taken by player 2 as the player, as their own (the glow over them).
+    const u32 who[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+    const u32 now[3] = {mem_read32(cpu, g_coop_p2 + 52u), g_coop_p2, mem_read32(cpu, g_coop_p2 + 16u)};
+    u32 was[3], ignore = 0u;
+    for (int i = 0; i < 3 && other == g_coop_p2; i++) {
+        was[i] = mem_read32(cpu, who[i]);
+        mem_write32(cpu, who[i], now[i]);
+    }
+    hle_guest_call(cpu, COOP_SEND_EVENT, args, 4, 0.0, &ignore);
+    for (int i = 0; i < 3 && other == g_coop_p2; i++)
+        mem_write32(cpu, who[i], was[i]);
+}
+
+// Enemies go after either player. Who a character is after is an id in its
+// stats (node +36): +20 (+12 beside it, with the same); the game only ever
+// puts player 1's there. In co-op, a character after one player takes the
+// nearer of the two (by 60 units, so it does not turn back and forth between
+// them), when both are in its room. ED_COOP_ENEMY_LOG=1 tells each change.
+#define COOP_TARGET_MARGIN 60.0f
+
+static float coop_distance(CPUState* cpu, u32 a, u32 b) {
+    float d2 = 0.0f;
+    for (u32 i = 0; i < 3u; i++) {
+        const float d = guest_read_f32(cpu, a + i * 4u) - guest_read_f32(cpu, b + i * 4u);
+        d2 += d * d;
+    }
+    return sqrtf(d2);
+}
+
+static void coop_enemy_target(CPUState* cpu, u32 object) {
+    if (!g_settings.mod_coop || g_coop_turn || g_coop_step_running || g_coop_p2 == 0u || !g_coop_p2_state ||
+        !sda_ready(cpu))
+        return;
+    const u32 p1_node = mem_read32(cpu, cpu->gpr[13] - 21492u);
+    const u32 p1 = mem_read32(cpu, cpu->gpr[13] - 26524u), p2 = mem_read32(cpu, g_coop_p2 + 52u);
+    if (object == p1 || object == p2 || !guest_ram_range_valid(cpu, p1_node, 20u) ||
+        !guest_ram_range_valid(cpu, object, COOP_OBJECT_ROOM + 4u) ||
+        !guest_ram_range_valid(cpu, p1, COOP_OBJECT_ROOM + 4u) || !guest_ram_range_valid(cpu, p2, COOP_OBJECT_ROOM + 4u))
+        return;
+    const u32 room = mem_read32(cpu, object + COOP_OBJECT_ROOM);
+    if (mem_read32(cpu, p1 + COOP_OBJECT_ROOM) != room || mem_read32(cpu, p2 + COOP_OBJECT_ROOM) != room)
+        return;
+    u32 node = 0u;
+    for (int i = 0; i < 1024 && (node = coop_next(cpu, node)) != 0u; i++)
+        if (mem_read32(cpu, node + 52u) == object)
+            break;
+    const u32 stats = node != 0u ? mem_read32(cpu, node + (u32)(s32)g_coop_stats_offset) : 0u;
+    if (!guest_ram_range_valid(cpu, stats, COOP_TARGET_B + 4u))
+        return;
+    static int log = -1;
+    if (log < 0)
+        log = getenv("ED_COOP_ENEMY_LOG") != NULL;
+    if (log) {  // and each change of its health
+        static struct {
+            u32 node;
+            s16 health;
+        } seen[32];
+        const s16 health = (s16)mem_read16(cpu, stats + (u32)(s32)g_coop_health_offset);
+        for (int i = 0; i < 32; i++)
+            if (seen[i].node == node || seen[i].node == 0u) {
+                if (seen[i].node == node && seen[i].health != health)
+                    fprintf(stderr, "[coop] %u's health %d -> %d\n", mem_read32(cpu, node + 16u), seen[i].health, health);
+                seen[i].node = node;
+                seen[i].health = health;
+                break;
+            }
+    }
+    const u32 ids[2] = {mem_read32(cpu, p1_node + 16u), mem_read32(cpu, g_coop_p2 + 16u)};
+    const u32 after = mem_read32(cpu, stats + COOP_TARGET_B);
+    if (after != ids[0] && after != ids[1])
+        return;
+    const float d1 = coop_distance(cpu, object, p1), d2 = coop_distance(cpu, object, p2);
+    const u32 want = after == ids[0] ? (d2 + COOP_TARGET_MARGIN < d1 ? ids[1] : ids[0])
+                                     : (d1 + COOP_TARGET_MARGIN < d2 ? ids[0] : ids[1]);
+    if (want == after)
+        return;
+    mem_write32(cpu, stats + COOP_TARGET_B, want);
+    if (mem_read32(cpu, stats + COOP_TARGET_A) == after)
+        mem_write32(cpu, stats + COOP_TARGET_A, want);
+    if (log)
+        fprintf(stderr, "[coop] %u goes after player %d (%.0f from player 1, %.0f from player 2)\n",
+                mem_read32(cpu, node + 16u), want == ids[0] ? 1 : 2, d1, d2);
+}
+
 static void coop_character_step(CPUState* cpu) {
     const u32 object = cpu->gpr[3];
     static bool seen;
@@ -7411,6 +7658,7 @@ static void coop_character_step(CPUState* cpu) {
         seen = true;
         fprintf(stderr, "[coop] player 2's step runs (their turn %s yet)\n", g_coop_p2_state ? "has run" : "has not run");
     }
+    coop_enemy_target(cpu, object);
     // Off unless ED_COOP_P2_STEP=1 (testing): with it, player 2 finds doors
     // (the record above is theirs) but neither player can open one yet:
     // something of the door's own, beyond these globals, is upset by the
@@ -8245,6 +8493,19 @@ static void find_coop(CPUState* cpu) {
         controller->notify = coop_player_turn;
     else
         fprintf(stderr, "[coop] the player controller not found: player 2 cannot move\n");
+    // An enemy's look for the one it is after (stwu r1,-64(r1); ... bl
+    // 0x800324B8 at +0x90) and the characters' answer to events (stwu
+    // r1,-256(r1)), for both players being seen.
+    HleDispatchEntry* sighting = hle_dispatch_entry(COOP_SIGHTING);
+    HleDispatchEntry* events = hle_dispatch_entry(COOP_EVENTS);
+    if (mem_read32(cpu, COOP_SIGHTING) == 0x9421FFC0u && mem_read32(cpu, COOP_SIGHTING + 0x90u) == 0x4BFF7261u &&
+        mem_read32(cpu, COOP_EVENTS) == 0x9421FF00u && sighting != NULL && sighting->intercept == NULL &&
+        sighting->notify == NULL && events != NULL && events->intercept == NULL && events->notify == NULL) {
+        sighting->intercept = coop_sighting;
+        events->intercept = coop_events;
+    } else {
+        fprintf(stderr, "[coop] the enemies' look not found: only player 1 is seen\n");
+    }
     // Each character's step (stwu r1,-240(r1) ... or r31,r3,r3), and its
     // scan for the player (bl at 0x801335C4), for player 2's own.
     HleDispatchEntry* step = hle_dispatch_entry(COOP_CHARACTER_STEP);
