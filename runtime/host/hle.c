@@ -7337,6 +7337,10 @@ static void coop_quick_cast(CPUState* cpu) {
     held = g_coop_p2_buttons;
     if (pressed == 0u || cpu->ram_size < SCRATCH_END - GC_RAM_BASE)
         return;
+    // ED_COOP_P2_QUICK=spell (testing): player 2's D-pad up casts that spell.
+    const char* test = getenv("ED_COOP_P2_QUICK");
+    if (test != NULL)
+        g_coop_quick[1] = (u32)strtoul(test, NULL, 16);
     for (u32 i = 0; i < COOP_QUICKS; i++) {
         if ((pressed & kCoopQuickButton[i]) == 0u)
             continue;
@@ -7386,6 +7390,34 @@ static void coop_cast(CPUState* cpu) {
     cpu->gpr[3] = result;
     g_hle_passthrough = false;
     g_hle_tail_call = false;
+}
+
+// A lasting spell's sign over its owner's head (Recover's rune): the sign's
+// thing (kind 34) is tied, when it is made, to the controlled character
+// (0x80026958, outside anyone's turn: player 1), and each frame the tie
+// (0x8002C0D4(sign, tied), each one a holder whose +56 is the node) puts it
+// over the one tied. Its record (node +40, then +60) says whom the spell is
+// for (+20); the sign of one for player 2 is put over them.
+#define COOP_SIGN_FOLLOW 0x8002C0D4u
+#define COOP_HOLDER_OF 0x8014ED1Cu
+
+static void coop_sign_follow(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const u32 sign = cpu->gpr[3], tied = cpu->gpr[4];
+    if (g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu) || !guest_ram_range_valid(cpu, sign, 60u) ||
+        !guest_ram_range_valid(cpu, tied, 60u))
+        return;
+    const u32 node = mem_read32(cpu, sign + 56u);
+    const u32 object = guest_ram_range_valid(cpu, node, 44u) ? mem_read32(cpu, node + 40u) : 0u;
+    const u32 record = guest_ram_range_valid(cpu, object, 64u) ? mem_read32(cpu, object + 60u) : 0u;
+    if (!guest_ram_range_valid(cpu, record, 24u) || mem_read32(cpu, record + 20u) != mem_read32(cpu, g_coop_p2 + 16u) ||
+        mem_read32(cpu, tied + 56u) == g_coop_p2)
+        return;
+    u32 theirs = 0u;
+    if (hle_guest_call(cpu, COOP_HOLDER_OF, &g_coop_p2, 1, 0.0, &theirs) && theirs != 0u) {
+        cpu->gpr[3] = sign;
+        cpu->gpr[4] = theirs;
+    }
 }
 
 // Player 2's spells play out as theirs. A spell cast is a record in the
@@ -9291,6 +9323,15 @@ static void find_coop(CPUState* cpu) {
         cast->intercept = coop_cast;
     } else {
         fprintf(stderr, "[coop] the cast not found: what player 2 casts from their Tome is player 1's\n");
+    }
+    // A lasting spell's sign following the one tied to it (stwu r1,-96(r1);
+    // ... stmw r27,76(r1) at +0x10), player 2's over them.
+    HleDispatchEntry* sign = hle_dispatch_entry(COOP_SIGN_FOLLOW);
+    if (mem_read32(cpu, COOP_SIGN_FOLLOW) == 0x9421FFA0u && mem_read32(cpu, COOP_SIGN_FOLLOW + 0x10u) == 0xBF61004Cu &&
+        sign != NULL && sign->intercept == NULL && sign->notify == NULL) {
+        sign->intercept = coop_sign_follow;
+    } else {
+        fprintf(stderr, "[coop] the spells' signs not found: player 2's show over player 1\n");
     }
     // The spells' update (stwu r1,-32(r1); ... lwz r30,-22324(r13) at +0x1C),
     // player 2's spells stepped as theirs.
