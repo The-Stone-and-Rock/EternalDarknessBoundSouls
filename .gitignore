@@ -4,6 +4,10 @@ dump/
 res/ui/portraits/
 # The launcher's music, converted from the disc (tools/launcher_music.py).
 res/music/
+# The title menu's video, converted from yours (tools/title_video.py).
+res/video/
+# Your own video to convert from.
+Background video/
 generated/
 build*/
 .deps/

@@ -949,6 +949,17 @@ void build_mods() {
         skip.change = [](int) { g_settings.mod_skip_intro = !g_settings.mod_skip_intro; };
         g_rows.push_back(skip);
     }
+    // The title menu's moving background (titlevideo.cpp), once made.
+    std::error_code ec;
+    const bool have_video =
+        std::filesystem::is_regular_file(std::filesystem::path(frontend_res_dir()) / "video" / "title.mpg", ec);
+    Row video{"Title video", have_video ? on_off(g_settings.mod_title_video) : "none"};
+    video.gap = g_in_game;
+    video.enabled = have_video;
+    video.note = have_video ? "The game's main menu over a moving picture of your own, its music unchanged."
+                            : "No video yet: tools/title_video.py makes res/video/title.mpg from yours.";
+    video.change = [](int) { g_settings.mod_title_video = !g_settings.mod_title_video; };
+    g_rows.push_back(video);
     Row back{"Back"};
     back.gap = true;
     back.activate = [] {
