@@ -7420,6 +7420,41 @@ static void coop_sign_follow(CPUState* cpu) {
     }
 }
 
+// Each player their own lasting spell. A lasting spell's thing (kind 34, one
+// made per cast: 0x800CBD34) is found, wherever the game asks for the
+// controlled character's (a new one ending the old, its sign tied, its
+// effect told), as the first of its kind in the world (0x801F8FD8(first,
+// 34)): there was one, player 2's Recover ending player 1's. The one found is
+// the controlled character's own (its record's +20), player 2's while their
+// spells play out (coop_be_player2), never player 2's for anyone else.
+#define COOP_FIND_KIND 0x801F8FD8u
+#define COOP_KIND_LASTING 34u
+
+static void coop_lasting_find(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (cpu->gpr[4] != COOP_KIND_LASTING || g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu) ||
+        !coop_listed(cpu, g_coop_p2))
+        return;
+    const u32 p2_id = mem_read32(cpu, g_coop_p2 + 16u);
+    const bool p2 = mem_read32(cpu, cpu->gpr[13] - 21488u) == p2_id;
+    u32 found = 0u;
+    for (u32 thing = cpu->gpr[3], n = 0u; thing != 0u && n < 65536u && guest_ram_range_valid(cpu, thing, 44u);
+         thing = mem_read32(cpu, thing + 4u), n++) {
+        if (mem_read32(cpu, thing + 8u) != COOP_KIND_LASTING)
+            continue;
+        const u32 object = mem_read32(cpu, thing + 40u);
+        const u32 record = guest_ram_range_valid(cpu, object, 64u) ? mem_read32(cpu, object + 60u) : 0u;
+        const bool theirs = guest_ram_range_valid(cpu, record, 24u) && mem_read32(cpu, record + 20u) == p2_id;
+        if (theirs == p2) {
+            found = thing;
+            break;
+        }
+    }
+    cpu->gpr[3] = found;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
 // Player 2's spells play out as theirs. A spell cast is a record in the
 // game's list of them (r13 - 22324 the first, +20 the next; its caster's id
 // at +12), each stepped every frame by the spells' update (0x801C5994),
@@ -7441,6 +7476,15 @@ static void coop_spells_update(CPUState* cpu) {
     }
     const u32 p2_id = mem_read32(cpu, g_coop_p2 + 16u);
     u32 paused = 0u, runs = 0u, ignore = 0u;
+    // ED_COOP_SPELL_LIST=1 (testing): the spells, every 30th frame.
+    if (getenv("ED_COOP_SPELL_LIST") != NULL && (cpu->timebase / 675000ull) % 30u == 0u) {
+        fprintf(stderr, "[coop] spells at frame %llu:", (unsigned long long)(cpu->timebase / 675000ull));
+        for (u32 s = mem_read32(cpu, cpu->gpr[13] - 22324u), n = 0u; s != 0u && n < 64u; s = mem_read32(cpu, s + 20u), n++)
+            fprintf(stderr, " %08X(%08X by %X fl %02X%02X%02X step %08X)", s, mem_read32(cpu, s + 4u),
+                    mem_read32(cpu, s + 12u), mem_read8(cpu, s + 4080u), mem_read8(cpu, s + 4081u),
+                    mem_read8(cpu, s + 4082u), mem_read32(cpu, s + 28u));
+        fprintf(stderr, "\n");
+    }
     hle_guest_call(cpu, COOP_SPELLS_PAUSED, NULL, 0, 0.0, &paused);
     for (u32 spell = mem_read32(cpu, cpu->gpr[13] - 22324u), n = 0u; spell != 0u && n < 4096u;
          spell = mem_read32(cpu, spell + 20u), n++) {
@@ -9332,6 +9376,15 @@ static void find_coop(CPUState* cpu) {
         sign->intercept = coop_sign_follow;
     } else {
         fprintf(stderr, "[coop] the spells' signs not found: player 2's show over player 1\n");
+    }
+    // The world's first thing of a kind (stwu r1,-16(r1); ... or r31,r4,r4 at
+    // +0x10), each player's own lasting spell.
+    HleDispatchEntry* lasting = hle_dispatch_entry(COOP_FIND_KIND);
+    if (mem_read32(cpu, COOP_FIND_KIND) == 0x9421FFF0u && mem_read32(cpu, COOP_FIND_KIND + 0x10u) == 0x7C9F2378u &&
+        lasting != NULL && lasting->intercept == NULL && lasting->notify == NULL) {
+        lasting->intercept = coop_lasting_find;
+    } else {
+        fprintf(stderr, "[coop] the things' find not found: one lasting spell for both players\n");
     }
     // The spells' update (stwu r1,-32(r1); ... lwz r30,-22324(r13) at +0x1C),
     // player 2's spells stepped as theirs.
