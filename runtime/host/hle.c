@@ -7250,6 +7250,7 @@ static void coop_restore_held(CPUState* cpu);
 #define COOP_THREAT_LOOK 0x800CBE7Cu
 static const s32 COOP_THREAT[2] = {-25008, -25004};
 static u32 g_coop_threat[2];
+static u32 g_coop_p1_id = ~0u;  // player 1's id, as it was before player 2's turn (coop_send_event)
 
 static void coop_player_turn(CPUState* cpu) {
     if (g_coop_turn || g_coop_p2 == 0u || !g_settings.mod_coop || !coop_listed(cpu, g_coop_p2))
@@ -7261,6 +7262,7 @@ static void coop_player_turn(CPUState* cpu) {
         return;
     g_coop_turn = true;
     const u32 node = cpu->gpr[3];
+    g_coop_p1_id = mem_read32(cpu, node + 16u);
     coop_state(cpu, &g_coop_state[0], true);
     if (g_coop_p2_state)
         coop_state(cpu, &g_coop_state[1], false);
@@ -7324,7 +7326,11 @@ static void coop_player_turn(CPUState* cpu) {
     hle_guest_call(cpu, COOP_THREAT_LOOK, &p2, 1, 0.0, &ignore);
     const bool ran = hle_guest_call(cpu, COOP_CONTROLLER, &p2, 1, 0.0, &ignore);
     for (int i = 0; i < 2; i++) {
-        g_coop_threat[i] = mem_read32(cpu, threat_at[i]);
+        const u32 found = mem_read32(cpu, threat_at[i]);
+        if (found != g_coop_threat[i] && getenv("ED_COOP_ENEMY_LOG") != NULL)
+            fprintf(stderr, "[coop] player 2's threat %d: 0x%08X -> 0x%08X (player 1's 0x%08X)\n", i, g_coop_threat[i],
+                    found, p1_threat[i]);
+        g_coop_threat[i] = found;
         mem_write32(cpu, threat_at[i], p1_threat[i]);
     }
     coop_state(cpu, &g_coop_state[1], true);  // with what they found, for the next turn
@@ -7352,13 +7358,18 @@ static void coop_player_turn(CPUState* cpu) {
 // event call (0x801F59B0(event, from, to, data), its answer in r4: 1 a
 // threat); another Alex answers yes, and both stood with their fists up. Asked
 // between the two players, the answer is no; everything else goes through.
+// Player 1's id is kept from before player 2 is the player (their turn, their
+// look for threats): asked then, "the player" is player 2, and player 2 took
+// player 1 for a threat (on guard with no enemy near).
 #define COOP_SEND_EVENT 0x801F59B0u
 
 static void coop_send_event(CPUState* cpu) {
     const u32 event = cpu->gpr[3], from = cpu->gpr[4], to = cpu->gpr[5];
     if ((event == 59u || event == 239u) && g_coop_p2 != 0u && sda_ready(cpu)) {
         const u32 player = coop_player(cpu);
-        const u32 ids[2] = {player != 0u ? mem_read32(cpu, player + 16u) : ~0u, mem_read32(cpu, g_coop_p2 + 16u)};
+        if (player != 0u && player != g_coop_p2)
+            g_coop_p1_id = mem_read32(cpu, player + 16u);
+        const u32 ids[2] = {g_coop_p1_id, mem_read32(cpu, g_coop_p2 + 16u)};
         if ((from == ids[0] && to == ids[1]) || (from == ids[1] && to == ids[0])) {
             cpu->gpr[3] = 0u;
             cpu->gpr[4] = 0u;
