@@ -65,6 +65,7 @@ body.spread .page {
 	right: 13dp;
 	bottom: 13dp;
 	border: 1dp #7a201266;
+	pointer-events: none;  /* over the rows: the pointer goes through to them */
 }
 
 #emblem,
@@ -118,18 +119,18 @@ body.branded #heading {
 	decorator: image(tome/rule.png contain center center);
 }
 
+/* Each row a frame of its own, shown round the chosen one. */
 .row {
 	display: flex;
 	align-items: center;
-	padding: 4dp 2dp;
+	padding: 2dp 12dp;
+	border: 2dp transparent;
+	border-radius: 8dp;
 }
 
-/* The red-ink diamond beside the chosen row. */
+/* The red-ink diamond the chosen row once had (the glowing frame now). */
 .mark {
-	width: 14dp;
-	height: 14dp;
-	margin-right: 10dp;
-	visibility: hidden;
+	display: none;
 }
 
 /* Dotted leader from a setting to its value. */
@@ -148,20 +149,17 @@ body.branded #heading {
 	white-space: nowrap;
 }
 
+/* The chosen row: the game's own glowing frame (its memory card screen's),
+   the ink kept black. */
 .row.selected {
-	color: #8e1b12;
-}
-
-.row.selected .mark {
-	visibility: visible;
+	color: #1a0f08;
+	border-color: #d4f0ff;
+	background-color: #cfeeff40;
+	box-shadow: #6ec4ff 0 0 22dp 6dp, #9fdcffd0 0 0 10dp 2dp inset;
 }
 
 .row.selected .value {
-	color: #8e1b12;
-}
-
-.row.selected .leader {
-	decorator: image(tome/leader-red.png repeat-x left bottom);
+	color: #1a0f08;
 }
 
 .row.disabled,
@@ -170,7 +168,7 @@ body.branded #heading {
 }
 
 .row.selected.disabled {
-	color: #9a6a5a;
+	color: #6a5a4a;
 }
 
 .note {
@@ -249,8 +247,14 @@ body.compact #heading {
 /* Character select: one wide page with every character at once, a frame for
    their portrait over their name, six to a line. */
 body.roster .page {
-	width: 1120dp;
-	padding: 22dp 40dp 14dp 40dp;
+	width: 1060dp;
+	padding: 16dp 40dp 10dp 40dp;
+}
+
+/* Twelve frames, the details, the break and Back on one screen. */
+body.roster #heading {
+	font-size: 32dp;
+	margin-bottom: 0;
 }
 
 .roster {
@@ -261,35 +265,34 @@ body.roster .page {
 }
 
 .tile {
-	width: 150dp;
-	margin: 6dp 6dp;
-	padding: 5dp;
-	border: 1dp #00000000;
+	width: 106dp;
+	margin: 4dp 5dp;
+	padding: 4dp;
+	border: 2dp transparent;
+	border-radius: 8dp;
 	text-align: center;
 }
 
 /* The character's portrait (from the player's disc: frontend.cpp
    ensure_portraits), the chapter pictures' 126x89 shape. */
 .portrait {
-	height: 106dp;
+	height: 74dp;
 	border: 1dp #7a201266;
 	background-color: #3a24120f;
 }
 
 .name {
-	margin-top: 6dp;
+	margin-top: 3dp;
 	font-family: "IM FELL English SC";
-	font-size: 24dp;
+	font-size: 19dp;
 }
 
+/* The highlighted character: the menus' glowing frame. */
 .tile.selected {
-	border-color: #8e1b12;
-	color: #8e1b12;
-}
-
-.tile.selected .portrait {
-	border-color: #8e1b12;
-	background-color: #8e1b1214;
+	color: #1a0f08;
+	border-color: #d4f0ff;
+	background-color: #cfeeff40;
+	box-shadow: #6ec4ff 0 0 22dp 6dp, #9fdcffd0 0 0 10dp 2dp inset;
 }
 
 /* The character in force: their name in red ink, under a red rule. */
@@ -300,8 +303,15 @@ body.roster .page {
 }
 
 body.roster .row {
-	width: 300dp;
+	width: 340dp;
 	margin: 0 auto;
+	font-size: 22dp;
+	padding: 1dp 12dp;
+}
+
+body.roster .gap {
+	height: 14dp;
+	margin: 2dp 70dp;
 }
 
 .portrait img {
@@ -317,7 +327,7 @@ body.roster .row {
 }
 
 .roster-wrap .roster {
-	width: 700dp;
+	width: 520dp;
 	flex-shrink: 0;
 }
 
@@ -468,37 +478,6 @@ body.launcher .row {
 	border-radius: 8dp;
 }
 
-body.launcher .mark {
-	display: none;
-}
-
-body.launcher .row.selected,
-body.slots .row.selected {
-	color: #1a0f08;
-	border-color: #d4f0ff;
-	background-color: #cfeeff40;
-	box-shadow: #6ec4ff 0 0 22dp 6dp, #9fdcffd0 0 0 10dp 2dp inset;
-}
-
-/* The save state pages: the same frame round the chosen row, the rows at
-   their full width. */
-body.slots .row {
-	border: 2dp transparent;
-	border-radius: 8dp;
-	padding: 2dp 12dp;
-}
-
-body.slots .mark {
-	display: none;
-}
-
-body.slots .row.selected .value {
-	color: #1a0f08;
-}
-
-body.slots .row.selected .leader {
-	decorator: image(tome/leader.png repeat-x left bottom);
-}
 
 /* The pause menu (the game's menu over it, dimmed): the launcher's parchment
    in its frame (res/ui/pause.png, cut from launcher.png), the rows centred
@@ -544,18 +523,7 @@ body.pause .row {
 	border-radius: 8dp;
 }
 
-body.pause .mark {
-	display: none;
-}
-
 body.pause .gap {
 	height: 16dp;
 	margin: 2dp 70dp;
-}
-
-body.pause .row.selected {
-	color: #1a0f08;
-	border-color: #d4f0ff;
-	background-color: #cfeeff40;
-	box-shadow: #6ec4ff 0 0 22dp 6dp, #9fdcffd0 0 0 10dp 2dp inset;
 }

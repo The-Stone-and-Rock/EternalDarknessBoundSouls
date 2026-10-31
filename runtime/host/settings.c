@@ -21,6 +21,8 @@ Settings g_settings = {
     .glow = 0,
     .hdr = true,  // only where the display has it
     .ssao = 1,
+    .anti_aliasing = 0,
+    .anisotropy = 4,
     .hdr_peak = 1000,
 #if defined(__APPLE__)
     .hdr_paper = 100,  // macOS's own SDR white (EDR 1.0)
@@ -131,6 +133,10 @@ void settings_load(void) {
             g_settings.hdr = n != 0;
         else if (strcmp(key, "ssao") == 0)
             g_settings.ssao = clamp_int(n, 0, 2);
+        else if (strcmp(key, "anti_aliasing") == 0)
+            g_settings.anti_aliasing = clamp_int(n, 0, 1);
+        else if (strcmp(key, "anisotropy") == 0)
+            g_settings.anisotropy = clamp_int(n, 0, 4);
         else if (strcmp(key, "hdr_peak") == 0)
             g_settings.hdr_peak = clamp_int(n, 100, 4000);
         else if (strcmp(key, "hdr_paper") == 0)
@@ -226,6 +232,8 @@ void settings_save(void) {
     fprintf(f, "glow = %d\n", g_settings.glow);
     fprintf(f, "hdr = %d\n", g_settings.hdr ? 1 : 0);
     fprintf(f, "ssao = %d\n", g_settings.ssao);
+    fprintf(f, "anti_aliasing = %d\n", g_settings.anti_aliasing);
+    fprintf(f, "anisotropy = %d\n", g_settings.anisotropy);
     fprintf(f, "hdr_peak = %d\n", g_settings.hdr_peak);
     fprintf(f, "hdr_paper = %d\n", g_settings.hdr_paper);
     fprintf(f, "hdr_black = %d\n", g_settings.hdr_black);

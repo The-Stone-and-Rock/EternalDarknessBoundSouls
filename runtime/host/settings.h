@@ -19,6 +19,8 @@ typedef struct {
     int glow;             // light glows round lamps, flames, magick: 0 off, 1 soft, 2 strong
     bool hdr;             // HDR output where the display has it (light past SDR white)
     int ssao;             // ambient occlusion: 0 off, 1 soft, 2 strong
+    int anti_aliasing;    // 1: 4x multisampling (from the next start)
+    int anisotropy;       // texture filtering: 1x, 2x, 4x, 8x, 16x (0-4, from the next start)
     // HDR calibration (Graphics enhancements > Calibrate HDR): the display's
     // peak and SDR white in nits, and the black level in steps (-5 sinks,
     // up to 10 lifts the darkest light).

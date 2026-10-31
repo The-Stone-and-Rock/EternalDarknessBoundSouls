@@ -620,6 +620,10 @@ int main(int argc, char** argv) {
 #endif
 
 #ifdef ED_AURORA
+    // The renderer's anti-aliasing and texture filtering are fixed for the run:
+    // the settings are read before it starts (and again below, with the rest).
+    settings_load();
+    static const unsigned kAnisotropy[] = {1u, 2u, 4u, 8u, 16u};
     const AuroraBackendConfig backend_config = {
         .app_name = "Eternal Darkness",
         .window_width = 1280,
@@ -631,6 +635,8 @@ int main(int argc, char** argv) {
         .force_untextured =
             getenv("ED_GFX_FORCE_UNTEXTURED") != NULL,
         .imgui_init = frontend_imgui_init,
+        .msaa = g_settings.anti_aliasing ? 4u : 1u,
+        .anisotropy = kAnisotropy[g_settings.anisotropy],
     };
     // --call mode runs one pure-compute function with no rendering: skip Aurora
     // init so it runs headless (no window), agent-drivable and side-effect-free.

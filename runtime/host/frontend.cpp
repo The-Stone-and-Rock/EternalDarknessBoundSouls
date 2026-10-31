@@ -296,6 +296,8 @@ std::vector<Disc> g_discs;
 int g_disc = 0;
 bool g_disc_on_main = true;  // first run, or the chosen disc is missing
 int g_load_slot = 0;         // launcher: boot into this save slot (0: none)
+// The anti-aliasing and texture filtering the renderer started with (main.c).
+int g_running_anti_aliasing = 0, g_running_anisotropy = 4;
 bool g_in_game = false;      // the game is running (menus open over it)
 std::string g_running_disc;  // the disc this run plays (the launcher's choice)
 int g_argc = 0;
@@ -468,7 +470,6 @@ int g_controls_return_row = 0;
 
 Row mods_row(Screen from) {
     Row mods{"Mods"};
-    mods.note = "Split-screen co-op and other changes to the game.";
     mods.activate = [from] {
         if (from != Screen::Options)
             g_options_return = from;
@@ -746,9 +747,6 @@ void build_characters() {
         struct stat st;
         if (stat((res_dir() + "/ui/" + portrait_file(i)).c_str(), &st) == 0)
             r.value_rml = "<img src=\"" + portrait_file(i) + "\"/>";
-        r.note = g_characters_player == 1
-                     ? std::string("Player 2 as ") + kCharacters[i] + " (chosen now, played in a later update)."
-                     : std::string("Play every chapter as ") + kCharacters[i] + ", in their own body.";
         r.activate = [i, leave] {
             chosen_character() = i;
             leave();
@@ -758,23 +756,17 @@ void build_characters() {
     static const char* const kStatsChoice[] = {"Vanilla", "Chosen character's"};
     Row stats{"Stats", "\u2039 " + std::string(kStatsChoice[chosen_stats()]) + " \u203a"};
     stats.gap = true;
-    stats.note = std::string(chosen_stats() == 0
-                                 ? "The chapter's own character's health, magick and sanity."
-                                 : "The chosen character's own health, magick and sanity (Roberto's lower stamina, ...).") +
-                 " In development: no effect yet.";
+    stats.note = "In development: no effect yet.";
     stats.change = [](int) { chosen_stats() = 1 - chosen_stats(); };
     g_rows.push_back(stats);
     Row own{kCharacters[0]};
     own.chosen = chosen_character() == 0;
-    own.note = g_characters_player == 1 ? "Player 2 as the chapter's own character, as now."
-                                        : "Each chapter's own character, as the game tells it.";
     own.activate = [leave] {
         chosen_character() = 0;
         leave();
     };
     g_rows.push_back(own);
     Row back{"Back"};
-    back.note = "Keep the character chosen before.";
     back.activate = leave;
     g_rows.push_back(back);
 }
@@ -807,31 +799,24 @@ void move_in_roster(int dx, int dy) {
 }
 
 void build_mods_rows() {
-    // Every mod is still being made: each note says so, until it works.
-    auto note = [](const std::string& text) { return text + " In development: no effect yet."; };
     Row coop{"Split-screen co-op", on_off(g_settings.mod_coop)};
     coop.section = "I · Co-op";
-    coop.note = "A second player in the same world, each with their own view and controls. (Their own health, "
-                "magick and sanity are still to come.)";
     coop.change = [](int) { g_settings.mod_coop = !g_settings.mod_coop; };
     g_rows.push_back(coop);
 
     static const char* const kSplit[] = {"Side by side", "Above and below"};
     Row split{"Screen split", kSplit[g_settings.mod_split]};
     split.enabled = g_settings.mod_coop;
-    split.note = "How the screen divides between the two players.";
     split.change = [](int dir) { cycle(g_settings.mod_split, 2, dir); };
     g_rows.push_back(split);
 
     static const char* const kInput[] = {"Controller", "Keyboard"};
     Row input{"Player 2 plays with", kInput[g_settings.mod_p2_input]};
     input.enabled = g_settings.mod_coop;
-    input.note = "A controller or the keyboard (more in Player 2 controls, below).";
     input.change = [](int dir) { cycle(g_settings.mod_p2_input, 2, dir); };
     g_rows.push_back(input);
 
     Row p2_controls{"Player 2 controls"};
-    p2_controls.note = "Player 2's controller or keys, their button layout and their button mapping.";
     p2_controls.activate = [] {
         controls::set_menu_player(1);
         g_controls_return = Screen::ModsPage;
@@ -843,7 +828,6 @@ void build_mods_rows() {
 
     // Each player's camera: player 1's is Options' Camera, player 2's their own.
     Row p1_camera{"Player 1 camera", camera_mode_name(g_settings.camera)};
-    p1_camera.note = "The game's own fixed cameras, behind them, or through their eyes (as Options, Camera).";
     p1_camera.change = [](int dir) {
         static const int kModes[] = {CAMERA_ORIGINAL, CAMERA_THIRD_PERSON, CAMERA_FIRST_PERSON};
         int at = 0;
@@ -858,31 +842,19 @@ void build_mods_rows() {
     static const char* const kP2Camera[] = {"Third person", "First person"};
     Row p2_camera{"Player 2 camera", kP2Camera[g_settings.mod_p2_camera]};
     p2_camera.enabled = g_settings.mod_coop;
-    p2_camera.note = g_settings.mod_p2_camera == 0
-                         ? "Behind player 2: their right stick turns it, and their left stick walks them "
-                           "away from it."
-                         : "Through player 2's eyes: their right stick looks around, and their left stick "
-                           "walks where they look.";
     p2_camera.change = [](int dir) { cycle(g_settings.mod_p2_camera, 2, dir); };
     g_rows.push_back(p2_camera);
 
     static const char* const kEnemies[] = {"Vanilla", "Enhanced"};
-    static const char* const kEnemyNotes[] = {
-        "Creatures as the game made them.",
-        "Creatures hit twice as hard, and more of them, of the kinds each area holds, roam it."};
     Row enemies{"Creatures", kEnemies[g_settings.mod_enemies]};
     enemies.section = "II · Challenge";
-    enemies.note = note(kEnemyNotes[g_settings.mod_enemies]);
+    enemies.note = "In development: no effect yet.";
     enemies.change = [](int dir) { cycle(g_settings.mod_enemies, 2, dir); };
     g_rows.push_back(enemies);
 
     static const char* const kInsanity[] = {"Normal", "More often", "Off"};
-    static const char* const kInsanityNotes[] = {
-        "The game's own sanity effects, as often as it chooses them.",
-        "Sanity effects come more often as sanity falls.",
-        "No sanity effects: the meter still drains and hurts at zero."};
     Row insanity{"Sanity effects", kInsanity[g_settings.mod_insanity]};
-    insanity.note = note(kInsanityNotes[g_settings.mod_insanity]);
+    insanity.note = "In development: no effect yet.";
     insanity.change = [](int dir) { cycle(g_settings.mod_insanity, 3, dir); };
     g_rows.push_back(insanity);
 
@@ -895,12 +867,8 @@ void build_mods_rows() {
         if ((player == 1 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats) == 1)
             r.value += " (own stats)";
         r.page = 1;
-        if (player == 1)
-            r.note = "Player 2's character in co-op. In development: no effect yet (player 2 plays as player 1's).";
-        else
-            r.note = chosen == 0 ? "Each chapter's own character, as the game tells it."
-                                 : "Every chapter played as " + std::string(kCharacters[chosen]) +
-                                       ", from the next chapter or save you load (with the chapter's weapons).";
+        if (chosen != 0)
+            r.note = "From the next chapter or save you load.";
         r.activate = [player] {
             g_characters_player = player;
             g_characters_return_row = g_selected;
@@ -927,9 +895,8 @@ void build_mods_rows() {
 
 // Mods: its sections, each a page of its own, then Back.
 void build_mods() {
-    auto page = [](const char* label, int section, const char* note) {
+    auto page = [](const char* label, int section) {
         Row r{label};
-        r.note = note;
         r.activate = [section] {
             g_mods_section = section;
             g_mods_row = g_selected;
@@ -938,14 +905,14 @@ void build_mods() {
         };
         return r;
     };
-    g_rows.push_back(page("Co-op", 1, "Split-screen for two: the split, player 2's controls and each player's camera."));
-    g_rows.push_back(page("Challenge", 2, "Creatures and sanity effects."));
-    g_rows.push_back(page("Characters", 3, "Each player's character, with their stats."));
+    g_rows.push_back(page("Co-op", 1));
+    g_rows.push_back(page("Challenge", 2));
+    g_rows.push_back(page("Characters", 3));
     // Only on the launcher: it is how Start game starts.
     if (!g_in_game) {
         Row skip{"Skip intro", on_off(g_settings.mod_skip_intro)};
         skip.gap = true;
-        skip.note = "Start game goes past the opening movie straight to the game's main menu.";
+        skip.note = "Main menu skips the opening movies.";
         skip.change = [](int) { g_settings.mod_skip_intro = !g_settings.mod_skip_intro; };
         g_rows.push_back(skip);
     }
@@ -956,8 +923,8 @@ void build_mods() {
     Row video{"Title video", have_video ? on_off(g_settings.mod_title_video) : "none"};
     video.gap = g_in_game;
     video.enabled = have_video;
-    video.note = have_video ? "The game's main menu over a moving picture of your own, its music unchanged."
-                            : "No video yet: tools/title_video.py makes res/video/title.mpg from yours.";
+    if (!have_video)
+        video.note = "No video yet: tools/title_video.py makes one.";
     video.change = [](int) { g_settings.mod_title_video = !g_settings.mod_title_video; };
     g_rows.push_back(video);
     Row back{"Back"};
@@ -1088,7 +1055,6 @@ void build_states() {
     for (int slot = 1; slot <= kSlotCount; slot++) {
         const bool used = slot_used(slot);
         Row r{"Slot " + std::to_string(slot), used ? slot_time(slot) : "empty"};
-        r.note = used ? "Save here, load, duplicate or delete this save." : "Save here.";
         r.activate = [slot, used] {
             if (!used) {
                 save_slot(slot);
@@ -1116,7 +1082,6 @@ void build_play() {
         if (!slot_used(slot))
             continue;
         Row r{"Slot " + std::to_string(slot), slot_time(slot)};
-        r.note = "Load, duplicate or delete this save.";
         r.activate = [slot] {
             g_slot_chosen = slot;
             g_slot_from_states = false;
@@ -1157,14 +1122,13 @@ void build_slot() {
     const int slot = g_slot_chosen;
     if (g_slot_from_states) {
         Row save{"Save here"};
-        save.note = "Replaces this save with where you are now.";
+        save.note = "Replaces this save.";
         save.activate = [slot] { save_slot(slot); };
         g_rows.push_back(save);
     }
 
     Row load{"Load"};
     load.enabled = disc_playable();
-    load.note = "Play from this save.";
     load.activate = [slot] { start_game(slot); };
     g_rows.push_back(load);
 
@@ -1182,7 +1146,7 @@ void build_slot() {
     g_rows.push_back(dup);
 
     Row del{"Delete"};
-    del.note = "Delete this save (you are asked first).";
+    del.note = "You are asked first.";
     del.activate = [] {
         g_screen = Screen::SlotDelete;
         g_selected = 0;
@@ -1230,8 +1194,7 @@ Row layout_row() {
     if (!controls::player_has_controller(controls::menu_player())) {
         const bool custom = controls::layout() == controls::kCustom;
         Row keys{"Keys", custom ? "\u2039 Custom \u203a" : "\u2039 Default \u203a"};
-        keys.note = custom ? "Your own keys (Button mapping)."
-                           : "WASD moves, TFGH turns the camera, J attacks, K acts. See Button mapping.";
+        keys.note = custom ? "Your own keys (Button mapping)." : "WASD moves, TFGH turns the camera, J attacks, K acts.";
         keys.change = [custom](int) {
             controls::set_layout(custom ? controls::kOriginal : controls::kCustom);
         };
@@ -1240,8 +1203,8 @@ Row layout_row() {
     Row layout{"Layout", "\u2039 " + std::string(controls::layout_name(controls::layout())) + " \u203a"};
     static const char* const kLayoutNotes[] = {
         "The GameCube's button positions.",
-        "Attack RT/A, action B, aim LT, sprint L3, creep R3. The Tome: A B X Y, LB/RB page.",
-        "Your own buttons (Button mapping). The Tome: A B X Y, LB/RB page."};
+        "Attack RT/A, action B, aim LT, sprint L3, creep R3.",
+        "Your own buttons (Button mapping)."};
     layout.note = kLayoutNotes[controls::layout()];
     layout.change = [](int dir) {
         int l = controls::layout();
@@ -1257,12 +1220,7 @@ Row device_row() {
     const int player = controls::menu_player();
     if (player == 0) {
         static const char* const kDevice[] = {"Controller and keyboard", "Controller", "Keyboard"};
-        static const char* const kNotes[] = {
-            "Either works. In co-op, a keyboard player 2 takes the keyboard.",
-            "A controller only: the keyboard is free for player 2.",
-            "The keyboard only: every controller is free for player 2."};
         Row r{"Plays with", kDevice[g_settings.controls_device]};
-        r.note = kNotes[g_settings.controls_device];
         r.change = [](int dir) {
             cycle(g_settings.controls_device, 3, dir);
             settings_save();
@@ -1271,11 +1229,8 @@ Row device_row() {
     }
     static const char* const kInput[] = {"Controller", "Keyboard"};
     Row r{"Plays with", kInput[g_settings.mod_p2_input]};
-    r.note = g_settings.mod_p2_input == 0
-                 ? "A controller of their own (chosen below)."
-                 : g_settings.controls_device == 2
-                       ? "The keyboard, as player 1: give them different keys (Button mapping)."
-                       : "The keyboard; in co-op player 1 then plays on their controller.";
+    if (g_settings.mod_p2_input == 1 && g_settings.controls_device == 2)
+        r.note = "Player 1 uses the keyboard too: give them different keys (Button mapping).";
     r.change = [](int dir) {
         cycle(g_settings.mod_p2_input, 2, dir);
         settings_save();
@@ -1298,9 +1253,8 @@ Row controller_row() {
                 (slot <= static_cast<int>(pads.size()) ? pads[slot - 1] : std::string("not connected"));
     }
     Row r{"Controller", "‹ " + value + " ›"};
-    r.note = pads.empty() ? "No controller is connected: this player's choice waits for one."
-                          : std::to_string(pads.size()) + " connected. Automatic: player 1 the first, "
-                                                          "player 2 the next one free.";
+    if (pads.empty())
+        r.note = "No controller is connected.";
     // Automatic, then a place for each connected controller (at least the
     // two players' own, so either can be chosen before it is plugged in).
     const int places = std::max(static_cast<int>(pads.size()), 2) + 1;
@@ -1321,13 +1275,6 @@ Row pad_type_row() {
         value += found.empty() ? "" : " (" + found + ")";
     }
     Row r{"Controller type", "‹ " + value + " ›"};
-    static const char* const kNotes[] = {
-        "Found from the controller when it is connected.",
-        "Xbox buttons and icons: A B X Y, LB RB, LT RT, Menu.",
-        "Any XInput controller: Xbox positions, plain names (Start).",
-        "PlayStation buttons and icons: Cross, Circle, Square, Triangle.",
-        "Switch buttons and icons: B A Y X, L R, ZL ZR, +."};
-    r.note = kNotes[type];
     r.change = [&type](int dir) {
         cycle(type, controls::kPadTypeCount, dir);
         settings_save();
@@ -1384,11 +1331,11 @@ void change(int which, int dir) {
 }
 
 const char* const kNotes[kCount] = {
-    "Lamps, flames, magick and glowing runes give off a soft haze of light.",
-    "Corners, creases and the ground round feet darken where light can't reach, worked out from depth each frame.",
-    "On an HDR display, glowing light shines brighter than white.",
-    "The rooms' light and shadow: Sharp upscales it as each room loads, Original keeps the disc's soft, blocky maps.",
-    "The texture pack in your textures folder.",
+    "A soft haze round lamps, flames and magick.",
+    "Darker corners and creases.",
+    "Light brighter than white on an HDR display.",
+    "Sharp: the rooms' light maps upscaled. Original: as on the disc.",
+    "",
 };
 
 }  // namespace enhancement
@@ -1445,11 +1392,6 @@ void build_options_rows() {
     // Fullscreen row, and the section starts here.
     scale.section = "I \u00b7 Display";
 #endif
-#ifdef __PROSPERO__
-    scale.note = "Screen draws at your TV's own resolution; the others draw at that size and scale to fit.";
-#else
-    scale.note = "Window draws at your screen's own resolution; the others draw at that size and scale to fit.";
-#endif
     scale.change = [](int dir) { cycle(g_settings.render_scale, 5, dir); changed(); };
     g_rows.push_back(scale);
 
@@ -1471,10 +1413,7 @@ void build_options_rows() {
     }
     Row rate{"Frame rate", std::to_string(shown)};
     rate.enabled = faster;
-    if (faster) {
-        rate.note = "Above 60, frames are drawn between the game's own, blended from the last two: "
-                    "smoother motion, at most one game frame more delay.";
-    } else {
+    if (!faster) {
 #ifdef __PROSPERO__
         rate.note = "Your TV is running at 60 Hz. 120 needs a TV that takes 120 Hz, with Enable 120 Hz "
                     "Output on in the PS5's Screen and Video settings.";
@@ -1498,8 +1437,7 @@ void build_options_rows() {
     g_rows.push_back(rate);
 
     Row aspect{"Aspect ratio", kAspect[g_settings.aspect]};
-    aspect.note = "16:9 is the game's own widescreen view: more at the sides, not stretched. 21:9 widens it "
-                  "for an ultrawide screen. The HUD keeps to the screen's edges.";
+    aspect.note = "Wider shows more at the sides, not stretched.";
     aspect.change = [](int dir) {
         static const int kChoices[] = {1, 2, 4};  // 4:3, 16:9, 21:9
         int at = 1;
@@ -1526,9 +1464,8 @@ void build_options_rows() {
             Row calibrate{"Calibrate HDR"};
             calibrate.enabled = g_settings.hdr;
             calibrate.value = std::to_string(g_settings.hdr_peak) + " nits peak";
-            calibrate.note = g_settings.hdr ? "Three steps for your display: the brightest it shows, how bright "
-                                              "the picture is, and where black begins."
-                                            : "Turn HDR on to calibrate it.";
+            if (!g_settings.hdr)
+                calibrate.note = "Turn HDR on to calibrate it.";
             calibrate.activate = [] { run_hdr_calibration(0); };
             g_rows.push_back(calibrate);
         }
@@ -1536,14 +1473,12 @@ void build_options_rows() {
 
     Row music{"Music", std::to_string(g_settings.music_volume) + "%"};
     music.section = "II \u00b7 Sound";
-    music.note = "Music streamed from the disc.";
     music.change = [](int dir) {
         g_settings.music_volume = std::clamp(g_settings.music_volume + dir * 10, 0, 100);
     };
     g_rows.push_back(music);
 
     Row effects{"Effects & voices", std::to_string(g_settings.effects_volume) + "%"};
-    effects.note = "The game's own mix: effects, voices and some music.";
     effects.change = [](int dir) {
         g_settings.effects_volume = std::clamp(g_settings.effects_volume + dir * 10, 0, 100);
     };
@@ -1560,14 +1495,35 @@ void build_options_rows() {
             r.page = 1;
             r.enabled = available(which);
             r.note = kNotes[which];
-            if (which == kHdTextures)
-                r.note = available(which) ? "The texture pack in your textures folder (" +
-                                                std::to_string(texpack_count()) + " images)."
-                                          : "Put a Dolphin-format texture pack (tex1_*.png) in the textures folder.";
+            if (which == kHdTextures && !available(which))
+                r.note = "No pack in the textures folder.";
             r.change = [which](int dir) { change(which, dir); };
             g_rows.push_back(r);
         }
     }
+
+    // Anti-aliasing and texture filtering: the renderer's from its start
+    // (main.c), so a change waits for the next one.
+    Row aa{"Anti-aliasing", g_settings.anti_aliasing ? "4x MSAA" : "Off"};
+    aa.page = 1;
+    if (g_settings.anti_aliasing != g_running_anti_aliasing)
+        aa.note = "From the next start.";
+    aa.change = [](int) {
+        g_settings.anti_aliasing = !g_settings.anti_aliasing;
+        settings_save();
+    };
+    g_rows.push_back(aa);
+
+    static const char* const kAnisotropy[] = {"1x", "2x", "4x", "8x", "16x"};
+    Row af{"Texture filtering", kAnisotropy[g_settings.anisotropy]};
+    af.page = 1;
+    if (g_settings.anisotropy != g_running_anisotropy)
+        af.note = "From the next start.";
+    af.change = [](int dir) {
+        cycle(g_settings.anisotropy, 5, dir);
+        settings_save();
+    };
+    g_rows.push_back(af);
 
     // Controls: the layout here, everything else (vibration, hold or toggle,
     // deadzone, mapping) a page of its own.
@@ -1575,8 +1531,6 @@ void build_options_rows() {
     controls_row.label = "Controls";
     controls_row.section = "IV \u00b7 Controls";
     controls_row.page = 1;
-    controls_row.note = "Left and right: the button layout. A: vibration, hold or toggle, "
-                        "stick deadzone and button mapping.";
     controls_row.activate = [] {
         controls::set_menu_player(0);
         g_screen = Screen::Controls;
@@ -1584,13 +1538,7 @@ void build_options_rows() {
     };
     g_rows.push_back(controls_row);
 
-    static const char* const kCameraNotes[] = {
-        "The game's own fixed cameras.",
-        "The game's own fixed cameras.",
-        "Behind Alex: the right stick turns it, up and down bring it closer or further. "
-        "It holds still while you aim.",
-        "Through Alex's eyes: the right stick looks around, and up on the left stick walks where you look. "
-        "It holds still while you aim."};
+    static const char* const kCameraNotes[] = {"", "", "The right stick turns it.", "The right stick looks around."};
     Row camera{"Camera", camera_mode_name(g_settings.camera)};
     camera.section = "V \u00b7 Game";
     camera.page = 1;
@@ -1609,14 +1557,12 @@ void build_options_rows() {
     static const char* const kGameFont[] = {"Sharp", "Tome", "Original"};
     Row font{"Game text", kGameFont[g_settings.game_font]};
     font.page = 1;
-    font.note = "The game's own lettering: Sharp redraws it crisply, Tome in old "
-                "typefaces, Original as on the disc.";
+    font.note = "Sharp: redrawn crisply. Tome: old typefaces. Original: as on the disc.";
     font.change = [](int dir) { cycle(g_settings.game_font, 3, dir); };
     g_rows.push_back(font);
 
     Row fps{"FPS counter", on_off(g_settings.fps_counter)};
     fps.page = 1;
-    fps.note = "Frames per second in the corner of the screen.";
     fps.change = [](int) { g_settings.fps_counter = !g_settings.fps_counter; };
     g_rows.push_back(fps);
 
@@ -1690,9 +1636,8 @@ const char* options_page_name() {
 }
 
 void build_options() {
-    auto page = [](const char* label, int section, const char* note) {
+    auto page = [](const char* label, int section) {
         Row r{label};
-        r.note = note;
         r.activate = [section] {
             g_options_section = section;
             g_options_row = g_selected;
@@ -1701,12 +1646,10 @@ void build_options() {
         };
         return r;
     };
-    g_rows.push_back(page("Display", 1, "Fullscreen, resolution, frame rate, aspect ratio and HDR."));
-    g_rows.push_back(page("Sound", 2, "Music, and effects and voices."));
-    g_rows.push_back(page("Graphics", 3, "HD textures, shadows, ambient occlusion and glow."));
+    g_rows.push_back(page("Display", 1));
+    g_rows.push_back(page("Sound", 2));
+    g_rows.push_back(page("Graphics", 3));
     Row controls{"Controls"};
-    controls.note = "Player 1's controller or keys, the button layout, vibration, hold or toggle, "
-                    "stick deadzone and button mapping. (Player 2's: Mods.)";
     controls.activate = [] {
         g_options_row = g_selected;
         controls::set_menu_player(0);
@@ -1716,7 +1659,7 @@ void build_options() {
         g_selected = 0;
     };
     g_rows.push_back(controls);
-    g_rows.push_back(page("Game", 5, "The camera, the game's text and the FPS counter."));
+    g_rows.push_back(page("Game", 5));
     Row mods = mods_row(Screen::Options);
     mods.activate = [inner = mods.activate] {
         g_options_row = g_selected;
@@ -1778,7 +1721,7 @@ void build_controls() {
 
     Row deadzone{"Stick deadzone",
                  std::to_string(g_settings.stick_deadzone[controls::layout()]) + "%"};
-    deadzone.note = "Raise it if a worn stick drifts; lower is more sensitive.";
+    deadzone.note = "Raise it if a stick drifts.";
     deadzone.change = [](int dir) {
         int& dz = g_settings.stick_deadzone[controls::layout()];
         dz = std::clamp(dz + dir * 5, 5, 25);
@@ -1793,7 +1736,6 @@ void build_controls() {
 void build_controls_mapping_and_back() {
     Row mapping{"Button mapping"};
     mapping.gap = true;  // its own group, so it does not trail the settings
-    mapping.note = "See and change which button or key does what.";
     mapping.activate = [] {
         g_screen = Screen::Mapping;
         g_selected = 0;
@@ -1883,7 +1825,6 @@ void build_in_game() {
 
     Row states{"Save states"};
     states.gap = true;
-    states.note = "Save everything exactly where you are, or load, duplicate or delete a save (ten slots).";
     states.activate = [] {
         g_screen = Screen::States;
         g_selected = 0;
@@ -2067,9 +2008,6 @@ void render() {
     g_doc->SetClass("launcher", g_screen == Screen::Launcher);
     // The pause menu: the launcher's parchment over the dimmed game.
     g_doc->SetClass("pause", g_screen == Screen::InGame);
-    // The save state pages: the chosen row in the launcher's glowing frame.
-    g_doc->SetClass("slots", g_screen == Screen::Play || g_screen == Screen::States || g_screen == Screen::Slot ||
-                                 g_screen == Screen::SlotDelete);
     // The mapping list and the ten save states are long: tighten the rows.
     g_doc->SetClass("compact", g_screen == Screen::Mapping || g_screen == Screen::States);
     // Character select: one wide page, every frame at once.
@@ -2469,6 +2407,8 @@ extern "C" void frontend_imgui_init(void) {
 extern "C" void frontend_init(int argc, char** argv) {
     g_argc = argc;
     g_argv = argv;
+    g_running_anti_aliasing = g_settings.anti_aliasing;
+    g_running_anisotropy = g_settings.anisotropy;
     // Load the menus now so their key listener hears Esc even when the
     // launcher is skipped (quick-load and test runs).
     ensure_ui();
