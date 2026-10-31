@@ -8041,6 +8041,30 @@ static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make) {
 // them there each step for player 1's alone: player 2's copy stayed where it
 // was made, floating. After player 2's turn, theirs go with them, into their
 // room.
+// A thing's record (node +44) names what kind of thing it is at +4 (the
+// sword's: its moves for each stance, part = that +4's +54 + 2 * stance); a
+// copy's was left empty, and its holder's guard, asked of it, was none: player
+// 2 stood at ease among enemies. The copy is given its original's.
+#define COOP_THING_RECORD 44u
+#define COOP_THING_KIND 4u
+
+static void coop_copy_kind(CPUState* cpu, int i) {
+    const u32 record = mem_read32(cpu, g_coop_copies[i].node + COOP_THING_RECORD);
+    if (!guest_ram_range_valid(cpu, record, COOP_THING_KIND + 4u) || mem_read32(cpu, record + COOP_THING_KIND) != 0u)
+        return;
+    for (u32 node = 0u, n = 0u; n < 1024u && (node = coop_next(cpu, node)) != 0u; n++) {
+        if (node == g_coop_copies[i].node || mem_read32(cpu, node + 16u) != g_coop_copies[i].id)
+            continue;
+        const u32 theirs = mem_read32(cpu, node + COOP_THING_RECORD);
+        if (guest_ram_range_valid(cpu, theirs, COOP_THING_KIND + 4u) && mem_read32(cpu, theirs + COOP_THING_KIND) != 0u) {
+            mem_write32(cpu, record + COOP_THING_KIND, mem_read32(cpu, theirs + COOP_THING_KIND));
+            fprintf(stderr, "[coop] player 2's copy of %u: its kind from the original (0x%08X)\n", g_coop_copies[i].id,
+                    mem_read32(cpu, theirs + COOP_THING_KIND));
+        }
+        return;
+    }
+}
+
 static void coop_copies_follow(CPUState* cpu) {
     const u32 p2 = mem_read32(cpu, g_coop_p2 + 52u);
     if (!guest_ram_range_valid(cpu, p2, COOP_OBJECT_ROOM + 4u))
@@ -8050,6 +8074,7 @@ static void coop_copies_follow(CPUState* cpu) {
         const u32 held = node != 0u ? mem_read32(cpu, node + 52u) : 0u;
         if (!guest_ram_range_valid(cpu, held, COOP_OBJECT_ROOM + 4u) || mem_read32(cpu, held + 372u) != p2)
             continue;
+        coop_copy_kind(cpu, i);
         for (u32 at = 0u; at < 60u; at += 4u)
             if (at < 12u || at >= 44u)
                 mem_write32(cpu, held + at, mem_read32(cpu, p2 + at));
