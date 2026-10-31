@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h>
 
 #include "host/compat.h"
 #ifdef ED_AURORA
@@ -52,10 +53,15 @@ static bool g_boot_saved;
 // SDL scancodes are the USB HID keyboard usages.
 #define QS_KEY_LOAD 30  // '1'
 #define QS_KEY_SAVE 31  // '2'
-// Input recording (controls.c): F8 starts it (a save of the moment first, to
+// Input recording (controls.c): F12 starts it (a save of the moment first, to
 // replay from) and stops it, as do the files saves/record-now and
 // saves/record-stop.
-#define QS_KEY_RECORD 65  // F8
+#define QS_KEY_RECORD 69  // F12
+// The save state slots (the menus' Save states, saves/slotN.state): F1-F10
+// save to slot 1-10; F11 loads the newest (as the launcher's Continue).
+#define QS_KEY_F1 58
+#define QS_KEY_LOAD_NEWEST 68  // F11
+#define QS_SLOTS 10
 #define QS_RECORD_STATE "build/runs/record.state"
 #define QS_RECORD_PAD "build/runs/record.pad"
 // Blocks to wait for the GX FIFO to reach a command boundary before going
@@ -108,6 +114,7 @@ static const QsBlob k_blobs[] = {
 #ifdef ED_AURORA
     {"AURA", dol_aurora_state_size, dol_aurora_state_save, dol_aurora_state_load,
      false},
+    {"COOP", hle_coop_state_size, hle_coop_state_save, hle_coop_state_load, false},
 #endif
 };
 #define QS_BLOB_COUNT (sizeof k_blobs / sizeof k_blobs[0])
@@ -291,6 +298,32 @@ void quickstate_poll(unsigned long long blocks) {
     if (record_key && !record_key_down)
         toggle_recording();
     record_key_down = record_key;
+    static bool slot_key_down[QS_SLOTS + 1];
+    for (int i = 0; i <= QS_SLOTS; i++) {
+        const bool down = dol_aurora_key_down(i < QS_SLOTS ? QS_KEY_F1 + i : QS_KEY_LOAD_NEWEST);
+        if (down && !slot_key_down[i]) {
+            char path[64];
+            if (i < QS_SLOTS) {
+                snprintf(path, sizeof path, "saves/slot%d.state", i + 1);
+                quickstate_request_save(path);
+            } else {
+                int newest = 0;
+                time_t newest_time = 0;
+                for (int s = 1; s <= QS_SLOTS; s++) {
+                    struct stat st;
+                    snprintf(path, sizeof path, "saves/slot%d.state", s);
+                    if (stat(path, &st) == 0 && st.st_mtime >= newest_time)
+                        newest = s, newest_time = st.st_mtime;
+                }
+                snprintf(path, sizeof path, "saves/slot%d.state", newest);
+                if (newest != 0)
+                    request(QS_LOAD, path);
+                else
+                    fprintf(stderr, "[quick] no save state to load\n");
+            }
+        }
+        slot_key_down[i] = down;
+    }
 #endif
     if (g_save_signal) {
         g_save_signal = 0;
@@ -770,6 +803,10 @@ bool quickstate_service(CPUState* cpu) {
         g_quickstate_pending = 0;
         return false;
     }
+#ifdef ED_AURORA
+    if (g_queue[0].kind == QS_SAVE && hle_save_held())
+        return false;  // player 2's Tome open: saved once it closes
+#endif
     if (!at_safe_point()) {
         if (++g_idle_wait < QS_IDLE_PATIENCE)
             return false;

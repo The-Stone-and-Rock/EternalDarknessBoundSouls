@@ -263,8 +263,8 @@ std::string region_name(const std::string& id) {
 
 // --- Menu model -------------------------------------------------------------
 
-enum class Screen { Launcher, Play, Options, OptionsPage, Controls, Mapping, InGame, Problem, Mods, ModsPage,
-                    Characters };
+enum class Screen { Launcher, Play, States, Slot, SlotDelete, Options, OptionsPage, Controls, Mapping, InGame, Problem,
+                    Mods, ModsPage, Characters };
 
 struct Row {
     std::string label;
@@ -294,7 +294,6 @@ bool g_close = false;      // leave the current menu loop
 bool g_play = false;       // launcher result
 std::vector<Disc> g_discs;
 int g_disc = 0;
-int g_slot = 1;
 bool g_disc_on_main = true;  // first run, or the chosen disc is missing
 int g_load_slot = 0;         // launcher: boot into this save slot (0: none)
 bool g_in_game = false;      // the game is running (menus open over it)
@@ -315,6 +314,9 @@ std::string escape(const std::string& text) {
 }
 
 std::string on_off(bool v) { return v ? "On" : "Off"; }
+
+// Save state slots: saves/slot1.state to saves/slot10.state.
+constexpr int kSlotCount = 10;
 
 std::string slot_path(int slot) {
     return "saves/slot" + std::to_string(slot) + ".state";
@@ -388,7 +390,7 @@ std::string slot_time(int slot) {
 int newest_slot() {
     int best = 0;
     time_t best_time = 0;
-    for (int slot = 1; slot <= 4; slot++) {
+    for (int slot = 1; slot <= kSlotCount; slot++) {
         struct stat st;
         if (stat(slot_path(slot).c_str(), &st) == 0 && st.st_mtime >= best_time) {
             best = slot;
@@ -997,14 +999,14 @@ void build_launcher() {
 
     const int newest = newest_slot();
     if (newest != 0) {
-        Row cont{"Continue", "Slot " + std::to_string(newest) + " \u00b7 " + slot_time(newest)};
+        Row cont{"Continue"};
         cont.enabled = disc_playable();
         cont.note = "Back where you saved last.";
         cont.activate = [newest] { start_game(newest); };
         g_rows.push_back(cont);
     }
 
-    Row fresh{"Start game"};
+    Row fresh{"Main menu"};
     fresh.big = true;
     fresh.enabled = disc_playable();
     fresh.note = "Start from the title screen (your memory card saves are there).";
@@ -1014,7 +1016,7 @@ void build_launcher() {
     if (newest != 0) {
         Row load{"Load game"};
         load.enabled = disc_playable();
-        load.note = "Choose one of your save slots.";
+        load.note = "Your save slots: load, duplicate or delete one.";
         load.activate = [] {
             g_screen = Screen::Play;
             g_selected = 0;
@@ -1046,14 +1048,70 @@ void build_launcher() {
     g_rows.push_back(quit);
 }
 
-// Load game: the used save slots.
+// Load game: the used save slots; one chosen opens what can be done with it
+// (build_slot). Continue loads the newest. In the game, Save states lists all
+// ten (build_states), and a slot's page can save there too.
+int g_slot_chosen = 0;
+bool g_slot_from_states = false;  // the slot page was opened from Save states
+
+int play_row(int slot);
+
+// The page a slot's page goes back to, at that slot's row.
+void slots_page(int slot) {
+    g_screen = g_slot_from_states ? Screen::States : Screen::Play;
+    g_selected = g_slot_from_states ? slot - 1 : play_row(slot);
+}
+
+// The slot page's row for Delete (after Save here, in the game).
+int delete_row() {
+    return g_slot_from_states ? 3 : 2;
+}
+
+void save_slot(int slot) {
+    quickstate_request_save(slot_path(slot).c_str());
+    std::fprintf(stderr, "[frontend] saved to slot %d\n", slot);
+    g_close = true;
+}
+
+void build_states() {
+    for (int slot = 1; slot <= kSlotCount; slot++) {
+        const bool used = slot_used(slot);
+        Row r{"Slot " + std::to_string(slot), used ? slot_time(slot) : "empty"};
+        r.note = used ? "Save here, load, duplicate or delete this save." : "Save here.";
+        r.activate = [slot, used] {
+            if (!used) {
+                save_slot(slot);
+                return;
+            }
+            g_slot_chosen = slot;
+            g_slot_from_states = true;
+            g_screen = Screen::Slot;
+            g_selected = 0;
+        };
+        g_rows.push_back(r);
+    }
+
+    Row back{"Back"};
+    back.gap = true;
+    back.activate = [] {
+        g_screen = Screen::InGame;
+        g_selected = 1;
+    };
+    g_rows.push_back(back);
+}
+
 void build_play() {
-    for (int slot = 1; slot <= 4; slot++) {
+    for (int slot = 1; slot <= kSlotCount; slot++) {
         if (!slot_used(slot))
             continue;
         Row r{"Slot " + std::to_string(slot), slot_time(slot)};
-        r.note = "Load this save.";
-        r.activate = [slot] { start_game(slot); };
+        r.note = "Load, duplicate or delete this save.";
+        r.activate = [slot] {
+            g_slot_chosen = slot;
+            g_slot_from_states = false;
+            g_screen = Screen::Slot;
+            g_selected = 0;
+        };
         g_rows.push_back(r);
     }
 
@@ -1064,6 +1122,96 @@ void build_play() {
         g_selected = 0;
     };
     g_rows.push_back(back);
+}
+
+// The first unused slot, 0 when all are used.
+int free_slot() {
+    for (int slot = 1; slot <= kSlotCount; slot++)
+        if (!slot_used(slot))
+            return slot;
+    return 0;
+}
+
+// The Load game page's row for a slot, to come back to.
+int play_row(int slot) {
+    int row = 0;
+    for (int s = 1; s < slot; s++)
+        row += slot_used(s);
+    return row;
+}
+
+// One save slot: (in the game) save over it, load it, copy it into a free
+// slot, or delete it.
+void build_slot() {
+    const int slot = g_slot_chosen;
+    if (g_slot_from_states) {
+        Row save{"Save here"};
+        save.note = "Replaces this save with where you are now.";
+        save.activate = [slot] { save_slot(slot); };
+        g_rows.push_back(save);
+    }
+
+    Row load{"Load"};
+    load.enabled = disc_playable();
+    load.note = "Play from this save.";
+    load.activate = [slot] { start_game(slot); };
+    g_rows.push_back(load);
+
+    const int to = free_slot();
+    Row dup{"Duplicate", to != 0 ? "to slot " + std::to_string(to) : "no free slot"};
+    dup.enabled = to != 0;
+    dup.note = to != 0 ? "Copy this save into slot " + std::to_string(to) + "." : "All slots are used.";
+    dup.activate = [slot, to] {
+        std::error_code ec;
+        std::filesystem::copy_file(slot_path(slot), slot_path(to), std::filesystem::copy_options::overwrite_existing,
+                                   ec);
+        std::fprintf(stderr, "[frontend] slot %d duplicated to slot %d%s\n", slot, to, ec ? " (failed)" : "");
+        slots_page(to);
+    };
+    g_rows.push_back(dup);
+
+    Row del{"Delete"};
+    del.note = "Delete this save (you are asked first).";
+    del.activate = [] {
+        g_screen = Screen::SlotDelete;
+        g_selected = 0;
+    };
+    g_rows.push_back(del);
+
+    Row back{"Back"};
+    back.gap = true;
+    back.activate = [slot] { slots_page(slot); };
+    g_rows.push_back(back);
+}
+
+// Deleting a slot, asked first: keeping it is the first choice.
+void build_slot_delete() {
+    const int slot = g_slot_chosen;
+    Row keep{"Keep it"};
+    keep.note = "Slot " + std::to_string(slot) + " · " + slot_time(slot) + " stays.";
+    keep.activate = [] {
+        g_screen = Screen::Slot;
+        g_selected = delete_row();
+    };
+    g_rows.push_back(keep);
+
+    Row del{"Delete slot " + std::to_string(slot)};
+    del.note = "This save is gone for good.";
+    del.activate = [slot] {
+        std::error_code ec;
+        std::filesystem::remove(slot_path(slot), ec);
+        std::fprintf(stderr, "[frontend] slot %d deleted%s\n", slot, ec ? " (failed)" : "");
+        // Back to the slots (the launcher's main menu when none is left).
+        if (g_slot_from_states || newest_slot() != 0) {
+            slots_page(slot);
+            if (!g_slot_from_states)
+                g_selected = 0;
+        } else {
+            g_screen = Screen::Launcher;
+            g_selected = 0;
+        }
+    };
+    g_rows.push_back(del);
 }
 
 Row layout_row() {
@@ -1722,27 +1870,14 @@ void build_in_game() {
     resume.activate = [] { g_close = true; };
     g_rows.push_back(resume);
 
-    Row save{"Save game", "\u2039 Slot " + std::to_string(g_slot) +
-                              (slot_used(g_slot) ? " \u00b7 used \u203a" : " \u00b7 empty \u203a")};
-    save.gap = true;
-    save.note = "Saves everything, exactly where you are.";
-    save.change = [](int dir) { g_slot = (g_slot - 1 + dir + 4) % 4 + 1; };
-    save.activate = [] {
-        quickstate_request_save(slot_path(g_slot).c_str());
-        g_close = true;
+    Row states{"Save states"};
+    states.gap = true;
+    states.note = "Save everything exactly where you are, or load, duplicate or delete a save (ten slots).";
+    states.activate = [] {
+        g_screen = Screen::States;
+        g_selected = 0;
     };
-    g_rows.push_back(save);
-
-    Row load{"Load game", "\u2039 Slot " + std::to_string(g_slot) +
-                              (slot_used(g_slot) ? " \u203a" : " \u00b7 empty \u203a")};
-    load.enabled = slot_used(g_slot);
-    load.browse = true;
-    load.change = [](int dir) { g_slot = (g_slot - 1 + dir + 4) % 4 + 1; };
-    load.activate = [] {
-        quickstate_request_load(slot_path(g_slot).c_str());
-        g_close = true;
-    };
-    g_rows.push_back(load);
+    g_rows.push_back(states);
 
     Row options{"Options"};
     options.gap = true;
@@ -1831,8 +1966,12 @@ std::string roster_panel_end() {
 void render() {
     if (g_doc == nullptr)
         return;
+    const std::string slot_heading = "Slot " + std::to_string(g_slot_chosen);
     const char* heading = g_screen == Screen::Launcher   ? ""
                           : g_screen == Screen::Play     ? "Load Game"
+                          : g_screen == Screen::States   ? "Save States"
+                          : g_screen == Screen::Slot     ? slot_heading.c_str()
+                          : g_screen == Screen::SlotDelete ? "Delete Save?"
                           : g_screen == Screen::Options  ? "Options"
                           : g_screen == Screen::OptionsPage ? options_page_name()
                           : g_screen == Screen::Controls ? (controls::menu_player() == 1
@@ -1915,12 +2054,19 @@ void render() {
     // The launcher: its picture behind it (res/ui/launcher.png), the menu on
     // the picture's blank parchment, no frame, notes or directions.
     g_doc->SetClass("launcher", g_screen == Screen::Launcher);
-    // The mapping list is long: tighten the rows.
-    g_doc->SetClass("compact", g_screen == Screen::Mapping);
+    // The pause menu: the launcher's parchment over the dimmed game.
+    g_doc->SetClass("pause", g_screen == Screen::InGame);
+    // The save state pages: the chosen row in the launcher's glowing frame.
+    g_doc->SetClass("slots", g_screen == Screen::Play || g_screen == Screen::States || g_screen == Screen::Slot ||
+                                 g_screen == Screen::SlotDelete);
+    // The mapping list and the ten save states are long: tighten the rows.
+    g_doc->SetClass("compact", g_screen == Screen::Mapping || g_screen == Screen::States);
     // Character select: one wide page, every frame at once.
     g_doc->SetClass("roster", g_screen == Screen::Characters);
     // Over the game the page lies on the dimmed, paused frame.
     g_doc->SetClass("overlay", g_screen == Screen::InGame || g_screen == Screen::Problem ||
+                                   g_screen == Screen::States ||
+                                   ((g_screen == Screen::Slot || g_screen == Screen::SlotDelete) && g_slot_from_states) ||
                                    ((g_screen == Screen::Options || g_screen == Screen::OptionsPage ||
                                      g_screen == Screen::Mods || g_screen == Screen::ModsPage ||
                                      g_screen == Screen::Characters ||
@@ -1934,6 +2080,9 @@ void build_rows() {
     switch (g_screen) {
     case Screen::Launcher: build_launcher(); break;
     case Screen::Play: build_play(); break;
+    case Screen::States: build_states(); break;
+    case Screen::Slot: build_slot(); break;
+    case Screen::SlotDelete: build_slot_delete(); break;
     case Screen::Options: build_options(); break;
     case Screen::OptionsPage: build_options_page(); break;
     case Screen::Controls: build_controls(); break;
@@ -1975,6 +2124,17 @@ void go_back() {
     case Screen::Play:
         g_screen = Screen::Launcher;
         g_selected = 0;
+        break;
+    case Screen::States:
+        g_screen = Screen::InGame;
+        g_selected = 1;
+        break;
+    case Screen::Slot:
+        slots_page(g_slot_chosen);
+        break;
+    case Screen::SlotDelete:
+        g_screen = Screen::Slot;
+        g_selected = delete_row();
         break;
     case Screen::Controls:
         controls::set_menu_player(0);
@@ -2334,9 +2494,9 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
                        g_discs[g_disc].path == g_settings.disc);
     g_screen = Screen::Launcher;
     g_selected = g_disc_on_main && disc_playable() ? 1 : 0;
-    // ED_MENU_OPEN=options, controls, mapping, mods or characters[,row] (testing): the
-    // launcher opens on that page, at that row; controls2 and mapping2 show
-    // player 2's.
+    // ED_MENU_OPEN=options, controls, mapping, mods, characters, load, states, slotN or
+    // deleteN[,row] (testing): the launcher opens on that page, at that row;
+    // controls2 and mapping2 show player 2's, slotN and deleteN slot N's.
     if (const char* page = std::getenv("ED_MENU_OPEN"); page != nullptr) {
         g_options_return = Screen::Launcher;
         g_mods_return = Screen::Launcher;
@@ -2344,7 +2504,13 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
                    : std::strncmp(page, "mapping", 7) == 0 ? Screen::Mapping
                    : std::strncmp(page, "mods", 4) == 0    ? Screen::Mods
                    : std::strncmp(page, "characters", 10) == 0 ? Screen::Characters
-                                                               : Screen::Options;
+                   : std::strncmp(page, "load", 4) == 0    ? Screen::Play
+                   : std::strncmp(page, "states", 6) == 0  ? Screen::States
+                   : std::strncmp(page, "slot", 4) == 0    ? Screen::Slot
+                   : std::strncmp(page, "delete", 6) == 0  ? Screen::SlotDelete
+                                                           : Screen::Options;
+        if (g_screen == Screen::Slot || g_screen == Screen::SlotDelete)
+            g_slot_chosen = std::atoi(page + (g_screen == Screen::Slot ? 4 : 6));
         const char* digit = page + std::strcspn(page, "2,");
         controls::set_menu_player(*digit == '2' ? 1 : 0);
         const char* comma = std::strchr(page, ',');

@@ -440,15 +440,122 @@ body.launcher #hint {
 	display: none;
 }
 
+/* Continue, Main menu, Load game, Options, Mods and Quit, with their two
+   breaks, all on the parchment. */
 body.launcher .row {
-	font-size: 30dp;
+	font-size: 26dp;
+	padding: 1dp 2dp;
 	color: #2a1810;
 }
 
 body.launcher .row.big {
-	font-size: 42dp;
+	font-size: 36dp;
+	padding: 2dp 2dp;
 }
 
-body.launcher .row.selected {
-	color: #8e1b12;
+body.launcher .gap {
+	height: 16dp;
+	margin: 2dp 70dp;
+}
+
+/* The chosen row: the game's own glowing frame (its memory card screen's),
+   the ink kept black. Each row a frame's width, centred. */
+body.launcher .row {
+	width: 62%;
+	margin: 0 auto;
+	justify-content: center;
+	border: 2dp transparent;
+	border-radius: 8dp;
+}
+
+body.launcher .mark {
+	display: none;
+}
+
+body.launcher .row.selected,
+body.slots .row.selected {
+	color: #1a0f08;
+	border-color: #d4f0ff;
+	background-color: #cfeeff40;
+	box-shadow: #6ec4ff 0 0 22dp 6dp, #9fdcffd0 0 0 10dp 2dp inset;
+}
+
+/* The save state pages: the same frame round the chosen row, the rows at
+   their full width. */
+body.slots .row {
+	border: 2dp transparent;
+	border-radius: 8dp;
+	padding: 2dp 12dp;
+}
+
+body.slots .mark {
+	display: none;
+}
+
+body.slots .row.selected .value {
+	color: #1a0f08;
+}
+
+body.slots .row.selected .leader {
+	decorator: image(tome/leader.png repeat-x left bottom);
+}
+
+/* The pause menu (the game's menu over it, dimmed): the launcher's parchment
+   in its frame (res/ui/pause.png, cut from launcher.png), the rows centred
+   on it in the launcher's ink, the chosen one in the glowing frame. */
+body.pause #book {
+	width: 44%;
+	height: 72%;
+	padding: 0;
+	border-width: 0;
+	background-color: transparent;
+	decorator: image(pause.png fill);
+	align-items: center;
+	justify-content: center;
+}
+
+body.pause .page {
+	width: 100%;
+	padding: 0 0 2% 0;
+	border-width: 0;
+	decorator: none;
+	background-color: transparent;
+	justify-content: center;
+}
+
+body.pause .rule,
+body.pause .note {
+	display: none;
+}
+
+body.pause #heading {
+	font-size: 34dp;
+	margin-bottom: 8dp;
+}
+
+body.pause .row {
+	width: 62%;
+	margin: 0 auto;
+	justify-content: center;
+	font-size: 26dp;
+	padding: 1dp 2dp;
+	color: #2a1810;
+	border: 2dp transparent;
+	border-radius: 8dp;
+}
+
+body.pause .mark {
+	display: none;
+}
+
+body.pause .gap {
+	height: 16dp;
+	margin: 2dp 70dp;
+}
+
+body.pause .row.selected {
+	color: #1a0f08;
+	border-color: #d4f0ff;
+	background-color: #cfeeff40;
+	box-shadow: #6ec4ff 0 0 22dp 6dp, #9fdcffd0 0 0 10dp 2dp inset;
 }
