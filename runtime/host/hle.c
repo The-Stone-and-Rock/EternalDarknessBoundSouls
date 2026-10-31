@@ -6462,8 +6462,9 @@ static void coop_park(CPUState* cpu, u32 player, bool park) {
 // one (0x80132ED8(model), as it starts) and makes the player from a spawn
 // record (COOP_SPAWN_CREATE: type at +16, model at +20); both are theirs.
 // The twelve, in Jump to Game's order: their character file (the model) and
-// their kind (the type).
-static const s16 kPlayerModel[12] = {0, 70, 85, 150, 18, 73, 74, 76, 69, 75, 81, 9};
+// their kind (the type). Jump to Game's Peter starts chapter 10 and Edward
+// chapter 9 (made as 69, kind 53).
+static const s16 kPlayerModel[12] = {0, 70, 85, 150, 18, 73, 74, 76, 75, 69, 81, 9};
 static const s16 kPlayerType[12] = {1, 49, 46, 27, 44, 55, 47, 54, 45, 53, 48, 26};
 static int g_chapter_model = -1;  // the playable the chapter asked for
 
@@ -6758,6 +6759,10 @@ static void hle_pack_load(CPUState* cpu) {
 
 // Their own chapter's level data (the first chapter that is theirs, 0 to 11)
 // loaded into the host's scratch, for `model`'s body, kept at `kept`.
+// Anthony's is not in his chapter's: it loads his body as the curse takes
+// him, from /U_Tony0.bin to 4 (0x8003F9A8, each a list of bodies itself);
+// his whole one is the first's.
+#define ANTHONY 85
 static bool start_borrow(CPUState* cpu, int model, u32 kept) {
     int chapter = -1;
     for (int c = 0; c < 12 && chapter < 0; c++)
@@ -6770,7 +6775,10 @@ static bool start_borrow(CPUState* cpu, int model, u32 kept) {
         return false;
     }
     char name[48];
-    snprintf(name, sizeof name, "/levels/level%02d/U_Level%02d.bin", chapter, chapter);
+    if (model == ANTHONY)
+        snprintf(name, sizeof name, "/U_Tony0.bin");
+    else
+        snprintf(name, sizeof name, "/levels/level%02d/U_Level%02d.bin", chapter, chapter);
     const u32 at = cpu->gpr[1] + 156u;  // the chapter's own name was built here
     for (size_t i = 0; i <= strlen(name); i++)
         mem_write8(cpu, at + (u32)i, (u8)name[i]);
@@ -6804,9 +6812,12 @@ static bool continue_pack_load(CPUState* cpu) {
         const u32 other = cpu->gpr[3];
         u32 ignore = 0u;
         hle_guest_call(cpu, PACK_RELOCATE, &other, 1, 0.0, &ignore);
-        const u32 theirs = pack_list(cpu, other, true);
-        if (theirs != 0u)
-            hle_guest_call(cpu, PACK_RELOCATE, &theirs, 1, 0.0, &ignore);
+        u32 theirs = other;  // Anthony's: the list itself
+        if (g_pack.model != ANTHONY) {
+            theirs = pack_list(cpu, other, true);
+            if (theirs != 0u)
+                hle_guest_call(cpu, PACK_RELOCATE, &theirs, 1, 0.0, &ignore);
+        }
         const u32 own = pack_list(cpu, g_pack.pack, false);
         const u32 want = (u32)g_pack.model;
         const u32 body = theirs != 0u && mem_read32(cpu, theirs) > want ? mem_read32(cpu, theirs + 8u + want * 8u) : 0u;
@@ -6829,6 +6840,13 @@ static bool continue_pack_load(CPUState* cpu) {
                     size, kept);
         } else {
             fprintf(stderr, "[player] no body for %u in their chapter's pack\n", want);
+            if (theirs != 0u) {
+                fprintf(stderr, "[player] its bodies (%u):", mem_read32(cpu, theirs));
+                for (u32 i = 0; i < mem_read32(cpu, theirs) && i < 200u; i++)
+                    if (mem_read32(cpu, theirs + 8u + i * 8u) != 0u)
+                        fprintf(stderr, " %u", i);
+                fprintf(stderr, "\n");
+            }
         }
         // Then player 2's, when theirs is borrowed too.
         if (g_pack.kept == SCRATCH_BODY && borrow_p2() >= 0 && start_borrow(cpu, borrow_p2(), SCRATCH_BODY2))
@@ -7042,6 +7060,15 @@ static bool g_coop_spawning;  // coop_spawn is making player 2
 static void hle_spawn_create(CPUState* cpu) {
     const u32 rec = cpu->gpr[3];
     const int want = player_model();
+    if (getenv("ED_BODY_LIST") != NULL && guest_ram_range_valid(cpu, rec, 48u)) {  // testing
+        const u32 list = mem_read32(cpu, cpu->gpr[13] - 26452u);
+        fprintf(stderr, "[player] making type %d model %d; bodies:", (s32)mem_read32(cpu, rec + 16u),
+                (s32)mem_read32(cpu, rec + 20u));
+        for (u32 i = 0; guest_ram_range_valid(cpu, list, 8u) && i < mem_read32(cpu, list) && i < 200u; i++)
+            if (mem_read32(cpu, list + 8u + i * 8u) != 0u)
+                fprintf(stderr, " %u(%08X,%u)", i, mem_read32(cpu, list + 8u + i * 8u), mem_read32(cpu, list + 12u + i * 8u));
+        fprintf(stderr, "\n");
+    }
     if (g_coop_spawning) {
         g_hle_passthrough = true;
         return;
