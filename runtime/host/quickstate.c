@@ -116,6 +116,7 @@ static const QsBlob k_blobs[] = {
     {"AURA", dol_aurora_state_size, dol_aurora_state_save, dol_aurora_state_load,
      false},
     {"COOP", hle_coop_state_size, hle_coop_state_save, hle_coop_state_load, false},
+    {"COMG", hle_coop_magick_size, hle_coop_magick_save, hle_coop_magick_load, false},
 #endif
 };
 #define QS_BLOB_COUNT (sizeof k_blobs / sizeof k_blobs[0])

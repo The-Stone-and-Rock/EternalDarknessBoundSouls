@@ -4958,7 +4958,11 @@ static bool hle_dispatch(CPUState* cpu, u32 address) {
     // caller and first arguments, without the full ED_HLE_LOG firehose.
     // ED_TRACE_CHAIN=1: instead, each distinct chain of callers once (the
     // return address, then each saved one up the stack's back chain).
-    if (g_trace_fn_count != 0u) {
+    // ED_TRACE_FROM=frame: only from that game frame (timebase / 675000) on.
+    static long long trace_from = -1;
+    if (trace_from < 0)
+        trace_from = getenv("ED_TRACE_FROM") != NULL ? atoll(getenv("ED_TRACE_FROM")) : 0;
+    if (g_trace_fn_count != 0u && cpu->timebase / 675000ull >= (u64)trace_from) {
         static int chain = -1;
         if (chain < 0)
             chain = getenv("ED_TRACE_CHAIN") != NULL;
@@ -4976,12 +4980,12 @@ static bool hle_dispatch(CPUState* cpu, u32 address) {
                 u64 h = address;
                 for (int k = 0; k < n; k++)
                     h = (h ^ lrs[k]) * 1099511628211ull;
-                static u64 seen[64];
+                static u64 seen[1024];
                 static unsigned count;
                 bool known = false;
                 for (unsigned k = 0; k < count; k++)
                     known = known || seen[k] == h;
-                if (known || count >= 64u)
+                if (known || count >= 1024u)
                     break;
                 seen[count++] = h;
                 fprintf(stderr, "[chain] 0x%08X r3=0x%08X frame=%llu <-", address, cpu->gpr[3],
@@ -7274,6 +7278,36 @@ static bool g_coop_quick_set;
 static u32 g_coop_quick_p1[COOP_QUICKS];  // player 1's, while player 2's Tome has the game's
 static u32 g_coop_turn_p1;                // player 1's node, while player 2 is the player in their turn
 
+// What the controlled character is casting: the spell (r13 - 22336, which
+// the cast sets and asks first: one being cast, no other is begun) and the
+// words its spells keep with it (- 22320, - 22316, - 22312). Each player has
+// their own, player 2's kept here while they are not casting, so the players
+// cast at the same time.
+static const u32 kCoopCasting[4] = {22336u, 22320u, 22316u, 22312u};
+static u32 g_coop_casting[4];
+
+// Player 2 the player, the controlled character and the one casting (on),
+// or back (off).
+static void coop_be_player2(CPUState* cpu, bool on, u32 was[5]) {
+    const u32 at[5] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u, cpu->gpr[13] - 21488u,
+                       cpu->gpr[13] - 21484u};
+    const u32 id = mem_read32(cpu, g_coop_p2 + 16u);
+    const u32 now[5] = {mem_read32(cpu, g_coop_p2 + 52u), g_coop_p2, id, id, g_coop_p2};
+    for (int i = 0; i < 5; i++) {
+        if (on) {
+            was[i] = mem_read32(cpu, at[i]);
+            mem_write32(cpu, at[i], now[i]);
+        } else {
+            mem_write32(cpu, at[i], was[i]);
+        }
+    }
+    for (int i = 0; i < 4; i++) {
+        const u32 casting = cpu->gpr[13] - kCoopCasting[i], theirs = g_coop_casting[i];
+        g_coop_casting[i] = mem_read32(cpu, casting);
+        mem_write32(cpu, casting, theirs);
+    }
+}
+
 static void coop_quick_init(CPUState* cpu) {
     if (g_coop_quick_set)
         return;
@@ -7301,7 +7335,7 @@ static void coop_quick_swap(CPUState* cpu, bool p2) {
 // In player 2's turn, with them the player: a quick spell's button pressed
 // casts theirs. The cast pays from the character the game controls (r13 -
 // 21488 its id, - 21484 its node; 0x801F6258, 0x801F6250), which is player 2
-// for their cast too.
+// for their cast too, with what they are casting (coop_be_player2).
 static void coop_quick_cast(CPUState* cpu) {
     static u16 held;
     const u16 pressed = (u16)(g_coop_p2_buttons & ~held);
@@ -7314,17 +7348,75 @@ static void coop_quick_cast(CPUState* cpu) {
             continue;
         mem_write32(cpu, COOP_QUICK_SLOT, g_coop_quick[i]);
         const u32 args[2] = {0u, COOP_QUICK_SLOT};
-        const u32 controlled[2] = {cpu->gpr[13] - 21488u, cpu->gpr[13] - 21484u};
-        const u32 was[2] = {mem_read32(cpu, controlled[0]), mem_read32(cpu, controlled[1])};
-        mem_write32(cpu, controlled[0], mem_read32(cpu, g_coop_p2 + 16u));
-        mem_write32(cpu, controlled[1], g_coop_p2);
-        u32 ignore = 0u;
+        const u32 first = mem_read32(cpu, cpu->gpr[13] - 22328u);
+        u32 was[5], ignore = 0u;
+        coop_be_player2(cpu, true, was);
         hle_guest_call(cpu, COOP_QUICK_CAST, args, 2, 0.0, &ignore);
-        mem_write32(cpu, controlled[0], was[0]);
-        mem_write32(cpu, controlled[1], was[1]);
-        if (getenv("ED_COOP_CAST_LOG") != NULL)
-            fprintf(stderr, "[coop] player 2 casts their quick spell %u (0x%08X)\n", i, g_coop_quick[i]);
+        coop_be_player2(cpu, false, was);
+        if (getenv("ED_COOP_CAST_LOG") != NULL) {
+            const u32 spell = mem_read32(cpu, cpu->gpr[13] - 22328u);
+            fprintf(stderr, "[coop] player 2 casts their quick spell %u (0x%08X): %s (frame %llu)\n", i, g_coop_quick[i],
+                    spell != first ? "cast" : "not cast", (unsigned long long)(cpu->timebase / 675000ull));
+        }
     }
+}
+
+// Player 2's spells play out as theirs. A spell cast is a record in the
+// game's list of them (r13 - 22324 the first, +20 the next; its caster's id
+// at +12), each stepped every frame by the spells' update (0x801C5994),
+// which calls the record's step (+28) as often as its clock (+0 >> 16, +4084
+// the steps done) says. A step asks round the player and the controlled
+// character (its aura, where it goes, who it acts on), which were player 1's:
+// Roberto had the aura of Alex's spell. The update is the game's, run here,
+// with a record player 2 cast stepped with them the player, the controlled
+// character and the one casting (coop_be_player2): its end clears what they
+// are casting, not what player 1 is.
+#define COOP_SPELLS_UPDATE 0x801C5994u
+#define COOP_SPELLS_PAUSED 0x80157364u
+#define COOP_SPELL_RUNS 0x80155450u
+
+static void coop_spells_update(CPUState* cpu) {
+    if (g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu) || !coop_listed(cpu, g_coop_p2)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    const u32 p2_id = mem_read32(cpu, g_coop_p2 + 16u);
+    u32 paused = 0u, runs = 0u, ignore = 0u;
+    hle_guest_call(cpu, COOP_SPELLS_PAUSED, NULL, 0, 0.0, &paused);
+    for (u32 spell = mem_read32(cpu, cpu->gpr[13] - 22324u), n = 0u; spell != 0u && n < 4096u;
+         spell = mem_read32(cpu, spell + 20u), n++) {
+        const u8 flags = mem_read8(cpu, spell + 4082u);
+        if (paused != 0u) {
+            if ((flags & 0x80u) == 0u)
+                continue;
+        } else if ((flags & 0x05u) == 0u) {
+            const u32 room = mem_read32(cpu, spell + 8u);
+            if (!hle_guest_call(cpu, COOP_SPELL_RUNS, &room, 1, 0.0, &runs) || runs == 0u)
+                continue;
+        }
+        if (mem_read32(cpu, spell) == 0u && mem_read16(cpu, spell + 4084u) != 0u) {
+            mem_write16(cpu, spell + 4084u, 0u);
+            mem_write32(cpu, spell, 0x10000u);
+        }
+        const u32 due = mem_read32(cpu, spell) >> 16, done = mem_read16(cpu, spell + 4084u);
+        const bool theirs = mem_read32(cpu, spell + 12u) == p2_id;
+        if (done == 0u && due > 0u && getenv("ED_COOP_CAST_LOG") != NULL)
+            fprintf(stderr, "[coop] spell 0x%08X (0x%08X) cast by 0x%X: %s (frame %llu)\n", spell,
+                    mem_read32(cpu, spell + 4u), mem_read32(cpu, spell + 12u), theirs ? "player 2's" : "not player 2's",
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        u32 was[5];
+        if (theirs)
+            coop_be_player2(cpu, true, was);
+        for (u32 k = 0; due > done && k < due - done; k++) {
+            hle_guest_call(cpu, mem_read32(cpu, spell + 28u), &spell, 1, 0.0, &ignore);
+            mem_write16(cpu, spell + 4084u, (u16)(mem_read16(cpu, spell + 4084u) + 1u));
+        }
+        if (theirs)
+            coop_be_player2(cpu, false, was);
+        mem_write32(cpu, spell, mem_read32(cpu, spell) + mem_read32(cpu, cpu->gpr[13] - 27032u));
+    }
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
 }
 
 static void cheat_apply(CPUState* cpu);
@@ -9163,6 +9255,15 @@ static void find_coop(CPUState* cpu) {
     } else {
         fprintf(stderr, "[coop] the Tome's check not found: player 2 cannot cast\n");
     }
+    // The spells' update (stwu r1,-32(r1); ... lwz r30,-22324(r13) at +0x1C),
+    // player 2's spells stepped as theirs.
+    HleDispatchEntry* spells = hle_dispatch_entry(COOP_SPELLS_UPDATE);
+    if (mem_read32(cpu, COOP_SPELLS_UPDATE) == 0x9421FFE0u && mem_read32(cpu, COOP_SPELLS_UPDATE + 0x1Cu) == 0x83CDA8CCu &&
+        spells != NULL && spells->intercept == NULL && spells->notify == NULL) {
+        spells->intercept = coop_spells_update;
+    } else {
+        fprintf(stderr, "[coop] the spells' update not found: player 2's spells act on player 1\n");
+    }
     // The copy of a position (lwz r5,0(r4); lwz r0,4(r4); stw r5,0(r3)), and
     // the share's call of it (bl at 0x8011CB70).
     {
@@ -9345,6 +9446,37 @@ void hle_coop_state_save(void* out) {
     s.parked = g_coop_parked;
     s.p2_is_player = g_coop_p2_is_player;
     memcpy(out, &s, sizeof s);
+}
+
+// Player 2's quick spells and what they are casting, a state of their own
+// (states saved before them keep loading).
+typedef struct {
+    u32 quick[COOP_QUICKS];
+    u32 casting[4];
+    u8 quick_set, pad[3];
+} HleCoopMagick;
+
+size_t hle_coop_magick_size(void) {
+    return sizeof(HleCoopMagick);
+}
+
+void hle_coop_magick_save(void* out) {
+    HleCoopMagick s;
+    memset(&s, 0, sizeof s);
+    memcpy(s.quick, g_coop_quick, sizeof s.quick);
+    memcpy(s.casting, g_coop_casting, sizeof s.casting);
+    s.quick_set = g_coop_quick_set;
+    memcpy(out, &s, sizeof s);
+}
+
+void hle_coop_magick_load(const void* in) {
+    HleCoopMagick s;
+    memset(&s, 0, sizeof s);
+    if (in != NULL)
+        memcpy(&s, in, sizeof s);
+    memcpy(g_coop_quick, s.quick, sizeof g_coop_quick);
+    memcpy(g_coop_casting, s.casting, sizeof g_coop_casting);
+    g_coop_quick_set = s.quick_set != 0u;
 }
 
 // While player 2's Tome is open the player's object and id are theirs
