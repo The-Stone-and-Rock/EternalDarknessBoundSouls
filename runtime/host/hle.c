@@ -6801,7 +6801,7 @@ static void hle_play_animation(CPUState* cpu) {
         return;
     static unsigned told;
     if (told++ < 8u)
-        fprintf(stderr, "[player] an animation the character does not have, passed over (0x%08X)\n", resource);
+        fprintf(stderr, "[player] an animation the character does not have, passed over (0x%08X; object 0x%08X, lr 0x%08X)\n", resource, cpu->gpr[3], cpu->lr);
     g_hle_passthrough = false;
 }
 
@@ -7129,6 +7129,8 @@ static void coop_state(CPUState* cpu, CoopPlayerState* s, bool save) {
     coop_interact(cpu, s->interact, save);
 }
 
+static void coop_copies_follow(CPUState* cpu);
+
 static void coop_player_turn(CPUState* cpu) {
     if (g_coop_turn || g_coop_p2 == 0u || !g_settings.mod_coop || !coop_listed(cpu, g_coop_p2))
         return;
@@ -7200,6 +7202,7 @@ static void coop_player_turn(CPUState* cpu) {
         mem_write32(cpu, who[i], was[i]);
     coop_bytes(cpu, COOP_CAMERA, camera, sizeof camera, false);
     coop_state(cpu, &g_coop_state[0], false);
+    coop_copies_follow(cpu);
     g_coop_turn = false;
     static bool told;
     if (!told) {
@@ -7272,8 +7275,11 @@ static void coop_follow(CPUState* cpu, u32 player) {
 
 static void coop_position_copy(CPUState* cpu) {
     u32 from = cpu->gpr[4];
-    if (cpu->lr == COOP_DETAIL_CALL && g_settings.mod_coop && g_coop_p2 != 0u && sda_ready(cpu) &&
-        from == mem_read32(cpu, g_coop_p2 + 52u)) {
+    // What player 2 holds (its holder, object +372, is them) too: out of
+    // player 1's view, their sword was left where they had been.
+    const u32 p2 = g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + 52u) : 0u;
+    if (cpu->lr == COOP_DETAIL_CALL && g_settings.mod_coop && p2 != 0u && sda_ready(cpu) &&
+        (from == p2 || (guest_ram_range_valid(cpu, from + 372u, 4u) && mem_read32(cpu, from + 372u) == p2))) {
         const u32 player = coop_player(cpu);
         const u32 p1 = player != 0u ? mem_read32(cpu, player + 52u) : 0u;
         if (guest_ram_range_valid(cpu, p1, 12u))
@@ -7670,10 +7676,55 @@ static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make) {
     return made;
 }
 
+// What a character holds is drawn at the holder's place and facing (object
+// +0..11, +44..59), its hand's bone from there (0x8011D394). The game puts
+// them there each step for player 1's alone: player 2's copy stayed where it
+// was made, floating. After player 2's turn, theirs go with them, into their
+// room.
+static void coop_copies_follow(CPUState* cpu) {
+    const u32 p2 = mem_read32(cpu, g_coop_p2 + 52u);
+    if (!guest_ram_range_valid(cpu, p2, COOP_OBJECT_ROOM + 4u))
+        return;
+    for (int i = 0; i < 32; i++) {
+        const u32 node = g_coop_copies[i].node;
+        const u32 held = node != 0u ? mem_read32(cpu, node + 52u) : 0u;
+        if (!guest_ram_range_valid(cpu, held, COOP_OBJECT_ROOM + 4u) || mem_read32(cpu, held + 372u) != p2)
+            continue;
+        for (u32 at = 0u; at < 60u; at += 4u)
+            if (at < 12u || at >= 44u)
+                mem_write32(cpu, held + at, mem_read32(cpu, p2 + at));
+        const u32 room = mem_read32(cpu, p2 + COOP_OBJECT_ROOM);
+        if (mem_read32(cpu, held + COOP_OBJECT_ROOM) != room) {
+            const u32 args[] = {node, room};
+            u32 ignore = 0u;
+            hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, args, 2, 0.0, &ignore);
+        }
+    }
+}
+
 // ED_COPY_WATCH=1 (testing): the readying and letting go of a copy's
 // animation buffers (0x8011F460, 0x8011FC8C), and who called.
 static void notify_copy_watch(CPUState* cpu) {
     static unsigned shown;
+    // A held thing's bones made for drawing (0x8011D394(object, ...)): how
+    // often, for player 2's held things, a second, with where they are.
+    if (cpu->pc == 0x8011D394u) {
+        static unsigned drawn, frames;
+        static u64 last;
+        const u32 o = cpu->gpr[3];
+        const u32 p2 = g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + 52u) : 0u;
+        if (p2 != 0u && guest_ram_range_valid(cpu, o + 372u, 4u) && o != p2 && mem_read32(cpu, o + 372u) == p2)
+            drawn++;
+        const u64 now = cpu->timebase / 40500000ull;
+        if (now != last && p2 != 0u) {
+            last = now;
+            if (frames++ < 60u)
+                fprintf(stderr, "[held] drawn %u a second; player 2 at %.0f %.0f\n", drawn, guest_read_f32(cpu, p2),
+                        guest_read_f32(cpu, p2 + 4u));
+            drawn = 0u;
+        }
+        return;
+    }
     // The hand link: a held thing's bone found in its holder (0x8011D33C(
     // holder, tag)) and a bone's matrix (0x8012123C(object, bone, out)), for
     // player 2 and the held things.
@@ -7710,6 +7761,19 @@ static void hle_find_by_id(CPUState* cpu) {
         g_hle_passthrough = false;
         hle_set_u32(cpu, node);
     }
+}
+
+// A weapon taken up has the player's moves made again (0x80131CF8): every
+// moves slot let go (0x80132484(0)), then the player's asked for anew. In
+// player 2's Tome they are the player, and their moves are kept in slots of
+// their own (hle_moves_want); letting go of the game's slots took player 1's
+// from them, and with no moves player 1 stood still, then twisted. While
+// player 2's Tome is open, the game's slots are left as they are.
+#define MOVES_LET_GO 0x80132484u
+#define MOVES_REMAKE_CALL 0x80131D14u  // the return address in 0x80131CF8
+
+static void hle_moves_let_go(CPUState* cpu) {
+    g_hle_passthrough = !(g_coop_tome_p2 && g_coop_p2 != 0u && cpu->lr == MOVES_REMAKE_CALL);
 }
 
 // What player 2 holds names their copies (the drawing of what is held asks
@@ -8084,8 +8148,8 @@ static void find_coop(CPUState* cpu) {
                 if (e != NULL && e->notify == NULL)
                     e->notify = notify_anim_load;
             }
-            static const u32 kWatch[] = {0x8011F460u, 0x8011FC8Cu, 0x8011D33Cu, 0x8012123Cu};
-            for (int i = 0; getenv("ED_COPY_WATCH") != NULL && i < 4; i++) {
+            static const u32 kWatch[] = {0x8011F460u, 0x8011FC8Cu, 0x8011D33Cu, 0x8012123Cu, 0x8011D394u};
+            for (int i = 0; getenv("ED_COPY_WATCH") != NULL && i < 5; i++) {
                 HleDispatchEntry* e = hle_dispatch_entry(kWatch[i]);
                 if (e != NULL && e->notify == NULL)
                     e->notify = notify_copy_watch;
@@ -8093,6 +8157,9 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* find = hle_dispatch_entry(FIND_BY_ID);
             if (find != NULL && find->intercept == NULL && find->notify == NULL)
                 find->intercept = hle_find_by_id;
+            HleDispatchEntry* let_go = hle_dispatch_entry(MOVES_LET_GO);
+            if (let_go != NULL && let_go->intercept == NULL && let_go->notify == NULL)
+                let_go->intercept = hle_moves_let_go;
             HleDispatchEntry* moves = hle_dispatch_entry(MOVES_WANT);
             if (moves != NULL && moves->intercept == NULL && moves->notify == NULL)
                 moves->intercept = hle_moves_want;
