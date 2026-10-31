@@ -8335,6 +8335,89 @@ static void find_letterbox(CPUState* cpu) {
     g_scene_flag_offset = (s16)(load & 0xFFFFu);
     g_letterbox_height = (high << 16) + (u32)(s32)(s16)(low & 0xFFFFu) + 0xBCu;
 }
+
+// Quick state: co-op and the chosen characters, kept by the host and not in
+// the game's memory. Without them a load found player 2 again as a co-op
+// save does (moved beside player 1), their copies were no longer theirs (the
+// sword floated, equipping made another), and the story was told the chosen
+// character, not the chapter's.
+typedef struct {
+    u32 p2, copies_for;
+    struct {
+        u32 id, node;
+    } copies[32];
+    CoopPlayerState state[2];
+    struct {
+        s32 model, part;
+        u32 ready, sets;
+    } moves[2];
+    s32 chapter_model;
+    u8 p2_state, parked, p2_is_player, pad;
+} HleCoopState;
+
+size_t hle_coop_state_size(void) {
+    return sizeof(HleCoopState);
+}
+
+void hle_coop_state_save(void* out) {
+    HleCoopState s;
+    memset(&s, 0, sizeof s);
+    s.p2 = g_coop_p2;
+    s.copies_for = g_coop_copies_for;
+    memcpy(s.copies, g_coop_copies, sizeof s.copies);
+    memcpy(s.state, g_coop_state, sizeof s.state);
+    for (int k = 0; k < 2; k++) {
+        s.moves[k].model = g_p2_moves[k].model;
+        s.moves[k].part = g_p2_moves[k].part;
+        s.moves[k].ready = g_p2_moves[k].ready;
+        s.moves[k].sets = g_p2_moves[k].sets;
+    }
+    s.chapter_model = g_chapter_model;
+    s.p2_state = g_coop_p2_state;
+    s.parked = g_coop_parked;
+    s.p2_is_player = g_coop_p2_is_player;
+    memcpy(out, &s, sizeof s);
+}
+
+// While player 2's Tome is open the player's object and id are theirs
+// (coop_tome_player): a save waits for it to close.
+bool hle_save_held(void) {
+    return g_coop_tome_p2;
+}
+
+// NULL: a state saved before co-op was kept; player 2 is found again as
+// after a co-op save.
+void hle_coop_state_load(const void* in) {
+    g_coop_turn = false;
+    g_coop_tome_p2 = false;
+    g_coop_attempts = 0u;
+    g_coop_restore.id = g_coop_restore.node = 0u;
+    if (in == NULL) {
+        g_coop_p2 = 0u;
+        g_coop_p2_state = false;
+        g_coop_parked = false;
+        memset(g_coop_copies, 0, sizeof g_coop_copies);
+        g_coop_copies_for = 0u;
+        p2_moves_clear();
+        return;
+    }
+    HleCoopState s;
+    memcpy(&s, in, sizeof s);
+    g_coop_p2 = s.p2;
+    g_coop_copies_for = s.copies_for;
+    memcpy(g_coop_copies, s.copies, sizeof g_coop_copies);
+    memcpy(g_coop_state, s.state, sizeof g_coop_state);
+    for (int k = 0; k < 2; k++) {
+        g_p2_moves[k].model = s.moves[k].model;
+        g_p2_moves[k].part = s.moves[k].part;
+        g_p2_moves[k].ready = s.moves[k].ready;
+        g_p2_moves[k].sets = s.moves[k].sets;
+    }
+    g_chapter_model = s.chapter_model;
+    g_coop_p2_state = s.p2_state != 0u;
+    g_coop_parked = s.parked != 0u;
+    g_coop_p2_is_player = s.p2_is_player != 0u;
+}
 #endif
 
 // PAL: 60 Hz from the start, without the game's 50/60 Hz question. Booting in

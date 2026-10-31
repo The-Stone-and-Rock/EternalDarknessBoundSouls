@@ -50,6 +50,15 @@ void hle_state_loaded(CPUState* cpu);
 size_t hle_gx_state_size(void);
 void hle_gx_state_save(void* out);
 void hle_gx_state_load(const void* in);
+// The windowed build's co-op and chosen characters (who player 2 is, their
+// copies and moves, each player's kept state, the chapter's own character);
+// hle_coop_state_load(NULL) for a state that has none finds player 2 anew.
+size_t hle_coop_state_size(void);
+void hle_coop_state_save(void* out);
+void hle_coop_state_load(const void* in);
+// True while a save would catch co-op half-way (player 2's Tome open): the
+// save waits.
+bool hle_save_held(void);
 
 // Run the guest function fn to its return, from the host, on the game thread
 // (a hook), with r3.. = args and f1, and every register as it was afterwards.
