@@ -7126,6 +7126,34 @@ static void hle_player_file(CPUState* cpu) {
     }
 }
 
+// The story's own change of the player's character (a script's command,
+// 0x8000CA90: Anthony's rotting, 119 and on): the body from the chapter's
+// list (0x80118A98, object +60), the file's character (0x80117C54, +580),
+// the player's character (0x80131CF0, r13 - 23664), and the file opened
+// again. Another chapter's chosen character keeps their own: Pius became
+// rotting Anthony on the church's stairs. Each step left out when called
+// from there (their return addresses).
+#define STORY_BODY_SET 0x80118A98u
+#define STORY_MODEL_SET 0x80117C54u
+#define STORY_PLAYER_SET 0x80131CF0u
+
+static void story_player_model(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (cpu->lr != 0x8000CB2Cu && cpu->lr != 0x8000CB38u && cpu->lr != 0x8000CB40u)
+        return;
+    const int want = player_model();
+    if (want < 0 || g_chapter_model < 0 || want == g_chapter_model)
+        return;
+    if (cpu->pc == STORY_BODY_SET) {
+        static u32 told;
+        if (told != cpu->gpr[4])
+            fprintf(stderr, "[player] the story's change of the player's body left out (%d is theirs)\n", want);
+        told = cpu->gpr[4];
+        cpu->gpr[3] = mem_read32(cpu, cpu->gpr[3] + 60u);  // as it answers: the body before
+    }
+    g_hle_passthrough = false;
+}
+
 static bool g_coop_spawning;  // coop_spawn is making player 2
 
 static void hle_spawn_create(CPUState* cpu) {
@@ -9664,6 +9692,17 @@ static void find_coop(CPUState* cpu) {
             if (mem_read32(cpu, PLAYER_FILE_CALL - 4u) == 0x4812B695u && file != NULL && file->intercept == NULL &&
                 file->notify == NULL)
                 file->intercept = hle_player_file;
+            // The story's change of the player's character (lwz r0,60(r3);
+            // stw r4,580(r3); stw r3,-23664(r13)).
+            static const u32 kStory[3][2] = {
+                {STORY_BODY_SET, 0x8003003Cu}, {STORY_MODEL_SET, 0x90830244u}, {STORY_PLAYER_SET, 0x906DA390u}};
+            for (int i = 0; i < 3; i++) {
+                HleDispatchEntry* e = hle_dispatch_entry(kStory[i][0]);
+                if (mem_read32(cpu, kStory[i][0]) == kStory[i][1] && e != NULL && e->intercept == NULL && e->notify == NULL)
+                    e->intercept = story_player_model;
+                else
+                    fprintf(stderr, "[player] the story's change of character (0x%08X) not found\n", kStory[i][0]);
+            }
             HleDispatchEntry* ending = hle_dispatch_entry(ENDING_SEEN);
             if (mem_read32(cpu, ENDING_SEEN) == 0x3C808030u && mem_read32(cpu, 0x800507FCu) == 0x4BFF1995u &&
                 ending != NULL && ending->intercept == NULL && ending->notify == NULL)
