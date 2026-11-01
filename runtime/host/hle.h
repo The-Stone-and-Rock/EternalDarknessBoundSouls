@@ -61,6 +61,10 @@ void hle_coop_state_load(const void* in);
 size_t hle_coop_kinds_size(void);
 void hle_coop_kinds_save(void* out);
 void hle_coop_kinds_load(const void* in);
+// Which prompt element is player 2's.
+size_t hle_coop_prompt_size(void);
+void hle_coop_prompt_save(void* out);
+void hle_coop_prompt_load(const void* in);
 // Player 2's magick: their quick spells and what they are casting.
 // hle_coop_magick_load(NULL) for a state that has none: they have no quick
 // spells.

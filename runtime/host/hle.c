@@ -7822,6 +7822,146 @@ static void coop_spells_update(CPUState* cpu) {
 static void cheat_apply(CPUState* cpu);
 static void coop_own_stats(CPUState* cpu, u32 who);
 
+// Player 2's own prompt ("B Examine"). A thing the player's look (the scan)
+// finds near them asks for its prompt (0x80117404(.., id, .., priority,
+// slot, ..): into one of six slots, 0x80335A38, 28 bytes each); each frame
+// the best is the game's one prompt, a "ButtonText" element (0x801DB374;
+// +8, +10 where it is, at the top right) in player 1's view. The look is
+// made for player 2 too, in their turn: what their things ask for is theirs
+// (hle_prompt_ask), the game's slots and the look's words kept as they were,
+// and shown in their own element at the top left of their half
+// (coop_prompt_show).
+#define PROMPT_ASK 0x80117404u
+#define PROMPT_CLEAR 0x80117360u
+#define PROMPT_LINE 0x801389DCu
+#define PROMPT_MAKE 0x801DB374u
+#define PROMPT_FREE 0x801DA4D8u
+#define PROMPT_STYLE 0x80252D68u   // "ButtonText"
+#define PROMPT_SLOTS 0x80335A38u
+#define PROMPT_SLOTS_SIZE (7u * 28u)  // the six and the game's prompt
+#define PROMPT_SCREEN 24036u          // r13 -: the screen the prompt's element is on
+#define COOP_PROMPT_AT (4096 - 120)   // HUD units: COOP_BAR_AWAY (their half) and as far in from its left edge as player 1's from the right
+static bool g_coop_prompt_look;       // player 2's look is running
+static s32 g_coop_prompt_found, g_coop_prompt_best;
+static s32 g_coop_prompt = -1;        // player 2's prompt, -1 none
+static struct {
+    u32 element, screen, p2;
+    s32 id;
+} g_coop_prompt_shown = {0u, 0u, 0u, -1};
+
+static void hle_prompt_ask(CPUState* cpu) {
+    g_hle_passthrough = !g_coop_prompt_look;
+    if (!g_coop_prompt_look)
+        return;
+    if ((s32)cpu->gpr[7] > g_coop_prompt_best) {
+        g_coop_prompt_best = (s32)cpu->gpr[7];
+        g_coop_prompt_found = (s32)cpu->gpr[4];
+    }
+    hle_set_u32(cpu, cpu->gpr[8]);
+}
+
+// Player 2's look, as the player's step makes it (info = 0x80123F70(object);
+// scan(object, info[180], info[176], out)), in their turn.
+static void coop_prompt_look(CPUState* cpu, u32 object) {
+    if (!g_coop_scan)
+        return;
+    u32 info = 0u, ignore = 0u;
+    if (!hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) || !guest_ram_range_valid(cpu, info, 184u))
+        return;
+    static u8 words[2060], slots[PROMPT_SLOTS_SIZE];
+    const u32 at = cpu->gpr[13] - 24040u;
+    coop_bytes(cpu, at, words, sizeof words, true);
+    coop_bytes(cpu, PROMPT_SLOTS, slots, sizeof slots, true);
+    // What it looks along: where they were to where they are, each less
+    // (c, c, their height: object +628), c the step's (r2 - 23120), made
+    // into the step's line (0x801389DC(line, from, to)).
+    static float was[3];
+    static u32 was_for;
+    if (was_for != object)
+        for (u32 i = 0; i < 3u; i++)
+            was[i] = guest_read_f32(cpu, object + i * 4u);
+    was_for = object;
+    const u32 from = (cpu->gpr[1] - 0x600u) & ~15u, to = from + 16u, line = from + 32u;
+    const float c = guest_read_f32(cpu, cpu->gpr[2] - 23120u), less[3] = {c, c, guest_read_f32(cpu, object + 628u)};
+    for (u32 i = 0; i < 3u; i++) {
+        const float now = guest_read_f32(cpu, object + i * 4u);
+        guest_write_f32(cpu, from + i * 4u, was[i] - less[i]);
+        guest_write_f32(cpu, to + i * 4u, now - less[i]);
+        was[i] = now;
+    }
+    const u32 make_line[3] = {line, from, to};
+    hle_guest_call(cpu, PROMPT_LINE, make_line, 3, 0.0, &ignore);
+    const u32 args[4] = {object, mem_read32(cpu, info + 180u), mem_read16(cpu, info + 176u), line};
+    g_coop_prompt_found = -1;
+    g_coop_prompt_best = -0x7FFFFFFF;
+    g_coop_prompt_look = true;
+    hle_guest_call(cpu, COOP_SCAN, args, 4, 0.0, &ignore);
+    g_coop_prompt_look = false;
+    coop_bytes(cpu, at, words, sizeof words, false);
+    coop_bytes(cpu, PROMPT_SLOTS, slots, sizeof slots, false);
+    g_coop_prompt = g_coop_prompt_found;
+}
+
+// Quick state: which element is player 2's (a state loaded without it
+// leaves the one it had drawn, unknown here).
+typedef struct {
+    u32 element, screen, p2;
+    s32 id;
+} HleCoopPrompt;
+
+size_t hle_coop_prompt_size(void) {
+    return sizeof(HleCoopPrompt);
+}
+
+void hle_coop_prompt_save(void* out) {
+    const HleCoopPrompt s = {g_coop_prompt_shown.element, g_coop_prompt_shown.screen, g_coop_prompt_shown.p2,
+                             g_coop_prompt_shown.id};
+    memcpy(out, &s, sizeof s);
+}
+
+void hle_coop_prompt_load(const void* in) {
+    HleCoopPrompt s = {0u, 0u, 0u, -1};
+    if (in != NULL)
+        memcpy(&s, in, sizeof s);
+    g_coop_prompt_shown.element = s.element;
+    g_coop_prompt_shown.screen = s.screen;
+    g_coop_prompt_shown.p2 = s.p2;
+    g_coop_prompt_shown.id = s.id;
+    g_coop_prompt = -1;
+}
+
+// Player 2's element: made when their prompt changes, let go of when it goes
+// (one on a screen since gone, with the area, is left alone).
+static void coop_prompt_show(CPUState* cpu, bool shown) {
+    const u32 screen = mem_read32(cpu, cpu->gpr[13] - PROMPT_SCREEN);
+    const s32 want = shown && screen != 0u ? g_coop_prompt : -1;
+    if (g_coop_prompt_shown.element != 0u &&
+        (g_coop_prompt_shown.screen != screen || g_coop_prompt_shown.p2 != g_coop_p2))
+        g_coop_prompt_shown.element = 0u, g_coop_prompt_shown.id = -1;
+    if (want == g_coop_prompt_shown.id)
+        return;
+    u32 ignore = 0u;
+    if (g_coop_prompt_shown.element != 0u)
+        hle_guest_call(cpu, PROMPT_FREE, &g_coop_prompt_shown.element, 1, 0.0, &ignore);
+    g_coop_prompt_shown.element = 0u;
+    g_coop_prompt_shown.id = -1;
+    if (want < 0)
+        return;
+    // Made as the game makes its own (0x8011708C), its word and picture
+    // with it.
+    u32 element = 0u;
+    const u32 make[6] = {screen, 0u, (u32)want, 0u, 1u, PROMPT_STYLE};
+    if (!hle_guest_call(cpu, PROMPT_MAKE, make, 6, 0.0, &element) || !guest_ram_range_valid(cpu, element, 0x100u))
+        return;
+    mem_write16(cpu, element + 8u, (u16)(s16)COOP_PROMPT_AT);
+    g_coop_prompt_shown.element = element;
+    g_coop_prompt_shown.screen = screen;
+    g_coop_prompt_shown.p2 = g_coop_p2;
+    g_coop_prompt_shown.id = want;
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] player 2's prompt %d (element 0x%08X)\n", want, element);
+}
+
 static void coop_player_turn(CPUState* cpu) {
     cheat_apply(cpu);  // Mods' Cheats, at the player's frame
     if (sda_ready(cpu)) {  // each player their own character's stats
@@ -7905,6 +8045,8 @@ static void coop_player_turn(CPUState* cpu) {
     const u32 prompt = cpu->gpr[13] - 24040u;
     if (scan)
         coop_bytes(cpu, prompt, p1_prompt, sizeof p1_prompt, true);
+    if (!scan && g_coop_p2_is_player)
+        coop_prompt_look(cpu, now[0]);
     if (scan && g_coop_p2_is_player && g_coop_scan) {
         u32 info = 0u;
         if (hle_guest_call(cpu, COOP_CHARACTER_INFO, &now[0], 1, 0.0, &info) &&
@@ -9039,6 +9181,11 @@ static void coop_door_proxy(CPUState* cpu) {
     }
     if (moved < 4.0f) {
         coop_trade_places(cpu);
+        // Put back where they were, player 1 never walked out of what was
+        // there, so its prompt stayed theirs: it goes (0x80117360(1)).
+        const u32 clear = 1u;
+        u32 ignore = 0u;
+        hle_guest_call(cpu, PROMPT_CLEAR, &clear, 1, 0.0, &ignore);
         fprintf(stderr, "[coop] nothing to use there: the players trade back\n");
     } else {
         fprintf(stderr, "[coop] player 1 went on (%.0f units)\n", sqrtf(moved));
@@ -9740,6 +9887,7 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         moves_repair(cpu, player, false);
         coop_door_proxy(cpu);
         coop_follow(cpu, player);
+        coop_prompt_show(cpu, !coop_busy(cpu) && !game_menu_open(cpu) && !cutscene_playing(cpu));
     }
     static int log = -1;
     if (log < 0)
@@ -9880,6 +10028,13 @@ static void find_coop(CPUState* cpu) {
     } else {
         fprintf(stderr, "[coop] the characters' step not found: player 2 finds no doors\n");
     }
+    // The prompt's asking (stwu r1,-48(r1)) and its element's making
+    // (0x8011708C: lwz r3,-24036(r13) at +0x1C), for player 2's own prompt.
+    HleDispatchEntry* ask = hle_dispatch_entry(PROMPT_ASK);
+    if (mem_read32(cpu, PROMPT_ASK) != 0x9421FFD0u || mem_read32(cpu, 0x801170A8u) != 0x806DA21Cu || ask == NULL)
+        fprintf(stderr, "[coop] the prompt's asking not found: player 2 has no prompt\n");
+    else if (ask->intercept == NULL && ask->notify == NULL)
+        ask->intercept = hle_prompt_ask;
     // A node's frame (stwu r1,-16(r1); ... li r3,3 at +0x18), the look-up by
     // id (... bl 0x801F5C20 at +0x18) and the bars' handler (stwu
     // r1,-32(r1); ... bl 0x801F6300 at +0x34), for player 2's bars.

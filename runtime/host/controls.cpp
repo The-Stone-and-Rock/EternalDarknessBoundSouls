@@ -1304,10 +1304,41 @@ extern "C" void controls_read_player2(DolPadState* state) {
     if (keys && key_down(p.moves[kMoveRight])) x = 127;
     if (keys && key_down(p.moves[kMoveUp])) y = 127;
     if (keys && key_down(p.moves[kMoveDown])) y = -127;
+    // Their sprint, creep and target toggle as player 1's do in their
+    // layout (the first button and the key; toggled sprint ends when they
+    // stop moving).
+    static bool toggled[kActionCount], was_down[kActionCount];
+    static Uint64 still_since;
+    const Uint64 now = SDL_GetTicks();
+    if (x != 0 || y != 0)
+        still_since = 0;
+    else if (still_since == 0)
+        still_since = now;
+    if (toggled[kSprint] && still_since != 0 && now - still_since > 300)
+        toggled[kSprint] = false;
     for (int a = 0; a < kActionCount; a++) {
-        int v = std::max(native_value(pad, p.bindings[a].pad[0]), native_value(pad, p.bindings[a].pad[1]));
+        int v = native_value(pad, p.bindings[a].pad[0]);
+        const int held = native_value(pad, p.bindings[a].pad[1]);
         if (keys && key_down(p.bindings[a].key))
             v = 255;
+        const bool toggles = (a == kSprint && g_settings.sprint_toggle[p.layout]) ||
+                             (a == kCreep && g_settings.creep_toggle[p.layout]) ||
+                             (a == kTarget && g_settings.target_toggle[p.layout]);
+        if (toggles) {
+            const bool down = v >= 128;
+            if (down && !was_down[a]) {
+                toggled[a] = !toggled[a];
+                if (toggled[a] && a == kSprint)
+                    toggled[kCreep] = false;
+                if (toggled[a] && a == kCreep)
+                    toggled[kSprint] = false;
+            }
+            was_down[a] = down;
+            v = std::max(toggled[a] ? 255 : 0, held);
+        } else {
+            toggled[a] = false;
+            v = std::max(v, held);
+        }
         if (a == kSprint || a == kTarget) {
             (a == kSprint ? s.trigger_left : s.trigger_right) = static_cast<u8>(v);
             if (v >= 230)
