@@ -179,7 +179,7 @@ void settings_load(void) {
         else if (strcmp(key, "mod_p2_input") == 0)
             g_settings.mod_p2_input = clamp_int(n, 0, 1);
         else if (strcmp(key, "mod_p2_camera") == 0)
-            g_settings.mod_p2_camera = clamp_int(n, 0, 1);
+            g_settings.mod_p2_camera = clamp_int(n, 0, 2);
         else if (strcmp(key, "mod_p2_layout") == 0)
             g_settings.mod_p2_layout = clamp_int(n, 0, 2);
         else if (strcmp(key, "mod_p2_custom") == 0)

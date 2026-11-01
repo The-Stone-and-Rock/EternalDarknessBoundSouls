@@ -7963,7 +7963,12 @@ static u32 coop_look_line(CPUState* cpu, u32 object) {
             was[i] = guest_read_f32(cpu, object + i * 4u);
     was_for = object;
     const u32 from = (cpu->gpr[1] - 0x600u) & ~15u, to = from + 16u, line = from + 32u;
-    const float c = guest_read_f32(cpu, cpu->gpr[2] - 23120u), less[3] = {c, c, guest_read_f32(cpu, object + 628u)};
+    // The step's line runs at their waist, height above them: the zones it
+    // crosses (the cameras' among them, as a wire across the floor) test that.
+    // Below the floor, only what they stand in was found: the Original camera
+    // needs the rest.
+    const float c = guest_read_f32(cpu, cpu->gpr[2] - 23120u), height = guest_read_f32(cpu, object + 628u);
+    const float less[3] = {c, c, g_settings.mod_p2_camera == 2 ? -height : height};
     for (u32 i = 0; i < 3u; i++) {
         const float now = guest_read_f32(cpu, object + i * 4u);
         guest_write_f32(cpu, from + i * 4u, was[i] - less[i]);
@@ -8053,6 +8058,8 @@ static void coop_states_swap(CPUState* cpu, bool to_p2) {
     coop_bytes(cpu, SCRIPT_STATES, to_p2 ? g_coop_states.p2 : g_coop_states.p1, SCRIPT_STATES_SIZE, false);
 }
 
+static unsigned long long g_coop_own_view_frame;  // when their Original camera last stepped
+
 // Player 2's zone words in (to_p2) or player 1's back.
 static void coop_zones_swap(CPUState* cpu, u32 info, bool to_p2) {
     const u32 zones = mem_read32(cpu, info + 180u), n = mem_read16(cpu, info + 176u);
@@ -8064,6 +8071,7 @@ static void coop_zones_swap(CPUState* cpu, u32 info, bool to_p2) {
         memset(g_coop_zones.p2, 0, sizeof g_coop_zones.p2);
         coop_prompt_slots_clear();
         g_coop_cameras.p2_set = false;
+        g_coop_own_view_frame = 0ull;
         memset(g_coop_states.p2, 0, sizeof g_coop_states.p2);
     }
     for (u32 i = 0; i < count; i++) {
@@ -8072,6 +8080,58 @@ static void coop_zones_swap(CPUState* cpu, u32 info, bool to_p2) {
         keep[i] = mem_read32(cpu, at);
         mem_write32(cpu, at, to_p2 ? g_coop_zones.p2[i] : g_coop_zones.p1[i]);
     }
+}
+
+// Player 2's Original camera: the game's camera step (0x801EB9A0(3): the
+// cameras' records move, the result to the view at 0x803012E0: eye, target,
+// up) run again in their turn, with them the player and their records in. What
+// it leaves there is their view, for the split (camera.c); the game's stays
+// player 1's.
+#define CAMERA_STEP 0x801EB9A0u
+#define CAMERA_VIEW 0x803012E0u
+#define CAMERA_VIEW_SIZE 52u
+static float g_coop_own_view[9];
+
+static void coop_camera_step(CPUState* cpu) {
+    if (g_settings.mod_p2_camera != 2 || g_coop_cameras.lent)
+        return;
+    static u8 cameras[COOP_ZONE_CAMERAS_SIZE];
+    u8 view[CAMERA_VIEW_SIZE];
+    coop_bytes(cpu, COOP_ZONE_CAMERAS, cameras, sizeof cameras, true);
+    coop_bytes(cpu, CAMERA_VIEW, view, sizeof view, true);
+    if (g_coop_cameras.p2_set)
+        coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p2, sizeof g_coop_cameras.p2, false);
+    // The records name whom they follow, each as it was set for the player:
+    // their copies follow them.
+    const u32 p1 = g_coop_turn_p1 != 0u ? mem_read32(cpu, g_coop_turn_p1 + 52u) : 0u,
+              them = mem_read32(cpu, g_coop_p2 + 52u);
+    for (u32 at = 0u; p1 != 0u && at < COOP_ZONE_CAMERAS_SIZE; at += 4u)
+        if (mem_read32(cpu, COOP_ZONE_CAMERAS + at) == p1)
+            mem_write32(cpu, COOP_ZONE_CAMERAS + at, them);
+    const u32 mask = 3u;
+    u32 ignore = 0u;
+    if (hle_guest_call(cpu, CAMERA_STEP, &mask, 1, 0.0, &ignore)) {
+        for (u32 i = 0; i < 9u; i++)
+            g_coop_own_view[i] = guest_read_f32(cpu, CAMERA_VIEW + i * 4u);
+        g_coop_own_view_frame = cpu->timebase / 675000ull;
+    }
+    coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p2, sizeof g_coop_cameras.p2, true);
+    g_coop_cameras.p2_set = true;
+    coop_bytes(cpu, COOP_ZONE_CAMERAS, cameras, sizeof cameras, false);
+    coop_bytes(cpu, CAMERA_VIEW, view, sizeof view, false);
+}
+
+// Their view from a recent turn (none while their turn is not run: the game's
+// close-ups keep the last).
+bool hle_coop_player2_camera(float eye[3], float target[3], float up[3]) {
+    if (g_coop_own_view_frame == 0ull)
+        return false;
+    for (int i = 0; i < 3; i++) {
+        eye[i] = g_coop_own_view[i];
+        target[i] = g_coop_own_view[3 + i];
+        up[i] = g_coop_own_view[6 + i];
+    }
+    return isfinite(eye[0]) && isfinite(target[0]);
 }
 
 static void coop_prompt_look(CPUState* cpu, u32 object) {
@@ -8510,6 +8570,8 @@ static void coop_player_turn(CPUState* cpu) {
     if (g_coop_p2_is_player)
         coop_quick_cast(cpu);  // their quick spells, as the player
     const bool ran = hle_guest_call(cpu, COOP_CONTROLLER, &p2, 1, 0.0, &ignore);
+    if (g_coop_p2_is_player)
+        coop_camera_step(cpu);
     for (int i = 0; i < 2; i++) {
         const u32 found = mem_read32(cpu, threat_at[i]);
         if (found != g_coop_threat[i] && getenv("ED_COOP_ENEMY_LOG") != NULL)

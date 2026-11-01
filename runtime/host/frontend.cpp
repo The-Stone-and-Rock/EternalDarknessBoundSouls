@@ -843,10 +843,10 @@ void build_mods_rows() {
     };
     g_rows.push_back(p1_camera);
 
-    static const char* const kP2Camera[] = {"Third person", "First person"};
+    static const char* const kP2Camera[] = {"Third person", "First person", "Original"};
     Row p2_camera{"Player 2 camera", kP2Camera[g_settings.mod_p2_camera]};
     p2_camera.enabled = g_settings.mod_coop;
-    p2_camera.change = [](int dir) { cycle(g_settings.mod_p2_camera, 2, dir); };
+    p2_camera.change = [](int dir) { cycle(g_settings.mod_p2_camera, 3, dir); };
     g_rows.push_back(p2_camera);
 
     static const char* const kEnemies[] = {"Vanilla", "Enhanced"};
