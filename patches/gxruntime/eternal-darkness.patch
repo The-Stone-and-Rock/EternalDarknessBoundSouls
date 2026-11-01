@@ -3612,7 +3612,7 @@ index a13ce39..c7a75c3 100644
   * EFB readback (GXRuntime recomp patch): arm a one-shot copy of the next
   * submitted frame's present source; take returns tightly packed RGBA8 rows
 diff --git a/graphics/aurora/lib/aurora.cpp b/graphics/aurora/lib/aurora.cpp
-index b09ef4d..c3599eb 100644
+index b09ef4d..f5bc693 100644
 --- a/graphics/aurora/lib/aurora.cpp
 +++ b/graphics/aurora/lib/aurora.cpp
 @@ -1,6 +1,17 @@
@@ -4076,7 +4076,7 @@ index b09ef4d..c3599eb 100644
      rmlBindGroup = std::move(rmlFrame.bindGroup);
      rmlOverlay = rmlFrame.overlay;
    }
-@@ -281,29 +672,146 @@ void end_frame() noexcept {
+@@ -281,29 +672,149 @@ void end_frame() noexcept {
  
    // Capture XFB handle by value for the worker lambda (shared_ptr).
    gfx::TextureHandle xfbHandle = (xfbTex && *xfbTex) ? *xfbTex : nullptr;
@@ -4131,8 +4131,10 @@ index b09ef4d..c3599eb 100644
 +    // frame then lays the menus over that picture and shows it.
 +    static Acquired s_split;
 +    // Each player's last view, kept for while a menu one of them opened shows
-+    // in their half (aurora_split_menu): the other half shows theirs.
-+    static gfx::TextureHandle s_held[2];
++    // in their half (aurora_split_menu): the other half shows theirs. The one
++    // shown is the frame before the last: what the menu opens with (a found
++    // thing's words) is in the last split frame already.
++    static gfx::TextureHandle s_held[2], s_shown[2];
 +    const auto half_of = [](int player, int layout, float w, float h) {
 +      const bool side = layout != 1;
 +      return webgpu::Viewport{
@@ -4184,6 +4186,7 @@ index b09ef4d..c3599eb 100644
 +      }
 +      // The view kept (a copy of it), for a menu's time.
 +      if (splitHandle && !viBlack && info.splitView < 2) {
++        std::swap(s_held[info.splitView], s_shown[info.splitView]);
 +        auto& held = s_held[info.splitView];
 +        if (!held || held->size.width != splitHandle->size.width || held->size.height != splitHandle->size.height ||
 +            held->format != splitHandle->format)
@@ -4236,7 +4239,7 @@ index b09ef4d..c3599eb 100644
        wgpu::BindGroup presentBindGroup;
        if (rmlBindGroup && !rmlOverlay) {
          presentBindGroup = rmlBindGroup;
-@@ -318,14 +826,21 @@ void end_frame() noexcept {
+@@ -318,14 +829,21 @@ void end_frame() noexcept {
          };
          presentBindGroup = webgpu::create_copy_bind_group(xfbSrc);
        } else {
@@ -4260,7 +4263,7 @@ index b09ef4d..c3599eb 100644
                  .storeOp = wgpu::StoreOp::Store,
              },
          };
-@@ -333,20 +848,73 @@ void end_frame() noexcept {
+@@ -333,20 +851,73 @@ void end_frame() noexcept {
              .label = xfbHandle ? "XFB present render pass" : "EFB copy render pass",
              .colorAttachmentCount = attachments.size(),
              .colorAttachments = attachments.data(),
@@ -4284,7 +4287,7 @@ index b09ef4d..c3599eb 100644
 +          const uint32_t sw = webgpu::g_graphicsConfig.surfaceConfiguration.width;
 +          const uint32_t sh = webgpu::g_graphicsConfig.surfaceConfiguration.height;
 +          const int layout = split_menu_layout();
-+          const auto& other = s_held[1 - menuPlayer];
++          const auto& other = s_shown[1 - menuPlayer] ? s_shown[1 - menuPlayer] : s_held[1 - menuPlayer];
 +          if (other) {
 +            const webgpu::TextureWithSampler src{
 +                .texture = other->texture,
@@ -4345,7 +4348,7 @@ index b09ef4d..c3599eb 100644
          }
          pass.End();
        }
-@@ -362,67 +930,230 @@ void end_frame() noexcept {
+@@ -362,67 +933,230 @@ void end_frame() noexcept {
              .label = "ImGui render pass",
              .colorAttachmentCount = attachments.size(),
              .colorAttachments = attachments.data(),
@@ -4597,7 +4600,7 @@ index b09ef4d..c3599eb 100644
      gfx::after_submit();
  
      TracyPlotConfig("aurora: lastVertSize", tracy::PlotFormatType::Memory, false, true, 0);
-@@ -440,7 +1171,7 @@ void end_frame() noexcept {
+@@ -440,7 +1174,7 @@ void end_frame() noexcept {
      TracyPlot("aurora: lastIndexSize", static_cast<int64_t>(gfx::g_stats.lastIndexSize));
      TracyPlot("aurora: lastStorageSize", static_cast<int64_t>(gfx::g_stats.lastStorageSize));
      TracyPlot("aurora: lastTextureUploadSize", static_cast<int64_t>(gfx::g_stats.lastTextureUploadSize));
@@ -4606,7 +4609,7 @@ index b09ef4d..c3599eb 100644
  
  #endif
  }
-@@ -475,6 +1206,84 @@ void aurora_set_resampler(AuroraSampler sampler) {
+@@ -475,6 +1209,84 @@ void aurora_set_resampler(AuroraSampler sampler) {
    (void)sampler;
  #endif
  }

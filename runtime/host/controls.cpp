@@ -1352,6 +1352,16 @@ extern "C" void controls_read_player2(DolPadState* state) {
     s.analog_b = (s.button & 0x0200) ? 255 : 0;
     s.stick_x = static_cast<s8>(x);
     s.stick_y = static_cast<s8>(y);
+    // Recording (F12): player 2's pad too, a "p2" line at each change (a
+    // replay reads only player 1's lines).
+    static DolPadState recorded{};
+    if (g_record != nullptr && (s.button != recorded.button || s.stick_x != recorded.stick_x ||
+                                s.stick_y != recorded.stick_y || s.substick_x != recorded.substick_x ||
+                                s.substick_y != recorded.substick_y)) {
+        std::fprintf(g_record, "p2 %llu %u %d %d %d %d\n", g_frame.load(), static_cast<unsigned>(s.button), s.stick_x,
+                     s.stick_y, s.substick_x, s.substick_y);
+        recorded = s;
+    }
     *state = s;
 }
 
