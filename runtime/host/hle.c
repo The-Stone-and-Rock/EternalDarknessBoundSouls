@@ -3751,6 +3751,9 @@ static void coop_pad_read(CPUState* cpu, bool playing);
 // the game's pad 1 is player 2's controller.
 static bool g_coop_pad_p2;
 static u16 g_coop_p2_buttons;  // player 2's pad as last read (coop_quick_cast)
+// What they held as a screen of theirs closed (the A that chose in their Tome):
+// nothing to play until let go, or it was a press there (their attack).
+static u16 g_coop_p2_hold;
 // Player 1's B held for them (coop_door_proxy: player 2 using a door).
 static bool g_coop_press_b;
 // Who has the screens that stop play (coop_menu_input).
@@ -3882,6 +3885,12 @@ static void hle_PADRead(CPUState* cpu) {
         if (pad_log && (state[0].button != 0u || state[0].stick_x != 0 || state[0].stick_y != 0))
             fprintf(stderr, "[coop] player 2's pad: buttons 0x%04X stick %d %d\n", state[0].button,
                     state[0].stick_x, state[0].stick_y);
+        g_coop_p2_hold &= state[0].button;
+        state[0].button &= (u16)~g_coop_p2_hold;
+        if ((g_coop_p2_hold & 0x0100u) != 0u)
+            state[0].analog_a = 0u;
+        if ((g_coop_p2_hold & 0x0200u) != 0u)
+            state[0].analog_b = 0u;
         g_coop_p2_buttons = state[0].button;
         state[0].button &= (u16)~0x1000u;  // their Start opens their own Tome (coop_menu_input)
         if (g_coop_screen)
@@ -7725,7 +7734,7 @@ static void coop_quick_cast(CPUState* cpu) {
 #define COOP_CAST_WORDS_WAIT 300u
 static bool g_coop_next_cast_p2;
 static bool g_coop_tome_cast;  // casting it
-static unsigned g_coop_cast_words;  // pad reads their B may yet close the words their cast leads to
+static unsigned g_coop_cast_words;  // pad reads the item their cast shows is yet to come
 static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make);
 
 static void coop_cast(CPUState* cpu) {
@@ -7735,14 +7744,15 @@ static void coop_cast(CPUState* cpu) {
         return;
     }
     g_coop_next_cast_p2 = false;
-    g_coop_cast_words = COOP_CAST_WORDS_WAIT;
     // An item chosen in their Tome is the original, as it shows; the one they
     // hold is their copy (the cast asks that their equipment lists it, and
     // what it enchants is theirs alone).
     const u32 item = mem_read32(cpu, COOP_SPELL_ITEM);
     const u32 copy = coop_weapon_copy(cpu, item, false);
-    if (copy != 0u)
+    if (copy != 0u) {
         mem_write32(cpu, COOP_SPELL_ITEM, mem_read32(cpu, copy + 16u));
+        g_coop_cast_words = COOP_CAST_WORDS_WAIT;
+    }
     const u32 args[2] = {cpu->gpr[3], cpu->gpr[4]};
     u32 was[5], result = 0u;
     coop_be_player2(cpu, true, was);
@@ -10140,6 +10150,17 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             fprintf(stderr, "[coop] player 2's quick spell opens the Tome\n");
         }
     }
+    // The item their cast shows, tied to the game's camera, and its words stop
+    // play: theirs, as a close-up is, in their half with their pad. Player 1's
+    // half keeps its view.
+    if (g_coop_cast_words > 0u && owner < 0) {
+        g_coop_cast_words--;
+        if (coop_busy(cpu)) {
+            g_coop_cast_words = 0u;
+            g_coop_assist_at = 1u;
+            coop_cameras_lend(cpu, true);
+        }
+    }
     // A close-up player 2's press opened stops play for them; a moment
     // without (between its pages) does not end it.
     static unsigned closeup_grace;
@@ -10156,19 +10177,6 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     const bool start_pressed = start && !start_was;
     start_was = start;
     if (!menu && !cutscene && !closeup) {
-        // The words their cast leads to wait for the game's one pad: their B
-        // closes them too, and uses nothing else.
-        if (g_coop_cast_words > 0u) {
-            g_coop_cast_words--;
-            if (coop_busy(cpu)) {
-                g_coop_cast_words = COOP_CAST_WORDS_WAIT;
-                if ((p2.button & 0x0200u) != 0u) {
-                    pad->button |= 0x0200u;
-                    pad->error = 0;
-                    g_coop_b_release = true;
-                }
-            }
-        }
         if (g_coop_assist_at != 0u && ++g_coop_assist_at > COOP_ASSIST_WINDOW)
             g_coop_assist_at = 0u;
         if (start_wait > 0u) {
@@ -10182,8 +10190,10 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             return;
         }
         if (owner >= 0) {
-            if (owner == 1)
+            if (owner == 1) {
                 g_coop_b_release = true;
+                g_coop_p2_hold = p2.button;
+            }
             fprintf(stderr, "[coop] play goes on: the pad is player 1's again\n");
             coop_cameras_lend(cpu, false);
             coop_snapshot(cpu);
@@ -10209,6 +10219,7 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     if (cutscene && owner == 1) {
         fprintf(stderr, "[coop] a cutscene: the screen and the pad are player 1's again\n");
         g_coop_b_release = true;
+        g_coop_p2_hold = p2.button;
         g_coop_cameras.lent = false;
         coop_snapshot(cpu);
         coop_tome_player(cpu, false);
