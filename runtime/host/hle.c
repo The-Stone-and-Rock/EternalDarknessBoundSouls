@@ -7453,8 +7453,13 @@ static struct {
     u32 kind;
     u16 p1;
     u32 own;  // player 2's copy's kind, or 0 (theirs is kept in g_coop_kinds)
+    u32 enchant[3];  // player 1's enchantment, while their copy's is in
 } g_coop_kinds_in[COOP_KINDS];  // the game's kinds while player 2's are in, and player 1's counts
 static int g_coop_kinds_in_count, g_coop_kinds_depth;
+// A kind's enchantment: its flags, the spell's effect and the alignment's
+// bytes. Each player's sword is enchanted on its own: while player 2's Tome
+// is open, the original (which it shows) has that of their copy.
+static const u32 kCoopEnchant[3] = {0x04u, 0x1Cu, 0x50u};
 
 static bool coop_own_kind(u32 kind) {
     return kind >= SCRATCH_KINDS && kind < SCRATCH_KINDS + 32u * THING_KIND_SIZE;
@@ -7484,6 +7489,10 @@ static void coop_kinds(CPUState* cpu, bool p2) {
             else if (own != NULL)
                 own->count = (u16)count;
             mem_write16(cpu, kind + THING_KIND_COUNT, g_coop_kinds_in[i].p1);
+            for (int w = 0; g_coop_kinds_in[i].own != 0u && w < 3; w++) {
+                mem_write32(cpu, g_coop_kinds_in[i].own + kCoopEnchant[w], mem_read32(cpu, kind + kCoopEnchant[w]));
+                mem_write32(cpu, kind + kCoopEnchant[w], g_coop_kinds_in[i].enchant[w]);
+            }
         }
         g_coop_kinds_in_count = 0;
         return;
@@ -7516,6 +7525,10 @@ static void coop_kinds(CPUState* cpu, bool p2) {
         g_coop_kinds_in[n].kind = kind;
         g_coop_kinds_in[n].p1 = count;
         g_coop_kinds_in[n].own = copy_kind;
+        for (int w = 0; copy_kind != 0u && w < 3; w++) {
+            g_coop_kinds_in[n].enchant[w] = mem_read32(cpu, kind + kCoopEnchant[w]);
+            mem_write32(cpu, kind + kCoopEnchant[w], mem_read32(cpu, copy_kind + kCoopEnchant[w]));
+        }
         n++;
         mem_write16(cpu, kind + THING_KIND_COUNT, copy_kind != 0u ? mem_read16(cpu, copy_kind + THING_KIND_COUNT) : own->count);
     }
@@ -7532,6 +7545,12 @@ static void coop_copy_own_kind(CPUState* cpu, int i, u32 copy) {
     const u32 own = SCRATCH_KINDS + (u32)i * THING_KIND_SIZE;
     for (u32 at = 0u; at < THING_KIND_SIZE; at += 4u)
         mem_write32(cpu, own + at, mem_read32(cpu, kind + at));
+    // Player 1's enchantment stays theirs (a sword's, as enchanting it changed).
+    if (mem_read32(cpu, own + kCoopEnchant[1]) != 0u) {
+        mem_write32(cpu, own + kCoopEnchant[0], mem_read32(cpu, own + kCoopEnchant[0]) | 4u);
+        mem_write32(cpu, own + kCoopEnchant[1], 0u);
+        mem_write32(cpu, own + kCoopEnchant[2], mem_read32(cpu, own + kCoopEnchant[2]) & 0xFF0000FFu);
+    }
     mem_write32(cpu, SCRATCH_KINDS_FROM + (u32)i * 4u, kind);
     mem_write32(cpu, record + THING_KIND_RECORD, own);
     fprintf(stderr, "[coop] player 2's copy (node 0x%08X) counts on its own (kind 0x%08X from 0x%08X, %u)\n", copy, own,
@@ -7594,6 +7613,16 @@ static u32 g_coop_p1_id = ~0u;  // player 1's id, as it was before player 2's tu
 static const u16 kCoopQuickButton[COOP_QUICKS] = {0x0800u, 0x0008u, 0x0004u, 0x0001u, 0x0002u};  // Y, up, down, left, right
 static u32 g_coop_quick[COOP_QUICKS];  // player 2's
 static u32 g_coop_quick_p1[COOP_QUICKS];  // player 1's, while player 2's Tome has the game's
+// A spell cast on an item (Enchant): the record at 0x80335748 has the item's
+// id (+0) and, with the Tome asked to open to choose one, +16's bit 0. A cast
+// asks how many things the caster carries first (0x801F98A4, their list's
+// +8); none is "no items". Both players have the same things, and player 2's
+// own list is empty, so theirs is player 1's for the cast. The Tome it opens
+// is theirs (coop_menu_input).
+#define COOP_SPELL_ITEM 0x80335748u
+#define COOP_SPELL_ITEM_TOME 16u
+#define CARRY_LIST 48u
+static bool g_coop_quick_tome;
 static u32 g_coop_turn_p1;                // player 1's node, while player 2 is the player in their turn
 
 // What the controlled character is casting: the spell (r13 - 22336, which
@@ -7667,9 +7696,16 @@ static void coop_quick_cast(CPUState* cpu) {
         const u32 args[2] = {0u, COOP_QUICK_SLOT};
         const u32 first = mem_read32(cpu, cpu->gpr[13] - 22328u);
         u32 was[5], ignore = 0u;
+        const u32 carried = mem_read32(cpu, g_coop_p2 + CARRY_LIST);
+        const u32 asked = mem_read32(cpu, COOP_SPELL_ITEM + COOP_SPELL_ITEM_TOME) & 1u;
+        if (g_coop_turn_p1 != 0u)
+            mem_write32(cpu, g_coop_p2 + CARRY_LIST, mem_read32(cpu, g_coop_turn_p1 + CARRY_LIST));
         coop_be_player2(cpu, true, was);
         hle_guest_call(cpu, COOP_QUICK_CAST, args, 2, 0.0, &ignore);
         coop_be_player2(cpu, false, was);
+        mem_write32(cpu, g_coop_p2 + CARRY_LIST, carried);
+        if (!asked && (mem_read32(cpu, COOP_SPELL_ITEM + COOP_SPELL_ITEM_TOME) & 1u) != 0u)
+            g_coop_quick_tome = true;
         if (getenv("ED_COOP_CAST_LOG") != NULL) {
             const u32 spell = mem_read32(cpu, cpu->gpr[13] - 22328u);
             fprintf(stderr, "[coop] player 2 casts their quick spell %u (0x%08X): %s (frame %llu)\n", i, g_coop_quick[i],
@@ -7686,8 +7722,11 @@ static void coop_quick_cast(CPUState* cpu) {
 #define COOP_CAST 0x801C4250u
 #define COOP_NEXT_CAST 0x80334DFCu
 #define COOP_NEXT_CAST_CALL 0x8000846Cu  // the return address in the frame's call
+#define COOP_CAST_WORDS_WAIT 300u
 static bool g_coop_next_cast_p2;
 static bool g_coop_tome_cast;  // casting it
+static unsigned g_coop_cast_words;  // pad reads their B may yet close the words their cast leads to
+static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make);
 
 static void coop_cast(CPUState* cpu) {
     if (!g_coop_next_cast_p2 || cpu->gpr[4] != COOP_NEXT_CAST || cpu->lr != COOP_NEXT_CAST_CALL || g_coop_p2 == 0u ||
@@ -7696,6 +7735,14 @@ static void coop_cast(CPUState* cpu) {
         return;
     }
     g_coop_next_cast_p2 = false;
+    g_coop_cast_words = COOP_CAST_WORDS_WAIT;
+    // An item chosen in their Tome is the original, as it shows; the one they
+    // hold is their copy (the cast asks that their equipment lists it, and
+    // what it enchants is theirs alone).
+    const u32 item = mem_read32(cpu, COOP_SPELL_ITEM);
+    const u32 copy = coop_weapon_copy(cpu, item, false);
+    if (copy != 0u)
+        mem_write32(cpu, COOP_SPELL_ITEM, mem_read32(cpu, copy + 16u));
     const u32 args[2] = {cpu->gpr[3], cpu->gpr[4]};
     u32 was[5], result = 0u;
     coop_be_player2(cpu, true, was);
@@ -7704,6 +7751,7 @@ static void coop_cast(CPUState* cpu) {
     hle_guest_call(cpu, COOP_CAST, args, 2, 0.0, &result);
     g_coop_tome_cast = false;
     coop_be_player2(cpu, false, was);
+    mem_write32(cpu, COOP_SPELL_ITEM, item);
     if (getenv("ED_COOP_CAST_LOG") != NULL)
         fprintf(stderr, "[coop] player 2 casts from their Tome\n");
     cpu->gpr[3] = result;
@@ -9136,7 +9184,6 @@ static void cheat_all_magick(CPUState* cpu) {
 // message, then it is theirs. Once for each Tome node (a chapter with none
 // says so).
 #define TOME_KIND 733u
-#define CARRY_LIST 48u
 #define ACQUIRE 0x80024528u
 #define ACQUIRE_TEXT 0x801DB374u
 #define ACQUIRE_TEXT_ARG 0x8023C1B4u
@@ -10019,6 +10066,30 @@ static u32 coop_equip_names_find(CPUState* cpu, u32 id) {
     return 0u;
 }
 
+// A spell done with an item it took from the hand gives it back
+// (0x800C9FD4(holder, item, 0, hands, 0)) to the controlled character, by then
+// player 1, as what is theirs fits their hands. A copy is player 2's: it goes
+// to them, with the hands the original takes.
+#define EQUIP_TAKE 0x800C9FD4u
+
+static void coop_equip_take(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu))
+        return;
+    const u32 item = cpu->gpr[4], p2 = mem_read32(cpu, g_coop_p2 + 16u);
+    if (cpu->gpr[3] == p2)
+        return;
+    for (int i = 0; i < 32; i++) {
+        const u32 copy = g_coop_copies[i].node;
+        if (copy == 0u || mem_read32(cpu, copy + 16u) != item || !coop_listed(cpu, copy))
+            continue;
+        const u32 entry = coop_equip_names_find(cpu, g_coop_copies[i].id);
+        cpu->gpr[3] = p2;
+        cpu->gpr[6] = entry != 0u ? mem_read32(cpu, entry + 4u) : 2u;
+        return;
+    }
+}
+
 static void coop_tome_player(CPUState* cpu, bool p2) {
     static u32 was[2];
     const u32 who[2] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21496u};
@@ -10048,14 +10119,26 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     static int owner = -1;  // -1 the game's own, 0 player 1, 1 player 2
     static unsigned start_wait;
     static bool start_was;
+    static unsigned quick_wait;  // pad reads for the Tome their quick spell asked for
     g_coop_screen = false;
     if (!g_settings.mod_coop || g_coop_p2 == 0u) {
+        g_coop_quick_tome = false;
+        quick_wait = 0u;
         coop_tome_player(cpu, false);
         if (owner >= 0)
             aurora_split_menu(-1, 0);
         owner = -1;
         start_wait = 0u;
         return;
+    }
+    if (g_coop_quick_tome) {
+        g_coop_quick_tome = false;
+        if (owner < 0) {
+            owner = 1;
+            quick_wait = COOP_START_WAIT;
+            coop_tome_player(cpu, true);
+            fprintf(stderr, "[coop] player 2's quick spell opens the Tome\n");
+        }
     }
     // A close-up player 2's press opened stops play for them; a moment
     // without (between its pages) does not end it.
@@ -10073,12 +10156,29 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     const bool start_pressed = start && !start_was;
     start_was = start;
     if (!menu && !cutscene && !closeup) {
+        // The words their cast leads to wait for the game's one pad: their B
+        // closes them too, and uses nothing else.
+        if (g_coop_cast_words > 0u) {
+            g_coop_cast_words--;
+            if (coop_busy(cpu)) {
+                g_coop_cast_words = COOP_CAST_WORDS_WAIT;
+                if ((p2.button & 0x0200u) != 0u) {
+                    pad->button |= 0x0200u;
+                    pad->error = 0;
+                    g_coop_b_release = true;
+                }
+            }
+        }
         if (g_coop_assist_at != 0u && ++g_coop_assist_at > COOP_ASSIST_WINDOW)
             g_coop_assist_at = 0u;
         if (start_wait > 0u) {
             start_wait--;
             pad->button |= 0x1000u;  // player 2's Start, as the game's
             pad->error = 0;
+            return;
+        }
+        if (quick_wait > 0u) {
+            quick_wait--;
             return;
         }
         if (owner >= 0) {
@@ -10101,6 +10201,7 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
         return;
     }
     start_wait = 0u;
+    quick_wait = 0u;
     // A cutscene player 2's close-up led to (the Tome taken) is the game's:
     // play is handed back as it starts. The cameras lent stay the game's
     // (put back, the cutscene's own went and it ended; put back after it,
@@ -10624,6 +10725,9 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* find = hle_dispatch_entry(FIND_BY_ID);
             if (find != NULL && find->intercept == NULL && find->notify == NULL)
                 find->intercept = hle_find_by_id;
+            HleDispatchEntry* take = hle_dispatch_entry(EQUIP_TAKE);
+            if (take != NULL && take->intercept == NULL && take->notify == NULL)
+                take->intercept = coop_equip_take;
             HleDispatchEntry* let_go = hle_dispatch_entry(MOVES_LET_GO);
             if (let_go != NULL && let_go->intercept == NULL && let_go->notify == NULL)
                 let_go->intercept = hle_moves_let_go;
