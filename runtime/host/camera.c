@@ -1524,6 +1524,7 @@ void aurora_split_set_view(int player, const float rot[9], float x, float y, flo
 
 bool hle_coop_player2_position(CPUState* cpu, float out[3]);  // hle.c
 bool hle_coop_screen(void);                                     // hle.c
+bool hle_game_menu_open(CPUState* cpu);                         // hle.c
 
 #define SPLIT_PITCH_LOW 0.05f
 #define SPLIT_PITCH_HIGH 1.30f
@@ -1572,8 +1573,11 @@ void camera_split_update(CPUState* cpu) {
         split_off(frame, "co-op off");
         return;
     }
-    if (!g_play || g_menu_open) {
-        split_off(frame, g_menu_open ? "the Tome" : "a cutscene");
+    // The Tome as soon as the game opens it: player 2's camera's line test
+    // as it opens held the game up for nearly 4 seconds.
+    const bool menu = g_menu_open || hle_game_menu_open(cpu);
+    if (!g_play || menu) {
+        split_off(frame, menu ? "the Tome" : "a cutscene");
         return;
     }
 #ifdef ED_AURORA

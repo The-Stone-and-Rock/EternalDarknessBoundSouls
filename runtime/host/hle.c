@@ -3629,6 +3629,10 @@ static bool game_menu_open(CPUState* cpu) {
            (s32)mem_read32(cpu, sda + (u32)g_menu_depth_offset) > 0;
 }
 
+// The game's pause menu (the Tome) up now, for the split (camera.c), which
+// hears of it from the pad a read later.
+bool hle_game_menu_open(CPUState* cpu) { return game_menu_open(cpu); }
+
 // A cutscene, where RB or Tab fast-forwards (controls.cpp): one of the movies is
 // open, or a scene plays in the letterbox bars. The game's scene flag is set
 // while one plays, and the bars' height is a float it keeps at 60 while they
@@ -7400,6 +7404,135 @@ static void coop_bytes(CPUState* cpu, u32 address, u8* buffer, u32 size, bool sa
         memcpy(guest, buffer, size);
 }
 
+// Each player has their own count of each kind of thing (the Chakrams
+// left to throw, the Talisman's uses): a kind's record (a thing's record,
+// node +44, names it at +4; 88 bytes) keeps it at +0x44, one for every
+// thing of that kind, and player 1's throws took from player 2's. Player
+// 2's copies (coop_weapon_copy) each have a kind of their own, a copy of
+// the original's in the scratch (SCRATCH_KINDS, the original's address
+// after them; coop_copy_own_kind): a throw is taken from the thrower's.
+// Other things' counts (the Talisman's) are kept here by the kind's mark
+// (+0x4C, a word of its own to each kind). While player 2's Tome is open,
+// it shows and uses theirs; a kind new to them starts with player 1's
+// count.
+#define KIND_RECORD 4u
+#define KIND_SIZE 88u
+#define KIND_COUNT 0x44u
+#define KIND_MARK 0x4Cu
+#define SCRATCH_KINDS 0x81FF0000u  // past player 2's body (SCRATCH_BODY2), KIND_SIZE each
+#define SCRATCH_KINDS_FROM (SCRATCH_KINDS + 32u * KIND_SIZE)  // each one's original, a word each
+#define COOP_KINDS 96
+typedef struct {
+    u32 mark;
+    u16 count, used;
+} CoopKind;
+static CoopKind g_coop_kinds[COOP_KINDS];
+static struct {
+    u32 kind;
+    u16 p1;
+    u32 own;  // player 2's copy's kind, or 0 (theirs is kept in g_coop_kinds)
+} g_coop_kinds_in[COOP_KINDS];  // the game's kinds while player 2's are in, and player 1's counts
+static int g_coop_kinds_in_count, g_coop_kinds_depth;
+
+static bool coop_own_kind(u32 kind) {
+    return kind >= SCRATCH_KINDS && kind < SCRATCH_KINDS + 32u * KIND_SIZE;
+}
+
+static CoopKind* coop_kind(u32 mark, bool make) {
+    for (int i = 0; i < COOP_KINDS; i++)
+        if (g_coop_kinds[i].used && g_coop_kinds[i].mark == mark)
+            return &g_coop_kinds[i];
+    for (int i = 0; make && i < COOP_KINDS; i++)
+        if (!g_coop_kinds[i].used)
+            return &g_coop_kinds[i];
+    return NULL;
+}
+
+static u32 coop_next(CPUState* cpu, u32 node);
+static bool coop_listed(CPUState* cpu, u32 wanted);
+static void coop_kinds(CPUState* cpu, bool p2) {
+    if (p2 ? g_coop_kinds_depth++ > 0 : g_coop_kinds_depth == 0 || --g_coop_kinds_depth > 0)
+        return;
+    if (!p2) {
+        for (int i = 0; i < g_coop_kinds_in_count; i++) {
+            const u32 kind = g_coop_kinds_in[i].kind, count = mem_read16(cpu, kind + KIND_COUNT);
+            CoopKind* own = coop_kind(mem_read32(cpu, kind + KIND_MARK), false);
+            if (g_coop_kinds_in[i].own != 0u)
+                mem_write16(cpu, g_coop_kinds_in[i].own + KIND_COUNT, (u16)count);
+            else if (own != NULL)
+                own->count = (u16)count;
+            mem_write16(cpu, kind + KIND_COUNT, g_coop_kinds_in[i].p1);
+        }
+        g_coop_kinds_in_count = 0;
+        return;
+    }
+    int n = 0;
+    for (u32 node = 0u, k = 0u; k < 1024u && n < COOP_KINDS && (node = coop_next(cpu, node)) != 0u; k++) {
+        const u32 record = mem_read32(cpu, node + 44u);
+        const u32 kind = guest_ram_range_valid(cpu, record, 8u) ? mem_read32(cpu, record + KIND_RECORD) : 0u;
+        if (coop_own_kind(kind) || !guest_ram_range_valid(cpu, kind, KIND_SIZE) ||
+            mem_read32(cpu, kind + KIND_MARK) == 0u)
+            continue;
+        bool seen = false;
+        for (int i = 0; i < n && !seen; i++)
+            seen = g_coop_kinds_in[i].kind == kind;
+        if (seen)
+            continue;
+        u32 copy_kind = 0u;
+        for (u32 c = 0u; c < 32u && copy_kind == 0u; c++)
+            if (mem_read32(cpu, SCRATCH_KINDS_FROM + c * 4u) == kind)
+                copy_kind = SCRATCH_KINDS + c * KIND_SIZE;
+        CoopKind* own = copy_kind != 0u ? NULL : coop_kind(mem_read32(cpu, kind + KIND_MARK), true);
+        if (copy_kind == 0u && own == NULL)
+            continue;
+        const u16 count = mem_read16(cpu, kind + KIND_COUNT);
+        if (own != NULL && !own->used) {
+            own->used = 1u;
+            own->mark = mem_read32(cpu, kind + KIND_MARK);
+            own->count = count;
+        }
+        g_coop_kinds_in[n].kind = kind;
+        g_coop_kinds_in[n].p1 = count;
+        g_coop_kinds_in[n].own = copy_kind;
+        n++;
+        mem_write16(cpu, kind + KIND_COUNT, copy_kind != 0u ? mem_read16(cpu, copy_kind + KIND_COUNT) : own->count);
+    }
+    g_coop_kinds_in_count = n;
+}
+
+// Player 2's copy in slot i (g_coop_copies) given a kind of its own, a copy
+// of its original's as it is (player 1's count, to start).
+static void coop_copy_own_kind(CPUState* cpu, int i, u32 copy) {
+    const u32 record = mem_read32(cpu, copy + 44u);
+    const u32 kind = guest_ram_range_valid(cpu, record, 8u) ? mem_read32(cpu, record + KIND_RECORD) : 0u;
+    if (coop_own_kind(kind) || !guest_ram_range_valid(cpu, kind, KIND_SIZE) || g_coop_kinds_depth > 0)
+        return;
+    const u32 own = SCRATCH_KINDS + (u32)i * KIND_SIZE;
+    for (u32 at = 0u; at < KIND_SIZE; at += 4u)
+        mem_write32(cpu, own + at, mem_read32(cpu, kind + at));
+    mem_write32(cpu, SCRATCH_KINDS_FROM + (u32)i * 4u, kind);
+    mem_write32(cpu, record + KIND_RECORD, own);
+    fprintf(stderr, "[coop] player 2's copy (node 0x%08X) counts on its own (kind 0x%08X from 0x%08X, %u)\n", copy, own,
+            kind, mem_read16(cpu, own + KIND_COUNT));
+}
+
+// Quick state: player 2's counts (states saved before them start them
+// with player 1's).
+size_t hle_coop_kinds_size(void) {
+    return sizeof g_coop_kinds;
+}
+
+void hle_coop_kinds_save(void* out) {
+    memcpy(out, g_coop_kinds, sizeof g_coop_kinds);
+}
+
+void hle_coop_kinds_load(const void* in) {
+    memset(g_coop_kinds, 0, sizeof g_coop_kinds);
+    if (in != NULL)
+        memcpy(g_coop_kinds, in, sizeof g_coop_kinds);
+    g_coop_kinds_in_count = g_coop_kinds_depth = 0;
+}
+
 static void coop_state(CPUState* cpu, CoopPlayerState* s, bool save) {
     const u32 aim = mem_read32(cpu, COOP_INPUT + 176u + 3u * 32u + 12u);  // channel 3's context
     coop_bytes(cpu, COOP_INPUT, s->input, COOP_INPUT_SIZE, save);
@@ -7413,6 +7546,7 @@ static void coop_state(CPUState* cpu, CoopPlayerState* s, bool save) {
 
 static void coop_copies_follow(CPUState* cpu);
 static void coop_restore_held(CPUState* cpu);
+static void coop_rehold(CPUState* cpu);
 
 // The player's look for threats round them (0x800CBE7C(node): the threat
 // search, 0x80032174, every 16th frame), and where it keeps what it found
@@ -7809,6 +7943,7 @@ static void coop_player_turn(CPUState* cpu) {
     coop_bytes(cpu, COOP_CAMERA, camera, sizeof camera, false);
     coop_state(cpu, &g_coop_state[0], false);
     coop_restore_held(cpu);
+    coop_rehold(cpu);
     coop_copies_follow(cpu);
     g_coop_turn = false;
     static bool told;
@@ -8349,7 +8484,11 @@ static void coop_bar_frame(CPUState* cpu) {
     }
 }
 
-// The game's look-up of a node by id: player 2's bars by theirs.
+// The game's look-up of a node by id: player 2's bars by theirs, and in
+// their Tome their hand and copies (hle_find_by_id, which this entry's one
+// intercept hands the rest to: installed after it, hle_find_by_id never
+// was, and player 2's equipping took player 1's weapon).
+static void hle_find_by_id(CPUState* cpu);
 static void coop_find_node(CPUState* cpu) {
     const u32 id = cpu->gpr[3];
     if (id >= COOP_BAR_ID && id < COOP_BAR_ID + COOP_BARS && g_coop_p2 != 0u) {
@@ -8360,7 +8499,7 @@ static void coop_find_node(CPUState* cpu) {
             return;
         }
     }
-    g_hle_passthrough = true;
+    hle_find_by_id(cpu);
 }
 
 // Mods' Cheats, each on or off (hle_cheat_set, from the in-game menu), kept
@@ -8963,6 +9102,12 @@ static void coop_copies_reset(void) {
 
 static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make) {
     coop_copies_reset();
+    // A copy asked for by its own id (equipment saved while it was so
+    // listed) is itself, not the original to copy again.
+    for (int i = 0; i < 32; i++)
+        if (g_coop_copies[i].node != 0u && mem_read32(cpu, g_coop_copies[i].node + 16u) == id &&
+            coop_listed(cpu, g_coop_copies[i].node))
+            return g_coop_copies[i].node;
     int free_at = -1;
     for (int i = 0; i < 32; i++) {
         if (g_coop_copies[i].node != 0u && g_coop_copies[i].id == id) {
@@ -9066,6 +9211,7 @@ static void coop_copies_follow(CPUState* cpu) {
         if (!guest_ram_range_valid(cpu, held, COOP_OBJECT_ROOM + 4u) || mem_read32(cpu, held + 372u) != p2)
             continue;
         coop_copy_kind(cpu, i);
+        coop_copy_own_kind(cpu, i, node);
         for (u32 at = 0u; at < 60u; at += 4u)
             if (at < 12u || at >= 44u)
                 mem_write32(cpu, held + at, mem_read32(cpu, p2 + at));
@@ -9127,6 +9273,64 @@ static void coop_restore_held(CPUState* cpu) {
     fprintf(stderr, "[coop] player 2's copy of %u from the save (node 0x%08X) back in their hand\n", id, node);
 }
 
+// Player 2's equipment can name a thing held (an entry: its id, then two
+// words, as 9, 2, 1 the Tulwar, 11, 2, 0 the Chakrams) with no copy of it in
+// their hand: the copies are
+// known here only (g_coop_copies), and a quick save loaded, or one gone with
+// a load, left it lost. Theirs is put in their hand as the Tome puts a
+// thing there (0x800C994C(equipment, id), their copy made for it by
+// hle_find_by_id). Looked at once a second.
+#define EQUIP_HOLD 0x800C994Cu
+#define EQUIP_ENTRIES 388u
+static void coop_rehold(CPUState* cpu) {
+    static unsigned turns, tries;
+    static u32 tries_for;
+    if (++turns % 60u != 0u || g_coop_tome_p2 || g_coop_p2 == 0u)
+        return;
+    if (tries_for != g_coop_p2)
+        tries_for = g_coop_p2, tries = 0u;
+    const u32 p2 = mem_read32(cpu, g_coop_p2 + 52u);
+    u32 own = 0u;
+    const u32 find[2] = {mem_read32(cpu, g_coop_p2 + 16u), 0u};
+    if (tries >= 3u || !guest_ram_range_valid(cpu, p2, 376u) ||
+        !hle_guest_call(cpu, EQUIP_FIND, find, 2, 0.0, &own) || own == 0u)
+        return;
+    const u32 id = mem_read32(cpu, own + EQUIP_ENTRIES) != 0u ? mem_read32(cpu, own + 4u) : 0u;
+    if (id == 0u) {
+        // Nothing held, so none of their copies is in their hand (one was
+        // left there by letting go while their Tome took player 1's): let
+        // go of as letting go leaves it (holder 0).
+        for (int i = 0; i < 32; i++) {
+            const u32 copy = g_coop_copies[i].node;
+            const u32 object = copy != 0u ? mem_read32(cpu, copy + 52u) : 0u;
+            if (guest_ram_range_valid(cpu, object, 376u) && mem_read32(cpu, object + 372u) == p2) {
+                mem_write32(cpu, object + 372u, 0u);
+                fprintf(stderr, "[coop] player 2 held nothing: their copy of %u out of their hand\n",
+                        g_coop_copies[i].id);
+            }
+        }
+        return;
+    }
+    for (u32 node = 0u, n = 0u; n < 1024u && (node = coop_next(cpu, node)) != 0u; n++) {
+        const u32 object = mem_read32(cpu, node + 52u);
+        if (node != g_coop_p2 && guest_ram_range_valid(cpu, object, 376u) && mem_read32(cpu, object + 372u) == p2) {
+            tries = 0u;
+            return;  // something is in their hand
+        }
+    }
+    tries++;
+    // Their equipment kept as it was (holding lists the thing again).
+    u8 record[408];
+    coop_bytes(cpu, own, record, sizeof record, true);
+    coop_tome_player(cpu, true);
+    u32 ignore = 0u;
+    const u32 hold[2] = {own, id};
+    hle_guest_call(cpu, EQUIP_HOLD, hold, 2, 0.0, &ignore);
+    coop_tome_player(cpu, false);
+    coop_bytes(cpu, own, record, sizeof record, false);
+    fprintf(stderr, "[coop] player 2 held %u with nothing in their hand: their copy put there again\n", id);
+}
+
 // ED_COPY_WATCH=1 (testing): the readying and letting go of a copy's
 // animation buffers (0x8011F460, 0x8011FC8C), and who called.
 static void notify_copy_watch(CPUState* cpu) {
@@ -9172,9 +9376,10 @@ static void notify_copy_watch(CPUState* cpu) {
         }
 }
 
+// In their Tome and in their turn (a throw readies the next Chakram).
 static void hle_find_by_id(CPUState* cpu) {
     g_hle_passthrough = true;
-    if (!g_coop_tome_p2 || g_coop_p2 == 0u)
+    if (!(g_coop_tome_p2 || g_coop_turn) || g_coop_p2 == 0u)
         return;
     const u32 id = cpu->gpr[3];
     u32 node = 0u;
@@ -9252,11 +9457,13 @@ static void coop_tome_player(CPUState* cpu, bool p2) {
         }
         g_coop_tome_p2 = true;
         coop_quick_swap(cpu, true);  // their Quick Spell page sets theirs
+        coop_kinds(cpu, true);       // their own counts
     } else if (!p2 && g_coop_tome_p2) {
         for (int i = 0; i < 2; i++)
             mem_write32(cpu, who[i], was[i]);
         g_coop_tome_p2 = false;
         coop_quick_swap(cpu, false);
+        coop_kinds(cpu, false);
         g_coop_next_cast_p2 = mem_read32(cpu, COOP_NEXT_CAST) != 0u;  // what they cast from it is theirs
         coop_equip_names(cpu, true);
     }
