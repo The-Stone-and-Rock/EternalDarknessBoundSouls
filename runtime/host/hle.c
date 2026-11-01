@@ -7415,12 +7415,12 @@ static void coop_bytes(CPUState* cpu, u32 address, u8* buffer, u32 size, bool sa
 // (+0x4C, a word of its own to each kind). While player 2's Tome is open,
 // it shows and uses theirs; a kind new to them starts with player 1's
 // count.
-#define KIND_RECORD 4u
-#define KIND_SIZE 88u
-#define KIND_COUNT 0x44u
-#define KIND_MARK 0x4Cu
-#define SCRATCH_KINDS 0x81FF0000u  // past player 2's body (SCRATCH_BODY2), KIND_SIZE each
-#define SCRATCH_KINDS_FROM (SCRATCH_KINDS + 32u * KIND_SIZE)  // each one's original, a word each
+#define THING_KIND_RECORD 4u
+#define THING_KIND_SIZE 88u
+#define THING_KIND_COUNT 0x44u
+#define THING_KIND_MARK 0x4Cu
+#define SCRATCH_KINDS 0x81FF0000u  // past player 2's body (SCRATCH_BODY2), THING_KIND_SIZE each
+#define SCRATCH_KINDS_FROM (SCRATCH_KINDS + 32u * THING_KIND_SIZE)  // each one's original, a word each
 #define COOP_KINDS 96
 typedef struct {
     u32 mark;
@@ -7435,7 +7435,7 @@ static struct {
 static int g_coop_kinds_in_count, g_coop_kinds_depth;
 
 static bool coop_own_kind(u32 kind) {
-    return kind >= SCRATCH_KINDS && kind < SCRATCH_KINDS + 32u * KIND_SIZE;
+    return kind >= SCRATCH_KINDS && kind < SCRATCH_KINDS + 32u * THING_KIND_SIZE;
 }
 
 static CoopKind* coop_kind(u32 mark, bool make) {
@@ -7455,13 +7455,13 @@ static void coop_kinds(CPUState* cpu, bool p2) {
         return;
     if (!p2) {
         for (int i = 0; i < g_coop_kinds_in_count; i++) {
-            const u32 kind = g_coop_kinds_in[i].kind, count = mem_read16(cpu, kind + KIND_COUNT);
-            CoopKind* own = coop_kind(mem_read32(cpu, kind + KIND_MARK), false);
+            const u32 kind = g_coop_kinds_in[i].kind, count = mem_read16(cpu, kind + THING_KIND_COUNT);
+            CoopKind* own = coop_kind(mem_read32(cpu, kind + THING_KIND_MARK), false);
             if (g_coop_kinds_in[i].own != 0u)
-                mem_write16(cpu, g_coop_kinds_in[i].own + KIND_COUNT, (u16)count);
+                mem_write16(cpu, g_coop_kinds_in[i].own + THING_KIND_COUNT, (u16)count);
             else if (own != NULL)
                 own->count = (u16)count;
-            mem_write16(cpu, kind + KIND_COUNT, g_coop_kinds_in[i].p1);
+            mem_write16(cpu, kind + THING_KIND_COUNT, g_coop_kinds_in[i].p1);
         }
         g_coop_kinds_in_count = 0;
         return;
@@ -7469,9 +7469,9 @@ static void coop_kinds(CPUState* cpu, bool p2) {
     int n = 0;
     for (u32 node = 0u, k = 0u; k < 1024u && n < COOP_KINDS && (node = coop_next(cpu, node)) != 0u; k++) {
         const u32 record = mem_read32(cpu, node + 44u);
-        const u32 kind = guest_ram_range_valid(cpu, record, 8u) ? mem_read32(cpu, record + KIND_RECORD) : 0u;
-        if (coop_own_kind(kind) || !guest_ram_range_valid(cpu, kind, KIND_SIZE) ||
-            mem_read32(cpu, kind + KIND_MARK) == 0u)
+        const u32 kind = guest_ram_range_valid(cpu, record, 8u) ? mem_read32(cpu, record + THING_KIND_RECORD) : 0u;
+        if (coop_own_kind(kind) || !guest_ram_range_valid(cpu, kind, THING_KIND_SIZE) ||
+            mem_read32(cpu, kind + THING_KIND_MARK) == 0u)
             continue;
         bool seen = false;
         for (int i = 0; i < n && !seen; i++)
@@ -7481,21 +7481,21 @@ static void coop_kinds(CPUState* cpu, bool p2) {
         u32 copy_kind = 0u;
         for (u32 c = 0u; c < 32u && copy_kind == 0u; c++)
             if (mem_read32(cpu, SCRATCH_KINDS_FROM + c * 4u) == kind)
-                copy_kind = SCRATCH_KINDS + c * KIND_SIZE;
-        CoopKind* own = copy_kind != 0u ? NULL : coop_kind(mem_read32(cpu, kind + KIND_MARK), true);
+                copy_kind = SCRATCH_KINDS + c * THING_KIND_SIZE;
+        CoopKind* own = copy_kind != 0u ? NULL : coop_kind(mem_read32(cpu, kind + THING_KIND_MARK), true);
         if (copy_kind == 0u && own == NULL)
             continue;
-        const u16 count = mem_read16(cpu, kind + KIND_COUNT);
+        const u16 count = mem_read16(cpu, kind + THING_KIND_COUNT);
         if (own != NULL && !own->used) {
             own->used = 1u;
-            own->mark = mem_read32(cpu, kind + KIND_MARK);
+            own->mark = mem_read32(cpu, kind + THING_KIND_MARK);
             own->count = count;
         }
         g_coop_kinds_in[n].kind = kind;
         g_coop_kinds_in[n].p1 = count;
         g_coop_kinds_in[n].own = copy_kind;
         n++;
-        mem_write16(cpu, kind + KIND_COUNT, copy_kind != 0u ? mem_read16(cpu, copy_kind + KIND_COUNT) : own->count);
+        mem_write16(cpu, kind + THING_KIND_COUNT, copy_kind != 0u ? mem_read16(cpu, copy_kind + THING_KIND_COUNT) : own->count);
     }
     g_coop_kinds_in_count = n;
 }
@@ -7504,16 +7504,16 @@ static void coop_kinds(CPUState* cpu, bool p2) {
 // of its original's as it is (player 1's count, to start).
 static void coop_copy_own_kind(CPUState* cpu, int i, u32 copy) {
     const u32 record = mem_read32(cpu, copy + 44u);
-    const u32 kind = guest_ram_range_valid(cpu, record, 8u) ? mem_read32(cpu, record + KIND_RECORD) : 0u;
-    if (coop_own_kind(kind) || !guest_ram_range_valid(cpu, kind, KIND_SIZE) || g_coop_kinds_depth > 0)
+    const u32 kind = guest_ram_range_valid(cpu, record, 8u) ? mem_read32(cpu, record + THING_KIND_RECORD) : 0u;
+    if (coop_own_kind(kind) || !guest_ram_range_valid(cpu, kind, THING_KIND_SIZE) || g_coop_kinds_depth > 0)
         return;
-    const u32 own = SCRATCH_KINDS + (u32)i * KIND_SIZE;
-    for (u32 at = 0u; at < KIND_SIZE; at += 4u)
+    const u32 own = SCRATCH_KINDS + (u32)i * THING_KIND_SIZE;
+    for (u32 at = 0u; at < THING_KIND_SIZE; at += 4u)
         mem_write32(cpu, own + at, mem_read32(cpu, kind + at));
     mem_write32(cpu, SCRATCH_KINDS_FROM + (u32)i * 4u, kind);
-    mem_write32(cpu, record + KIND_RECORD, own);
+    mem_write32(cpu, record + THING_KIND_RECORD, own);
     fprintf(stderr, "[coop] player 2's copy (node 0x%08X) counts on its own (kind 0x%08X from 0x%08X, %u)\n", copy, own,
-            kind, mem_read16(cpu, own + KIND_COUNT));
+            kind, mem_read16(cpu, own + THING_KIND_COUNT));
 }
 
 // Quick state: player 2's counts (states saved before them start them
@@ -8272,6 +8272,9 @@ static void coop_seen_shared(CPUState* cpu) {
 #define COOP_BAR_HANDLER 0x80029454u
 #define COOP_BAR_CLASS 11u
 #define COOP_BARS 3              // health, sanity and magick
+#define COOP_AMMO COOP_BARS      // the slot after them: what a throw has left (coop_bar_copy)
+#define COOP_AMMO_CLASS 70u
+#define COOP_AMMO_LEFT (-120)    // HUD units: player 2's count, as far in from their half's left edge as player 1's
 #define COOP_BAR_ID 0x00FFFFF0u  // + kind: past the ids the game gives out
 #define COOP_BAR_AWAY 4096       // HUD units; the renderer's split-screen view brings them back
 #define COOP_BAR_SCREEN 640      // the HUD's width
@@ -8283,7 +8286,7 @@ static void coop_seen_shared(CPUState* cpu) {
 #define STAT_MOST 0x80034F7Cu     // (node, kind, out): a character's most health, sanity or magick
 static struct {
     u32 from, p2;  // player 1's bar it was copied from, and for whom
-} g_coop_bar[COOP_BARS];
+} g_coop_bar[COOP_BARS + 1];
 static bool g_coop_bar_frame;
 
 static u32 coop_bar_list(CPUState* cpu, u32 node) {
@@ -8304,14 +8307,21 @@ static u32 coop_bar_source(CPUState* cpu, int kind) {
 
 // Player 2's copy of a kind's bar, made from player 1's when there is none
 // for them yet, and its id in their list.
+// Player 2's copy of player 1's bar (kind 0..2) or of the count a throw
+// shows (COOP_AMMO: player 1's at the bottom right, its id at their info's
+// +0, +112, where a throw tells it, 0x800BCF78; player 2's had none, and
+// their throws showed nothing), made once.
 static u32 coop_bar_copy(CPUState* cpu, int kind, u32 from) {
     const u32 node = SCRATCH_HUD + (u32)kind * COOP_BAR_SLOT;
     const u32 info = node + 64u, record = info + COOP_INFO_SIZE;
     const u32 id = COOP_BAR_ID + (u32)kind;
     const u32 list = coop_bar_list(cpu, g_coop_p2);
-    if (list == 0u || cpu->ram_size < SCRATCH_END - GC_RAM_BASE)
+    const u32 p2_info = mem_read32(cpu, g_coop_p2 + 40u);
+    const u32 hud = guest_ram_range_valid(cpu, p2_info, 4u) ? mem_read32(cpu, p2_info) : 0u;
+    if ((kind == COOP_AMMO ? !guest_ram_range_valid(cpu, hud, 116u) : list == 0u) ||
+        cpu->ram_size < SCRATCH_END - GC_RAM_BASE)
         return 0u;
-    const u32 at = list + 4u + (u32)kind * 4u;
+    const u32 at = kind == COOP_AMMO ? hud + 112u : list + 4u + (u32)kind * 4u;
     if (mem_read32(cpu, at) != 0u && mem_read32(cpu, at) != id)
         return 0u;  // theirs already (not the game's way, but kept)
     mem_write32(cpu, at, id);
@@ -8329,8 +8339,14 @@ static u32 coop_bar_copy(CPUState* cpu, int kind, u32 from) {
     mem_write32(cpu, node + 16u, id);
     mem_write32(cpu, node + 40u, info);
     mem_write32(cpu, info + 20u, record);
+    // Mirrored in player 2's half: the bars at the far right, the count at
+    // the bottom left (at the bottom right it was over their bars), as near
+    // the edge as player 1's: the widescreen HUD moves player 1's out to the
+    // screen's edge, and not player 2's copies.
     const s16 x = (s16)mem_read16(cpu, from_record + 32u);
-    mem_write16(cpu, record + 32u, (u16)(s16)(COOP_BAR_AWAY + COOP_BAR_SCREEN - x - COOP_BAR_WIDTH));
+    mem_write16(cpu, record + 32u,
+                (u16)(s16)(kind == COOP_AMMO ? COOP_BAR_AWAY + COOP_AMMO_LEFT
+                                             : COOP_BAR_AWAY + COOP_BAR_SCREEN - x - COOP_BAR_WIDTH));
     g_coop_bar[kind].from = from;
     g_coop_bar[kind].p2 = g_coop_p2;
     if (getenv("ED_COOP_BAR_LOG") != NULL)
@@ -8445,8 +8461,24 @@ static void coop_bar_length(CPUState* cpu, u32 record, u32 who, int kind) {
 // player 2's copy has its frame too.
 static void coop_bar_frame(CPUState* cpu) {
     const u32 node = cpu->gpr[3];
-    if (g_coop_bar_frame || !sda_ready(cpu) || !guest_ram_range_valid(cpu, node, COOP_NODE_SIZE) ||
-        mem_read32(cpu, node + 8u) != COOP_BAR_CLASS)
+    if (g_coop_bar_frame || !sda_ready(cpu) || !guest_ram_range_valid(cpu, node, COOP_NODE_SIZE))
+        return;
+    if (mem_read32(cpu, node + 8u) == COOP_AMMO_CLASS) {
+        // Player 1's count: player 2's has its frame with it.
+        const u32 p1_info = mem_read32(cpu, mem_read32(cpu, cpu->gpr[13] - 21492u) + 40u);
+        const u32 hud = guest_ram_range_valid(cpu, p1_info, 4u) ? mem_read32(cpu, p1_info) : 0u;
+        if (!g_settings.mod_coop || g_coop_p2 == 0u || !coop_listed(cpu, g_coop_p2) ||
+            !guest_ram_range_valid(cpu, hud, 116u) || mem_read32(cpu, hud + 112u) != mem_read32(cpu, node + 16u))
+            return;
+        u32 copy = coop_bar_copy(cpu, COOP_AMMO, node), ignore = 0u;
+        if (copy == 0u)
+            return;
+        g_coop_bar_frame = true;
+        hle_guest_call(cpu, COOP_BAR_FRAME, &copy, 1, 0.0, &ignore);
+        g_coop_bar_frame = false;
+        return;
+    }
+    if (mem_read32(cpu, node + 8u) != COOP_BAR_CLASS)
         return;
     // Player 1's own bars, played or not with player 2.
     const u32 p1 = mem_read32(cpu, cpu->gpr[13] - 21492u);
@@ -8491,7 +8523,7 @@ static void coop_bar_frame(CPUState* cpu) {
 static void hle_find_by_id(CPUState* cpu);
 static void coop_find_node(CPUState* cpu) {
     const u32 id = cpu->gpr[3];
-    if (id >= COOP_BAR_ID && id < COOP_BAR_ID + COOP_BARS && g_coop_p2 != 0u) {
+    if (id >= COOP_BAR_ID && id <= COOP_BAR_ID + COOP_AMMO && g_coop_p2 != 0u) {
         const int kind = (int)(id - COOP_BAR_ID);
         const u32 node = SCRATCH_HUD + (u32)kind * COOP_BAR_SLOT;
         if (g_coop_bar[kind].p2 == g_coop_p2 && mem_read32(cpu, node + 16u) == id) {
