@@ -3671,6 +3671,42 @@ static void hle_card_frame(CPUState* cpu) {
     g_hle_passthrough = !(cpu->lr >= CARD_SCREEN_DRAW && cpu->lr < CARD_SCREEN_DRAW_END);
 }
 
+// A chapter picked in Jump to Game starts straight away. The game has just
+// been reset, so the title's look for cards being put in (0x8001BF68) finds
+// slot A's as new, checks it, and holds the chapter's start (0x8001A164) on
+// the memory card screen ("Press A to Continue": its step 0x8001CCC8, which
+// runs only while it is up) until A. While that screen is up on the title
+// (mode 0) and it is not Load Game's (skip_card_select), A is pressed for
+// the player. The screen is drawn see-through meanwhile (its step draws it at
+// the fade level in r3), so it does not flash up as it passes.
+#define CARD_SCREEN_LOOK 0x8001CCC8u
+static unsigned long long g_card_screen_drawn;  // the frame the screen's step last ran
+
+static void notify_card_screen(CPUState* cpu) {
+    g_card_screen_drawn = cpu->timebase / 675000ull;
+    if (sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 26240u) == 0u &&
+        mem_read32(cpu, cpu->gpr[13] - 26188u) == 0u && mem_read32(cpu, SAVE_LIST_FLAG) != 1u)
+        cpu->gpr[3] = 0u;
+}
+
+static void skip_card_inserted(CPUState* cpu, DolPadState* pad) {
+    static unsigned reads;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    const bool up = g_card_screen_drawn != 0u && frame - g_card_screen_drawn <= 2u && sda_ready(cpu) &&
+                    mem_read32(cpu, cpu->gpr[13] - 26188u) == 0u && mem_read32(cpu, SAVE_LIST_FLAG) != 1u;
+    if (!up) {
+        reads = 0u;
+        return;
+    }
+    if (reads++ == 0u)
+        fprintf(stderr, "[load] the memory card screen after Jump to Game passed over\n");
+    if (reads % 6u >= 3u)
+        return;  // released between presses
+    pad->button |= 0x0100u;
+    pad->analog_a = 0xFFu;
+    pad->error = 0;
+}
+
 static void skip_card_select(CPUState* cpu, DolPadState* pad) {
     static bool came_from_list;
     static unsigned reads, since_list = ~0u;
@@ -3685,6 +3721,7 @@ static void skip_card_select(CPUState* cpu, DolPadState* pad) {
     const bool card = mem_read32(cpu, CARD_STAGE) == 6u && mem_read32(cpu, CARD_THREAD_PC) == CARD_SELECT_PC;
     if (!card) {
         reads = 0u;
+        skip_card_inserted(cpu, pad);
         return;
     }
     if (reads++ == 0u) {
@@ -9744,6 +9781,12 @@ static void find_coop(CPUState* cpu) {
                 HleDispatchEntry* frame = hle_dispatch_entry(CARD_FRAME_DRAW);
                 if (frame != NULL && frame->intercept == NULL && frame->notify == NULL)
                     frame->intercept = hle_card_frame;
+                // The card screen's step (stwu r1,-96(r1)), seen to pass it
+                // over after Jump to Game.
+                HleDispatchEntry* screen = hle_dispatch_entry(CARD_SCREEN_LOOK);
+                if (mem_read32(cpu, CARD_SCREEN_LOOK) == 0x9421FFA0u && screen != NULL && screen->intercept == NULL &&
+                    screen->notify == NULL)
+                    screen->notify = notify_card_screen;
             }
             static const u32 kWatch[] = {0x8011F460u, 0x8011FC8Cu, 0x8011D33Cu, 0x8012123Cu, 0x8011D394u};
             for (int i = 0; getenv("ED_COPY_WATCH") != NULL && i < 5; i++) {
