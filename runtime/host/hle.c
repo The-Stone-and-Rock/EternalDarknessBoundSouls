@@ -7463,6 +7463,7 @@ static struct {
     u32 kind;
     u16 p1;
     u32 own;  // player 2's copy's kind, or 0 (theirs is kept in g_coop_kinds)
+    bool bare;  // no copy yet, and player 1's enchantment put by
     u32 enchant[3];  // player 1's enchantment, while their copy's is in
 } g_coop_kinds_in[COOP_KINDS];  // the game's kinds while player 2's are in, and player 1's counts
 static int g_coop_kinds_in_count, g_coop_kinds_depth;
@@ -7503,6 +7504,8 @@ static void coop_kinds(CPUState* cpu, bool p2) {
                 mem_write32(cpu, g_coop_kinds_in[i].own + kCoopEnchant[w], mem_read32(cpu, kind + kCoopEnchant[w]));
                 mem_write32(cpu, kind + kCoopEnchant[w], g_coop_kinds_in[i].enchant[w]);
             }
+            for (int w = 1; g_coop_kinds_in[i].bare && w < 3; w++)
+                mem_write32(cpu, kind + kCoopEnchant[w], g_coop_kinds_in[i].enchant[w]);
         }
         g_coop_kinds_in_count = 0;
         return;
@@ -7538,6 +7541,14 @@ static void coop_kinds(CPUState* cpu, bool p2) {
         for (int w = 0; copy_kind != 0u && w < 3; w++) {
             g_coop_kinds_in[n].enchant[w] = mem_read32(cpu, kind + kCoopEnchant[w]);
             mem_write32(cpu, kind + kCoopEnchant[w], mem_read32(cpu, copy_kind + kCoopEnchant[w]));
+        }
+        // No copy of theirs yet: what they would have is not enchanted (as coop_copy_own_kind).
+        g_coop_kinds_in[n].bare = copy_kind == 0u && mem_read32(cpu, kind + kCoopEnchant[1]) != 0u;
+        if (g_coop_kinds_in[n].bare) {
+            g_coop_kinds_in[n].enchant[1] = mem_read32(cpu, kind + kCoopEnchant[1]);
+            g_coop_kinds_in[n].enchant[2] = mem_read32(cpu, kind + kCoopEnchant[2]);
+            mem_write32(cpu, kind + kCoopEnchant[1], 0u);
+            mem_write32(cpu, kind + kCoopEnchant[2], g_coop_kinds_in[n].enchant[2] & 0xFF0000FFu);
         }
         n++;
         mem_write16(cpu, kind + THING_KIND_COUNT, copy_kind != 0u ? mem_read16(cpu, copy_kind + THING_KIND_COUNT) : own->count);
@@ -7740,9 +7751,16 @@ static void coop_quick_cast(CPUState* cpu) {
 static bool g_coop_next_cast_p2;
 static bool g_coop_tome_cast;  // casting it
 static unsigned g_coop_cast_words;  // pad reads the item their cast shows is yet to come
+static unsigned g_coop_p1_cast_words;  // and player 1's
+static bool g_coop_p1_cast_shown;      // it is showing: player 2's half keeps its view
+bool hle_coop_player2_held(void) { return g_coop_p1_cast_shown; }
 static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make);
 
 static void coop_cast(CPUState* cpu) {
+    // Player 1's, on an item (Enchant): what it shows is theirs (coop_menu_input).
+    if (!g_coop_next_cast_p2 && cpu->gpr[4] == COOP_NEXT_CAST && cpu->lr == COOP_NEXT_CAST_CALL && sda_ready(cpu) &&
+        mem_read32(cpu, COOP_SPELL_ITEM) != 0u)
+        g_coop_p1_cast_words = COOP_CAST_WORDS_WAIT;
     if (!g_coop_next_cast_p2 || cpu->gpr[4] != COOP_NEXT_CAST || cpu->lr != COOP_NEXT_CAST_CALL || g_coop_p2 == 0u ||
         !sda_ready(cpu) || !coop_listed(cpu, g_coop_p2)) {
         g_hle_passthrough = true;
@@ -7900,6 +7918,32 @@ static void coop_spells_update(CPUState* cpu) {
             coop_be_player2(cpu, false, was);
         mem_write32(cpu, spell, mem_read32(cpu, spell) + mem_read32(cpu, cpu->gpr[13] - 27032u));
     }
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+// An enchanted thing's look (0x800D9304(node), from its update) ends the
+// controlled character's cast, the spell having left the enchanting to it. A
+// thing of player 2's ends theirs: player 1's would be ended, and theirs would
+// stay, no other cast begun.
+#define COOP_ENCHANTED_LOOK 0x800D9304u
+
+static void coop_enchanted_look(CPUState* cpu) {
+    static bool running;
+    const u32 node = cpu->gpr[3];
+    const u32 record = guest_ram_range_valid(cpu, node, 48u) ? mem_read32(cpu, node + 44u) : 0u;
+    const u32 kind = guest_ram_range_valid(cpu, record, 8u) ? mem_read32(cpu, record + THING_KIND_RECORD) : 0u;
+    if (running || g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu) || !coop_own_kind(kind) ||
+        !coop_listed(cpu, g_coop_p2)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    u32 was[5], ignore = 0u;
+    coop_be_player2(cpu, true, was);
+    running = true;
+    hle_guest_call(cpu, COOP_ENCHANTED_LOOK, &node, 1, 0.0, &ignore);
+    running = false;
+    coop_be_player2(cpu, false, was);
     g_hle_passthrough = false;
     g_hle_tail_call = false;
 }
@@ -8961,8 +9005,8 @@ static void coop_player_turn(CPUState* cpu) {
     coop_state(cpu, &g_coop_state[0], false);
     coop_restore_held(cpu);
     coop_rehold(cpu);
+    coop_kinds(cpu, false);  // out first: a copy is given a kind of its own only with them out
     coop_copies_follow(cpu);
-    coop_kinds(cpu, false);
     g_coop_turn = false;
     static bool told;
     if (!told) {
@@ -10945,6 +10989,17 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             coop_cameras_lend(cpu, true);
         }
     }
+    // Player 1's is tied to the game's camera too: seen from player 2's, it lay
+    // across their half.
+    if (g_coop_p1_cast_words > 0u && owner < 0) {
+        g_coop_p1_cast_words--;
+        if (coop_busy(cpu)) {
+            g_coop_p1_cast_words = 0u;
+            g_coop_p1_cast_shown = true;
+        }
+    }
+    if (g_coop_p1_cast_shown && !coop_busy(cpu))
+        g_coop_p1_cast_shown = false;
     // A close-up player 2's press opened stops play for them; a moment
     // without (between its pages) does not end it.
     static unsigned closeup_grace;
@@ -11487,6 +11542,14 @@ static void find_coop(CPUState* cpu) {
         cast->intercept = coop_cast;
     } else {
         fprintf(stderr, "[coop] the cast not found: what player 2 casts from their Tome is player 1's\n");
+    }
+    // An enchanted thing's look (stwu r1,-16(r1); ... or r30,r3,r3 at +0x14).
+    HleDispatchEntry* enchanted = hle_dispatch_entry(COOP_ENCHANTED_LOOK);
+    if (mem_read32(cpu, COOP_ENCHANTED_LOOK) == 0x9421FFF0u && mem_read32(cpu, COOP_ENCHANTED_LOOK + 0x14u) == 0x7C7E1B78u &&
+        enchanted != NULL && enchanted->intercept == NULL && enchanted->notify == NULL) {
+        enchanted->intercept = coop_enchanted_look;
+    } else {
+        fprintf(stderr, "[coop] an enchanted thing's look not found: player 2 may enchant only once\n");
     }
     // A lasting spell's sign following the one tied to it (stwu r1,-96(r1);
     // ... stmw r27,76(r1) at +0x10), player 2's over them.

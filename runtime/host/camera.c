@@ -1524,6 +1524,7 @@ void aurora_split_hold(int player);
 #endif
 
 bool hle_coop_player2_position(CPUState* cpu, float out[3]);  // hle.c
+bool hle_coop_player2_held(void);
 bool hle_coop_screen(void);                                    // hle.c
 bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* zoom);  // hle.c
 bool hle_game_menu_open(CPUState* cpu);                         // hle.c
@@ -1708,7 +1709,7 @@ void camera_split_update(CPUState* cpu) {
     const Vec3 rel = sub(eye2, eye);
 #ifdef ED_AURORA
     static const float kIdentity[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
-    aurora_split_hold(-1);
+    aurora_split_hold(hle_coop_player2_held() ? 1 : -1);
     aurora_split_set_view(0, kIdentity, 0.0f, 0.0f, 0.0f, 1.0f, false);
     aurora_split_set_view(1, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), zoom2, true);
     aurora_split_set(true, g_settings.mod_split);
