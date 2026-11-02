@@ -1520,6 +1520,7 @@ void camera_held_end(CPUState* cpu) {
 #ifdef ED_AURORA
 void aurora_split_set(bool on, int layout);
 void aurora_split_set_view(int player, const float rot[9], float x, float y, float z, float zoom, bool hide_hud);
+void aurora_split_hold(int player);
 #endif
 
 bool hle_coop_player2_position(CPUState* cpu, float out[3]);  // hle.c
@@ -1555,6 +1556,7 @@ static void look_axes(Vec3 eye, Vec3 target, Vec3 up, Vec3* x, Vec3* y, Vec3* z)
 
 static void split_off(unsigned long long frame, const char* why) {
 #ifdef ED_AURORA
+    aurora_split_hold(-1);
     if (g_split_on)
         aurora_split_set(false, 0);
 #endif
@@ -1583,7 +1585,18 @@ void camera_split_update(CPUState* cpu) {
     }
 #ifdef ED_AURORA
     if (hle_coop_screen()) {
-        split_off(frame, "player 2's close-up");
+        // Theirs in their half at its shape, as player 1's close-up is: the
+        // game's camera is theirs, and player 1's half keeps their last view.
+        // The whole frame fitted into the half had bars above and below it.
+        static const float kSame[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+        aurora_split_set_view(0, kSame, 0.0f, 0.0f, 0.0f, 1.0f, true);
+        aurora_split_set_view(1, kSame, 0.0f, 0.0f, 0.0f, 1.0f, false);
+        aurora_split_hold(0);
+        aurora_split_set(true, g_settings.mod_split);
+        if (!g_split_on)
+            fprintf(stderr, "[split] on at frame %llu (player 2's close-up)\n", frame);
+        g_split_on = true;
+        g_p2_view = false;
         return;
     }
 #endif
@@ -1695,6 +1708,7 @@ void camera_split_update(CPUState* cpu) {
     const Vec3 rel = sub(eye2, eye);
 #ifdef ED_AURORA
     static const float kIdentity[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    aurora_split_hold(-1);
     aurora_split_set_view(0, kIdentity, 0.0f, 0.0f, 0.0f, 1.0f, false);
     aurora_split_set_view(1, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), zoom2, true);
     aurora_split_set(true, g_settings.mod_split);

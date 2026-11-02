@@ -8406,6 +8406,34 @@ static void coop_run_script(CPUState* cpu) {
     }
 }
 
+// A prompt with no script of its own (its script -2): a look its zone made ready
+// (0x80307108), which the game's use of a prompt opens (0x80006EBC(its +4, 0): a
+// press of the action button, the prompt the game's own, +28 * 6). Player 2's
+// press has it opened with them the player and their prompt the game's: the
+// press went unheard, a script being what it was looked for.
+#define COOP_PROMPT_CLOSE_UP (-2)
+#define COOP_PROMPT_USE 0x80006EBCu
+
+static void coop_close_up_start(CPUState* cpu, s32 prompt) {
+    coop_use_start(cpu, COOP_PROMPT_CLOSE_UP, true);
+    if (!g_coop_use.active)
+        return;
+    g_coop_use.script = 0;
+    const u32 own = PROMPT_SLOTS + 6u * 28u;
+    for (u32 i = 0u; i < 6u; i++) {
+        const u32 slot = PROMPT_SLOTS + i * 28u;
+        if ((s32)mem_read32(cpu, slot + 8u) != prompt || (s32)mem_read32(cpu, slot + 12u) != COOP_PROMPT_CLOSE_UP)
+            continue;
+        for (u32 at = 0u; at < 28u; at += 4u)
+            mem_write32(cpu, own + at, mem_read32(cpu, slot + at));
+        break;
+    }
+    g_coop_use.found = true;  // what it opens is theirs, their prompts and cameras in
+    cpu->gpr[3] = mem_read32(cpu, own + 4u);
+    cpu->gpr[4] = 0u;
+    cpu->pc = COOP_PROMPT_USE;
+}
+
 // No examine close-ups in co-op (ED_COOP_EXAMINE=1 keeps them). An examine
 // (0x8001000C) makes its words and opens them in the message window
 // (0x80024310(words, script, 0), from 0x80010134), which freezes the player
@@ -8469,10 +8497,12 @@ static void hle_coop_controller(CPUState* cpu) {
             coop_use_start(cpu, script, g_coop_close.p2);
         return;
     }
-    if (g_coop_use_script > 0) {
+    if (g_coop_use_script != 0) {
         const s32 script = g_coop_use_script;
         g_coop_use_script = 0;
-        if (coop_prompt_is_exit(g_coop_use_prompt)) {
+        if (script == COOP_PROMPT_CLOSE_UP) {
+            coop_close_up_start(cpu, g_coop_use_prompt);
+        } else if (coop_prompt_is_exit(g_coop_use_prompt)) {
             // A way to another room: the game loads rooms round player 1,
             // so it is taken as player 1 takes it, from what player 2's
             // prompt left (their script's word moved to the game's table):
@@ -8662,7 +8692,8 @@ static void coop_player_turn(CPUState* cpu) {
         const bool b = (g_coop_p2_buttons & 0x0200u) != 0u;
         if (g_coop_use_own && b && !b_was && getenv("ED_COOP_LOG") != NULL)
             fprintf(stderr, "[coop] player 2's B: prompt %d script %d\n", g_coop_prompt, g_coop_prompt_script);
-        if (g_coop_use_own && b && !b_was && g_coop_prompt >= 0 && g_coop_prompt_script > 0) {
+        if (g_coop_use_own && b && !b_was && g_coop_prompt >= 0 &&
+            (g_coop_prompt_script > 0 || g_coop_prompt_script == COOP_PROMPT_CLOSE_UP)) {
             g_coop_use_script = g_coop_prompt_script;
             g_coop_use_prompt = g_coop_prompt;
         }

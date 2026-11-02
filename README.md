@@ -219,6 +219,12 @@ cp /path/to/disc.iso dump/GEDP01.iso          # the European disc
   `EternalDarkness`, copy the DLLs from the build tree next to the exe, then
   `play.bat`. For the release folder, `tools/win/stage-win-build.bat` on the
   PC gathers the build, then `tools/win/make-win-package.sh` on a Mac zips it.
+  **After a change that touches rendering** (anything in `.deps/GXRuntime`),
+  rebuild from a Visual Studio 2022 tools prompt (`vcvars64.bat`, the tools
+  `build-win` was configured with): with a newer Visual Studio installed, its
+  headers are picked up otherwise and the C++ fails with `STL1000`. Then save
+  the change with `git -C .deps/GXRuntime diff > patches/gxruntime/eternal-darkness.patch`:
+  `.deps` is not in git, so a fresh setup has only what the patch holds.
 - **Linux / Steam Deck**: build with clang and Ninja (`build-linux`);
   `tools/deck/make-deck-package.sh` makes a folder that builds the game from
   your disc on first start (`tools/deck/README.txt`).

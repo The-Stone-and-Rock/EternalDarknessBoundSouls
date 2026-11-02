@@ -3521,10 +3521,10 @@ index b86b214..f6b70de 100644
  AuroraBackend aurora_get_backend();
  const AuroraBackend* aurora_get_available_backends(size_t* count);
 diff --git a/graphics/aurora/include/aurora/gfx.h b/graphics/aurora/include/aurora/gfx.h
-index a13ce39..c7a75c3 100644
+index a13ce39..58b372b 100644
 --- a/graphics/aurora/include/aurora/gfx.h
 +++ b/graphics/aurora/include/aurora/gfx.h
-@@ -29,10 +29,86 @@ typedef struct {
+@@ -29,10 +29,89 @@ typedef struct {
  } AuroraStats;
  
  const AuroraStats* aurora_get_stats();
@@ -3595,6 +3595,9 @@ index a13ce39..c7a75c3 100644
 +/* A menu one player opened (the Tome) in their half (0 or 1, -1 none), the
 + * other half keeping the other player's last view; layout as above. */
 +void aurora_split_menu(int player, int layout);
++/* While split, a player's half (0 or 1, -1 none) keeps their last view: a close-up
++ * the other player has, the game's camera being theirs, shown at their half's shape. */
++void aurora_split_hold(int player);
 +/* HD texture pack images waiting their turn to be uploaded (a few a frame; all
 + * at once while photo mode steps). */
 +unsigned aurora_texture_pack_pending(void);
@@ -3612,7 +3615,7 @@ index a13ce39..c7a75c3 100644
   * EFB readback (GXRuntime recomp patch): arm a one-shot copy of the next
   * submitted frame's present source; take returns tightly packed RGBA8 rows
 diff --git a/graphics/aurora/lib/aurora.cpp b/graphics/aurora/lib/aurora.cpp
-index b09ef4d..f5bc693 100644
+index b09ef4d..515229c 100644
 --- a/graphics/aurora/lib/aurora.cpp
 +++ b/graphics/aurora/lib/aurora.cpp
 @@ -1,6 +1,17 @@
@@ -3943,7 +3946,7 @@ index b09ef4d..f5bc693 100644
  uint32_t clamp_scissor_coord(double value, uint32_t maximum) noexcept {
    if (!std::isfinite(value)) {
      return 0;
-@@ -48,6 +355,13 @@ uint32_t clamp_scissor_coord(double value, uint32_t maximum) noexcept {
+@@ -48,6 +355,15 @@ uint32_t clamp_scissor_coord(double value, uint32_t maximum) noexcept {
    return static_cast<uint32_t>(std::clamp(value, 0.0, static_cast<double>(maximum)));
  }
  
@@ -3951,13 +3954,15 @@ index b09ef4d..f5bc693 100644
 +// half (aurora_split_menu), -1 none, and the halves' layout.
 +static std::atomic<int> g_splitMenu{-1};
 +static std::atomic<int> g_splitMenuLayout{0};
++// The player whose half keeps their last view while split (aurora_split_hold), -1 none.
++static std::atomic<int> g_splitHold{-1};
 +static int split_menu_player() noexcept { return g_splitMenu.load(); }
 +static int split_menu_layout() noexcept { return g_splitMenuLayout.load(); }
 +
  void set_present_viewport(const wgpu::RenderPassEncoder& pass, const gfx::Viewport& viewport, uint32_t surfaceWidth,
                            uint32_t surfaceHeight) noexcept {
    pass.SetViewport(viewport.left, viewport.top, viewport.width, viewport.height, viewport.znear, viewport.zfar);
-@@ -106,7 +420,14 @@ AuroraInfo initialize(int argc, char* argv[], const AuroraConfig& config) noexce
+@@ -106,7 +422,14 @@ AuroraInfo initialize(int argc, char* argv[], const AuroraConfig& config) noexce
    } else {
      g_config.userPath = strdup(g_config.userPath);
    }
@@ -3973,7 +3978,7 @@ index b09ef4d..f5bc693 100644
      g_config.cachePath = SDL_GetPrefPath(nullptr, g_config.appName);
    } else {
      g_config.cachePath = strdup(g_config.cachePath);
-@@ -248,6 +569,33 @@ bool begin_frame() noexcept {
+@@ -248,6 +571,33 @@ bool begin_frame() noexcept {
    return true;
  }
  
@@ -4007,7 +4012,7 @@ index b09ef4d..f5bc693 100644
  void end_frame() noexcept {
    ZoneScoped;
  #ifdef AURORA_ENABLE_GX
-@@ -257,10 +605,43 @@ void end_frame() noexcept {
+@@ -257,10 +607,43 @@ void end_frame() noexcept {
  
    // E7 present-from-XFB: VI current → GPU Virtual-XFB, else YUYV-from-RAM
    // decode, else EFB-direct (Strikers when no RAM XFB / match fails).
@@ -4053,7 +4058,7 @@ index b09ef4d..f5bc693 100644
    const uint32_t contentW =
        xfbTex && *xfbTex ? (*xfbTex)->size.width : efbSource.size.width;
    const uint32_t contentH =
-@@ -269,11 +650,21 @@ void end_frame() noexcept {
+@@ -269,11 +652,21 @@ void end_frame() noexcept {
        webgpu::g_graphicsConfig.surfaceConfiguration.width,
        webgpu::g_graphicsConfig.surfaceConfiguration.height, contentW, contentH);
  
@@ -4076,7 +4081,7 @@ index b09ef4d..f5bc693 100644
      rmlBindGroup = std::move(rmlFrame.bindGroup);
      rmlOverlay = rmlFrame.overlay;
    }
-@@ -281,29 +672,149 @@ void end_frame() noexcept {
+@@ -281,29 +674,154 @@ void end_frame() noexcept {
  
    // Capture XFB handle by value for the worker lambda (shared_ptr).
    gfx::TextureHandle xfbHandle = (xfbTex && *xfbTex) ? *xfbTex : nullptr;
@@ -4149,6 +4154,9 @@ index b09ef4d..f5bc693 100644
 +    const float surfaceW = static_cast<float>(webgpu::g_graphicsConfig.surfaceConfiguration.width);
 +    const float surfaceH = static_cast<float>(webgpu::g_graphicsConfig.surfaceConfiguration.height);
 +    if (info.splitView >= 0) {
++      const auto& kept = info.splitView < 2 && s_shown[info.splitView] ? s_shown[info.splitView]
++                                                                       : s_held[info.splitView < 2 ? info.splitView : 0];
++      const bool holding = info.splitView == g_splitHold.load() && kept;
 +      if (info.splitView == 0 || !s_split.texture)
 +        s_split = acquire();
 +      if (s_split.texture && s_split.view) {
@@ -4166,12 +4174,14 @@ index b09ef4d..f5bc693 100644
 +            .colorAttachments = attachments.data(),
 +        };
 +        const auto pass = encoder.BeginRenderPass(&desc);
-+        if (splitHandle && !viBlack) {
++        // A held player's half (aurora_split_hold): their last view, not this one.
++        const auto& source = holding ? kept : splitHandle;
++        if (source && (holding || !viBlack)) {
 +          const webgpu::TextureWithSampler src{
-+              .texture = splitHandle->texture,
-+              .view = splitHandle->sampleTextureView,
-+              .size = splitHandle->size,
-+              .format = splitHandle->format,
++              .texture = source->texture,
++              .view = source->sampleTextureView,
++              .size = source->size,
++              .format = source->format,
 +              .sampler = webgpu::present_source().sampler,
 +          };
 +          const auto bindGroup = webgpu::create_copy_bind_group(src);
@@ -4185,7 +4195,7 @@ index b09ef4d..f5bc693 100644
 +        pass.End();
 +      }
 +      // The view kept (a copy of it), for a menu's time.
-+      if (splitHandle && !viBlack && info.splitView < 2) {
++      if (splitHandle && !viBlack && info.splitView < 2 && !holding) {
 +        std::swap(s_held[info.splitView], s_shown[info.splitView]);
 +        auto& held = s_held[info.splitView];
 +        if (!held || held->size.width != splitHandle->size.width || held->size.height != splitHandle->size.height ||
@@ -4239,7 +4249,7 @@ index b09ef4d..f5bc693 100644
        wgpu::BindGroup presentBindGroup;
        if (rmlBindGroup && !rmlOverlay) {
          presentBindGroup = rmlBindGroup;
-@@ -318,14 +829,21 @@ void end_frame() noexcept {
+@@ -318,14 +836,21 @@ void end_frame() noexcept {
          };
          presentBindGroup = webgpu::create_copy_bind_group(xfbSrc);
        } else {
@@ -4263,7 +4273,7 @@ index b09ef4d..f5bc693 100644
                  .storeOp = wgpu::StoreOp::Store,
              },
          };
-@@ -333,20 +851,73 @@ void end_frame() noexcept {
+@@ -333,20 +858,73 @@ void end_frame() noexcept {
              .label = xfbHandle ? "XFB present render pass" : "EFB copy render pass",
              .colorAttachmentCount = attachments.size(),
              .colorAttachments = attachments.data(),
@@ -4348,7 +4358,7 @@ index b09ef4d..f5bc693 100644
          }
          pass.End();
        }
-@@ -362,67 +933,230 @@ void end_frame() noexcept {
+@@ -362,67 +940,230 @@ void end_frame() noexcept {
              .label = "ImGui render pass",
              .colorAttachmentCount = attachments.size(),
              .colorAttachments = attachments.data(),
@@ -4600,7 +4610,7 @@ index b09ef4d..f5bc693 100644
      gfx::after_submit();
  
      TracyPlotConfig("aurora: lastVertSize", tracy::PlotFormatType::Memory, false, true, 0);
-@@ -440,7 +1174,7 @@ void end_frame() noexcept {
+@@ -440,7 +1181,7 @@ void end_frame() noexcept {
      TracyPlot("aurora: lastIndexSize", static_cast<int64_t>(gfx::g_stats.lastIndexSize));
      TracyPlot("aurora: lastStorageSize", static_cast<int64_t>(gfx::g_stats.lastStorageSize));
      TracyPlot("aurora: lastTextureUploadSize", static_cast<int64_t>(gfx::g_stats.lastTextureUploadSize));
@@ -4609,7 +4619,7 @@ index b09ef4d..f5bc693 100644
  
  #endif
  }
-@@ -475,6 +1209,84 @@ void aurora_set_resampler(AuroraSampler sampler) {
+@@ -475,6 +1216,85 @@ void aurora_set_resampler(AuroraSampler sampler) {
    (void)sampler;
  #endif
  }
@@ -4638,6 +4648,7 @@ index b09ef4d..f5bc693 100644
 +  aurora::g_splitMenuLayout.store(layout == 1 ? 1 : 0);
 +  aurora::g_splitMenu.store(player == 0 || player == 1 ? player : -1);
 +}
++void aurora_split_hold(int player) { aurora::g_splitHold.store(player == 0 || player == 1 ? player : -1); }
 +void aurora_split_set_view(int player, const float rot[9], float x, float y, float z, float zoom, bool hide_hud) {
 +  aurora::gfx::PhotoView v;
 +  for (int i = 0; i < 3; ++i)
