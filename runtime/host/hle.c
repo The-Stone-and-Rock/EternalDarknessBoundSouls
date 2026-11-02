@@ -7959,17 +7959,38 @@ static void coop_prompt_slots_clear(void) {
 #define COOP_TALK_SCRIPT 1902
 static unsigned long long g_coop_talk_frame;
 
-static void coop_talk_slot_clear(void) {
+static void coop_prompt_slot_clear(s32 prompt, s32 script_of) {
     for (u32 i = 0u; i < 6u; i++) {
         u8* slot = g_coop_prompt_slots + i * 28u;
         const s32 id = (s32)((u32)slot[8] << 24 | (u32)slot[9] << 16 | (u32)slot[10] << 8 | slot[11]);
         const s32 script = (s32)((u32)slot[12] << 24 | (u32)slot[13] << 16 | (u32)slot[14] << 8 | slot[15]);
-        if (id != COOP_TALK_PROMPT || script != COOP_TALK_SCRIPT)
+        if (id != prompt || script != script_of)
             continue;
         memset(slot, 0, 28u);
         for (u32 at = 4u; at <= 20u; at += (at == 8u ? 12u : 4u))
             memset(slot + at, 0xFF, 4u);
     }
+}
+
+static void coop_talk_slot_clear(void) {
+    coop_prompt_slot_clear(COOP_TALK_PROMPT, COOP_TALK_SCRIPT);
+}
+
+// Things lying about are looked for in each player's frame, not by a zone
+// (0x800C030C(node), which asks for the prompt: 19, script 2246). Player 2's frame
+// runs outside their turn, with player 1's prompts in: player 1 was offered what
+// player 2 stood by, and player 2 nothing. It is looked for in their look, with
+// their prompts in, and goes unless asked for again.
+#define COOP_THING_LOOK 0x800C030Cu
+#define COOP_THING_PROMPT 19
+#define COOP_THING_SCRIPT 2246
+
+static void coop_thing_look(CPUState* cpu) {
+    g_hle_passthrough = g_coop_p2 == 0u || !g_settings.mod_coop || cpu->gpr[3] != g_coop_p2 || g_coop_prompt_look;
+    if (g_hle_passthrough)
+        return;
+    cpu->gpr[3] = 0u;
+    g_hle_tail_call = false;
 }
 
 // Player 2's look, as the player's step makes it (info = 0x80123F70(object);
@@ -8239,6 +8260,12 @@ static void coop_prompt_look(CPUState* cpu, u32 object) {
     coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, sizeof g_coop_prompt_slots, false);
     g_coop_prompt_look = true;
     hle_guest_call(cpu, COOP_SCAN, args, 4, 0.0, &ignore);
+    if (mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2) {
+        coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, sizeof g_coop_prompt_slots, true);
+        coop_prompt_slot_clear(COOP_THING_PROMPT, COOP_THING_SCRIPT);
+        coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, sizeof g_coop_prompt_slots, false);
+        hle_guest_call(cpu, COOP_THING_LOOK, &g_coop_p2, 1, 0.0, &ignore);
+    }
     g_coop_prompt_look = false;
     g_coop_arrived = false;
     coop_zones_swap(cpu, info, false);
@@ -8383,6 +8410,7 @@ static void coop_use_start(CPUState* cpu, s32 script, bool p2) {
     g_coop_use.found = false;
     if (p2) {
         coop_be_player2(cpu, true, g_coop_use.was);
+        coop_kinds(cpu, true);  // what their script gives or takes is from their own counts
         coop_states_swap(cpu, true);
         // Their zone words too: what a script of theirs leaves for a zone (the
         // Tome's hand open: its zone looks again, and offers it) was player
@@ -8425,6 +8453,7 @@ static bool continue_coop_use(CPUState* cpu) {
         coop_states_swap(cpu, false);
         if (g_coop_use.info != 0u)
             coop_zones_swap(cpu, g_coop_use.info, false);
+        coop_kinds(cpu, false);
         coop_be_player2(cpu, false, g_coop_use.was);
         // What it opened is theirs from this frame on: player 1's half keeps
         // their last view from before it (not a frame with its words).
@@ -8820,6 +8849,7 @@ static void coop_player_turn(CPUState* cpu) {
     if (coop_busy(cpu) && !coop_door_turns(cpu))
         return;
     g_coop_turn = true;
+    coop_kinds(cpu, true);  // their own counts, for what they fire and use
     const u32 node = cpu->gpr[3];
     g_coop_p1_id = mem_read32(cpu, node + 16u);
     coop_state(cpu, &g_coop_state[0], true);
@@ -8932,6 +8962,7 @@ static void coop_player_turn(CPUState* cpu) {
     coop_restore_held(cpu);
     coop_rehold(cpu);
     coop_copies_follow(cpu);
+    coop_kinds(cpu, false);
     g_coop_turn = false;
     static bool told;
     if (!told) {
@@ -11402,6 +11433,15 @@ static void find_coop(CPUState* cpu) {
         words_layout->intercept = hle_words_layout;
     } else {
         fprintf(stderr, "[coop] the layout of the game's words not found: they name the chapter's character\n");
+    }
+    // The look for things lying about (stwu r1,-32(r1); ... bl 0x800DA688 at +0x14),
+    // player 2's in their own look.
+    HleDispatchEntry* thing_look = hle_dispatch_entry(COOP_THING_LOOK);
+    if (mem_read32(cpu, COOP_THING_LOOK) == 0x9421FFE0u && mem_read32(cpu, COOP_THING_LOOK + 0x14u) == 0x4801A369u &&
+        thing_look != NULL && thing_look->intercept == NULL && thing_look->notify == NULL) {
+        thing_look->intercept = coop_thing_look;
+    } else {
+        fprintf(stderr, "[coop] the look for things lying about not found: player 1 is offered what player 2 stands by\n");
     }
     // The look for the player to talk to them (stwu r1,-64(r1); ... bl 0x801F62B8
     // at +0x18), for player 2 too.
