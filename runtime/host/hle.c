@@ -7948,6 +7948,89 @@ static void coop_enchanted_look(CPUState* cpu) {
     g_hle_tail_call = false;
 }
 
+// An enchant's close-up (0x80024528, as the thing is shown) stops play for
+// both players. The spell shows it only if its caster is the controlled
+// character (0x801F6258, asked at 0x801C6DC8, and at 0x801C6990 to tie the
+// thing to the caster); for any other it enchants the thing where it is and
+// gives it back, and play goes on. In co-op that is what it does for either
+// player. With no close-up to end it, the cast ends here, for whoever's it is
+// (their spell is stepped with them the player, coop_spells_update). The spell
+// (r31; the thing's id at +188, the caster's at +196) has taken the thing from
+// the caster's list and left the close-up to give it back, and what it is tied
+// to (0x80024528's first steps): that is done here too.
+#define COOP_CONTROLLED_ID 0x801F6258u
+#define COOP_ENCHANT_ASKS 0x801C6DCCu  // the return addresses in the spell's asking
+#define COOP_ENCHANT_TIES 0x801C6994u
+#define COOP_CAST_SET 0x801C54C0u
+#define COOP_NODE_LIST 0x801F63A0u
+#define COOP_NODE_RECORD 0x801F6398u
+#define COOP_RECORD_TIED 0x8015095Cu
+#define COOP_LIST_MOVE 0x801F95A0u
+#define COOP_THING_CARRIED 0x801F9DE8u
+
+static u32 coop_enchant_node(CPUState* cpu, u32 id) {
+    u32 node = 0u;
+    hle_guest_call(cpu, 0x801F5F88u, &id, 1, 0.0, &node);
+    return node;
+}
+
+// The thing and what it is tied to back on the caster's list.
+static void coop_enchant_give_back(CPUState* cpu, u32 spell) {
+    const u32 id = mem_read32(cpu, spell + 188u), caster = mem_read32(cpu, spell + 196u);
+    const u32 node = coop_enchant_node(cpu, id), by = coop_enchant_node(cpu, caster);
+    if (node == 0u || by == 0u)
+        return;
+    u32 list = 0u, record = 0u, tied = 0u, ignore = 0u;
+    hle_guest_call(cpu, COOP_NODE_LIST, &by, 1, 0.0, &list);
+    hle_guest_call(cpu, COOP_NODE_RECORD, &node, 1, 0.0, &record);
+    hle_guest_call(cpu, COOP_RECORD_TIED, &record, 1, 0.0, &tied);
+    const u32 move[2] = {node, list};
+    hle_guest_call(cpu, COOP_LIST_MOVE, move, 2, 0.0, &ignore);
+    if ((s32)tied > 0) {
+        const u32 other = coop_enchant_node(cpu, tied), move2[2] = {other, list};
+        hle_guest_call(cpu, COOP_LIST_MOVE, move2, 2, 0.0, &ignore);
+    }
+    const u32 carried[3] = {node, caster, 30u};
+    hle_guest_call(cpu, COOP_THING_CARRIED, carried, 3, 0.0, &ignore);
+}
+
+static void coop_controlled_id(CPUState* cpu) {
+    if ((cpu->lr != COOP_ENCHANT_ASKS && cpu->lr != COOP_ENCHANT_TIES) || g_coop_p2 == 0u || !g_settings.mod_coop ||
+        !sda_ready(cpu)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    if (cpu->lr == COOP_ENCHANT_ASKS) {
+        const u32 none = 0u;
+        u32 ignore = 0u;
+        const u32 lr = cpu->lr;
+        g_coop_cast_words = 0u;
+        g_coop_p1_cast_words = 0u;
+        coop_enchant_give_back(cpu, cpu->gpr[31]);
+        hle_guest_call(cpu, COOP_CAST_SET, &none, 1, 0.0, &ignore);
+        cpu->lr = lr;
+        if (getenv("ED_COOP_CAST_LOG") != NULL)
+            fprintf(stderr, "[coop] an enchant goes on without its close-up\n");
+    }
+    cpu->gpr[3] = ~0u;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+// An enchant's start holds play for its close-up (0x80199EA0(0), at 0x801C36B0;
+// the close-up's end lets go): there is none, so nothing to hold.
+#define COOP_PLAY_HOLD 0x80199EA0u
+#define COOP_ENCHANT_HOLDS 0x801C36B4u  // the return address
+
+static void coop_play_hold(CPUState* cpu) {
+    if (cpu->lr != COOP_ENCHANT_HOLDS || g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
 static void cheat_apply(CPUState* cpu);
 static void coop_own_stats(CPUState* cpu, u32 who);
 
@@ -11542,6 +11625,22 @@ static void find_coop(CPUState* cpu) {
         cast->intercept = coop_cast;
     } else {
         fprintf(stderr, "[coop] the cast not found: what player 2 casts from their Tome is player 1's\n");
+    }
+    // Who the controlled character is, as an enchant asks (bl at 0x801C6DC8).
+    HleDispatchEntry* controlled = hle_dispatch_entry(COOP_CONTROLLED_ID);
+    if (mem_read32(cpu, COOP_ENCHANT_ASKS - 4u) == 0x48000000u + ((COOP_CONTROLLED_ID - (COOP_ENCHANT_ASKS - 4u)) & 0x03FFFFFCu) + 1u &&
+        controlled != NULL && controlled->intercept == NULL && controlled->notify == NULL) {
+        controlled->intercept = coop_controlled_id;
+    } else {
+        fprintf(stderr, "[coop] an enchant's asking not found: its close-up stops play\n");
+    }
+    // Holding play, as an enchant starts (bl at 0x801C36B0).
+    HleDispatchEntry* hold = hle_dispatch_entry(COOP_PLAY_HOLD);
+    if (mem_read32(cpu, COOP_ENCHANT_HOLDS - 4u) == 0x48000000u + ((COOP_PLAY_HOLD - (COOP_ENCHANT_HOLDS - 4u)) & 0x03FFFFFCu) + 1u &&
+        hold != NULL && hold->intercept == NULL && hold->notify == NULL) {
+        hold->intercept = coop_play_hold;
+    } else {
+        fprintf(stderr, "[coop] an enchant's holding play not found: it stops play\n");
     }
     // An enchanted thing's look (stwu r1,-16(r1); ... or r30,r3,r3 at +0x14).
     HleDispatchEntry* enchanted = hle_dispatch_entry(COOP_ENCHANTED_LOOK);
