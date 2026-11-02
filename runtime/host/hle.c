@@ -10942,6 +10942,12 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
                     closeup ? "close-up" : "screen");
     }
     g_coop_screen = closeup && owner == 1;
+    if (owner == 1) {
+        pad_held &= p2.button;
+        p2.button &= (u16)~pad_held;
+        *pad = p2;
+        pad->error = 0;
+    }
     // A cutscene shows whole, once, as the game alone shows it (the Tome
     // taken), whoever's press led to it.
     if (owner >= 0)
