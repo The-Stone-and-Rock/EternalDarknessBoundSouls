@@ -1570,6 +1570,10 @@ static void split_off(unsigned long long frame, const char* why) {
 
 void camera_split_update(CPUState* cpu) {
     const unsigned long long frame = cpu->timebase / 675000ull;
+    // The Tome's own frame, turn about with the world's: for no player's view, and it
+    // does not take the world's turn here (the time is theirs alike).
+    if (hle_coop_tome_shares() && hle_game_menu_open(cpu))
+        return;
     if (frame == g_split_frame)
         return;  // once a frame (the camera runs twice)
     g_split_frame = frame;
@@ -1581,8 +1585,6 @@ void camera_split_update(CPUState* cpu) {
     // The Tome as soon as the game opens it: player 2's camera's line test
     // as it opens held the game up for nearly 4 seconds.
     const bool menu = !hle_coop_tome_shares() && (g_menu_open || hle_game_menu_open(cpu));
-    if (hle_coop_tome_shares() && hle_game_menu_open(cpu))
-        return;  // the Tome's own frame, turn about with the world's: for no player's view
     if (!g_play || menu) {
         split_off(frame, menu ? "the Tome" : "a cutscene");
         return;
@@ -1743,8 +1745,11 @@ void camera_look_at(CPUState* cpu) {
                target = read_vec(cpu, cpu->gpr[6]);
     const unsigned long long frame = cpu->timebase / 675000ull;
     static unsigned long long last_frame;
-    const bool step = frame != last_frame;  // once a frame (the camera runs twice)
-    last_frame = frame;
+    // Once a frame (the camera runs twice); the Tome's frame does not take the world's turn.
+    const bool tome_frame = hle_coop_tome_shares() && hle_game_menu_open(cpu);
+    const bool step = !tome_frame && frame != last_frame;
+    if (!tome_frame)
+        last_frame = frame;
     if (step)
         snapshot(cpu, frame);
     // The Tome draws the inventory's things with this camera too: while it is

@@ -8058,8 +8058,11 @@ static void coop_play_hold(CPUState* cpu) {
 // scratch (SCRATCH_TOME), the objects keep theirs, and the loop runs the two
 // modes' frames in turn, TW_WORLD_FRAMES of the world's to one of the Tome's, with
 // what each sets for its drawing (the settings' block, TW_BLOCK; the switches) as
-// that one had it. The world's frames are the ones shown, with the Tome's last picture
-// in its owner's half (aurora); the Tome's are only kept, so both go at full speed.
+// that one had it. The world is drawn once, from the other player's camera, and its
+// frames are the ones shown, with the Tome's last picture in its owner's half (aurora).
+// The Tome's are only kept, its frames in between shown with the world's. None waits on
+// the presents' pacing (the world's retrace wait keeps time), so both go at full speed
+// and both halves at the screen's rate, up to the frame rate set.
 #define TW_MODE_CHANGE 0x80018728u
 #define TW_TOME_START 0x80111078u
 #define TW_WORLD_FRAME 0x800083C8u
@@ -8261,7 +8264,7 @@ static void tw_mode_change(CPUState* cpu) {
     g_tw.world_tick = !g_tw.world_tick;
     g_tw.worlds_left = TW_WORLD_FRAMES;
     dol_aurora_split_skip_views(!g_tw.world_tick);
-    dol_aurora_frame_unpaced(!g_tw.world_tick);
+    dol_aurora_frame_unpaced(true);
     aurora_split_only_view(g_coop_tome_owner >= 0 ? 1 - g_coop_tome_owner : -1);
 }
 
