@@ -1,5 +1,5 @@
 diff --git a/backends/aurora/aurora_backend.cpp b/backends/aurora/aurora_backend.cpp
-index d94f811..1641583 100644
+index d94f811..6a1dafc 100644
 --- a/backends/aurora/aurora_backend.cpp
 +++ b/backends/aurora/aurora_backend.cpp
 @@ -19,9 +19,25 @@
@@ -688,7 +688,7 @@ index d94f811..1641583 100644
          return;
      }
      if (!g_shadow_frontend.write_fifo(fragment) ||
-@@ -842,133 +1321,1450 @@ void shadow_transform_observer(
+@@ -842,133 +1321,1468 @@ void shadow_transform_observer(
      }
  }
  #endif
@@ -753,6 +753,7 @@ index d94f811..1641583 100644
 +    SetNextXfb,
 +    FlushXfb,
 +    SetXfbBlack,
++    SplitSkipViews,
 +    Present,
 +    Call,             // run a function on the main thread (quick states)
 +};
@@ -1061,12 +1062,14 @@ index d94f811..1641583 100644
 +// start there, on an even beat, however long their work then takes.
 +std::atomic<std::uint64_t> g_last_retrace_ns{0};
 +
++bool g_frame_unpaced = false;  // this frame is not shown: nothing to pace (game thread)
++
 +void present() {
 +    const std::uint64_t n = ++g_presents_queued;
 +    const std::uint64_t now = SDL_GetTicksNS();
 +    const std::uint64_t retrace = g_last_retrace_ns.load(std::memory_order_relaxed);
 +    // No retrace seen yet, or a stale one (a long load): time from now.
-+    const std::uint64_t t_frame =
++    const std::uint64_t t_frame = g_frame_unpaced ? 0u :
 +        retrace != 0u && retrace <= now && now - retrace < 50'000'000u ? retrace : now;
 +    const PresentArgs args{n, t_frame};
 +    append(Op::Present, &args, sizeof args);
@@ -1110,6 +1113,7 @@ index d94f811..1641583 100644
 +    SetNextXfb,
 +    FlushXfb,
 +    SetXfbBlack,
++    SplitSkipViews,
 +    Present,
 +    Call,
 +    Done,
@@ -1548,6 +1552,10 @@ index d94f811..1641583 100644
 +            ring_item(Item::SetXfbBlack).flag = read_args<bool>(p);
 +            ring_commit();
 +            break;
++        case Op::SplitSkipViews:
++            ring_item(Item::SplitSkipViews).flag = read_args<bool>(p);
++            ring_commit();
++            break;
 +        case Op::Present:
 +            // The frame's last draw is planned at the frame boundary.
 +            if (live && !g_shadow_frontend_failed)
@@ -1732,6 +1740,9 @@ index d94f811..1641583 100644
 +        case Item::SetXfbBlack:
 +            aurora_backend_set_xfb_black(item.flag);
 +            break;
++        case Item::SplitSkipViews:
++            aurora_split_skip_views(item.flag);
++            break;
 +        case Item::Present:
 +            if (live) {
 +                pace_present(item.t_game);
@@ -1893,6 +1904,13 @@ index d94f811..1641583 100644
 +        append(Op::SetXfbBlack, &black, sizeof black);
 +    else
 +        aurora_backend_set_xfb_black(black);
++}
++
++void split_skip_views_op(bool skip) {
++    if (t_game_thread)
++        append(Op::SplitSkipViews, &skip, sizeof skip);
++    else
++        aurora_split_skip_views(skip);
 +}
 +
 +} // namespace gxq
@@ -2252,41 +2270,14 @@ index d94f811..1641583 100644
                       g_trace_last_frame);
      }
      // 63/Mfin default flip: gxcore is the renderer. Opt out only with
-@@ -1039,85 +2835,361 @@ bool dol_aurora_initialize(int argc, char** argv,
-     g_audio_low_log_push = 0;
-     g_audio_sample_rate = 32000;
+@@ -1055,69 +2869,345 @@ bool dol_aurora_initialize(int argc, char** argv,
+         std::fprintf(stderr, "[audio] SDL audio initialization failed: %s\n", SDL_GetError());
+     }
  
--    if (SDL_InitSubSystem(SDL_INIT_AUDIO)) {
--        SDL_AudioSpec spec{};
--        spec.format = SDL_AUDIO_S16;
--        spec.channels = 2;
--        spec.freq = static_cast<int>(g_audio_sample_rate);
--        g_audio_stream = SDL_OpenAudioDeviceStream(
--            SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
--        if (g_audio_stream == nullptr)
--            std::fprintf(stderr, "[audio] SDL output unavailable: %s\n", SDL_GetError());
--        else if (g_audio_queue_log)
--            std::fprintf(stderr, "[audio-queue] prebuffer_ms=%d max_queue_ms=%d\n",
--                         g_audio_prebuffer_ms, g_audio_max_queue_ms);
--    } else {
--        std::fprintf(stderr, "[audio] SDL audio initialization failed: %s\n", SDL_GetError());
--    }
-+    if (SDL_InitSubSystem(SDL_INIT_AUDIO)) {
-+        SDL_AudioSpec spec{};
-+        spec.format = SDL_AUDIO_S16;
-+        spec.channels = 2;
-+        spec.freq = static_cast<int>(g_audio_sample_rate);
-+        g_audio_stream = SDL_OpenAudioDeviceStream(
-+            SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
-+        if (g_audio_stream == nullptr)
-+            std::fprintf(stderr, "[audio] SDL output unavailable: %s\n", SDL_GetError());
-+        else if (g_audio_queue_log)
-+            std::fprintf(stderr, "[audio-queue] prebuffer_ms=%d max_queue_ms=%d\n",
-+                         g_audio_prebuffer_ms, g_audio_max_queue_ms);
-+    } else {
-+        std::fprintf(stderr, "[audio] SDL audio initialization failed: %s\n", SDL_GetError());
-+    }
-+
+-    poll_events();
+-    g_frame_open = !g_should_quit && aurora_begin_frame();
+-    install_platform_ops();
+-    return true;
 +    poll_events();
 +    g_frame_open = !g_should_quit && aurora_begin_frame();
 +    install_platform_ops();
@@ -2557,22 +2548,6 @@ index d94f811..1641583 100644
 +
 +void dol_aurora_set_fullscreen(bool fullscreen) {
 +    aurora::window::set_fullscreen(fullscreen);
-+}
-+
-+void dol_aurora_set_fast_forward(bool on) {
-+    gxq::g_fast_forward.store(on, std::memory_order_relaxed);
-+}
-+
-+void dol_aurora_set_frame_rate(int hz) {
-+    frame_rate::g_setting = hz;
-+}
- 
--    poll_events();
--    g_frame_open = !g_should_quit && aurora_begin_frame();
--    install_platform_ops();
--    return true;
-+int dol_aurora_screen_refresh(void) {
-+    return static_cast<int>(std::lround(1e9 / frame_rate::screen_period()));
  }
  
 -// C2: route nonzero gxcore GapCounters into the structured report. Mirrors
@@ -2580,6 +2555,18 @@ index d94f811..1641583 100644
 -// U1/U2 counters the replay table historically omitted). Counter value IS the
 -// fire-count — gap_report_add adds that many occurrences in one call.
 -static void flush_gxcore_gap_counters() {
++void dol_aurora_set_fast_forward(bool on) {
++    gxq::g_fast_forward.store(on, std::memory_order_relaxed);
++}
++
++void dol_aurora_set_frame_rate(int hz) {
++    frame_rate::g_setting = hz;
++}
++
++int dol_aurora_screen_refresh(void) {
++    return static_cast<int>(std::lround(1e9 / frame_rate::screen_period()));
++}
++
 +void dol_aurora_measure_screen(void) {
 +    frame_rate::g_probe = true;
 +}
@@ -2682,7 +2669,7 @@ index d94f811..1641583 100644
          aurora::gfx::efb_readback::set_continuous(true);
          aurora_request_framebuffer_readback();
      }
-@@ -1169,8 +3241,11 @@ void aurora_backend_present(void) {
+@@ -1169,8 +3259,11 @@ void aurora_backend_present(void) {
      // gxcore accumulates the frame's draws as their spans complete; the final
      // pending draw is only planned at the frame boundary. Submit it into the
      // still-open Aurora frame before end_frame flushes the command list.
@@ -2695,7 +2682,7 @@ index d94f811..1641583 100644
      // TEMP DIAG: per-frame gxcore gap-counter deltas so a live
      // goal celebration reveals which skip reason dominates (missing_vcd /
      // "projection never captured" vertex_decode_failures / cull_all_draws vs.
-@@ -1197,12 +3272,21 @@ void aurora_backend_present(void) {
+@@ -1197,12 +3290,21 @@ void aurora_backend_present(void) {
      }
  #endif
      if (g_frame_open) {
@@ -2719,7 +2706,7 @@ index d94f811..1641583 100644
          const std::uint8_t* rgba = nullptr;
          std::uint32_t w = 0;
          std::uint32_t h = 0;
-@@ -1212,6 +3296,124 @@ void aurora_backend_present(void) {
+@@ -1212,6 +3314,124 @@ void aurora_backend_present(void) {
          }
      }
      ++g_present_count;
@@ -2844,7 +2831,7 @@ index d94f811..1641583 100644
      if (g_frame_pacing_log &&
          (g_present_count <= 10 || (g_present_count % 60) == 0)) {
          const AuroraStats* stats = aurora_get_stats();
-@@ -1432,6 +3634,7 @@ void aurora_backend_present(void) {
+@@ -1432,6 +3652,7 @@ void aurora_backend_present(void) {
      const unsigned long long present_fifo = g_fifo_bytes;
      g_fifo_bytes = 0;
      poll_events();
@@ -2852,7 +2839,7 @@ index d94f811..1641583 100644
      if (!g_should_quit) {
          g_frame_open = aurora_begin_frame();
  #if GXRUNTIME_HAS_AURORA_RECOMP
-@@ -1482,7 +3685,13 @@ void aurora_backend_gx_write(u64 value, u8 size) {
+@@ -1482,7 +3703,13 @@ void aurora_backend_gx_write(u64 value, u8 size) {
          return;
      g_fifo_bytes += size;
  #if GXRUNTIME_HAS_AURORA_RECOMP
@@ -2867,7 +2854,7 @@ index d94f811..1641583 100644
      // Record AFTER the shadow write so MEM_UPDATEs its resolves emitted
      // precede this GX_WRITE in the trace (replay reads them first), and
      // BEFORE the live-Aurora forwarding below so the pristine value is
-@@ -1673,6 +3882,7 @@ void aurora_backend_set_guest_address_resolver(
+@@ -1673,6 +3900,7 @@ void aurora_backend_set_guest_address_resolver(
              &frontend_resolver, frontend_guest_address_resolver_bridge,
              nullptr);
          g_shadow_frontend.reset(&frontend_resolver);
@@ -2875,7 +2862,7 @@ index d94f811..1641583 100644
          g_shadow_frontend.set_packet_drain_enabled(g_shadow_frontend_enabled);
          g_shadow_packet_sink.reset();
          // Resolve packet guest addresses to host bytes through the frontend's
-@@ -1737,6 +3947,7 @@ void aurora_backend_set_xfb_black(bool black) {
+@@ -1737,6 +3965,7 @@ void aurora_backend_set_xfb_black(bool black) {
  }
  
  bool aurora_backend_pad_init(void) {
@@ -2883,7 +2870,7 @@ index d94f811..1641583 100644
      if (PADInit() == FALSE)
          return false;
  
-@@ -1780,6 +3991,7 @@ bool aurora_backend_pad_init(void) {
+@@ -1780,6 +4009,7 @@ bool aurora_backend_pad_init(void) {
  }
  
  u32 aurora_backend_pad_read(DolPadState state[4]) {
@@ -2891,7 +2878,7 @@ index d94f811..1641583 100644
      PADStatus status[4]{};
      const u32 motor_mask = PADRead(status);
      for (u32 i = 0; i < 4; i++) {
-@@ -1796,22 +4008,41 @@ u32 aurora_backend_pad_read(DolPadState state[4]) {
+@@ -1796,22 +4026,41 @@ u32 aurora_backend_pad_read(DolPadState state[4]) {
              .error = status[i].err,
          };
      }
@@ -2933,7 +2920,7 @@ index d94f811..1641583 100644
      PADSetSpec(spec);
  }
  
-@@ -1841,13 +4072,16 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1841,13 +4090,16 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
          return;
      const int bytes_per_second =
          static_cast<int>(g_audio_sample_rate) * 2 * static_cast<int>(sizeof(s16));
@@ -2952,7 +2939,7 @@ index d94f811..1641583 100644
      while (queued > max_queued_bytes && waited_ms < 20u) {
          g_audio_throttle_count++;
          if (g_audio_queue_log &&
-@@ -1860,11 +4094,51 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1860,11 +4112,51 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
                           max_queued_bytes);
          SDL_Delay(1);
          waited_ms++;
@@ -3004,7 +2991,7 @@ index d94f811..1641583 100644
      if (g_audio_queue_log &&
          (g_audio_push_count <= 16 || (g_audio_push_count % 4000) == 0 ||
           (low_queue && g_audio_push_count - g_audio_low_log_push >= 4000))) {
-@@ -1876,6 +4150,21 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1876,6 +4168,21 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
                       g_audio_push_count, queued, queued + bytes,
                       g_audio_playing ? 1u : 0u, g_audio_throttle_count);
      }
@@ -3026,7 +3013,7 @@ index d94f811..1641583 100644
      if (!SDL_PutAudioStreamData(g_audio_stream, samples, bytes))
          std::fprintf(stderr, "[audio] failed to queue samples: %s\n", SDL_GetError());
      else if (!g_audio_playing && queued + bytes >= prebuffer_bytes) {
-@@ -1886,10 +4175,455 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1886,10 +4193,471 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
      }
  }
  
@@ -3079,6 +3066,22 @@ index d94f811..1641583 100644
 +#else
 +    (void)xfb;
 +    (void)texture;
++#endif
++}
++
++void dol_aurora_frame_unpaced(bool unpaced) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    gxq::g_frame_unpaced = unpaced;
++#else
++    (void)unpaced;
++#endif
++}
++
++void dol_aurora_split_skip_views(bool skip) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    gxq::split_skip_views_op(skip);
++#else
++    (void)skip;
 +#endif
 +}
 +
@@ -3482,7 +3485,7 @@ index d94f811..1641583 100644
      const DolPlatformOps ops = {
          .should_quit = aurora_backend_should_quit,
          .present = aurora_backend_present,
-@@ -1918,6 +4652,7 @@ void install_platform_ops() {
+@@ -1918,6 +4686,7 @@ void install_platform_ops() {
          .audio_set_sample_rate = aurora_backend_audio_set_sample_rate,
          .audio_push = aurora_backend_audio_push,
      };
@@ -3521,10 +3524,10 @@ index b86b214..f6b70de 100644
  AuroraBackend aurora_get_backend();
  const AuroraBackend* aurora_get_available_backends(size_t* count);
 diff --git a/graphics/aurora/include/aurora/gfx.h b/graphics/aurora/include/aurora/gfx.h
-index a13ce39..58b372b 100644
+index a13ce39..d32aaaa 100644
 --- a/graphics/aurora/include/aurora/gfx.h
 +++ b/graphics/aurora/include/aurora/gfx.h
-@@ -29,10 +29,89 @@ typedef struct {
+@@ -29,10 +29,93 @@ typedef struct {
  } AuroraStats;
  
  const AuroraStats* aurora_get_stats();
@@ -3598,6 +3601,10 @@ index a13ce39..58b372b 100644
 +/* While split, a player's half (0 or 1, -1 none) keeps their last view: a close-up
 + * the other player has, the game's camera being theirs, shown at their half's shape. */
 +void aurora_split_hold(int player);
++/* While split, frames drawn for no player's view (a menu's, turn about with the world's). */
++void aurora_split_skip_views(bool skip);
++/* While split, only this player's view is drawn (0 or 1, the other's half a menu; -1 both). */
++void aurora_split_only_view(int player);
 +/* HD texture pack images waiting their turn to be uploaded (a few a frame; all
 + * at once while photo mode steps). */
 +unsigned aurora_texture_pack_pending(void);
@@ -3615,7 +3622,7 @@ index a13ce39..58b372b 100644
   * EFB readback (GXRuntime recomp patch): arm a one-shot copy of the next
   * submitted frame's present source; take returns tightly packed RGBA8 rows
 diff --git a/graphics/aurora/lib/aurora.cpp b/graphics/aurora/lib/aurora.cpp
-index b09ef4d..515229c 100644
+index b09ef4d..3568755 100644
 --- a/graphics/aurora/lib/aurora.cpp
 +++ b/graphics/aurora/lib/aurora.cpp
 @@ -1,6 +1,17 @@
@@ -4081,7 +4088,7 @@ index b09ef4d..515229c 100644
      rmlBindGroup = std::move(rmlFrame.bindGroup);
      rmlOverlay = rmlFrame.overlay;
    }
-@@ -281,29 +674,154 @@ void end_frame() noexcept {
+@@ -281,32 +674,218 @@ void end_frame() noexcept {
  
    // Capture XFB handle by value for the worker lambda (shared_ptr).
    gfx::TextureHandle xfbHandle = (xfbTex && *xfbTex) ? *xfbTex : nullptr;
@@ -4089,6 +4096,12 @@ index b09ef4d..515229c 100644
 +  // VI may point at the frame before it, as in photo mode).
 +  const gfx::TextureHandle* splitTex = gfx::gxcore::last_display_copy();
 +  gfx::TextureHandle splitHandle = splitTex && *splitTex ? *splitTex : nullptr;
++  // A menu's frame turn about with the world's: its own copy (the VI's is the
++  // frame before, the world's).
++  const bool menuFrame = gfx::split_skipping_views() && gfx::split_sharing();
++  const bool worldFrame = !gfx::split_skipping_views() && gfx::split_sharing();
++  if (gfx::split_skipping_views() && splitHandle)
++    xfbHandle = splitHandle;
  
 -  gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport,
 -                  imguiDrawData = std::move(imguiDrawData),
@@ -4104,7 +4117,7 @@ index b09ef4d..515229c 100644
 +  g_interpPhases.clear();
 +  gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport, uiViewport, viBlack,
 +                  imguiDrawData = std::move(imguiDrawData), xfbRamRequests = std::move(xfbRamRequests),
-+                  xfbHandle = std::move(xfbHandle),
++                  xfbHandle = std::move(xfbHandle), menuFrame, worldFrame,
 +                  splitHandle = std::move(splitHandle)](wgpu::CommandEncoder& encoder, const gfx::PresentInfo& info) {
 +    // The surface's next texture, or why there is none.
 +    struct Acquired {
@@ -4127,8 +4140,8 @@ index b09ef4d..515229c 100644
 +        if (out.status == wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal) {
 +          out.texture = std::move(surfaceTexture.texture);
 +          out.view = out.texture.CreateView();
-         }
-       }
++        }
++      }
 +      return out;
 +    };
 +    // GXRuntime recomp patch (split-screen): each player's view is drawn into
@@ -4140,6 +4153,13 @@ index b09ef4d..515229c 100644
 +    // shown is the frame before the last: what the menu opens with (a found
 +    // thing's words) is in the last split frame already.
 +    static gfx::TextureHandle s_held[2], s_shown[2];
++    // While a menu shows, the world's frames behind it only give the views kept
++    // (asked as a frame's first view is drawn: a surface's picture taken and not
++    // shown lost the device).
++    static bool s_keepOnly = false;
++    // A menu sharing the frames with the world: the world's frames are the ones
++    // shown, with the menu's last picture, kept here by its own frames.
++    static gfx::TextureHandle s_menuKept;
 +    const auto half_of = [](int player, int layout, float w, float h) {
 +      const bool side = layout != 1;
 +      return webgpu::Viewport{
@@ -4157,9 +4177,10 @@ index b09ef4d..515229c 100644
 +      const auto& kept = info.splitView < 2 && s_shown[info.splitView] ? s_shown[info.splitView]
 +                                                                       : s_held[info.splitView < 2 ? info.splitView : 0];
 +      const bool holding = info.splitView == g_splitHold.load() && kept;
-+      if (info.splitView == 0 || !s_split.texture)
++      s_keepOnly = split_menu_player() >= 0;
++      if (!s_keepOnly && (info.splitView == 0 || !s_split.texture))
 +        s_split = acquire();
-+      if (s_split.texture && s_split.view) {
++      if (!s_keepOnly && s_split.texture && s_split.view) {
 +        const webgpu::Viewport half = half_of(info.splitView, info.splitLayout, surfaceW, surfaceH);
 +        const std::array attachments{
 +            wgpu::RenderPassColorAttachment{
@@ -4227,16 +4248,54 @@ index b09ef4d..515229c 100644
 +          kept.SetBindGroup(0, webgpu::create_copy_bind_group(src), 0, nullptr);
 +          kept.Draw(3);
 +          kept.End();
-+        }
-+      }
+         }
+       }
 +      const wgpu::CommandBufferDescriptor splitBufDescriptor{.label = "Split-screen view command buffer"};
 +      const auto splitBuffer = encoder.Finish(&splitBufDescriptor);
 +      g_queue.Submit(1, &splitBuffer);
 +      return;
 +    }
++    // A world's frame behind a menu shows nothing, nor do those between and after it.
++    if (s_keepOnly && info.present && !info.real)
++      return;
 +    // The game's own frame over a split picture: shown as the views drew it.
 +    const bool splitShown = info.splitLayout >= 0 && s_split.texture && s_split.view;
-+    if (info.splitLayout >= 0 && !splitShown) {
++    const bool keptOnly = menuFrame || (info.splitLayout >= 0 && s_keepOnly && !worldFrame);
++    if (info.real && info.splitLayout < 0 && !menuFrame)
++      s_keepOnly = false;
++    if (menuFrame && info.real && splitHandle && !viBlack) {
++      if (!s_menuKept || s_menuKept->size.width != splitHandle->size.width ||
++          s_menuKept->size.height != splitHandle->size.height || s_menuKept->format != splitHandle->format)
++        s_menuKept = gfx::new_render_texture(splitHandle->size.width, splitHandle->size.height, splitHandle->gxFormat,
++                                             "Split-screen menu kept");
++      if (s_menuKept && s_menuKept->format == splitHandle->format) {
++        const webgpu::TextureWithSampler src{
++            .texture = splitHandle->texture,
++            .view = splitHandle->sampleTextureView,
++            .size = splitHandle->size,
++            .format = splitHandle->format,
++            .sampler = webgpu::present_source().sampler,
++        };
++        const std::array keep{
++            wgpu::RenderPassColorAttachment{
++                .view = s_menuKept->attachmentTextureView,
++                .loadOp = wgpu::LoadOp::Clear,
++                .storeOp = wgpu::StoreOp::Store,
++            },
++        };
++        const wgpu::RenderPassDescriptor keepDesc{
++            .label = "Split-screen menu kept",
++            .colorAttachmentCount = keep.size(),
++            .colorAttachments = keep.data(),
++        };
++        const auto kept = encoder.BeginRenderPass(&keepDesc);
++        kept.SetPipeline(webgpu::g_CopyPipeline);
++        kept.SetBindGroup(0, webgpu::create_copy_bind_group(src), 0, nullptr);
++        kept.Draw(3);
++        kept.End();
++      }
++    }
++    if (info.splitLayout >= 0 && !splitShown && !keptOnly) {
 +      static unsigned s_lost = 0;
 +      if (s_lost++ % 60u == 0u)
 +        std::fprintf(stderr, "[split] views drawn but no picture to show them in (%u so far)\n", s_lost);
@@ -4249,7 +4308,19 @@ index b09ef4d..515229c 100644
        wgpu::BindGroup presentBindGroup;
        if (rmlBindGroup && !rmlOverlay) {
          presentBindGroup = rmlBindGroup;
-@@ -318,14 +836,21 @@ void end_frame() noexcept {
++      } else if (worldFrame && s_menuKept) {
++        const webgpu::TextureWithSampler menuSrc{
++            .texture = s_menuKept->texture,
++            .view = s_menuKept->sampleTextureView,
++            .size = s_menuKept->size,
++            .format = s_menuKept->format,
++            .sampler = webgpu::present_source().sampler,
++        };
++        presentBindGroup = webgpu::create_copy_bind_group(menuSrc);
+       } else if (xfbHandle) {
+         // E7: present Virtual XFB GPU texture directly (no EFB resample).
+         webgpu::TextureWithSampler xfbSrc{
+@@ -318,14 +897,21 @@ void end_frame() noexcept {
          };
          presentBindGroup = webgpu::create_copy_bind_group(xfbSrc);
        } else {
@@ -4273,7 +4344,7 @@ index b09ef4d..515229c 100644
                  .storeOp = wgpu::StoreOp::Store,
              },
          };
-@@ -333,20 +858,73 @@ void end_frame() noexcept {
+@@ -333,20 +919,73 @@ void end_frame() noexcept {
              .label = xfbHandle ? "XFB present render pass" : "EFB copy render pass",
              .colorAttachmentCount = attachments.size(),
              .colorAttachments = attachments.data(),
@@ -4297,7 +4368,7 @@ index b09ef4d..515229c 100644
 +          const uint32_t sw = webgpu::g_graphicsConfig.surfaceConfiguration.width;
 +          const uint32_t sh = webgpu::g_graphicsConfig.surfaceConfiguration.height;
 +          const int layout = split_menu_layout();
-+          const auto& other = s_shown[1 - menuPlayer] ? s_shown[1 - menuPlayer] : s_held[1 - menuPlayer];
++          const auto& other = !worldFrame && s_shown[1 - menuPlayer] ? s_shown[1 - menuPlayer] : s_held[1 - menuPlayer];
 +          if (other) {
 +            const webgpu::TextureWithSampler src{
 +                .texture = other->texture,
@@ -4358,7 +4429,7 @@ index b09ef4d..515229c 100644
          }
          pass.End();
        }
-@@ -362,67 +940,230 @@ void end_frame() noexcept {
+@@ -362,67 +1001,230 @@ void end_frame() noexcept {
              .label = "ImGui render pass",
              .colorAttachmentCount = attachments.size(),
              .colorAttachments = attachments.data(),
@@ -4432,14 +4503,14 @@ index b09ef4d..515229c 100644
 +    Acquired current;
 +    if (splitShown && info.present) {
 +      current = std::move(s_split);  // the picture the views drew
-+    } else if (info.present) {
++    } else if (info.present && !keptOnly) {
 +      current = acquire();
 +    }
 +    s_split = {};
 +    const bool canPresent = current.texture && current.view;
 +    if (canPresent) {
 +      encode_present(encoder, current.view);
-+    } else if (info.present) {
++    } else if (info.present && !keptOnly) {
        Log.info("Skipping present; window not presentable");
      }
 -    webgpu::gpu_prof::frame_end(encoder);
@@ -4574,7 +4645,7 @@ index b09ef4d..515229c 100644
 +            g_refreshProbes.store(60);
 +        }
 +      }
-+    } else if (g_surface && info.present) {
++    } else if (g_surface && info.present && !keptOnly) {
 +      switch (current.status) {
        case wgpu::SurfaceGetCurrentTextureStatus::Timeout:
          Log.warn("Surface texture acquisition timed out");
@@ -4610,7 +4681,7 @@ index b09ef4d..515229c 100644
      gfx::after_submit();
  
      TracyPlotConfig("aurora: lastVertSize", tracy::PlotFormatType::Memory, false, true, 0);
-@@ -440,7 +1181,7 @@ void end_frame() noexcept {
+@@ -440,7 +1242,7 @@ void end_frame() noexcept {
      TracyPlot("aurora: lastIndexSize", static_cast<int64_t>(gfx::g_stats.lastIndexSize));
      TracyPlot("aurora: lastStorageSize", static_cast<int64_t>(gfx::g_stats.lastStorageSize));
      TracyPlot("aurora: lastTextureUploadSize", static_cast<int64_t>(gfx::g_stats.lastTextureUploadSize));
@@ -4619,7 +4690,7 @@ index b09ef4d..515229c 100644
  
  #endif
  }
-@@ -475,6 +1216,85 @@ void aurora_set_resampler(AuroraSampler sampler) {
+@@ -475,6 +1277,87 @@ void aurora_set_resampler(AuroraSampler sampler) {
    (void)sampler;
  #endif
  }
@@ -4648,6 +4719,8 @@ index b09ef4d..515229c 100644
 +  aurora::g_splitMenuLayout.store(layout == 1 ? 1 : 0);
 +  aurora::g_splitMenu.store(player == 0 || player == 1 ? player : -1);
 +}
++void aurora_split_skip_views(bool skip) { aurora::gfx::split_skip_views(skip); }
++void aurora_split_only_view(int player) { aurora::gfx::split_only_view(player); }
 +void aurora_split_hold(int player) { aurora::g_splitHold.store(player == 0 || player == 1 ? player : -1); }
 +void aurora_split_set_view(int player, const float rot[9], float x, float y, float z, float zoom, bool hide_hud) {
 +  aurora::gfx::PhotoView v;
@@ -4871,7 +4944,7 @@ index 421bd9e..69b25fd 100644
 +bool DisplayShowsHDR(SDL_Window*) { return true; }  // EDR: SDR white stays 1.0, any display
  } // namespace aurora::webgpu::utils
 diff --git a/graphics/aurora/lib/gfx/common.cpp b/graphics/aurora/lib/gfx/common.cpp
-index a64dd2d..ca1f229 100644
+index a64dd2d..a3faa70 100644
 --- a/graphics/aurora/lib/gfx/common.cpp
 +++ b/graphics/aurora/lib/gfx/common.cpp
 @@ -10,6 +10,10 @@
@@ -4922,16 +4995,24 @@ index a64dd2d..ca1f229 100644
  static render_worker::FrameSlotPool g_frameSlots{FrameSlotCount};
  static render_worker::FrameSlotPool g_stagingSlots{StagingBufferCount};
  static u32 g_currentRenderPass = UINT32_MAX;
-@@ -338,6 +355,8 @@ static void wait_for_gpu_progress(std::chrono::nanoseconds sleepDuration) {
+@@ -338,8 +355,16 @@ static void wait_for_gpu_progress(std::chrono::nanoseconds sleepDuration) {
    std::this_thread::sleep_for(sleepDuration);
  }
  
 +void pump_gpu_events(uint32_t us) noexcept { wait_for_gpu_progress(std::chrono::microseconds{us}); }
 +
++// A menu sharing the frames with the world behind it: only every other frame is shown,
++// so the presents' period says nothing of the frames' (it halved the world's speed).
++static std::atomic<bool> g_noFrameStartPacing{false};
++
  static void pace_frame_start() {
    ZoneScopedN("Frame start pacing");
++  if (g_noFrameStartPacing.load(std::memory_order_relaxed))
++    return;
    if (g_frameSlots.free_count() == FrameSlotCount) {
-@@ -475,8 +494,10 @@ static void seal_pass(FramePacket& frame, uint32_t passIndex) {
+     return;
+   }
+@@ -475,8 +500,10 @@ static void seal_pass(FramePacket& frame, uint32_t passIndex) {
  }
  
  static void encode_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const FrameOp& op);
@@ -4943,7 +5024,7 @@ index a64dd2d..ca1f229 100644
  static void expire_cached_bind_groups();
  static void push_command(CommandType type, const Command::Data& data);
  
-@@ -652,6 +673,26 @@ gx::DrawData* get_last_draw_command() {
+@@ -652,6 +679,26 @@ gx::DrawData* get_last_draw_command() {
    return &last.data.draw.gx;
  }
  
@@ -4970,7 +5051,7 @@ index a64dd2d..ca1f229 100644
  static void push_draw_command(ShaderDrawCommand data) {
    push_command(CommandType::Draw, Command::Data{.draw = data});
    ++g_drawCallCount;
-@@ -692,9 +733,10 @@ PipelineRef pipeline_ref(const clear::PipelineConfig& config) {
+@@ -692,9 +739,10 @@ PipelineRef pipeline_ref(const clear::PipelineConfig& config) {
  
  void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool clearAlpha, bool clearDepth,
                     Vec4<float> clearColorValue, float clearDepthValue, GXTexFmt resolveFormat,
@@ -4982,7 +5063,7 @@ index a64dd2d..ca1f229 100644
    // GPNF §7: if plane capture armed for this copy, tag the pass for pre-resolve
    // EFB color + depth snapshot at encode time.
    {
-@@ -781,6 +823,65 @@ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool cl
+@@ -781,6 +829,65 @@ void resolve_pass(TextureHandle texture, ClipRect rect, bool clearColor, bool cl
    push_command(CommandType::SetScissor, Command::Data{.setScissor = g_cachedScissor});
  }
  
@@ -5048,7 +5129,7 @@ index a64dd2d..ca1f229 100644
  void queue_palette_conv(tex_palette_conv::ConvRequest req) {
    auto& renderPass = current_render_passes()[g_currentRenderPass];
    ASSERT(!renderPass.sealed, "Attempted to append palette conversion to sealed render pass {}", g_currentRenderPass);
-@@ -1271,6 +1372,9 @@ bool begin_frame() {
+@@ -1271,6 +1378,9 @@ bool begin_frame() {
    push_command(CommandType::SetViewport, Command::Data{.setViewport = g_cachedViewport});
    push_command(CommandType::SetScissor, Command::Data{.setScissor = g_cachedScissor});
    begin_pipeline_frame();
@@ -5058,7 +5139,7 @@ index a64dd2d..ca1f229 100644
    render_worker::enqueue_begin_frame(frame.frameId, [frameSlot] {
      static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "Redraw encoder"};
      g_framePackets[frameSlot].encoder = g_device.CreateCommandEncoder(&EncoderDescriptor);
-@@ -1309,7 +1413,473 @@ void finish() {
+@@ -1309,7 +1419,498 @@ void finish() {
    }
  }
  
@@ -5077,6 +5158,8 @@ index a64dd2d..ca1f229 100644
 +namespace split {
 +std::mutex g_mutex;
 +bool g_on = false;
++bool g_skipViews = false;
++int g_onlyView = -1;  // only this player's view (the other's half shows a menu), -1 both
 +int g_layout = 0;
 +PhotoView g_views[2];
 +
@@ -5093,7 +5176,7 @@ index a64dd2d..ca1f229 100644
 +  std::vector<FrameOutput> outputs;
 +#ifdef AURORA_ENABLE_GXCORE
 +  std::lock_guard lock{g_mutex};
-+  if (!g_on)
++  if (!g_on || g_skipViews)
 +    return outputs;
 +  if (!interp::recording()) {
 +    note_whole("not kept");
@@ -5117,6 +5200,8 @@ index a64dd2d..ca1f229 100644
 +    std::fprintf(stderr, "[split] renderer: player 2 at %.0f %.0f %.0f, aspect %.2f, %zu bytes of uniforms\n",
 +                 g_views[1].pos[0], g_views[1].pos[1], g_views[1].pos[2], aspect, frame.uniforms.size());
 +  for (int player = 0; player < 2; ++player) {
++    if (g_onlyView >= 0 && player != g_onlyView)
++      continue;
 +    PhotoView view = g_views[player];
 +    view.aspect = aspect;
 +    auto uniforms = interp::split_build(frame.uniforms.size(), photo::projection, &view, view.hideHud, photo::flare);
@@ -5135,6 +5220,27 @@ index a64dd2d..ca1f229 100644
 +  return outputs;
 +}
 +} // namespace split
++
++bool split_skipping_views() noexcept {
++  std::lock_guard lock{split::g_mutex};
++  return split::g_skipViews;
++}
++
++bool split_sharing() noexcept {
++  std::lock_guard lock{split::g_mutex};
++  return split::g_onlyView >= 0;
++}
++
++void split_only_view(int player) noexcept {
++  std::lock_guard lock{split::g_mutex};
++  g_noFrameStartPacing.store(player >= 0, std::memory_order_relaxed);
++  split::g_onlyView = player;
++}
++
++void split_skip_views(bool skip) noexcept {
++  std::lock_guard lock{split::g_mutex};
++  split::g_skipViews = skip;
++}
 +
 +void split_set(bool on, int layout) noexcept {
 +  std::lock_guard lock{split::g_mutex};
@@ -5533,7 +5639,7 @@ index a64dd2d..ca1f229 100644
    ZoneScoped;
    ASSERT(!g_inOffscreen, "end_frame called while offscreen rendering is active");
    ASSERT(g_currentRenderPass == UINT32_MAX, "end_frame called before finish finalized the current render pass");
-@@ -1320,6 +1890,7 @@ void end_frame(EndFrameCallback callback) {
+@@ -1320,6 +1921,7 @@ void end_frame(EndFrameCallback callback) {
      TracyPlot("aurora: cpuFrameTimeMs", cpuFrameTimeMs);
    }
    auto& frame = current_frame_packet();
@@ -5541,7 +5647,7 @@ index a64dd2d..ca1f229 100644
    frame.stats.drawCallCount = g_drawCallCount;
    frame.stats.mergedDrawCallCount = g_mergedDrawCallCount;
    frame.stats.lastVertSize = frame.verts.size();
-@@ -1352,12 +1923,53 @@ void end_frame(EndFrameCallback callback) {
+@@ -1352,12 +1954,53 @@ void end_frame(EndFrameCallback callback) {
  #endif
  
    const size_t stagingSlot = frame.stagingBuffer;
@@ -5596,14 +5702,14 @@ index a64dd2d..ca1f229 100644
      packet = {};
      g_stats.drawCallCount = stats.drawCallCount;
      g_stats.mergedDrawCallCount = stats.mergedDrawCallCount;
-@@ -1367,7 +1979,14 @@ void end_frame(EndFrameCallback callback) {
+@@ -1367,7 +2010,14 @@ void end_frame(EndFrameCallback callback) {
      g_stats.lastStorageSize = stats.lastStorageSize;
      g_stats.lastTextureUploadSize = stats.lastTextureUploadSize;
      if (callback) {
 -      callback(encoder);
 +      callback(encoder, PresentInfo{.present = realShown,
 +                                    .real = true,
-+                                    .splitLayout = splitViews == 2 ? splitLayout : static_cast<int8_t>(-1)});
++                                    .splitLayout = splitViews > 0 ? splitLayout : static_cast<int8_t>(-1)});
 +      for (size_t i = 0; i < repeats; ++i) {
 +        static constexpr wgpu::CommandEncoderDescriptor RepeatDescriptor{.label = "Repeat-frame encoder"};
 +        auto repeat = g_device.CreateCommandEncoder(&RepeatDescriptor);
@@ -5612,7 +5718,7 @@ index a64dd2d..ca1f229 100644
      }
      g_frameSlots.release(frameSlot);
      expire_cached_bind_groups();
-@@ -1561,7 +2180,46 @@ static void encode_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const Frame
+@@ -1561,7 +2211,46 @@ static void encode_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const Frame
    }
  }
  
@@ -5660,7 +5766,7 @@ index a64dd2d..ca1f229 100644
    ZoneScoped;
    if (!passInfo.sealed) {
      return;
-@@ -1570,7 +2228,7 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+@@ -1570,7 +2259,7 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
    for (const auto& conv : passInfo.paletteConvs) {
      tex_palette_conv::run(cmd, conv);
    }
@@ -5669,7 +5775,7 @@ index a64dd2d..ca1f229 100644
      // Skip intermediate EFB render passes without observable output.
      return;
    }
-@@ -1622,15 +2280,28 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+@@ -1622,15 +2311,28 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
    auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
    render_pass(pass, frame, passInfo);
    pass.End();
@@ -5700,7 +5806,7 @@ index a64dd2d..ca1f229 100644
      depth_peek::encode_frame_snapshot(cmd, passInfo.copySourceDepthView, passInfo.targetSize, passInfo.msaaSamples);
    }
  
-@@ -1682,9 +2353,88 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+@@ -1682,7 +2384,86 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
        };
        cmd.CopyTextureToTexture(&src, &dst, &size);
      }
@@ -5709,9 +5815,9 @@ index a64dd2d..ca1f229 100644
 +      glow::compose(cmd, passInfo.resolveTarget->attachmentTextureView, passInfo.resolveTarget->format,
 +                    passInfo.copySourceView);
 +#endif
-   }
- }
- 
++  }
++}
++
 +// GXRuntime recomp patch: an EFB pass's draws that add light, again into the
 +// glow buffer (glow.hpp), tested against the pass's depth without writing it.
 +static void render_glow_pass(wgpu::CommandEncoder& cmd, const RenderPass& passInfo, bool emit) {
@@ -5780,16 +5886,14 @@ index a64dd2d..ca1f229 100644
 +    default:
 +      break;
 +    }
-+  }
+   }
 +  pass.End();
 +  g_currentPipeline = UINTPTR_MAX;
 +#endif
-+}
-+
+ }
+ 
  void after_submit() noexcept {
-   depth_peek::after_submit();
-   efb_readback::after_submit();
-@@ -1892,8 +2642,14 @@ Range push_indices(const uint8_t* data, size_t length, size_t alignment) {
+@@ -1892,8 +2673,14 @@ Range push_indices(const uint8_t* data, size_t length, size_t alignment) {
  
  Range push_uniform(const uint8_t* data, size_t length) {
    ZoneScoped;
@@ -5806,7 +5910,7 @@ index a64dd2d..ca1f229 100644
  }
  
  Range push_storage(const uint8_t* data, size_t length) {
-@@ -1935,7 +2691,19 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
+@@ -1935,7 +2722,19 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
  wgpu::BindGroup find_bind_group(BindGroupRef id) {
    std::lock_guard lock{g_bindGroupCacheMutex};
    const auto it = g_cachedBindGroups.find(id);
@@ -5828,7 +5932,7 @@ index a64dd2d..ca1f229 100644
  }
  
 diff --git a/graphics/aurora/lib/gfx/common.hpp b/graphics/aurora/lib/gfx/common.hpp
-index 37acf2b..ae0eb30 100644
+index 37acf2b..9e1084f 100644
 --- a/graphics/aurora/lib/gfx/common.hpp
 +++ b/graphics/aurora/lib/gfx/common.hpp
 @@ -1,5 +1,6 @@
@@ -5885,7 +5989,7 @@ index 37acf2b..ae0eb30 100644
  
  enum class ShaderType : uint8_t {
    Clear = 0,
-@@ -252,8 +282,59 @@ void shutdown();
+@@ -252,8 +282,63 @@ void shutdown();
  
  bool begin_frame();
  void finish();
@@ -5920,6 +6024,10 @@ index 37acf2b..ae0eb30 100644
 +// game camera's view space; its aspect is the half's, set here) and the two
 +// shown in halves of the window: side by side (layout 0) or one above the
 +// other (1). Off for a frame (a cutscene), the game's frame shows whole.
++void split_skip_views(bool skip) noexcept;
++void split_only_view(int player) noexcept;
++bool split_skipping_views() noexcept;
++bool split_sharing() noexcept;
 +void split_set(bool on, int layout) noexcept;
 +void split_set_view(int player, const PhotoView& view) noexcept;
 +// The layout while on, else -1 (the present's).
@@ -5946,7 +6054,7 @@ index 37acf2b..ae0eb30 100644
  void render_pass(const wgpu::RenderPassEncoder& pass, uint32_t idx);
  void after_submit() noexcept;
  void gpu_synchronize();
-@@ -276,9 +357,22 @@ struct EfbCopyFilterParams {
+@@ -276,9 +361,22 @@ struct EfbCopyFilterParams {
    std::uint32_t filter_row[3]{0, 64, 0};
  };
  
@@ -6944,7 +7052,7 @@ index 0000000..64bd328
 +
 +} // namespace aurora::gfx::glow
 diff --git a/graphics/aurora/lib/gfx/gxcore_draw.cpp b/graphics/aurora/lib/gfx/gxcore_draw.cpp
-index 71136b9..697ea66 100644
+index 71136b9..5575628 100644
 --- a/graphics/aurora/lib/gfx/gxcore_draw.cpp
 +++ b/graphics/aurora/lib/gfx/gxcore_draw.cpp
 @@ -1,4 +1,11 @@
@@ -7621,7 +7729,7 @@ index 71136b9..697ea66 100644
    gfx::resolve_pass(it->second, srcRect, do_clear && cmd.color_update,
                      do_clear && cmd.alpha_update,
                      do_clear && cmd.depth_update,
-@@ -723,73 +1159,579 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -723,73 +1159,583 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
                                  static_cast<float>(cmd.clear_a) / 255.f},
                      clearDepthValue, fmt, &filter);
  
@@ -7930,6 +8038,10 @@ index 71136b9..697ea66 100644
 +// NDC x shift for one draw (0: leave it), its projection's x scaled by xs.
 +float widescreen_hud_shift(const gxc::DrawPlan& plan, float xs) {
 +  const auto& P = plan.constants.projection;
++  // A menu's frames turn about with the world's: the bands of the frame before
++  // are the world's, and the book's sides moved out with them.
++  if (split_skipping_views())
++    return 0.f;
 +  if (!g_widescreenHud || P[3][2] != 0.f || P[3][3] != 1.f || P[0][0] <= 0.f)
 +    return 0.f;
 +  // The HUD space's edges in NDC; a squeezed HUD is symmetric and inside +-1.
@@ -8258,7 +8370,7 @@ index 71136b9..697ea66 100644
      const float sx = plan.viewport[0];
      const float sy = plan.viewport[1];
      const float sz = plan.viewport[2];
-@@ -799,13 +1741,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -799,13 +1745,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const float width = sx * 2.0f;
      const float height = -sy * 2.0f;
      gx::set_logical_viewport({
@@ -8276,7 +8388,7 @@ index 71136b9..697ea66 100644
    }
  
    // U4: apply DrawPlan scissor as a logical render-pass scissor. Multi-rect
-@@ -827,7 +1771,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -827,7 +1775,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
        [&](uint32_t address, uint32_t tsize, uint32_t format, uint32_t width,
            uint32_t height, const void* data, uint32_t available, bool has_tlut,
            uint32_t tlut_address, uint32_t tlut_format, uint32_t tlut_entries,
@@ -8285,7 +8397,7 @@ index 71136b9..697ea66 100644
      auto efbIt = g_efbCopyTextures.find(address);
      if (efbIt != g_efbCopyTextures.end() && efbIt->second) {
        ++g_textureCacheStats.hits;
-@@ -839,23 +1783,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -839,23 +1787,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const uint32_t size = std::min(tsize, available);
      // Hash the actual source texels (+ TLUT for CI) so a content change under an
      // unchanged guest identity is a distinct cache entry — see TextureKey.
@@ -8568,7 +8680,7 @@ index 71136b9..697ea66 100644
      // gxcore owns the decode for every format: produce tightly-packed RGBA8 and
      // upload it as a pre-decoded PC texture (no substrate re-conversion).
      std::vector<uint8_t> decoded;
-@@ -868,8 +2064,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -868,8 +2068,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      } else {
        decoded = gxc::decode_texture(format, width, height, bytes, size);
      }
@@ -8620,7 +8732,7 @@ index 71136b9..697ea66 100644
        handle = new_static_texture_2d(
            width, height, 1, GX_TF_RGBA8_PC,
            ArrayRef<uint8_t>{decoded.data(), decoded.size()}, false,
-@@ -892,7 +2130,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -892,7 +2134,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    };
  
    BindGroupRef textureBindGroup = 0;
@@ -8719,7 +8831,7 @@ index 71136b9..697ea66 100644
      if (plan.texmap_mask == 0u) {
        // Single-texmap fast path: primary texture + plan.sampler at binding 0/1.
        if (plan.has_texture) {
-@@ -903,7 +2232,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -903,7 +2236,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
              plan.tlut_data, plan.tlut_available);
          if (bound) {
            const auto sampler =
@@ -8728,7 +8840,7 @@ index 71136b9..697ea66 100644
            const std::array entries{
                WGPUBindGroupEntry{.binding = 0,
                                   .textureView =
-@@ -919,6 +2248,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -919,6 +2252,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            textureBindGroup = bind_group_ref(descriptor);
          }
        }
@@ -8736,7 +8848,7 @@ index 71136b9..697ea66 100644
      } else {
        // Multi-texmap: bind each used texmap at 2t (texture) / 2t+1 (sampler),
        // matching the WGSL declarations. Per-texmap PlanSampler from
-@@ -932,12 +2262,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -932,12 +2266,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          if ((plan.texmap_mask & (1u << t)) == 0u)
            continue;
          const gxc::PlanTexture& pt = plan.textures[t];
@@ -8753,7 +8865,7 @@ index 71136b9..697ea66 100644
          if (!bound) {
            complete = false;
            break;
-@@ -945,14 +2278,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -945,14 +2282,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          held.push_back(bound);
          const gxc::PlanSampler& ps =
              pt.sampler.valid ? pt.sampler : plan.samplers[t];
@@ -8772,7 +8884,7 @@ index 71136b9..697ea66 100644
        const WGPUBindGroupDescriptor descriptor{
            .label = {"GXCore Texture Bind Group", WGPU_STRLEN},
            .layout = texture_bind_group_layout(plan.texmap_mask).Get(),
-@@ -960,6 +2295,299 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -960,6 +2299,299 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            .entries = entries.data(),
        };
        textureBindGroup = bind_group_ref(descriptor);
@@ -9072,7 +9184,7 @@ index 71136b9..697ea66 100644
      }
    }
  
-@@ -969,31 +2597,19 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -969,31 +2601,19 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    const auto idxRange = push_indices(
        reinterpret_cast<const uint8_t*>(plan.indices.data()),
        plan.indices.size() * sizeof(uint16_t), 4);
@@ -9108,7 +9220,7 @@ index 71136b9..697ea66 100644
      });
    };
  
-@@ -1006,6 +2622,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -1006,6 +2626,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      }
    } else {
      issue_draw();
@@ -15376,7 +15488,7 @@ index 9c2f7bb..6dd6411 100644
 +
  #endif
 diff --git a/include/gxruntime/aurora_backend.h b/include/gxruntime/aurora_backend.h
-index 6ef4cf4..128794c 100644
+index 6ef4cf4..b9ffd8d 100644
 --- a/include/gxruntime/aurora_backend.h
 +++ b/include/gxruntime/aurora_backend.h
 @@ -5,6 +5,7 @@
@@ -15424,7 +15536,7 @@ index 6ef4cf4..128794c 100644
  
  // C2: walk nonzero gxcore GapCounters into the process-global gap_report.
  // Call once before gap_report_write_json on the live Strikers path so
-@@ -40,6 +59,188 @@ void dol_aurora_set_efb_frame_fill(DolAuroraEfbFrameFillFn fn, void* user);
+@@ -40,6 +59,194 @@ void dol_aurora_set_efb_frame_fill(DolAuroraEfbFrameFillFn fn, void* user);
  // from shutdown (second call only bumps if counters grew).
  void dol_aurora_flush_gap_report(void);
  
@@ -15441,6 +15553,12 @@ index 6ef4cf4..128794c 100644
 +// between GX commands too: the only point where a state can be taken or
 +// replaced without the decoder misreading the bytes that follow.
 +bool dol_aurora_gx_idle(void);
++// Split-screen: the frames from here on (in the GX stream's order) are drawn for
++// no player's view, or are again (a menu's frames, turn about with the world's).
++void dol_aurora_split_skip_views(bool skip);
++// The frames from here on are not shown (the world's behind a menu): the game
++// does not wait to pace them.
++void dol_aurora_frame_unpaced(bool unpaced);
 +// Before the game reads a display copy's destination on the CPU: make RAM
 +// there hold that copy (waits for its GPU readback, at most 200 ms).
 +bool dol_aurora_xfb_ram_sync(uint32_t address);
@@ -15814,10 +15932,10 @@ index 2c0e5ff..be88d3e 100644
      if (ax != NULL)
          ax->log = enabled;
 diff --git a/src/core/cpu.c b/src/core/cpu.c
-index 2f13110..54bceda 100644
+index 2f13110..c56ac85 100644
 --- a/src/core/cpu.c
 +++ b/src/core/cpu.c
-@@ -17,6 +17,12 @@ bool cpu_init(CPUState* cpu) {
+@@ -17,6 +17,13 @@ bool cpu_init(CPUState* cpu) {
      memset(cpu, 0, sizeof(*cpu));
  
      cpu->ram_size = GC_MAIN_RAM_SIZE;
@@ -15825,12 +15943,13 @@ index 2f13110..54bceda 100644
 +    // game's 24 MB, as scratch the game is never told of (its OS sees 24 MB):
 +    // a character from another chapter is unpacked there. The generated
 +    // code's fast path stays at 24 MB. (A quick state from before, of 24 MB,
-+    // is refused: its MEM1 is another size.)
-+    cpu->ram_size += 8u * 1024u * 1024u;
++    // is refused: its MEM1 is another size.) 8 MB past that: the co-op Tome's
++    // memory, so the room's data stays for the world behind it.
++    cpu->ram_size += 16u * 1024u * 1024u;
      cpu->ram = (u8*)calloc(1, cpu->ram_size);
      if (!cpu->ram) {
          fprintf(stderr, "error: failed to allocate %u bytes for RAM\n", cpu->ram_size);
-@@ -168,7 +174,12 @@ static u32 exception_msr(u32 old_msr, u32 exception) {
+@@ -168,7 +175,12 @@ static u32 exception_msr(u32 old_msr, u32 exception) {
      return next;
  }
  
@@ -15843,7 +15962,7 @@ index 2f13110..54bceda 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host || avail < 8) {
-@@ -180,6 +191,79 @@ u64 mem_read64(CPUState* cpu, u32 addr) {
+@@ -180,6 +192,79 @@ u64 mem_read64(CPUState* cpu, u32 addr) {
      return read_be64(host);
  }
  
@@ -15923,7 +16042,7 @@ index 2f13110..54bceda 100644
  void mem_write64(CPUState* cpu, u32 addr, u64 value) {
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
-@@ -191,11 +275,15 @@ void mem_write64(CPUState* cpu, u32 addr, u64 value) {
+@@ -191,11 +276,15 @@ void mem_write64(CPUState* cpu, u32 addr, u64 value) {
          fprintf(stderr, "warn: write64 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -15939,7 +16058,7 @@ index 2f13110..54bceda 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host || avail < 4) {
-@@ -218,11 +306,15 @@ void mem_write32(CPUState* cpu, u32 addr, u32 value) {
+@@ -218,11 +307,15 @@ void mem_write32(CPUState* cpu, u32 addr, u32 value) {
          fprintf(stderr, "warn: write32 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -15955,7 +16074,7 @@ index 2f13110..54bceda 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host || avail < 2) {
-@@ -245,11 +337,15 @@ void mem_write16(CPUState* cpu, u32 addr, u16 value) {
+@@ -245,11 +338,15 @@ void mem_write16(CPUState* cpu, u32 addr, u16 value) {
          fprintf(stderr, "warn: write16 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -15971,7 +16090,7 @@ index 2f13110..54bceda 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host) {
-@@ -272,6 +368,8 @@ void mem_write8(CPUState* cpu, u32 addr, u8 value) {
+@@ -272,6 +369,8 @@ void mem_write8(CPUState* cpu, u32 addr, u8 value) {
          fprintf(stderr, "warn: write8 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -15980,7 +16099,7 @@ index 2f13110..54bceda 100644
      clear_matching_reservation(cpu, addr);
      *host = value;
  }
-@@ -562,18 +660,33 @@ static bool psq_access_is_valid(CPUState* cpu, u8 type, u32 ea, u32 cia) {
+@@ -562,18 +661,33 @@ static bool psq_access_is_valid(CPUState* cpu, u8 type, u32 ea, u32 cia) {
      return true;
  }
  
@@ -16018,7 +16137,7 @@ index 2f13110..54bceda 100644
      default:
          return 0.0;
      }
-@@ -585,7 +698,7 @@ static s64 psq_quantize_int(f64 value, s64 min_value, s64 max_value, s32 scale)
+@@ -585,7 +699,7 @@ static s64 psq_quantize_int(f64 value, s64 min_value, s64 max_value, s32 scale)
      if (isinf(value))
          return value < 0.0 ? min_value : max_value;
  

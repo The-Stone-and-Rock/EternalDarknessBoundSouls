@@ -135,6 +135,8 @@ int g_menu_player = 0;
 Player& menu() { return g_players[g_menu_player]; }
 // The game's pause menu is open (set on the game thread, read by the icons).
 std::atomic<bool> g_game_menu{false};
+// A Tome with the world going on: whether the pad read now is its owner's, -1 no matter.
+std::atomic<int> g_tome_read{-1};
 // A cutscene is playing (set on the game thread): the Skip prompt shows.
 std::atomic<bool> g_cutscene{false};
 // Cutscenes are no longer sped up (Start skips them, hle.c): always false.
@@ -148,7 +150,8 @@ bool g_capture_armed = false;  // every input released since capture began
 // The controller inputs an action reads now: the Tome's while it is open
 // (in Modern and Custom), else the action's binding.
 bool tome_buttons() {
-    return g_layout != kOriginal && g_game_menu.load(std::memory_order_relaxed);
+    const int read = g_tome_read.load(std::memory_order_relaxed);
+    return g_layout != kOriginal && (read >= 0 ? read != 0 : g_game_menu.load(std::memory_order_relaxed));
 }
 
 const int* pad_inputs(int action) {
@@ -1410,6 +1413,10 @@ extern "C" void controls_set_cutscene(bool playing) {
 
 extern "C" bool controls_fast_forward(void) {
     return controls::g_fast_forward.load(std::memory_order_relaxed);
+}
+
+extern "C" void controls_set_tome_read(int tome) {
+    controls::g_tome_read.store(tome, std::memory_order_relaxed);
 }
 
 extern "C" void controls_set_game_menu(bool open) {

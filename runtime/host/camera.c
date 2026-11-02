@@ -1528,6 +1528,7 @@ bool hle_coop_player2_held(void);
 bool hle_coop_screen(void);                                    // hle.c
 bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* zoom);  // hle.c
 bool hle_game_menu_open(CPUState* cpu);                         // hle.c
+bool hle_coop_tome_shares(void);                                // hle.c
 
 #define SPLIT_PITCH_LOW 0.05f
 #define SPLIT_PITCH_HIGH 1.30f
@@ -1579,7 +1580,9 @@ void camera_split_update(CPUState* cpu) {
     }
     // The Tome as soon as the game opens it: player 2's camera's line test
     // as it opens held the game up for nearly 4 seconds.
-    const bool menu = g_menu_open || hle_game_menu_open(cpu);
+    const bool menu = !hle_coop_tome_shares() && (g_menu_open || hle_game_menu_open(cpu));
+    if (hle_coop_tome_shares() && hle_game_menu_open(cpu))
+        return;  // the Tome's own frame, turn about with the world's: for no player's view
     if (!g_play || menu) {
         split_off(frame, menu ? "the Tome" : "a cutscene");
         return;
@@ -1710,7 +1713,7 @@ void camera_split_update(CPUState* cpu) {
 #ifdef ED_AURORA
     static const float kIdentity[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
     aurora_split_hold(hle_coop_player2_held() ? 1 : -1);
-    aurora_split_set_view(0, kIdentity, 0.0f, 0.0f, 0.0f, 1.0f, false);
+    aurora_split_set_view(0, kIdentity, 0.0f, 0.0f, 0.0f, 1.0f, hle_coop_tome_shares());  // the Tome's words are in the frame
     aurora_split_set_view(1, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), zoom2, true);
     aurora_split_set(true, g_settings.mod_split);
 #else

@@ -140,6 +140,7 @@ struct DolPadState;
 void controls_read_player2(struct DolPadState* state);
 // Whether the game's pause menu is open (hle.c, each pad read).
 void controls_set_game_menu(bool open);
+void controls_set_tome_read(int tome);
 // Whether a cutscene is playing (hle.c, each pad read), and whether the player
 // is fast-forwarding it (RB or Tab held there): the game then runs at up to
 // four times speed.

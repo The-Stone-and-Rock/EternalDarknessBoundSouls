@@ -3622,7 +3622,13 @@ static void hle_PADInit(CPUState* cpu) {
 // (find_game_menu); 0 when it was not found.
 static s32 g_menu_flag_offset, g_menu_depth_offset;
 
+bool hle_coop_tome_shares(void);
+void aurora_split_only_view(int player);
+static bool tw_world_turn(void);
+static bool tw_tome_next(void);
 static bool game_menu_open(CPUState* cpu) {
+    if (hle_coop_tome_shares())
+        return !tw_world_turn();  // the Tome open, its frames turn about with the world's
     const u32 sda = cpu->gpr[13];
     if (g_menu_flag_offset == 0 || sda < GC_RAM_BASE + 0x8000u ||
         sda - GC_RAM_BASE > cpu->ram_size - 0x8000u)
@@ -3758,6 +3764,9 @@ static u16 g_coop_p2_hold;
 static bool g_coop_press_b;
 // Who has the screens that stop play (coop_menu_input).
 static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState* pad);
+static int g_coop_tome_owner = -1;  // who has the screens that stop play
+static int g_tw_held_from = -1;  // which reads' the pad's held buttons are now, -1 starting
+static u16 g_tw_taps;  // what the Tome's owner pressed between the Tome's reads: a quick press is not lost
 // Player 2 has a close-up their action press opened (coop_menu_input): the
 // split is off (camera.c) and the close-up shows in their half.
 static bool g_coop_screen;
@@ -3878,13 +3887,21 @@ static void hle_PADRead(CPUState* cpu) {
     memset(state, 0, sizeof state);
 #ifdef ED_AURORA
     if (g_coop_pad_p2) {
+        controls_set_tome_read(hle_coop_tome_shares() ? g_coop_tome_owner == 1 : -1);
         controls_read_player2(&state[0]);
+        controls_set_tome_read(-1);
         static int pad_log = -1;  // ED_COOP_PAD_LOG=1: player 2's pad when anything is pressed
         if (pad_log < 0)
             pad_log = getenv("ED_COOP_PAD_LOG") != NULL;
         if (pad_log && (state[0].button != 0u || state[0].stick_x != 0 || state[0].stick_y != 0))
             fprintf(stderr, "[coop] player 2's pad: buttons 0x%04X stick %d %d\n", state[0].button,
                     state[0].stick_x, state[0].stick_y);
+        if (tw_world_turn() && g_coop_tome_owner == 1) {  // their pad is their Tome's
+            g_tw_taps |= state[0].button;
+            const s32 error = state[0].error;
+            memset(&state[0], 0, sizeof state[0]);
+            state[0].error = error;
+        }
         g_coop_p2_hold &= state[0].button;
         state[0].button &= (u16)~g_coop_p2_hold;
         if ((g_coop_p2_hold & 0x0100u) != 0u)
@@ -3916,7 +3933,7 @@ static void hle_PADRead(CPUState* cpu) {
     }
 #endif
     const bool menu = game_menu_open(cpu), cutscene = cutscene_playing(cpu);
-    controls_set_game_menu(menu);
+    controls_set_game_menu(hle_coop_tome_shares() || menu);  // not turn about, for its button pictures
     controls_set_cutscene(cutscene);
 #ifdef ED_AURORA
     coop_pad_read(cpu, !menu && !cutscene);
@@ -3927,7 +3944,9 @@ static void hle_PADRead(CPUState* cpu) {
     }
 #endif
     controls_note_frame(cpu->timebase / 675000ull);
+    controls_set_tome_read(hle_coop_tome_shares() ? g_coop_tome_owner == 0 : -1);
     u32 motor_mask = dol_platform_pad_read(state);
+    controls_set_tome_read(-1);
 #ifdef ED_AURORA
     coop_watch(cpu, &state[0]);
 #endif
@@ -7691,7 +7710,7 @@ static void coop_quick_swap(CPUState* cpu, bool p2) {
             mem_write32(cpu, at, g_coop_quick_p1[i]);
         }
     }
-    if (getenv("ED_COOP_CAST_LOG") != NULL)
+    if (getenv("ED_COOP_CAST_LOG") != NULL && !hle_coop_tome_shares())
         fprintf(stderr, "[coop] quick spells: player 2's %08X %08X %08X %08X %08X, player 1's %08X %08X %08X %08X %08X (%s)\n",
                 g_coop_quick[0], g_coop_quick[1], g_coop_quick[2], g_coop_quick[3], g_coop_quick[4], g_coop_quick_p1[0],
                 g_coop_quick_p1[1], g_coop_quick_p1[2], g_coop_quick_p1[3], g_coop_quick_p1[4],
@@ -8029,6 +8048,221 @@ static void coop_play_hold(CPUState* cpu) {
     }
     g_hle_passthrough = false;
     g_hle_tail_call = false;
+}
+
+// The Tome in co-op: the world goes on behind it. The game's loop runs one
+// mode's frame (r13 - 26192; the mode - 26240, the one asked for - 26188; 2 the
+// world, 3 the Tome), and the Tome's start stops the world's for good reason:
+// the Tome is given the room's data buffer (0x801538A4), the collision among it,
+// and the objects' motion is let go. Here it has memory of its own past the
+// scratch (SCRATCH_TOME), the objects keep theirs, and the loop runs the two
+// modes' frames in turn, TW_WORLD_FRAMES of the world's to one of the Tome's, with
+// what each sets for its drawing (the settings' block, TW_BLOCK; the switches) as
+// that one had it. The world's frames are the ones shown, with the Tome's last picture
+// in its owner's half (aurora); the Tome's are only kept, so both go at full speed.
+#define TW_MODE_CHANGE 0x80018728u
+#define TW_TOME_START 0x80111078u
+#define TW_WORLD_FRAME 0x800083C8u
+#define TW_TOME_FRAME 0x80111234u
+#define TW_ROOM_BUFFER 0x801538A4u
+#define TW_TOME_ASKS 0x80110A30u
+#define TW_TOME_MEMORY 0x2D8020u
+#define SCRATCH_TOME 0x82000000u
+#define TW_BLOCK 0x80602B18u
+#define TW_BLOCK_SIZE 0x1400u
+#define TW_WORLD_FRAMES 1u
+static const u32 kTwSwitches[] = {22216u, 23760u, 23456u, 24920u, 24048u, 21936u, 21996u, 21896u, 21892u, 21800u, 21796u, 21700u};
+#define TW_SWITCHES (sizeof kTwSwitches / sizeof kTwSwitches[0])
+static struct {
+    bool sharing, world_tick, have_world;
+    unsigned worlds_left;  // the world's frames to come before the Tome's, this one among them
+    u32 world[TW_SWITCHES + 2], tome[TW_SWITCHES + 2];
+    u8 block[2][TW_BLOCK_SIZE];  // 0 the world's, 1 the Tome's
+    unsigned ticks;
+} g_tw;
+
+bool hle_coop_tome_shares(void) { return g_tw.sharing; }
+static bool tw_world_turn(void) { return g_tw.sharing && g_tw.world_tick; }
+// A pad read is for the frame after it.
+static bool tw_tome_next(void) { return g_tw.sharing && g_tw.world_tick && g_tw.worlds_left <= 1u; }
+
+static bool tw_on(CPUState* cpu) {
+    return sda_ready(cpu) && g_settings.mod_coop && g_coop_p2 != 0u && cpu->ram_size >= SCRATCH_TOME + TW_TOME_MEMORY - GC_RAM_BASE;
+}
+
+static void tw_switches(CPUState* cpu, u32* save, const u32* load) {
+    const u32 sda = cpu->gpr[13];
+    for (u32 i = 0; i < TW_SWITCHES + 2u; i++) {
+        const u32 at = i < TW_SWITCHES ? sda - kTwSwitches[i] : sda + (u32)(i == TW_SWITCHES ? g_menu_flag_offset : g_menu_depth_offset);
+        if (save != NULL)
+            save[i] = mem_read32(cpu, at);
+        if (load != NULL)
+            mem_write32(cpu, at, load[i]);
+    }
+}
+
+static void tw_block(CPUState* cpu, int save, int load) {
+    for (u32 i = 0u; save >= 0 && i < TW_BLOCK_SIZE; i += 4u) {
+        const u32 v = mem_read32(cpu, TW_BLOCK + i);
+        memcpy(g_tw.block[save] + i, &v, 4u);
+    }
+    for (u32 i = 0u; load >= 0 && i < TW_BLOCK_SIZE; i += 4u) {
+        u32 v;
+        memcpy(&v, g_tw.block[load] + i, 4u);
+        mem_write32(cpu, TW_BLOCK + i, v);
+    }
+}
+
+// A quick state loaded: the frames are the game's own again.
+static void tw_state_loaded(void) {
+    g_tw.sharing = g_tw.world_tick = g_tw.have_world = false;
+    dol_aurora_split_skip_views(false);
+    dol_aurora_frame_unpaced(false);
+    aurora_split_only_view(-1);
+}
+
+static void tw_tome_start(CPUState* cpu) {
+    if (sda_ready(cpu)) {
+        tw_block(cpu, 0, -1);
+        tw_switches(cpu, g_tw.world, NULL);
+        // The world's frames know of no menu (its asking may have set these already).
+        g_tw.world[TW_SWITCHES] = g_tw.world[TW_SWITCHES + 1u] = 0u;
+        g_tw.have_world = true;
+    }
+    g_hle_passthrough = true;
+}
+
+// What the Tome's start lets go of, and its end takes back: the objects' motion
+// (0x8011F2D4, 0x80125190), what they hold (0x80043AB8), the room packed into its
+// own data (0x801104D4, 0x80110C24) and read back (0x80152298).
+static void tw_keep(CPUState* cpu) {
+    const bool ours = cpu->lr == 0x80111160u || cpu->lr == 0x80111164u || cpu->lr == 0x801110FCu || cpu->lr == 0x801110C4u ||
+                      cpu->lr == 0x80110EC4u || cpu->lr == 0x80110E58u || cpu->lr == 0x80110E8Cu || cpu->lr == 0x80110E70u ||
+                      cpu->lr == 0x80111138u || cpu->lr == 0x80111148u || cpu->lr == 0x8011114Cu || cpu->lr == 0x8011115Cu;  // its sound's hush
+    if (!ours || !tw_on(cpu)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    if (cpu->lr == 0x80110E8Cu)
+        mem_write32(cpu, cpu->gpr[13] - 26508u, 0u);  // the room read back asked for: none
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+static void tw_room_buffer(CPUState* cpu) {
+    if (cpu->lr != TW_TOME_ASKS || !tw_on(cpu)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    cpu->gpr[3] = SCRATCH_TOME;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+// A frame's end waits for the retrace's message (0x801DFA4C, OSReceiveMessage) and
+// the retrace itself (0x801E4764, VIWaitForRetrace). The world's frames keep their waits
+// and are the ones shown, at their own speed; the Tome's, between them, wait for neither.
+#define TW_FRAME_WAIT 0x8020190Cu
+#define TW_FRAME_WAITS 0x801DFA50u
+#define TW_RETRACE_WAITS 0x801E4768u
+static void tw_retrace_wait(CPUState* cpu) {
+    if (cpu->lr == TW_RETRACE_WAITS && g_tw.sharing && !g_tw.world_tick) {
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+    } else {
+        g_hle_passthrough = true;
+    }
+}
+
+static void tw_frame_wait(CPUState* cpu) {
+    if (cpu->lr == TW_FRAME_WAITS && g_tw.sharing && !g_tw.world_tick) {
+        cpu->gpr[3] = 1u;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+    } else {
+        g_hle_passthrough = true;
+    }
+}
+
+static void coop_tome_player(CPUState* cpu, bool p2);
+
+static void tw_mode_change(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!tw_on(cpu))
+        return;
+    const u32 sda = cpu->gpr[13];
+    const u32 mode = mem_read32(cpu, sda - 26240u), asked = mem_read32(cpu, sda - 26188u);
+    if (g_tw.sharing && asked != mode) {
+        // Asked to leave: the Tome's own way out from its frame; the world's as it was.
+        if (g_tw.world_tick && asked == 3u) {
+            mem_write32(cpu, sda - 26188u, mode);  // it is open
+        } else if (g_tw.world_tick) {
+            fprintf(stderr, "[coop] the world asks for mode %u with the Tome open\n", asked);
+            tw_switches(cpu, g_tw.world, g_tw.tome);
+            tw_block(cpu, 0, 1);
+        } else {
+            // The Tome's way out has run: the menu's words as it left them.
+            const u32 flag = mem_read32(cpu, sda + (u32)g_menu_flag_offset), depth = mem_read32(cpu, sda + (u32)g_menu_depth_offset);
+            tw_switches(cpu, NULL, g_tw.world);
+            mem_write32(cpu, sda + (u32)g_menu_flag_offset, flag);
+            mem_write32(cpu, sda + (u32)g_menu_depth_offset, depth);
+            tw_block(cpu, 1, 0);
+        }
+        if (!g_tw.world_tick || asked != 3u) {
+            mem_write32(cpu, sda - 26240u, 3u);
+            mem_write32(cpu, sda - 26192u, TW_TOME_FRAME);
+            g_tw.sharing = false;
+            g_tw.world_tick = false;
+            dol_aurora_split_skip_views(false);
+            dol_aurora_frame_unpaced(false);
+            aurora_split_only_view(-1);
+            return;
+        }
+    }
+    if (!g_tw.sharing) {
+        if (mode != 3u || asked != 3u || !g_tw.have_world || mem_read32(cpu, sda - 26192u) != TW_TOME_FRAME)
+            return;
+        g_tw.sharing = true;
+        g_tw.world_tick = false;
+        g_tw.ticks = 0u;
+        g_tw_held_from = -1;
+        g_tw_taps = 0u;
+        fprintf(stderr, "[coop] the world goes on behind the Tome\n");
+    }
+    g_tw.ticks++;
+    if (g_tw.world_tick && g_tw.worlds_left > 1u) {
+        g_tw.worlds_left--;  // another of the world's
+        return;
+    }
+    tw_block(cpu, g_tw.world_tick ? 0 : 1, g_tw.world_tick ? 1 : 0);
+    if (g_tw.world_tick) {
+        const u32 lr = cpu->lr;
+        u32 ignore = 0u;
+        const u32 none[3] = {0u, 0u, 0u};
+        hle_guest_call(cpu, 0x801E58C8u, none, 3, 0.0, &ignore);  // its fog, as its start set
+        cpu->lr = lr;
+        tw_switches(cpu, g_tw.world, g_tw.tome);
+        g_tw.world[TW_SWITCHES] = g_tw.world[TW_SWITCHES + 1u] = 0u;
+        mem_write32(cpu, sda - 26240u, 3u);
+        mem_write32(cpu, sda - 26188u, 3u);
+        mem_write32(cpu, sda - 26192u, TW_TOME_FRAME);
+        if (g_coop_tome_owner == 1)
+            coop_tome_player(cpu, true);
+    } else {
+        if (g_coop_tome_owner == 1)
+            coop_tome_player(cpu, false);
+        tw_switches(cpu, g_tw.tome, g_tw.world);
+        mem_write32(cpu, sda + (u32)g_menu_flag_offset, 0u);
+        mem_write32(cpu, sda + (u32)g_menu_depth_offset, 0u);
+        mem_write32(cpu, sda - 26240u, 2u);
+        mem_write32(cpu, sda - 26188u, 2u);
+        mem_write32(cpu, sda - 26192u, TW_WORLD_FRAME);
+    }
+    g_tw.world_tick = !g_tw.world_tick;
+    g_tw.worlds_left = TW_WORLD_FRAMES;
+    dol_aurora_split_skip_views(!g_tw.world_tick);
+    dol_aurora_frame_unpaced(!g_tw.world_tick);
+    aurora_split_only_view(g_coop_tome_owner >= 0 ? 1 - g_coop_tome_owner : -1);
 }
 
 static void cheat_apply(CPUState* cpu);
@@ -8879,6 +9113,7 @@ static void coop_script_timers(CPUState* cpu) {
     }
 }
 
+static void tw_state_loaded(void);
 // Quick state: which element is player 2's (a state loaded without it
 // leaves the one it had drawn, unknown here).
 typedef struct {
@@ -8905,6 +9140,7 @@ void hle_coop_prompt_load(const void* in) {
     g_coop_prompt_shown.p2 = s.p2;
     g_coop_prompt_shown.id = s.id;
     g_coop_prompt = -1;
+    tw_state_loaded();
 }
 
 // Player 2's element: made when their prompt changes, let go of when it goes
@@ -10430,6 +10666,7 @@ static void coop_door_proxy(CPUState* cpu) {
 #define COOP_ASSIST_WINDOW 120u  // pad reads after the assist's B that a screen is player 2's
 #define COOP_START_WAIT 30u      // pad reads for the Tome to open after player 2's Start
 void aurora_split_menu(int player, int layout);
+void aurora_split_only_view(int player);
 
 // ED_COOP_SNAP_DIR=dir (testing): memory as player 2's Tome opens and as
 // play goes on again (snapN.ram, the first 24 MB).
@@ -11029,11 +11266,43 @@ static void coop_cutscene_over(CPUState* cpu) {
     fprintf(stderr, "[coop] the cutscene over: player 1 back where they were\n");
 }
 
+
 static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState* pad) {
     static int owner = -1;  // -1 the game's own, 0 player 1, 1 player 2
     static unsigned start_wait;
     static bool start_was;
     static unsigned quick_wait;  // pad reads for the Tome their quick spell asked for
+    g_coop_tome_owner = owner;
+    // The world behind the Tome: a read is for the frame after it. For the world's,
+    // the Tome's owner stands; for the Tome's, it is their pad as ever.
+    if (hle_coop_tome_shares()) {
+        // The buttons held at the last read, which make a press new: the world's and
+        // the Tome's reads are different pads to it, each with its own (held by turns,
+        // a button was a new press each time, and a Tome opened with it shut again).
+        static u32 held[2];
+        const int turn = tw_tome_next() ? 1 : 0;
+        const u32 now = mem_read32(cpu, COOP_INPUT + 48u);
+        if (g_tw_held_from < 0)
+            held[0] = held[1] = now;
+        else
+            held[g_tw_held_from] = now;
+        g_tw_held_from = turn;
+        mem_write32(cpu, COOP_INPUT + 48u, held[turn]);
+        if (!tw_tome_next()) {
+            if (owner == 0) {
+                const s32 error = pad->error;
+                g_tw_taps |= pad->button;
+                memset(pad, 0, sizeof *pad);
+                pad->error = error;
+            }
+            return;
+        }
+        if (owner == 0) {
+            pad->button |= g_tw_taps;
+            g_tw_taps = 0u;
+        }
+        menu = true;
+    }
     g_coop_screen = false;
     g_coop_cutscene_pending = g_coop_cutscene.pending;
     if (g_coop_scene_script != 0 && !cutscene && ++g_coop_scene_after > COOP_SCENE_AFTER)
@@ -11095,6 +11364,10 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     }
     DolPadState p2;
     controls_read_player2(&p2);
+    if (hle_coop_tome_shares() && owner == 1) {
+        p2.button |= g_tw_taps;
+        g_tw_taps = 0u;
+    }
     const bool start = (p2.button & 0x1000u) != 0u;
     const bool start_pressed = start && !start_was;
     start_was = start;
@@ -11187,6 +11460,7 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     // taken), whoever's press led to it.
     if (owner >= 0)
         aurora_split_menu(cutscene ? -1 : owner, g_settings.mod_split);
+    g_coop_tome_owner = owner;
 }
 
 static void coop_test_swap(CPUState* cpu) {
@@ -11625,6 +11899,31 @@ static void find_coop(CPUState* cpu) {
         cast->intercept = coop_cast;
     } else {
         fprintf(stderr, "[coop] the cast not found: what player 2 casts from their Tome is player 1's\n");
+    }
+    // The world behind the Tome.
+    {
+        HleDispatchEntry* wait = hle_dispatch_entry(TW_FRAME_WAIT);
+        if (wait != NULL && wait->intercept == NULL)
+            wait->intercept = tw_frame_wait;
+        const u32 retrace = sdk_symbol_address("VIWaitForRetrace");
+        HleDispatchEntry* wait2 = retrace != 0u ? hle_dispatch_entry(retrace) : NULL;
+        if (wait2 != NULL && wait2->intercept == NULL)
+            wait2->intercept = tw_retrace_wait;
+        const u32 kept[11] = {0x80125190u, 0x8011F2D4u, 0x80043AB8u, 0x801104D4u, 0x80110C24u, 0x80152298u, 0x801556A8u,
+                             0x801A0F30u, 0x801A05ECu, 0x801A4FCCu, 0x8019E068u};
+        HleDispatchEntry* change = hle_dispatch_entry(TW_MODE_CHANGE);
+        HleDispatchEntry* start = hle_dispatch_entry(TW_TOME_START);
+        HleDispatchEntry* buffer = hle_dispatch_entry(TW_ROOM_BUFFER);
+        if (change != NULL && start != NULL && buffer != NULL) {
+            change->intercept = tw_mode_change;
+            start->intercept = tw_tome_start;
+            buffer->intercept = tw_room_buffer;
+            for (int i = 0; i < 11; i++) {
+                HleDispatchEntry* e = hle_dispatch_entry(kept[i]);
+                if (e != NULL && e->intercept == NULL)
+                    e->intercept = tw_keep;
+            }
+        }
     }
     // Who the controlled character is, as an enchant asks (bl at 0x801C6DC8).
     HleDispatchEntry* controlled = hle_dispatch_entry(COOP_CONTROLLED_ID);
