@@ -8000,16 +8000,23 @@ static u32 coop_look_line(CPUState* cpu, u32 object) {
 #define COOP_ZONE_CAMERAS_SIZE 0xDC8u
 static struct {
     u8 p2[COOP_ZONE_CAMERAS_SIZE], p1[COOP_ZONE_CAMERAS_SIZE];
+    u8 p1_prompts[PROMPT_SLOTS_SIZE];
     bool p2_set, lent;
 } g_coop_cameras;
 
-// Player 2's cameras in for their close-up (on) or player 1's back.
+// Player 2's cameras in for their close-up (on) or player 1's back, and
+// their prompts: what a close-up of theirs asks for is theirs, and took player
+// 1's place (Examine for player 1, at their door).
 static void coop_cameras_lend(CPUState* cpu, bool on) {
     if (on == g_coop_cameras.lent || (on && !g_coop_cameras.p2_set))
         return;
     g_coop_cameras.lent = on;
     coop_bytes(cpu, COOP_ZONE_CAMERAS, on ? g_coop_cameras.p1 : g_coop_cameras.p2, COOP_ZONE_CAMERAS_SIZE, true);
     coop_bytes(cpu, COOP_ZONE_CAMERAS, on ? g_coop_cameras.p2 : g_coop_cameras.p1, COOP_ZONE_CAMERAS_SIZE, false);
+    if (on && !g_coop_prompt_slots_set)
+        coop_prompt_slots_clear();
+    coop_bytes(cpu, PROMPT_SLOTS, on ? g_coop_cameras.p1_prompts : g_coop_prompt_slots, PROMPT_SLOTS_SIZE, true);
+    coop_bytes(cpu, PROMPT_SLOTS, on ? g_coop_prompt_slots : g_coop_cameras.p1_prompts, PROMPT_SLOTS_SIZE, false);
 }
 static struct {
     u32 list, p1[COOP_ZONES_MAX], p2[COOP_ZONES_MAX];
@@ -10324,8 +10331,10 @@ static void coop_cutscene_held(CPUState* cpu) {
     }
     coop_cutscene_place(cpu, object);
     if (--g_coop_cutscene.hold == 0u) {
-        if (g_coop_cutscene.cameras)
+        if (g_coop_cutscene.cameras) {
             coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p1, COOP_ZONE_CAMERAS_SIZE, false);
+            coop_bytes(cpu, PROMPT_SLOTS, g_coop_cameras.p1_prompts, PROMPT_SLOTS_SIZE, false);
+        }
         coop_cutscene_word(cpu);
     }
 }
@@ -10343,6 +10352,8 @@ static void coop_cutscene_over(CPUState* cpu) {
         coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p2, COOP_ZONE_CAMERAS_SIZE, true);
         g_coop_cameras.p2_set = true;
         coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p1, COOP_ZONE_CAMERAS_SIZE, false);
+        coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, PROMPT_SLOTS_SIZE, true);
+        coop_bytes(cpu, PROMPT_SLOTS, g_coop_cameras.p1_prompts, PROMPT_SLOTS_SIZE, false);
     }
     coop_cutscene_word(cpu);
     fprintf(stderr, "[coop] the cutscene over: player 1 back where they were\n");
