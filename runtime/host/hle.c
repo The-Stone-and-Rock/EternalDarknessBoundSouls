@@ -9457,6 +9457,42 @@ static void coop_has_tome(CPUState* cpu) {
     g_hle_tail_call = false;
 }
 
+// What the players carry is theirs together for a script too. A script asks
+// whether the player carries a thing (0x80165C94(5, id) -> 0x801F60BC(id, their
+// list)) of whoever is the player as it runs: at a way out player 2's look asked
+// their list, the Tome being in player 1's, and offered the way to fetch it;
+// the press, run as player 1, found it and left with the input held, in the
+// next room for good. Either list answers, whoever picked it up.
+#define COOP_ITEM_IN_LIST 0x801F60BCu
+#define COOP_SCRIPT_ITEM_ASKED 0x80165DB8u
+
+static void coop_script_item(CPUState* cpu) {
+    static bool asking;
+    g_hle_passthrough = true;
+    if (asking || cpu->lr != COOP_SCRIPT_ITEM_ASKED || g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu) ||
+        !coop_listed(cpu, g_coop_p2))
+        return;
+    const u32 self = mem_read32(cpu, cpu->gpr[13] - 21492u);
+    const u32 first = g_coop_use.active && g_coop_use.p2 ? g_coop_use.was[1] : g_coop_turn ? g_coop_turn_p1 : 0u;
+    const u32 other = self == g_coop_p2 ? first : g_coop_p2;
+    if (!guest_ram_range_valid(cpu, other, CARRY_LIST + 4u))
+        return;
+    u32 args[2] = {cpu->gpr[3], cpu->gpr[4]};
+    u32 answer = 0u;
+    asking = true;
+    hle_guest_call(cpu, COOP_ITEM_IN_LIST, args, 2, 0.0, &answer);
+    if ((s32)answer < 0) {
+        args[1] = mem_read32(cpu, other + CARRY_LIST);
+        hle_guest_call(cpu, COOP_ITEM_IN_LIST, args, 2, 0.0, &answer);
+        if ((s32)answer >= 0 && getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] a script asks for item %d: the other player carries it (%d)\n", (s32)args[0], (s32)answer);
+    }
+    asking = false;
+    cpu->gpr[3] = answer;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
 static void cheat_full(CPUState* cpu, u32 node) {
     if (!guest_ram_range_valid(cpu, node, 56u))
         return;
@@ -10908,6 +10944,15 @@ static void find_coop(CPUState* cpu) {
         tome->intercept = coop_has_tome;
     } else {
         fprintf(stderr, "[coop] the Tome's check not found: player 2 cannot cast\n");
+    }
+    // A script's asking for what the player carries (stwu r1,-16(r1) and the
+    // script function's bl to it), of both players.
+    HleDispatchEntry* item_asked = hle_dispatch_entry(COOP_ITEM_IN_LIST);
+    if (mem_read32(cpu, COOP_ITEM_IN_LIST) == 0x9421FFF0u && mem_read32(cpu, COOP_SCRIPT_ITEM_ASKED - 4u) == 0x48090309u &&
+        item_asked != NULL && item_asked->intercept == NULL && item_asked->notify == NULL) {
+        item_asked->intercept = coop_script_item;
+    } else {
+        fprintf(stderr, "[coop] a script's asking for items not found: each player's own list answers\n");
     }
     // The cast (stwu r1,-160(r1); ... lwz r29,0(r4) at +0x28), for what
     // player 2 casts from their Tome.
