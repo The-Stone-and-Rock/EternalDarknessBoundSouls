@@ -8226,6 +8226,7 @@ static unsigned g_coop_assist_at;
 static struct {
     bool active, resumed, p2, found;
     u32 resume, was[5];
+    s32 script;  // what it last ran
     HleSavedContext saved;
 } g_coop_use;
 
@@ -8276,6 +8277,7 @@ static void coop_use_start(CPUState* cpu, s32 script, bool p2) {
     save_callback_context(&g_coop_use.saved, cpu);
     g_coop_use.resume = cpu->pc;
     g_coop_use.p2 = p2;
+    g_coop_use.script = script;
     g_coop_use.found = false;
     if (p2) {
         coop_be_player2(cpu, true, g_coop_use.was);
@@ -10334,6 +10336,10 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     // player 1's camera was the old room's in the new).
     if (cutscene && owner == 1) {
         fprintf(stderr, "[coop] a cutscene: the screen and the pad are player 1's again\n");
+        // Its end runs the script that began it again, in the game's table:
+        // with its word still theirs, that began it again from the start.
+        if (g_coop_use.script != 0)
+            coop_state_to_game(cpu, g_coop_use.script);
         g_coop_b_release = true;
         g_coop_p2_hold = p2.button;
         g_coop_cameras.lent = false;
