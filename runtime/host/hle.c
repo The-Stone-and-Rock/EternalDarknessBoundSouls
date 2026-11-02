@@ -8178,9 +8178,16 @@ bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* 
 // again it takes them.
 #define COOP_SCRIPT_GO_TO_ROOM 0x801666A4u
 static bool g_coop_arrived;
+// Player 2 is going through a door (until they arrive, or this frame): their turn
+// runs through its fade, or its motion waited for the room after.
+static unsigned long long g_coop_door_turns_until;
+
+static bool coop_door_turns(const CPUState* cpu) {
+    return g_coop_door_turns_until != 0ull && cpu->timebase / 675000ull <= g_coop_door_turns_until;
+}
 
 static void coop_script_go_to_room(CPUState* cpu) {
-    g_hle_passthrough = !g_coop_prompt_look || !g_coop_arrived;
+    g_hle_passthrough = !g_coop_prompt_look || (!g_coop_arrived && !coop_door_turns(cpu));
     if (g_hle_passthrough)
         return;
     if (getenv("ED_COOP_LOG") != NULL)
@@ -8406,6 +8413,12 @@ static void coop_run_script(CPUState* cpu) {
     }
 }
 
+// A way to another room player 2 opened: it runs as player 1's, and the motion
+// that goes with it (coop_door_motion) is theirs, for as long as its script may
+// wait before it asks for the room.
+#define COOP_DOOR_WAIT 300u
+static unsigned long long g_coop_door_p2_until;
+
 // A prompt with no script of its own (its script -2): a look its zone made ready
 // (0x80307108), which the game's use of a prompt opens (0x80006EBC(its +4, 0): a
 // press of the action button, the prompt the game's own, +28 * 6). Player 2's
@@ -8510,6 +8523,7 @@ static void hle_coop_controller(CPUState* cpu) {
             // in the room (player 2 brought along, coop_follow).
             coop_state_to_game(cpu, script);
             coop_use_start(cpu, script, false);
+            g_coop_door_p2_until = cpu->timebase / 675000ull + COOP_DOOR_WAIT;
         } else {
             coop_use_start(cpu, script, true);
         }
@@ -8626,7 +8640,7 @@ static void coop_player_turn(CPUState* cpu) {
     // While the player is busy (a close-up, a thing taken) the game runs it
     // for player 1 alone: player 2's turn, which pumps the game's input with
     // their pad and is "the player" for a while, kept it from going on.
-    if (coop_busy(cpu))
+    if (coop_busy(cpu) && !coop_door_turns(cpu))
         return;
     g_coop_turn = true;
     const u32 node = cpu->gpr[3];
@@ -8692,7 +8706,7 @@ static void coop_player_turn(CPUState* cpu) {
         const bool b = (g_coop_p2_buttons & 0x0200u) != 0u;
         if (g_coop_use_own && b && !b_was && getenv("ED_COOP_LOG") != NULL)
             fprintf(stderr, "[coop] player 2's B: prompt %d script %d\n", g_coop_prompt, g_coop_prompt_script);
-        if (g_coop_use_own && b && !b_was && g_coop_prompt >= 0 &&
+        if (g_coop_use_own && b && !b_was && g_coop_prompt >= 0 && !coop_door_turns(cpu) &&
             (g_coop_prompt_script > 0 || g_coop_prompt_script == COOP_PROMPT_CLOSE_UP)) {
             g_coop_use_script = g_coop_prompt_script;
             g_coop_use_prompt = g_coop_prompt;
@@ -8786,6 +8800,12 @@ static void coop_send_event(CPUState* cpu) {
 #define COOP_FALLEN 2000.0f  // below where they last stood still by more, player 2 has fallen out
 #define COOP_INSIDE 30.0f    // nearer player 1 than this (across the floor), player 2 is inside them
 
+#define COOP_NODE_STATE 24u
+#define COOP_STATE_DOOR 121u
+#define COOP_ARRIVED_EVENT 238u
+#define COOP_NODE_HELD_SET 0x801F6828u
+static bool g_coop_door_held;  // held while the game is busy, before a door of theirs let them go on
+
 static void coop_follow(CPUState* cpu, u32 player) {
     const u32 o1 = mem_read32(cpu, player + 52u), o2 = mem_read32(cpu, g_coop_p2 + 52u);
     if (!guest_ram_range_valid(cpu, o1, 64u) || !guest_ram_range_valid(cpu, o2, 64u) ||
@@ -8847,6 +8867,30 @@ static void coop_follow(CPUState* cpu, u32 player) {
     u32 ignore = 0u;
     hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, args, 2, 0.0, &ignore);
     g_coop_arrived = true;
+    g_coop_door_turns_until = 0ull;
+    // Through a door of theirs (its motion's state still theirs): the room change
+    // tells the player they have arrived (0x801526EC: event 238, from and to
+    // them), which ends it, and tells player 1 alone. Their door's motion went on
+    // in the new room, late. They are told as player 1 is, as the player.
+    if (mem_read32(cpu, g_coop_p2 + COOP_NODE_STATE) == COOP_STATE_DOOR) {
+        const u32 id = mem_read32(cpu, g_coop_p2 + 16u);
+        const u32 event[4] = {COOP_ARRIVED_EVENT, id, id, 0u};
+        const u32 who[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+        const u32 now[3] = {o2, g_coop_p2, id};
+        u32 kept[3];
+        for (int i = 0; i < 3; i++) {
+            kept[i] = mem_read32(cpu, who[i]);
+            mem_write32(cpu, who[i], now[i]);
+        }
+        hle_guest_call(cpu, COOP_SEND_EVENT, event, 4, 0.0, &ignore);
+        for (int i = 0; i < 3; i++)
+            mem_write32(cpu, who[i], kept[i]);
+    }
+    if (g_coop_door_held) {
+        const u32 hold[2] = {g_coop_p2, 1u};
+        g_coop_door_held = false;
+        hle_guest_call(cpu, COOP_NODE_HELD_SET, hold, 2, 0.0, &ignore);
+    }
     fprintf(stderr, "[coop] player 2 brought to player 1's room 0x%08X, at %.0f %.0f %.0f\n", room, at[0], at[1],
             at[2]);
 }
@@ -8947,6 +8991,35 @@ static void coop_as_player2(CPUState* cpu, u32 fn) {
     cpu->gpr[3] = result;
     g_hle_passthrough = false;
     g_hle_tail_call = false;
+}
+
+// A script's asking for a room plays its motion on whoever is the player
+// (0x801669AC(motion): event 253 to them; 25 a door, from 0x801666A4): player 1,
+// the script being run as theirs so the rooms load round them, whoever opened
+// it. The one who opened it goes through it.
+#define COOP_DOOR_MOTION 0x801669ACu
+#define COOP_DOOR_FADE 120u  // frames at most: a door's fade is 60
+
+static void coop_door_motion(CPUState* cpu) {
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    const bool theirs = g_coop_door_p2_until != 0ull && frame <= g_coop_door_p2_until && g_settings.mod_coop &&
+                        g_coop_p2 != 0u && sda_ready(cpu);
+    g_coop_door_p2_until = 0ull;  // once: not for this call again, nor player 1's next door
+    if (!theirs) {
+        g_hle_passthrough = true;
+        return;
+    }
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] player 2 opened it: motion %d is theirs\n", (s32)cpu->gpr[3]);
+    g_coop_door_turns_until = frame + COOP_DOOR_FADE;
+    // The room's asking lets the player go on while the game is busy (0x801F6828
+    // (player, 0): their +28's 8, which holds a character then): only player 1, so
+    // the motion stood still through the fade. Theirs too, until they arrive.
+    const u32 go_on[2] = {g_coop_p2, 0u};
+    u32 ignore = 0u;
+    g_coop_door_held = (mem_read32(cpu, g_coop_p2 + 28u) & 8u) != 0u;
+    hle_guest_call(cpu, COOP_NODE_HELD_SET, go_on, 2, 0.0, &ignore);
+    coop_as_player2(cpu, COOP_DOOR_MOTION);
 }
 
 static void coop_sighting(CPUState* cpu) {
@@ -11076,6 +11149,15 @@ static void find_coop(CPUState* cpu) {
         item_asked->intercept = coop_script_item;
     } else {
         fprintf(stderr, "[coop] a script's asking for items not found: each player's own list answers\n");
+    }
+    // A room's motion (stwu r1,-16(r1); ... bl 0x801F62B8 at +0x14), on whoever
+    // opened the way.
+    HleDispatchEntry* door_motion = hle_dispatch_entry(COOP_DOOR_MOTION);
+    if (mem_read32(cpu, COOP_DOOR_MOTION) == 0x9421FFF0u && mem_read32(cpu, COOP_DOOR_MOTION + 0x14u) == 0x4808F8F9u &&
+        door_motion != NULL && door_motion->intercept == NULL && door_motion->notify == NULL) {
+        door_motion->intercept = coop_door_motion;
+    } else {
+        fprintf(stderr, "[coop] a room's motion not found: player 1 goes through every door\n");
     }
     // A script's asking for a room (stwu r1,-112(r1); ... cmpwi r3,7 at +0x24),
     // not heard from player 2's first look in the room they were brought to.
