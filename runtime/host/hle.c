@@ -7607,6 +7607,8 @@ static const s32 COOP_THREAT[2] = {-25008, -25004};
 static u32 g_coop_threat[2];
 static u32 g_coop_p1_id = ~0u;  // player 1's id, as it was before player 2's turn (coop_send_event)
 
+static u32 g_coop_own_carry;  // player 2's own list, while their quick spell has player 1's
+
 // Player 2's quick spells. The game casts the player's from its input:
 // Y and the D-pad's bindings call 0x800069DC with the address of one of the
 // five quick spells (the magick record's 0x80334DE8..), which, when the player
@@ -7707,6 +7709,7 @@ static void coop_quick_cast(CPUState* cpu) {
         const u32 first = mem_read32(cpu, cpu->gpr[13] - 22328u);
         u32 was[5], ignore = 0u;
         const u32 carried = mem_read32(cpu, g_coop_p2 + CARRY_LIST);
+        g_coop_own_carry = carried;
         const u32 asked = mem_read32(cpu, COOP_SPELL_ITEM + COOP_SPELL_ITEM_TOME) & 1u;
         if (g_coop_turn_p1 != 0u)
             mem_write32(cpu, g_coop_p2 + CARRY_LIST, mem_read32(cpu, g_coop_turn_p1 + CARRY_LIST));
@@ -7714,6 +7717,7 @@ static void coop_quick_cast(CPUState* cpu) {
         hle_guest_call(cpu, COOP_QUICK_CAST, args, 2, 0.0, &ignore);
         coop_be_player2(cpu, false, was);
         mem_write32(cpu, g_coop_p2 + CARRY_LIST, carried);
+        g_coop_own_carry = 0u;
         if (!asked && (mem_read32(cpu, COOP_SPELL_ITEM + COOP_SPELL_ITEM_TOME) & 1u) != 0u)
             g_coop_quick_tome = true;
         if (getenv("ED_COOP_CAST_LOG") != NULL) {
@@ -8247,6 +8251,12 @@ static struct {
 static void hle_coop_found(CPUState* cpu) {
     if (g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu))
         return;
+    // What player 2 finds is the players' together: both Tomes list player 1's
+    // things (their own copies of weapons apart), so in player 2's list it
+    // showed in neither.
+    const u32 first = g_coop_use.active && g_coop_use.p2 ? g_coop_use.was[1] : g_coop_turn_p1;
+    if (cpu->gpr[5] == mem_read32(cpu, g_coop_p2 + 16u) && guest_ram_range_valid(cpu, first, 20u))
+        cpu->gpr[5] = mem_read32(cpu, first + 16u);
     const s16 script = (s16)mem_read32(cpu, cpu->gpr[13] - RUNNING_SCRIPT);
     u8 word[8];
     bool found = false;
@@ -9431,7 +9441,14 @@ static void coop_has_tome(CPUState* cpu) {
         !coop_listed(cpu, g_coop_p2))
         return;
     asking = true;
+    // Their own things: with player 1's lent for their cast, the Tome they
+    // carry was in neither list, and they could not cast.
+    const u32 lent = g_coop_own_carry != 0u ? mem_read32(cpu, g_coop_p2 + CARRY_LIST) : 0u;
+    if (lent != 0u)
+        mem_write32(cpu, g_coop_p2 + CARRY_LIST, g_coop_own_carry);
     u32 answer = coop_ask_has_tome(cpu, self);
+    if (lent != 0u)
+        mem_write32(cpu, g_coop_p2 + CARRY_LIST, lent);
     if (answer == 0u)
         answer = coop_ask_has_tome(cpu, other);
     asking = false;
