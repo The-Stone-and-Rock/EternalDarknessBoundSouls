@@ -8170,6 +8170,25 @@ bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* 
     return isfinite(eye[0]) && isfinite(target[0]);
 }
 
+// Brought to player 1's room, player 2 may stand in a way back (the stairs just
+// come up: player 1 arrives clear of its zone, they beside them in it). Their
+// first look in the room, all it finds being new to them, took that as walking
+// in and sent both back, for ever. That look's asking for a room (0x801666A4,
+// the script's) goes unheard; the zone counts as come into, and walked into
+// again it takes them.
+#define COOP_SCRIPT_GO_TO_ROOM 0x801666A4u
+static bool g_coop_arrived;
+
+static void coop_script_go_to_room(CPUState* cpu) {
+    g_hle_passthrough = !g_coop_prompt_look || !g_coop_arrived;
+    if (g_hle_passthrough)
+        return;
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] player 2 arrived in a way out: its room change passed over\n");
+    cpu->gpr[3] = 0u;
+    g_hle_tail_call = false;
+}
+
 static void coop_prompt_look(CPUState* cpu, u32 object) {
     if (!g_coop_scan)
         return;
@@ -8194,6 +8213,7 @@ static void coop_prompt_look(CPUState* cpu, u32 object) {
     g_coop_prompt_look = true;
     hle_guest_call(cpu, COOP_SCAN, args, 4, 0.0, &ignore);
     g_coop_prompt_look = false;
+    g_coop_arrived = false;
     coop_zones_swap(cpu, info, false);
     coop_states_swap(cpu, false);
     coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, sizeof g_coop_prompt_slots, true);
@@ -8795,6 +8815,7 @@ static void coop_follow(CPUState* cpu, u32 player) {
     const u32 args[] = {g_coop_p2, room};
     u32 ignore = 0u;
     hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, args, 2, 0.0, &ignore);
+    g_coop_arrived = true;
     fprintf(stderr, "[coop] player 2 brought to player 1's room 0x%08X, at %.0f %.0f %.0f\n", room, at[0], at[1],
             at[2]);
 }
@@ -10953,6 +10974,15 @@ static void find_coop(CPUState* cpu) {
         item_asked->intercept = coop_script_item;
     } else {
         fprintf(stderr, "[coop] a script's asking for items not found: each player's own list answers\n");
+    }
+    // A script's asking for a room (stwu r1,-112(r1); ... cmpwi r3,7 at +0x24),
+    // not heard from player 2's first look in the room they were brought to.
+    HleDispatchEntry* go_to_room = hle_dispatch_entry(COOP_SCRIPT_GO_TO_ROOM);
+    if (mem_read32(cpu, COOP_SCRIPT_GO_TO_ROOM) == 0x9421FF90u && mem_read32(cpu, COOP_SCRIPT_GO_TO_ROOM + 0x24u) == 0x2C030007u &&
+        go_to_room != NULL && go_to_room->intercept == NULL && go_to_room->notify == NULL) {
+        go_to_room->intercept = coop_script_go_to_room;
+    } else {
+        fprintf(stderr, "[coop] a script's asking for a room not found: player 2 may be sent back as they arrive\n");
     }
     // The cast (stwu r1,-160(r1); ... lwz r29,0(r4) at +0x28), for what
     // player 2 casts from their Tome.
