@@ -8538,6 +8538,72 @@ static struct {
     bool p2;
 } g_coop_close;
 
+// The game's words name the chapter's character ("Paul cannot use that now."),
+// whoever plays them: the player's own name goes in before they are laid out.
+// Whatever makes words comes through the layout (0x801DB088(element): the words
+// whole at its +122). A name followed by another ("Paul Luther") is the person's,
+// and stays. Only the name: "he" and "his" stay as written.
+#define WORDS_LAYOUT 0x801DB088u
+#define WORDS_AT 122u
+#define WORDS_MOST 1500u
+static bool g_coop_tome_p2;
+
+static const char* const kCharacterWords[12][2] = {
+    {"Pius", "Pious"},  {"Ellia", NULL},  {"Anthony", NULL}, {"Karim", NULL},
+    {"Max", "Maximillian"}, {"Lindsey", NULL}, {"Paul", NULL}, {"Roberto", NULL},
+    {"Peter", NULL}, {"Edward", NULL}, {"Michael", NULL}, {"Alex", "Alexandra"}};
+
+static bool words_letter(u8 c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); }
+
+// Each whole word of from in the words becomes to, while there is room after them.
+static void words_rename(u8* words, const char* from, const char* to) {
+    const u32 from_n = (u32)strlen(from), to_n = (u32)strlen(to);
+    u32 end = 0u;
+    while (end < WORDS_MOST && words[end] != 0u)
+        end++;
+    if (end >= WORDS_MOST)
+        return;
+    for (u32 at = 0u; at + from_n <= end; at++) {
+        if (memcmp(words + at, from, from_n) != 0 || (at > 0u && words_letter(words[at - 1u])) ||
+            words_letter(words[at + from_n]) ||
+            (words[at + from_n] == ' ' && words[at + from_n + 1u] >= 'A' && words[at + from_n + 1u] <= 'Z'))
+            continue;
+        if (to_n > from_n) {
+            const u32 more = to_n - from_n;
+            if (end + more >= WORDS_MOST)
+                return;
+            for (u32 i = 1u; i <= more; i++)
+                if (words[end + i] != 0u)
+                    return;
+        }
+        memmove(words + at + to_n, words + at + from_n, end + 1u - (at + from_n));
+        if (to_n < from_n)
+            memset(words + end + 1u - (from_n - to_n), 0, from_n - to_n);
+        end = end + to_n - from_n;
+        memcpy(words + at, to, to_n);
+        at += to_n - 1u;
+    }
+}
+
+static void hle_words_layout(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (g_chapter_model < 0 || !sda_ready(cpu) || !guest_ram_range_valid(cpu, cpu->gpr[3] + WORDS_AT, WORDS_MOST))
+        return;
+    int chapter = -1;
+    for (int i = 0; i < 12; i++)
+        if (kPlayerModel[i] == g_chapter_model)
+            chapter = i;
+    const bool p2 = g_settings.mod_coop && g_coop_p2 != 0u &&
+                    (g_coop_tome_p2 || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2);
+    const int choice = (p2 ? g_settings.mod_p2_character : g_settings.mod_p1_character) - 1;
+    if (chapter < 0 || choice < 0 || choice >= 12 || choice == chapter)
+        return;
+    u8* const words = cpu->ram + (cpu->gpr[3] + WORDS_AT - GC_RAM_BASE);
+    for (int k = 0; k < 2; k++)
+        if (kCharacterWords[chapter][k] != NULL)
+            words_rename(words, kCharacterWords[chapter][k], kCharacterWords[choice][0]);
+}
+
 static void hle_message_open(CPUState* cpu) {
     static int keep = -1;
     if (keep < 0)
@@ -11328,6 +11394,14 @@ static void find_coop(CPUState* cpu) {
         item_asked->intercept = coop_script_item;
     } else {
         fprintf(stderr, "[coop] a script's asking for items not found: each player's own list answers\n");
+    }
+    // The layout of the game's words, for the player's own name in them.
+    HleDispatchEntry* words_layout = hle_dispatch_entry(WORDS_LAYOUT);
+    if ((mem_read32(cpu, WORDS_LAYOUT) >> 16) == 0x9421u && mem_read32(cpu, WORDS_LAYOUT + 4u) == 0x7C0802A6u &&
+        words_layout != NULL && words_layout->intercept == NULL && words_layout->notify == NULL) {
+        words_layout->intercept = hle_words_layout;
+    } else {
+        fprintf(stderr, "[coop] the layout of the game's words not found: they name the chapter's character\n");
     }
     // The look for the player to talk to them (stwu r1,-64(r1); ... bl 0x801F62B8
     // at +0x18), for player 2 too.
