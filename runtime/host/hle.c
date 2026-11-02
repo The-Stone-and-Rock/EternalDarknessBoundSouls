@@ -7360,6 +7360,7 @@ static void coop_spawn(CPUState* cpu, u32 player) {
 #define COOP_PAD_UPDATE 0x8013E518u
 #define COOP_INPUT 0x805880A0u       // raw pads, processed pads, the input channels
 #define COOP_INPUT_SIZE 816u
+#define COOP_INPUT_MASKS 0xE0u
 #define COOP_CONTROL 0x805D7900u     // the control blocks (0x805D7BA0 among them)
 #define COOP_CONTROL_SIZE 0x300u
 #define COOP_AIM_SIZE 208u           // the block channel 3 drives (its +12)
@@ -8232,7 +8233,7 @@ static s32 g_coop_use_prompt;    // and the prompt it was pressed at
 static unsigned g_coop_assist_at;
 static struct {
     bool active, resumed, p2, found, at_press, lent_before;
-    u32 resume, was[5];
+    u32 resume, was[5], info;
     s32 script;  // what it last ran
     HleSavedContext saved;
 } g_coop_use;
@@ -8289,6 +8290,18 @@ static void coop_use_start(CPUState* cpu, s32 script, bool p2) {
     if (p2) {
         coop_be_player2(cpu, true, g_coop_use.was);
         coop_states_swap(cpu, true);
+        // Their zone words too: what a script of theirs leaves for a zone (the
+        // Tome's hand open: its zone looks again, and offers it) was player
+        // 1's, who had the prompt when they came by, and player 2 none.
+        const u32 object = mem_read32(cpu, g_coop_p2 + 52u);
+        u32 ignore = 0u, info = 0u;
+        g_coop_use.info = hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) &&
+                                  guest_ram_range_valid(cpu, info, 184u)
+                              ? info
+                              : 0u;
+        (void)ignore;
+        if (g_coop_use.info != 0u)
+            coop_zones_swap(cpu, g_coop_use.info, true);
         g_coop_assist_at = 1u;  // the close-up it opens is theirs
         // Their cameras in first: what it sets is theirs. Put in after, player
         // 1's kept the close-up's, and stayed at the thing when it was over.
@@ -8316,6 +8329,8 @@ static bool continue_coop_use(CPUState* cpu) {
     g_coop_use.at_press = false;
     if (g_coop_use.p2) {
         coop_states_swap(cpu, false);
+        if (g_coop_use.info != 0u)
+            coop_zones_swap(cpu, g_coop_use.info, false);
         coop_be_player2(cpu, false, g_coop_use.was);
         // What it opened is theirs from this frame on: player 1's half keeps
         // their last view from before it (not a frame with its words).
@@ -8559,6 +8574,15 @@ static void coop_player_turn(CPUState* cpu) {
     coop_state(cpu, &g_coop_state[0], true);
     if (g_coop_p2_state)
         coop_state(cpu, &g_coop_state[1], false);
+    // What the game's input lets through (each input channel's +16, 32 bytes
+    // apart): set for a window or a lock and cleared in the game's, which is
+    // player 1's between turns. Player 2's own copy kept a lock for good, and
+    // their stick did nothing. Theirs is the game's as it stands.
+    for (u32 at = COOP_INPUT_MASKS; at + 4u <= COOP_INPUT_SIZE; at += 32u) {
+        const u8* b = g_coop_state[0].input + at;
+        const u32 mask = (u32)b[0] << 24 | (u32)b[1] << 16 | (u32)b[2] << 8 | b[3];
+        mem_write32(cpu, COOP_INPUT + at, mask == 0x0FFFFFFEu ? 0x0FFFFFFFu : mask);
+    }
     u32 ignore = 0u;
     g_coop_pad_p2 = true;
     hle_guest_call(cpu, COOP_PAD_UPDATE, NULL, 0, 0.0, &ignore);
@@ -10290,7 +10314,7 @@ static void coop_game_camera(CPUState* cpu) {
 #define COOP_CUTSCENE_HOLD 30u
 static struct {
     u8 place[COOP_OBJECT_PLACE];
-    u32 object;
+    u32 object, zones;
     bool pending, cameras;
     unsigned hold;
 } g_coop_cutscene;
@@ -10344,7 +10368,7 @@ static void coop_cutscene_over(CPUState* cpu) {
     const u32 object = mem_read32(cpu, cpu->gpr[13] - 26524u);
     u32 info = 0u;
     if (object != g_coop_cutscene.object || !hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) ||
-        !guest_ram_range_valid(cpu, info, 184u) || mem_read32(cpu, info + 180u) != g_coop_zones.list)
+        !guest_ram_range_valid(cpu, info, 184u) || mem_read32(cpu, info + 180u) != g_coop_cutscene.zones)
         return;
     coop_cutscene_place(cpu, object);
     g_coop_cutscene.hold = COOP_CUTSCENE_HOLD;
@@ -10468,6 +10492,7 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             coop_state_to_game(cpu, g_coop_use.script);
         g_coop_cutscene.pending = g_coop_cutscene.object != 0u;
         g_coop_cutscene.cameras = g_coop_cameras.lent;
+        g_coop_cutscene.zones = g_coop_zones.list;
         g_coop_b_release = true;
         g_coop_p2_hold = p2.button;
         g_coop_cameras.lent = false;
