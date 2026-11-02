@@ -7123,8 +7123,13 @@ static void notify_room_change(CPUState* cpu) {
     room_log(cpu, "change");
 }
 
+// A new room asked for since the cutscene began (coop_cutscene_over).
+static bool g_coop_room_asked;
+
 static void notify_room_ticket(CPUState* cpu) {
-    room_log(cpu, "ticket");
+    g_coop_room_asked = true;
+    if (getenv("ED_ROOM_LOG") != NULL)
+        room_log(cpu, "ticket");
 }
 
 static void notify_script_later(CPUState* cpu) {
@@ -11264,7 +11269,9 @@ static void coop_cutscene_over(CPUState* cpu) {
     coop_talk_over(cpu);
     const u32 object = mem_read32(cpu, cpu->gpr[13] - 26524u);
     u32 info = 0u;
-    if (object != g_coop_cutscene.object || !hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) ||
+    // A cutscene that ends in another room (the Tome taken): the new room is not in
+    // yet, its zones still the old one's, and the old room's place is out of its bounds.
+    if (g_coop_room_asked || object != g_coop_cutscene.object || !hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) ||
         !guest_ram_range_valid(cpu, info, 184u) || mem_read32(cpu, info + 180u) != g_coop_cutscene.zones)
         return;
     coop_cutscene_place(cpu, object);
@@ -11441,6 +11448,7 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
         g_coop_scene_script = g_coop_use.script;
         g_coop_scene_after = 0u;
         g_coop_cutscene.pending = g_coop_cutscene.object != 0u;
+        g_coop_room_asked = false;
         g_coop_cutscene.cameras = g_coop_cameras.lent;
         g_coop_cutscene.zones = g_coop_zones.list;
         g_coop_b_release = true;
@@ -12037,7 +12045,7 @@ static void find_coop(CPUState* cpu) {
             if (getenv("ED_ROOM_LOG") != NULL && room != NULL && room->notify == NULL && room->intercept == NULL)
                 room->notify = notify_room_change;
             HleDispatchEntry* ticket = hle_dispatch_entry(0x80155770u);
-            if (getenv("ED_ROOM_LOG") != NULL && ticket != NULL && ticket->notify == NULL && ticket->intercept == NULL)
+            if (ticket != NULL && ticket->notify == NULL && ticket->intercept == NULL)
                 ticket->notify = notify_room_ticket;
             HleDispatchEntry* later = hle_dispatch_entry(0x80163C6Cu);
             if (getenv("ED_ROOM_LOG") != NULL && later != NULL && later->notify == NULL && later->intercept == NULL)
