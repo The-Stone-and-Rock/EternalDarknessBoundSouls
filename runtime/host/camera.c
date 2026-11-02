@@ -1524,7 +1524,7 @@ void aurora_split_set_view(int player, const float rot[9], float x, float y, flo
 
 bool hle_coop_player2_position(CPUState* cpu, float out[3]);  // hle.c
 bool hle_coop_screen(void);                                     // hle.c
-bool hle_coop_player2_camera(float eye[3], float target[3], float up[3]);  // hle.c
+bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* zoom);  // hle.c
 bool hle_game_menu_open(CPUState* cpu);                         // hle.c
 
 #define SPLIT_PITCH_LOW 0.05f
@@ -1634,11 +1634,11 @@ void camera_split_update(CPUState* cpu) {
     const Vec3 level = add(scale(e1, cosf(g_split_yaw)), scale(e2, sinf(g_split_yaw)));
     Vec3 eye2, focus;
     // The game's own camera, as its zones set it for player 2 (Original).
-    float own_eye[3], own_target[3], own_up[3];
+    float own_eye[3], own_target[3], own_up[3], zoom2 = 1.0f;
     if (g_settings.mod_p2_camera == 2) {
         // Before their first step (the game's opening pan, a new room), the
         // game's as it is.
-        const bool own = hle_coop_player2_camera(own_eye, own_target, own_up);
+        const bool own = hle_coop_player2_camera(own_eye, own_target, own_up, &zoom2);
         eye2 = own ? v3(own_eye[0], own_eye[1], own_eye[2]) : eye;
         focus = own ? v3(own_target[0], own_target[1], own_target[2]) : target;
     } else if (first) {
@@ -1696,7 +1696,7 @@ void camera_split_update(CPUState* cpu) {
 #ifdef ED_AURORA
     static const float kIdentity[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
     aurora_split_set_view(0, kIdentity, 0.0f, 0.0f, 0.0f, 1.0f, false);
-    aurora_split_set_view(1, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), 1.0f, true);
+    aurora_split_set_view(1, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), zoom2, true);
     aurora_split_set(true, g_settings.mod_split);
 #else
     (void)rot;
@@ -1710,8 +1710,8 @@ void camera_split_update(CPUState* cpu) {
     if (log < 0)
         log = getenv("ED_SPLIT_LOG") != NULL;
     if (log && frame % 30u == 0u)
-        fprintf(stderr, "[split] frame %llu: player 2 at %.0f %.0f %.0f in view 1 (eye %.0f %.0f %.0f, their eye %.0f %.0f %.0f, player %.0f %.0f %.0f)\n",
-                frame, dot(rel, x1), dot(rel, y1), dot(rel, z1), eye.x, eye.y, eye.z, eye2.x, eye2.y, eye2.z, player.x, player.y, player.z);
+        fprintf(stderr, "[split] frame %llu: player 2 at %.0f %.0f %.0f in view 1 (eye %.0f %.0f %.0f, their eye %.0f %.0f %.0f, player %.0f %.0f %.0f, zoom %.2f)\n",
+                frame, dot(rel, x1), dot(rel, y1), dot(rel, z1), eye.x, eye.y, eye.z, eye2.x, eye2.y, eye2.z, player.x, player.y, player.z, zoom2);
     g_split_on = true;
 }
 
