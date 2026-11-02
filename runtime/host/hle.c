@@ -3894,8 +3894,8 @@ static void hle_PADRead(CPUState* cpu) {
         if (pad_log < 0)
             pad_log = getenv("ED_COOP_PAD_LOG") != NULL;
         if (pad_log && (state[0].button != 0u || state[0].stick_x != 0 || state[0].stick_y != 0))
-            fprintf(stderr, "[coop] player 2's pad: buttons 0x%04X stick %d %d\n", state[0].button,
-                    state[0].stick_x, state[0].stick_y);
+            fprintf(stderr, "[coop] player 2's pad: buttons 0x%04X stick %d %d (frame %llu)\n", state[0].button,
+                    state[0].stick_x, state[0].stick_y, (unsigned long long)(cpu->timebase / 675000ull));
         if (tw_world_turn() && g_coop_tome_owner == 1) {  // their pad is their Tome's
             g_tw_taps |= state[0].button;
             const s32 error = state[0].error;
@@ -3908,7 +3908,8 @@ static void hle_PADRead(CPUState* cpu) {
             state[0].analog_a = 0u;
         if ((g_coop_p2_hold & 0x0200u) != 0u)
             state[0].analog_b = 0u;
-        g_coop_p2_buttons = state[0].button;
+        // What's pressed in their Tome is not for the world (a B there ran a prompt's script).
+        g_coop_p2_buttons = hle_coop_tome_shares() && g_coop_tome_owner == 1 ? 0u : state[0].button;
         state[0].button &= (u16)~0x1000u;  // their Start opens their own Tome (coop_menu_input)
         if (g_coop_screen)
             memset(&state[0], 0, sizeof state[0]);  // their pad runs the close-up instead
@@ -3947,6 +3948,16 @@ static void hle_PADRead(CPUState* cpu) {
     controls_set_tome_read(hle_coop_tome_shares() ? g_coop_tome_owner == 0 : -1);
     u32 motor_mask = dol_platform_pad_read(state);
     controls_set_tome_read(-1);
+    {
+        static int pad_log = -1;  // ED_COOP_PAD_LOG=1: player 1's pad as it changes, and the Tome's owner
+        static u16 pad_was;
+        if (pad_log < 0)
+            pad_log = getenv("ED_COOP_PAD_LOG") != NULL;
+        if (pad_log && state[0].button != pad_was)
+            fprintf(stderr, "[coop] player 1's pad: buttons 0x%04X (Tome open %d, its owner %d, frame %llu)\n", state[0].button,
+                    hle_coop_tome_shares(), g_coop_tome_owner, (unsigned long long)(cpu->timebase / 675000ull));
+        pad_was = state[0].button;
+    }
 #ifdef ED_AURORA
     coop_watch(cpu, &state[0]);
 #endif
