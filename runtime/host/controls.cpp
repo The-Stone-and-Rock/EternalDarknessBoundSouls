@@ -516,16 +516,25 @@ bool g_keyboard_last = false;
 
 void note_last_device(SDL_Gamepad* pad) {
     int count = 0;
-    const bool* keys = player_has_keyboard(0) ? SDL_GetKeyboardState(&count) : nullptr;
+    // Only with the window's focus, and not the keys that take it away: Alt-Tab to
+    // another window left the keyboard's prompts behind.
+    const bool* keys = player_has_keyboard(0) && SDL_GetKeyboardFocus() != nullptr ? SDL_GetKeyboardState(&count) : nullptr;
+    if (keys != nullptr && (keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT] || keys[SDL_SCANCODE_LGUI] || keys[SDL_SCANCODE_RGUI]))
+        keys = nullptr;
     bool keyboard = false;
     for (int k = 1; keys != nullptr && k < count && !keyboard; k++)
         keyboard = keys[k];
+    // Either player's controller: player 2's brought the prompts back no more than
+    // their stick moved player 1.
     bool controller = false;
-    if (pad != nullptr) {
+    SDL_Gamepad* const pads[2] = {pad, g_settings.mod_coop && player_has_controller(1) ? gamepad(1) : nullptr};
+    for (SDL_Gamepad* const one : pads) {
+        if (one == nullptr)
+            continue;
         for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT && !controller; b++)
-            controller = SDL_GetGamepadButton(pad, static_cast<SDL_GamepadButton>(b));
+            controller = SDL_GetGamepadButton(one, static_cast<SDL_GamepadButton>(b));
         for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT && !controller; a++) {
-            const int v = SDL_GetGamepadAxis(pad, static_cast<SDL_GamepadAxis>(a));
+            const int v = SDL_GetGamepadAxis(one, static_cast<SDL_GamepadAxis>(a));
             controller = std::abs(v) > g_settings.stick_deadzone[g_layout] * 32767 / 100 + 4000;
         }
     }
