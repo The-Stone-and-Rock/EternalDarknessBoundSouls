@@ -9257,10 +9257,10 @@ index 0a23a3f..bb77937 100644
  unsigned long long dst_alpha_fallback_count() noexcept;
 diff --git a/graphics/aurora/lib/gfx/interp.cpp b/graphics/aurora/lib/gfx/interp.cpp
 new file mode 100644
-index 0000000..db6d134
+index 0000000..a287a51
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/interp.cpp
-@@ -0,0 +1,626 @@
+@@ -0,0 +1,630 @@
 +#include "interp.hpp"
 +
 +#include <gxruntime/gxcore/shader.hpp>
@@ -9772,6 +9772,7 @@ index 0000000..db6d134
 +// of its screen (all of a draw past its right edge: player 2's bars, which
 +// player 1's view leaves off) is brought back onto it instead, and with it
 +// whatever else shares its uniforms (moved off the left).
++constexpr uint32_t kFlareSpriteVerts = 16u; // a flare's sprite is a quad or two; a line of text, many
 +constexpr float kHudAway = 4096.f; // Eternal Darkness's COOP_BAR_AWAY (hle.c)
 +Uniforms build_view(const Frame& f, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
 +                    PhotoFlare flare, bool away) {
@@ -9784,6 +9785,7 @@ index 0000000..db6d134
 +  absl::flat_hash_map<uint32_t, bool> hud;
 +  absl::flat_hash_map<uint32_t, std::vector<std::pair<float, float>>> sprites;  // their middles on screen
 +  absl::flat_hash_map<uint32_t, bool> offRight; // a draw using it lies past the screen's right edge
++  absl::flat_hash_map<uint32_t, bool> manyVerts; // a draw using it has more than a sprite does: no flare's
 +  for (const Draw& d : f.draws) {
 +    if (d.vs + sizeof(Vs) > f.uniforms.size() || d.vs + sizeof(Vs) > size)
 +      continue;
@@ -9796,6 +9798,8 @@ index 0000000..db6d134
 +      sprites[d.vs].emplace_back((d.box[0] + d.box[2]) * 0.5f, (d.box[1] + d.box[3]) * 0.5f);
 +    if (isHud && d.box[0] > 1.f)
 +      offRight[d.vs] = true;
++    if (isHud && d.verts > kFlareSpriteVerts)
++      manyVerts[d.vs] = true;
 +  }
 +  // The scene's projection: the first perspective draw's.
 +  const float(*scene)[4] = nullptr;
@@ -9815,7 +9819,7 @@ index 0000000..db6d134
 +  // the line with it (the light: where most sprites sit on each other).
 +  absl::flat_hash_map<uint32_t, std::array<float, 4>> flares;  // the 2x2 map, or hidden (all 0)
 +  for (auto& [offset, middles] : sprites) {
-+    if (middles.size() < 3)
++    if (middles.size() < 3 || manyVerts.contains(offset))  // centred lines of text make a line too
 +      continue;
 +    std::pair<float, float> far{0.f, 0.f};
 +    for (const auto& m : middles)

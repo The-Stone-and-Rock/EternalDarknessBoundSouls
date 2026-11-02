@@ -1524,7 +1524,7 @@ void aurora_split_hold(int player);
 #endif
 
 bool hle_coop_player2_position(CPUState* cpu, float out[3]);  // hle.c
-bool hle_coop_screen(void);                                     // hle.c
+bool hle_coop_screen(void);                                    // hle.c
 bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* zoom);  // hle.c
 bool hle_game_menu_open(CPUState* cpu);                         // hle.c
 
