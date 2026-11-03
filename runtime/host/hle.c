@@ -8535,8 +8535,26 @@ static float g_coop_own_zoom = 1.0f;  // their field of view, in the one the fra
 
 static bool g_coop_own_step;
 
+// Player 1's records name player 1: set in player 2's turn (who is the player then,
+// with player 1's records in), the game's camera followed player 2 until a new room.
+static void coop_cameras_own(CPUState* cpu) {
+    const u32 p1 = g_coop_turn_p1 != 0u ? mem_read32(cpu, g_coop_turn_p1 + 52u) : 0u,
+              them = mem_read32(cpu, g_coop_p2 + 52u);
+    if (p1 == 0u || them == 0u || p1 == them)
+        return;
+    for (u32 at = 0u; at < COOP_ZONE_CAMERAS_SIZE; at += 4u)
+        if (mem_read32(cpu, COOP_ZONE_CAMERAS + at) == them) {
+            mem_write32(cpu, COOP_ZONE_CAMERAS + at, p1);
+            fprintf(stderr, "[coop] player 1's camera record 0x%08X named player 2: theirs again (frame %llu, Tome %d)\n",
+                    COOP_ZONE_CAMERAS + at, (unsigned long long)(cpu->timebase / 675000ull), hle_coop_tome_shares());
+        }
+}
+
 static void coop_camera_step(CPUState* cpu) {
-    if (g_settings.mod_p2_camera != 2 || g_coop_cameras.lent)
+    if (g_coop_cameras.lent)
+        return;
+    coop_cameras_own(cpu);
+    if (g_settings.mod_p2_camera != 2)
         return;
     static u8 cameras[COOP_ZONE_CAMERAS_SIZE];
     u8 view[CAMERA_VIEW_SIZE];
