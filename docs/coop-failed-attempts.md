@@ -125,3 +125,13 @@ Older failures are mostly recorded in code comments in `runtime/host/hle.c`, as 
 **What works:** `coop_found_for_finder` and `coop_found_mark` mark the item's matrices as it is drawn (`0x8011A278`), and `build_view` (`gfx/interp.cpp`, `marked_out_of`) leaves them out of the other view. Seen in pictures for player 1's urn and rune (`logs/run-20261103-141926-one1`).
 
 **Judging "player 2's own" by `g_coop_use` alone.** An item from player 2's Tome runs with no use up (`tome_copy_left`), so `coop_no_pause` took their words for player 1's and let go of the hold: the words showed in player 1's half and the game froze (`logs/run-20261103-142333-before`, `who 70`). It's in commit `c8f69bc`; fixed after it by also asking whether they are the player (`r13-21492`). `build/runs/enchant/p2urn.sh` replays player 2's urn.
+
+## Player 1 free during player 2's words and finds
+
+Confirmed in the user's play for slot 1's urn. See `docs/coop-no-pause.md`. No hold on play for their words and finds, the busy bit kept for this host's asking; `0x80155738` answers 0 while `g_coop_screen`; `coop_player1_turn` mirrors player 2's turn; player 1's half follows them from their last camera.
+
+**What stopped player 1 walking with their stick read:** the input focus (`r13-23552`, `-23556`). The window takes it, so the controller's channel (`r13-25648`) is passed over and it sends event 45 (standing), not 44. Player 2's own saved copy of those words kept them free. Player 1's turn clears them, and `coop_state` puts the game's back.
+
+**Doesn't help, and likely gave them an attack stance:** clearing bit 4 of the object's marks through `0x801223B8` around the controller. The user saw both players in attack position in that build only. `0x801223B8` is a large function with more to it than the bit. Not traced.
+
+Seen by script: `logs/run-20261103-145338-live7` (player 2's urn, player 1 walking), `logs/run-*-regress1` (player 1's urn). `build/runs/enchant/p2urn.sh` replays player 2's urn; `P1SCRIPT` walks player 1.

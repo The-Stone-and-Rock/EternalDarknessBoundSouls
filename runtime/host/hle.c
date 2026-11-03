@@ -3802,6 +3802,7 @@ static void coop_pad_read(CPUState* cpu, bool playing);
 // Split-screen co-op: while player 2's turn reads the pad (coop_player_turn),
 // the game's pad 1 is player 2's controller.
 static bool g_coop_pad_p2;
+static bool g_coop_pad_p1;  // player 1's turn in a close-up of player 2's: their own pad, not the close-up's
 static u16 g_coop_p2_buttons;  // player 2's pad as last read (coop_quick_cast)
 // What they held as a screen of theirs closed (the A that chose in their Tome):
 // nothing to play until let go, or it was a press there (their attack).
@@ -4137,7 +4138,8 @@ static void hle_PADRead(CPUState* cpu) {
         state[0].analog_b = 0xFFu;
         state[0].error = 0;
     }
-    coop_menu_input(cpu, menu, cutscene, &state[0]);
+    if (!g_coop_pad_p1)
+        coop_menu_input(cpu, menu, cutscene, &state[0]);
 #endif
     skip_card_select(cpu, &state[0]);
     if (g_mash_to_gameplay)
@@ -9407,7 +9409,7 @@ static struct {
 // for this one, and player 1's half showed its words for a frame.
 #ifdef ED_AURORA
 void aurora_split_hold(int player);
-static void coop_hold_player1(void) { aurora_split_hold(0); }
+static void coop_hold_player1(void) {}  // their half follows them (camera_split_update)
 #else
 static void coop_hold_player1(void) {}
 #endif
@@ -9921,17 +9923,12 @@ static void hle_message_open(CPUState* cpu) {
 // its Tome. Player 1's words go without it too, and player 2 plays on: the window's input lock
 // keeps player 1 still, and player 2's turn opens that lock for them (coop_player_turn).
 // Not a cutscene's words, and not player 2's own (their half and pad, coop_hold_player1).
-// A script's own step may have held play just before (the urn, 0x8016820C): its bit goes too.
-static bool coop_no_pause(CPUState* cpu) {
-    // Player 2's own too with no use of theirs up: their Tome's item (tome_copy_left), with them the player.
-    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || cutscene_playing(cpu) || (g_coop_use.active && g_coop_use.p2) ||
-        mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2)
-        return false;
+// A script's own step may have held play just before (the urn, 0x8016820C). Let go as the script's
+// end would: its input channels stay on with only the bit cleared, and player 2, standing, couldn't start.
+static bool coop_script_hold_go(CPUState* cpu) {
     const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u);
     if ((busy & ~2u) != 0u)
         return false;
-    // Let go as the script's end would: its input channels stay on with only the bit cleared, and
-    // player 2, standing, couldn't start.
     if (busy != 0u) {
         const u32 lr = cpu->lr, r3 = cpu->gpr[3], go = 1u;
         u32 ignore = 0u;
@@ -9942,13 +9939,47 @@ static bool coop_no_pause(CPUState* cpu) {
     return true;
 }
 
+// Player 2's words or find: the hold's bit stays for this host's asking (coop_busy: the close-up
+// is theirs, with their pad), with no hold on play. The game is told nobody's busy (coop_busy_ask).
+static bool coop_their_close_up(CPUState* cpu) {
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || cutscene_playing(cpu) ||
+        !((g_coop_use.active && g_coop_use.p2) || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2))
+        return false;
+    return coop_script_hold_go(cpu);
+}
+
+static bool coop_no_pause(CPUState* cpu) {
+    // Player 2's own too with no use of theirs up: their Tome's item (tome_copy_left), with them the player.
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || cutscene_playing(cpu) || (g_coop_use.active && g_coop_use.p2) ||
+        mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2)
+        return false;
+    return coop_script_hold_go(cpu);
+}
+
 #define WORDS_HOLD 0x80042A8Cu
 #define WORDS_HOLD_OPENS 0x8002436Cu   // the return, in the window's opening
 #define WORDS_HOLD_CLOSES 0x800242C4u  // and its closing
 static bool g_coop_words_free;
 
+static bool g_coop_words_theirs;
+
 static void coop_words_hold(CPUState* cpu) {
     g_hle_passthrough = true;
+    if (cpu->lr == WORDS_HOLD_OPENS && coop_their_close_up(cpu)) {
+        g_coop_words_theirs = true;
+        g_coop_script_hold = false;
+        mem_write32(cpu, cpu->gpr[13] - 23344u, mem_read32(cpu, cpu->gpr[13] - 23344u) | 8u);
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
+    if (cpu->lr == WORDS_HOLD_CLOSES && g_coop_words_theirs) {
+        g_coop_words_theirs = false;
+        mem_write32(cpu, cpu->gpr[13] - 23344u, mem_read32(cpu, cpu->gpr[13] - 23344u) & ~8u);
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
     if (cpu->lr == WORDS_HOLD_OPENS) {
         g_coop_words_free = coop_no_pause(cpu);
         if (!g_coop_words_free)
@@ -9975,6 +10006,20 @@ static void coop_find_hold(CPUState* cpu) {
     const bool on = cpu->gpr[3] != 0u;
     if (!on && g_coop_found_out_of >= 0)  // a few frames on: it is still there as its close-up ends
         g_coop_found_until = cpu->timebase / 675000ull + 4ull;
+    static bool theirs;
+    if ((on && coop_their_close_up(cpu)) || (!on && theirs)) {
+        theirs = on;
+        if (on)
+            g_coop_script_hold = false;
+        const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u);
+        mem_write32(cpu, cpu->gpr[13] - 23344u, on ? busy | 16u : busy & ~16u);
+        const u32 kept = mem_read32(cpu, cpu->gpr[13] - 24048u);
+        mem_write32(cpu, cpu->gpr[13] - 24048u, on ? kept | 2u : kept & ~2u);
+        mem_write8(cpu, cpu->gpr[13] - 25932u, on ? 1u : 0u);
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
     if (on) {
         g_coop_find_free = coop_no_pause(cpu);
         if (!g_coop_find_free)
@@ -9993,6 +10038,68 @@ static void coop_find_hold(CPUState* cpu) {
     g_hle_tail_call = false;
 }
 
+// A close-up of player 2's is theirs, with the game's pad: player 1 plays on. The game is told
+// nobody's busy (everyone's update asks, 0x80155738), and at their controller player 1 has a turn as
+// player 2 has theirs: input of their own, with their pad, past the window's lock.
+#define COOP_BUSY_ASK 0x80155738u
+static void coop_busy_ask(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (g_coop_screen && (g_coop_words_theirs || coop_busy(cpu)) && !cutscene_playing(cpu) && !game_menu_open(cpu)) {
+        hle_set_u32(cpu, 0u);
+        g_hle_passthrough = false;
+    }
+}
+
+static bool g_coop_p1_turn;
+static void coop_player1_turn(CPUState* cpu) {
+    static CoopPlayerState game, own;
+    static bool own_set;
+    const u32 node = cpu->gpr[3];
+    // Their words leave them the player, and the controller moves the controlled character.
+    const u32 who[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+    const u32 now[3] = {mem_read32(cpu, node + 52u), node, mem_read32(cpu, node + 16u)};
+    const u32 who4[2] = {cpu->gpr[13] - 21488u, cpu->gpr[13] - 21484u};
+    u32 was[3], was4[2];
+    for (int i = 0; i < 3; i++) {
+        was[i] = mem_read32(cpu, who[i]);
+        mem_write32(cpu, who[i], now[i]);
+    }
+    for (int i = 0; i < 2; i++)
+        was4[i] = mem_read32(cpu, who4[i]);
+    mem_write32(cpu, who4[0], now[2]);
+    mem_write32(cpu, who4[1], now[1]);
+    coop_state(cpu, &game, true);
+    if (own_set)
+        coop_state(cpu, &own, false);
+    // Their input has the focus, as player 2's own copy has in their turn: the window's took it,
+    // and the controller's channel (r13 - 25648) was passed over: "standing" whatever the stick.
+    // Back with the game's (coop_state).
+    mem_write32(cpu, cpu->gpr[13] - 23552u, 0u);
+    mem_write32(cpu, cpu->gpr[13] - 23556u, 0u);
+    for (u32 at = COOP_INPUT_MASKS; at + 4u <= COOP_INPUT_SIZE; at += 32u)
+        if (mem_read32(cpu, COOP_INPUT + at) == 0x0FFFFFFEu)
+            mem_write32(cpu, COOP_INPUT + at, 0x0FFFFFFFu);
+    u32 ignore = 0u;
+    g_coop_pad_p1 = true;
+    hle_guest_call(cpu, COOP_PAD_UPDATE, NULL, 0, 0.0, &ignore);
+    g_coop_pad_p1 = false;
+    g_coop_p1_turn = true;
+    hle_guest_call(cpu, COOP_CONTROLLER, &node, 1, 0.0, &ignore);
+    g_coop_p1_turn = false;
+    if (coop_trace() && cpu->timebase / 675000ull % 30ull == 0ull) {
+        const u32 o1 = mem_read32(cpu, node + 52u);
+        fprintf(stderr, "[trace] player 1's turn: at %.0f %.0f pad %d %d busy %u words %u frame %llu\n", guest_read_f32(cpu, o1), guest_read_f32(cpu, o1 + 4u),
+                (s8)mem_read8(cpu, COOP_INPUT + 2u), (s8)mem_read8(cpu, COOP_INPUT + 3u), mem_read32(cpu, cpu->gpr[13] - 23344u), mem_read32(cpu, cpu->gpr[13] - 25960u), (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    coop_state(cpu, &own, true);
+    own_set = true;
+    coop_state(cpu, &game, false);
+    for (int i = 0; i < 3; i++)
+        mem_write32(cpu, who[i], was[i]);
+    for (int i = 0; i < 2; i++)
+        mem_write32(cpu, who4[i], was4[i]);
+}
+
 // Player 1's controller: player 2's turn first, then their use if they
 // pressed for one.
 static void coop_player_turn(CPUState* cpu);
@@ -10000,6 +10107,18 @@ static void hle_coop_controller(CPUState* cpu) {
     g_hle_passthrough = true;
     if (g_coop_p2 != 0u && cpu->gpr[3] == g_coop_p2)
         return;  // player 2's own, in their turn
+    if (g_coop_p1_turn)
+        return;
+    // And words over a Tome the game opened for player 2 (the page after a rune): the world goes on
+    // behind it, and the words have the focus.
+    if (!g_coop_use.active && !cutscene_playing(cpu) &&
+        ((g_coop_screen && !game_menu_open(cpu)) ||
+         (g_coop_tome_owner == 1 && hle_coop_tome_shares() && sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u))) {
+        coop_player1_turn(cpu);
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
     if (g_coop_use.resumed) {  // back from a run: the controller goes on
         g_coop_use.resumed = false;
         return;
@@ -12671,6 +12790,7 @@ static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* s
         g_coop_assist_at = 1u;
         // From this frame: player 1's half showed the words for a moment first.
         g_coop_screen = true;
+        coop_cameras_lend(cpu, true);  // the game's camera is theirs, as in a close-up of theirs
         coop_hold_player1();
         for (u32 i = 0u; i < 10u; i++) {
             const u32 word = SCRIPT_STATES + i * 8u;
@@ -12743,7 +12863,7 @@ bool tome_copy_hook_off(HleHandler fn) {
         OFF(coop_script_go_to_room), OFF(coop_cast), OFF(tw_mode_change), OFF(tw_tome_start), OFF(coop_controlled_id), OFF(coop_play_hold),
         OFF(coop_enchanted_look), OFF(coop_sign_follow), OFF(coop_lasting_find), OFF(coop_spells_update),
         OFF(coop_game_camera), OFF(hle_moves_let_go), OFF(hle_moves_want), OFF(hle_find_by_id), OFF(coop_position_copy),
-        OFF(coop_send_event), OFF(notify_GXSetDrawDone), OFF(coop_words_hold), OFF(coop_find_hold), OFF(coop_found_object_draw),
+        OFF(coop_send_event), OFF(notify_GXSetDrawDone), OFF(coop_words_hold), OFF(coop_find_hold), OFF(coop_found_object_draw), OFF(coop_busy_ask),
 #undef OFF
     };
     static bool said[sizeof kOff / sizeof kOff[0]];
@@ -13269,6 +13389,12 @@ static void find_coop(CPUState* cpu) {
         find_hold->intercept = coop_find_hold;
     else
         fprintf(stderr, "[coop] a find's hold not found: finds stop both players\n");
+    // The busy asking (lwz r3,-23344(r13)).
+    HleDispatchEntry* busy_ask = hle_dispatch_entry(COOP_BUSY_ASK);
+    if (mem_read32(cpu, COOP_BUSY_ASK) == 0x806DA4D0u && busy_ask != NULL && busy_ask->intercept == NULL && busy_ask->notify == NULL)
+        busy_ask->intercept = coop_busy_ask;
+    else
+        fprintf(stderr, "[coop] the busy asking not found: player 2's close-ups stop player 1\n");
     // The words' hold (stwu r1,-16(r1), and the window's call of it at 0x80024368).
     HleDispatchEntry* words_hold = hle_dispatch_entry(WORDS_HOLD);
     if (mem_read32(cpu, WORDS_HOLD) == 0x9421FFF0u && mem_read32(cpu, WORDS_HOLD_OPENS - 4u) == 0x4801E725u && words_hold != NULL &&

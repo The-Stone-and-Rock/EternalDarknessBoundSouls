@@ -11,5 +11,6 @@
 - Commit only when told, and don't push unless asked.
 - Add items seen in logs or code to `docs/items-log.md`, in any session, with only what was actually seen.
 - Player 2 menu work: read `docs/coop-player2-menu.md`, and add what each trace finds. `play.sh` turns on the `[trace]` log lines.
+- A player freezing during the other's pickup or words, or an item on both screens: start with `docs/coop-no-pause.md`.
 - Before writing a fix, check `docs/coop-failed-attempts.md`, and add any attempt that fails, with its code.
 - All screenshot folders go inside `E:\Eternal Darkness Recomp Fork\Screenshots for Claude`, never the root of `E:\`.

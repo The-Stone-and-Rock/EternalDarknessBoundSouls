@@ -1568,6 +1568,11 @@ static void split_off(unsigned long long frame, const char* why) {
     g_p2_view = false;
 }
 
+// Player 1's camera as last seen, and where they were: their half while the game's camera is
+// player 2's (a close-up of theirs) follows them from it.
+static Vec3 g_p1_cam_eye, g_p1_cam_target, g_p1_cam_at;
+static bool g_p1_cam_set;
+
 void camera_split_update(CPUState* cpu) {
     const unsigned long long frame = cpu->timebase / 675000ull;
     // The Tome's own frame, turn about with the world's: for no player's view, and it
@@ -1592,12 +1597,34 @@ void camera_split_update(CPUState* cpu) {
 #ifdef ED_AURORA
     if (hle_coop_screen()) {
         // Theirs in their half at its shape, as player 1's close-up is: the
-        // game's camera is theirs, and player 1's half keeps their last view.
+        // game's camera is theirs, and player 1's half is drawn from player 1's,
+        // following them, as player 2's half is at other times.
         // The whole frame fitted into the half had bars above and below it.
         static const float kSame[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
-        aurora_split_set_view(0, kSame, 0.0f, 0.0f, 0.0f, 1.0f, true);
+        const Vec3 game_eye = read_vec(cpu, cpu->gpr[4]), game_target = read_vec(cpu, cpu->gpr[6]);
+        const Vec3 game_k = normalize(read_vec(cpu, cpu->gpr[5]));
+        Vec3 p1_now;
+        if (g_p1_cam_set && player_position(cpu, &p1_now) && length(sub(game_target, game_eye)) > 0.0f && length(game_k) > 0.0f) {
+            const Vec3 moved = sub(p1_now, g_p1_cam_at);
+            const Vec3 eye1 = add(g_p1_cam_eye, moved), target1 = add(g_p1_cam_target, moved);
+            Vec3 x1, y1, z1, x2, y2, z2;
+            look_axes(game_eye, game_target, game_k, &x1, &y1, &z1);
+            look_axes(eye1, target1, game_k, &x2, &y2, &z2);
+            const Vec3 axes[3] = {x2, y2, z2};
+            float rot[9];
+            for (int c = 0; c < 3; c++) {
+                rot[0 * 3 + c] = dot(axes[c], x1);
+                rot[1 * 3 + c] = dot(axes[c], y1);
+                rot[2 * 3 + c] = dot(axes[c], z1);
+            }
+            const Vec3 rel = sub(eye1, game_eye);
+            aurora_split_set_view(0, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), 1.0f, true);
+            aurora_split_hold(-1);
+        } else {
+            aurora_split_set_view(0, kSame, 0.0f, 0.0f, 0.0f, 1.0f, true);
+            aurora_split_hold(0);
+        }
         aurora_split_set_view(1, kSame, 0.0f, 0.0f, 0.0f, 1.0f, false);
-        aurora_split_hold(0);
         aurora_split_set(true, g_settings.mod_split);
         if (!g_split_on)
             fprintf(stderr, "[split] on at frame %llu (player 2's close-up)\n", frame);
@@ -1610,6 +1637,7 @@ void camera_split_update(CPUState* cpu) {
         split_off(frame, "no player");
         return;
     }
+    const Vec3 p1_here = player;
     // Player 2's camera circles their own character once they have one.
     float p2[3];
     if (hle_coop_player2_position(cpu, p2))
@@ -1623,6 +1651,10 @@ void camera_split_update(CPUState* cpu) {
         split_off(frame, "no camera");
         return;
     }
+    g_p1_cam_eye = eye;
+    g_p1_cam_target = target;
+    g_p1_cam_at = p1_here;
+    g_p1_cam_set = true;
     // The world's level directions, for player 2's turn round player 1.
     Vec3 e1 = normalize(flatten(v3(1.0f, 0.0f, 0.0f), k));
     if (length(e1) < 0.5f)

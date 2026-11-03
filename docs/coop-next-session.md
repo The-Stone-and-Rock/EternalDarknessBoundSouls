@@ -2,13 +2,11 @@
 
 Written 2026-11-02. Read this first, then update it at the end of the session.
 
-## Start here (written 2026-11-03, end of a long session)
+## Start here (updated 2026-11-03)
 
-The user ended that session angry, after hours lost: Tome fixes broke working things twice. Don't argue with what they saw in play. Don't ask them to name or re-explain things they've already said. Test with a real run before saying anything works.
+**Pickups and words don't stop either player, and the item shows only to whoever found it.** The user confirmed this in play for slot 1's urn, from both players. If it breaks again, read `docs/coop-no-pause.md` first: it lists each symptom and its cause. Don't rebuild it from scratch, and don't skip the close-up.
 
-**Their report, not resolved:** when one player examines or uses an item, the other shouldn't pause or freeze, and they say this was fixed days ago. They saw player 2 frozen during player 1's examine. A logged podium examine in Paul's chapter (`logs/run-20261103-131917-examine` or nearby) passed its window over with no hold. The urn's words and finds (slots 1 to 7) do hold the other player, on the restore point too. Those two facts don't explain what they saw, so it's still open. Saves of theirs may show it.
-
-**State of the code:** last commit `f6a824d` on `tome-copy`, nothing pushed. Uncommitted in `runtime/host/hle.c`: only the still picture during player 1's finds taken out. Also uncommitted: docs. The hold experiment was removed (`logs/saved-changes/hold-experiment-removed/`), after which Paul's cutscene worked again in their play. Don't bring it back without testing cutscenes.
+Don't argue with what the user saw in play. Don't ask them to name or re-explain things they've already said. Test with a real run before saying anything works, and test from standing still.
 
 **Tracing planned by the user:** slots 1 to 7, in `docs/coop-tome-pickups.md`. Only slot 1 is done.
 
@@ -51,7 +49,9 @@ Player 1's words and finds now set no hold (`coop_no_pause`, `coop_words_hold`, 
 
 The earlier one-half items (monk's key `862e14d`, enchant `9bba6ba`, player 2's finds) keep the other half as a still picture (`coop_hold_player1`, `g_coop_p1_cast_shown`). Nothing yet leaves one draw out of a live half. The find's item comes through `0x801F9DE8`/event 71 in `0x80024528`; which call draws it isn't traced.
 
-**Not done:** player 2's use still holds player 1, as `g_coop_screen` and `coop_hold_player1` hold their half too. Spells aren't looked at yet.
+**Committed:** `c8f69bc`, `50c1d62` on `tome-copy`, not pushed. The user confirmed player 2's urn. They then asked for player 1 not to be paused during it, and for all of this to hold for any model and chapter. The first is the open job: see the last section of `docs/coop-failed-attempts.md`.
+
+**Not done:** spells aren't checked against the no-pause rule, and only slot 1's urn has been played.
 
 ## How to work on this
 
@@ -166,6 +166,7 @@ The user re-saves these slots, so check a slot's date and what's in it before re
 | Doc | What it holds |
 |---|---|
 | `docs/coop-player2-menu.md` | The plan for a custom player 2 menu, and what's traced for it |
+| `docs/coop-no-pause.md` | Pickups, words and items in co-op: each symptom, its cause and its fix |
 | `docs/coop-failed-attempts.md` | What was tried and didn't work. Check it before writing a fix |
 | `docs/coop-two-tomes.md` | Why two game Tomes at once was set aside, and how the Tome works |
 | `docs/coop-two-tomes-design.md` | The design to try next for two Tomes: player 2's in its own copy of memory. Not built |
