@@ -41,6 +41,7 @@ Confirmed in the user's play on 2026-11-03: slot 1's urn and rune from both play
 | Player 2 can't move while player 1 looks at something with no words up yet (the circle's scene and DETAIL) | The hold's only let go at words or a find (`coop_no_pause`), and player 2's turn is skipped under any hold. A hold from a script player 1 pressed on is their look: everyone's told nobody's busy, the hold's channels stay on so player 1 stands, and player 2's turn runs with them let go. Their counts go down each frame, so each is put back (`logs/run-20261103-175913-p1full`). Player 1's own stick still ends the look, as it does without this | `coop_p1_close_up`, `coop_play_hold`, `coop_busy_ask`, `hle_coop_controller` |
 | Both halves show player 1's close-up, player 2's camera gone, after player 2 walks up to something | Their EXAMINE, asked for in their turn (`0x8000A424`), was taken for their close-up opening: for 120 pad reads any hold of player 1's became player 2's (`logs/run-20261103-180133-p1look`, frame 15722) | `coop_look_prompt`, `closeup` in `coop_menu_input` |
 | Player 1's Tome page in player 2's half, and player 2's close-up in player 1's | Player 2's press in player 1's find waited, then started on the frame the find ended, as player 1's Tome was on its way (`logs/run-20261103-181505-both`, frame 10703). A press while player 1's look or find is up, or their Tome is coming, does nothing now | `coop_player1_mid_use` |
+| Player 1's Start just after player 2's pickup opens a Tome in player 2's half, with player 2 stuck in it | What's marked as player 2's (`g_coop_assist_at`) lasts 120 pad reads after their page's RETURN, and took the Tome player 1 opened (`logs/run-20261103-182310-s1-room`, frame 10278). Player 1's Start clears it | `coop_menu_input` |
 | Both players in attack position | Seen in one build, which called `0x801223B8` to clear an object's mark. Taken out and not traced. Don't call it for this. The players not being each other's threat is `coop_send_event` | `docs/coop-failed-attempts.md` |
 
 ## Don't
@@ -66,7 +67,8 @@ Scripts have missed these bugs, so test the way the user plays.
 
 - Notices read the game's English words (`has picked up`, `has found`, `has acquired`, or anything with `has`). Words without `has` get no notice, and a log line says so.
 - Spell pages aren't traced, so a spell found may not give a notice.
-- Neither player's Start opens a Tome during player 2's text, finds or close-up. It works once they close.
+- Player 1's Start in player 2's text, finds or close-up opens their Tome in a copy of memory, as player 2's runs, with the real game carrying on (`g_tome_copy_p1`). Their item or cast from it waits for the close-up to end. Player 2's own Start waits for their own close-up, and for player 1's copy to close.
+- In that copy, player 1's Tome has player 2's tabs: no Journal or Options.
 - **Not explained:** `OSCheckActiveThreads` fails now and then with a thread at `0x80325188` holding a bad priority. Reports `hang-20261103-160259` and `hang-20261103-162310` have the state saved, and `logs/run-20261103-164349-icon1` hit it too. Two of the three stopped at frame 8564 on save 2, just after it reloads the characters and before any close-up, one with nothing scripted for player 1. So it isn't tied to player 1 walking. Not traced. Don't assume it's the number of threads.
 - Only slot 1's urn and Paul's podium have been played.
 - Player 1's bars are likely hidden during player 2's close-up.

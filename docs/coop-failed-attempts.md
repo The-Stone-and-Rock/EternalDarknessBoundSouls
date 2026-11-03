@@ -143,3 +143,9 @@ Seen by script: `logs/run-20261103-145338-live7` (player 2's urn, player 1 walki
 **Taking a hold's channel at +16 being 0 as the hold being over.** It's still 0 the frame after the hold starts, then counts down from about `0x0FFFFFFF`, so the look ended itself on its first frame. Only the busy word says whether it's over.
 
 **Reading the busy word in `coop_p1_close_up` during player 2's turn.** The turn lets the hold go, so the word reads 0 and the look ended itself. `g_coop_p1_look_open` covers the turn.
+
+## Player 1's Tome in a copy, in player 2's close-up (2026-11-03)
+
+**Their world reads marked as the Tome's.** `camera_set_menu` then told the camera a menu was open, and the user saw player 2's camera bounce. Not measured: the code was changed from what the user saw, and the jump log came after.
+
+**Reading player 1's pad twice a frame, world then Tome, to keep the camera out of it.** Each change marks everything held as held over (`controls.cpp`, `g_tome_was`, `g_held_over`), so no press got through and their Tome couldn't be closed (`logs/run-*-s1-both`). `ED_INPUT_SCRIPT` skips that code, so the replays closed it fine: **scripted presses for player 1 can't test `controls.cpp`.**

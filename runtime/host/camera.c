@@ -1314,7 +1314,9 @@ static void first_person(Vec3 eye, Vec3 target, Vec3 focus, Vec3 player, Vec3 k,
 static float g_move_x, g_move_y;
 static bool g_menu_open;  // camera_set_menu
 
-void camera_set_menu(bool open) { g_menu_open = open; }
+bool hle_coop_player1_copy_up(void);
+// Not for player 1's Tome in a copy: the real world goes on, and player 2's view went from its own to the game's and back.
+void camera_set_menu(bool open) { g_menu_open = open && !hle_coop_player1_copy_up(); }
 
 void camera_set_move(float x, float y) {
     g_move_x = x;
@@ -1527,6 +1529,7 @@ bool hle_coop_player2_position(CPUState* cpu, float out[3]);  // hle.c
 bool hle_coop_player2_held(void);
 bool hle_coop_screen(void);                                    // hle.c
 bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* zoom);  // hle.c
+bool hle_coop_player1_copy_up(void);                             // hle.c: their Tome's in a copy, the real world plays on
 bool hle_game_menu_open(CPUState* cpu);                         // hle.c
 bool hle_coop_tome_shares(void);                                // hle.c
 bool hle_coop_player1_tome_up(void);
@@ -1592,7 +1595,7 @@ void camera_split_update(CPUState* cpu) {
     }
     // The Tome as soon as the game opens it: player 2's camera's line test
     // as it opens held the game up for nearly 4 seconds.
-    const bool menu = !hle_coop_tome_shares() && (g_menu_open || hle_game_menu_open(cpu));
+    const bool menu = !hle_coop_tome_shares() && !hle_coop_player1_copy_up() && (g_menu_open || hle_game_menu_open(cpu));
     if (!g_play || menu) {
         split_off(frame, menu ? "the Tome" : "a cutscene");
         return;
