@@ -35,6 +35,20 @@ How test 3 fits together: when player 1 has no Tome, the copy stands in for the 
 
 **Test 5, Enchant, scripted, slot 3 as saved 2026-11-02 23:16 (Enchant on D-pad up for both, `logs/run-20261102-233058-t5h`, pictures in `logs/cap-t5h`):** player 2 alone; player 1 then player 2 with both Tomes up; both on the same frame (player 1's first cast at frame 11601, player 2's at 11604); player 2 alone again; then plain Start beside player 1's Tome with a page turn. Each cast was by the right player, with no failed calls, no hang, no `rejected FIFO`. Only the Chakrams and the sword can be enchanted, by the game's design: the game refuses the Tome and the Talisman, and the Enchant Tome stays open.
 
+**Test 5, the user's play, both pressing Enchant together, slot 3 (`logs/run-20261103-093139-hand8`):** D-pad up at frames 8166 (player 2) and 8168 (player 1), A at 8511 and 8514. Both casts ran on frame 8515 and again on 8640, each by the right character (`0x5B`, `0x1`). Player 1 enchanted the Tulwar and player 2 their copy of it. No hang, `rejected=0 failed=0`, no exception. Done once. Each alone also worked in the same run (player 1 at 7313, player 2 at 7787).
+
+That also had player 1's Tome open beside player 2's, by Enchant, from frame 8170 to 8514. Not in that run: either player's Start, a page turn with both up, or one Tome closing with the other staying. So test 3 by hand was still open.
+
+**Test 3, the user's play, slot 3 (`logs/run-20261103-093522-hand9`):** player 2's Tome opened beside player 1's twice, and each pressed page buttons while both were up (player 2's RB at frames 7416 to 7563, player 1's LB at 7746 to 7791). Player 1 closed first both times and player 2's stayed open and took more presses. Not in this run: player 1 pressing Start with player 2's already up, so `player 1's Tome has closed; player 2's stays` never showed. The logs can't show what each half drew. Longest turns reached 52.79 and 45.71 ms, against about 19 before. Not looked into.
+
+The run ended stuck on a message, now fixed: see `docs/coop-failed-attempts.md`.
+
+**Use, the record fix, scripted, slot 3:** the failing case, player 1 enchanting the Tulwar and player 2 then using the Talisman, heals player 2 (`logs/run-20261103-095904-r8`, `its item 0x0000000A, the real record's 0x00000009`). Five uses all heal. On the sixth the Talisman really is empty, its count shows 0, and the words open inside the copy (no picture of them was taken). B closes them, Start closes the Tome, and player 2 can walk and open Enchant, twice over (`logs/run-20261103-095529-r6`). Switch off afterwards: player 2's old Tome opened, no `[tome-copy]` lines, but no item was used in it (`logs/run-20261103-095811-r7off`).
+
+**Use, the record fix, the user's play (`logs/run-20261103-100630-hand10`):** after player 1 enchanted the Tulwar, player 2's Talisman healed five times, then said "drained" on the sixth, and B closed it. Player 1's Talisman then healed five times and said "drained" on its sixth, so the counts stay separate. Later Enchants by both worked. The user saw the messages on the right screens. No hang, `rejected=0 failed=0`. The `no second step` guard still hasn't run.
+
+**Test scripts:** the Inventory is a grid, Chakrams and Tome on top, Talisman and Tulwar below. In Enchant, Down from the Chakrams stays put because the Talisman can't be chosen. Right from the Chakrams goes to the Tulwar.
+
 What test 5 found:
 
 - **Enchant beside player 1's:** `coop_quick_cast` saw the flag player 1's cast left in `0x80335748` and didn't see theirs as asked. The flag is cleared for their call, and the record and mode words are put back.

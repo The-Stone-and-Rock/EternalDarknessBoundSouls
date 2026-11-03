@@ -12287,14 +12287,29 @@ static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* s
         hle_guest_call(cpu, 0x801F62B8u, NULL, 0, 0.0, &who);
         hle_guest_call(cpu, 0x801C4F48u, &who, 1, 0.0, &ignore);
     }
+    // An item's script takes its item from the spell record (0x80015C30, by 0x80110478): the one
+    // their Tome chose, as the real record has the last cast's. The Tulwar there, count 0, was "drained".
+    const u32 item_was = mem_read32(cpu, COOP_SPELL_ITEM);
+    u32 item_chosen = 0u;
+    memcpy(&item_chosen, spell_item, sizeof item_chosen);
+    item_chosen = __builtin_bswap32(item_chosen);
+    fprintf(stderr, "[tome-copy] its item 0x%08X, the real record's 0x%08X\n", item_chosen, item_was);
+    mem_write32(cpu, COOP_SPELL_ITEM, item_chosen);
     // The Tome's call asked it first, and it went on from where that left its word: both are
     // the real game's, or the first use only did what the Tome's call does.
     if (g_tome_copy_use_script == script) {
         const u32 asked[3] = {(u32)script, g_tome_copy_use_item, 0u};
         hle_guest_call(cpu, COOP_RUN_SCRIPT, asked, 3, 0.0, &ignore);
     }
-    const u32 args[3] = {(u32)script, 0u, 0u};
-    hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ignore);
+    // If that opened words, going on opens them again: the first keep the game's one focus
+    // (0x8013DB1C), the close only knows the second (0x80024220), and they never close.
+    if (mem_read32(cpu, cpu->gpr[13] - 25960u) == 0u) {
+        const u32 args[3] = {(u32)script, 0u, 0u};
+        hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ignore);
+    } else {
+        fprintf(stderr, "[tome-copy] its script opened words: no second step\n");
+    }
+    mem_write32(cpu, COOP_SPELL_ITEM, item_was);
     mem_write32(cpu, cpu->gpr[13] - 26324u, 0u);  // as the world's call, 0x800082B0
     g_tome_copy_use_script = 0;
     if (zones)

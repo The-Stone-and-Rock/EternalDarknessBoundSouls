@@ -26,7 +26,7 @@ To run it from PowerShell:
 $env:ED_COOP_TOME_COPY = '2'; & 'C:\Program Files\Git\bin\sh.exe' tools/coop-test/play.sh saves/slot3.state NAME
 ```
 
-Not done: sound from player 2's Tome, Mix, new spells from the Magick page, labels in other languages, on by default. To confirm by hand: both Tomes in both orders, and both pressing Enchant at the same moment. The scripted test edits in `runtime/host/controls.cpp` (`l`, `r`, right stick) are uncommitted, as asked, and scripted page turns need them.
+Not done: sound from player 2's Tome, Mix, new spells from the Magick page, labels in other languages, on by default. Both pressing Enchant at the same moment passed by hand on 2026-11-03 (`logs/run-20261103-093139-hand8`, presses 2 and 3 frames apart). Page turns with both up, and player 1 closing with player 2's staying, passed in the logs on 2026-11-03 (`logs/run-20261103-093522-hand9`). To confirm by hand: player 1 pressing Start with player 2's already up. The scripted test edits in `runtime/host/controls.cpp` (`l`, `r`, right stick) are uncommitted, as asked, and scripted page turns need them.
 
 ## Next up
 
@@ -47,6 +47,12 @@ Not done: sound from player 2's Tome, Mix, new spells from the Magick page, labe
 | Player 1's camera stuck | The user saw it just before closing `logs/run-20261102-223052-test2` (slot 3, about frame 31995, player 1 near `1228 429 26`, far from player 2, some time after player 1's Enchant and last Tome). Player 2's Tome never opened in that run, so no turn ran in a memory copy. Not diagnosed. The user wants it looked at after the two-Tome tests |
 | Scroll in an examine's Details | The user mentioned an error around the scroll. Nothing in the trace shows inside the window |
 | Right half during Anthony's Tome room scene | Stays on a close-up for the whole scene. The user was happy with it when player 2 triggered it |
+
+## Fixed on 2026-11-03 (branch `tome-copy`, not committed yet)
+
+| What | Fix |
+|---|---|
+| Player 2's Talisman said "drained" and the message never closed (`logs/run-20261103-093522-hand9`) | `tome_copy_left` now gives the script the item their Tome chose, and doesn't run the second step if the first opened words. Details in `docs/coop-failed-attempts.md`. Passed by script and in the user's play (`logs/run-20261103-100630-hand10`) |
 
 ## Fixed on 2026-11-02 (branch `mods`, nothing pushed)
 
