@@ -3233,7 +3233,38 @@ static void notify_DrawableBallRender(CPUState* cpu) {
 static unsigned g_posmtx_loads_this_frame = 0;
 static unsigned g_posmtx_tilted_this_frame = 0;
 static unsigned g_posmtx_logged = 0;
+// A thing one player found is tied to the game's camera, and lay across both halves: it is drawn
+// for its finder. Its matrices are marked as they are loaded (the renderer's marked_out_of), for the
+// other player's view to leave it out. Set at the find (hle_coop_found), gone as its close-up ends.
+#define COOP_OBJECT_DRAW 0x8011A278u
+#define COOP_OBJECT_DRAW_END 0x8011B400u
+static u32 g_coop_found_objects[2];
+static int g_coop_found_out_of = -1;  // the view that leaves it out
+static unsigned long long g_coop_found_until;
+static bool g_coop_found_drawing;
+
+static void coop_found_object_draw(CPUState* cpu) {
+    g_coop_found_drawing = g_coop_found_out_of >= 0 && cpu->gpr[3] != 0u &&
+                           (cpu->gpr[3] == g_coop_found_objects[0] || cpu->gpr[3] == g_coop_found_objects[1]);
+    if (g_coop_found_until != 0ull && cpu->timebase / 675000ull >= g_coop_found_until) {
+        g_coop_found_until = 0ull;
+        g_coop_found_out_of = -1;
+        g_coop_found_drawing = false;
+    }
+}
+
+static void coop_found_mark(CPUState* cpu) {
+    const u32 m = cpu->gpr[3];
+    if (cpu->lr < COOP_OBJECT_DRAW || cpu->lr >= COOP_OBJECT_DRAW_END || !guest_ram_range_valid(cpu, m, 48u))
+        return;
+    mem_write8(cpu, m + 15u, 0xD2u);
+    mem_write8(cpu, m + 31u, (u8)(0xA0 + g_coop_found_out_of));
+    mem_write8(cpu, m + 47u, 0xE5u);
+}
+
 static void notify_GXLoadPosMtxImm(CPUState* cpu) {
+    if (g_coop_found_drawing)
+        coop_found_mark(cpu);
     static int matrix_log_enabled = -1;
     if (matrix_log_enabled < 0)
         matrix_log_enabled = getenv("ED_MATRIX_LOG") != NULL ? 1 : 0;
@@ -9385,9 +9416,37 @@ static s32 g_coop_scene_script;     // the script of player 2's whose cutscene h
 static unsigned g_coop_scene_after; // pad reads since it ended
 static bool g_coop_cutscene_pending;  // g_coop_cutscene.pending, as told here
 
+static void coop_found_notice(CPUState* cpu, bool p2);
+// The thing's object and the second it may have with it, as the find's opening finds them
+// (0x80024584 on), for the finder alone. r6 the thing's id, r5 the finder's.
+static void coop_found_for_finder(CPUState* cpu, bool p2) {
+    u32 keep[13];
+    for (int i = 0; i < 13; i++)
+        keep[i] = cpu->gpr[i];
+    const u32 lr = cpu->lr, id = cpu->gpr[6];
+    u32 node = 0u, info = 0u, second = 0u, node2 = 0u;
+    g_coop_found_objects[0] = g_coop_found_objects[1] = 0u;
+    if (hle_guest_call(cpu, 0x801F5F88u, &id, 1, 0.0, &node) && guest_ram_range_valid(cpu, node, 64u)) {
+        g_coop_found_objects[0] = mem_read32(cpu, node + 52u);
+        if (hle_guest_call(cpu, 0x801F6398u, &node, 1, 0.0, &info) && hle_guest_call(cpu, 0x8015095Cu, &info, 1, 0.0, &second) &&
+            (s32)second > 0 && hle_guest_call(cpu, 0x801F5F88u, &second, 1, 0.0, &node2) && guest_ram_range_valid(cpu, node2, 64u))
+            g_coop_found_objects[1] = mem_read32(cpu, node2 + 52u);
+    }
+    for (int i = 0; i < 13; i++)
+        cpu->gpr[i] = keep[i];
+    cpu->lr = lr;
+    g_coop_found_out_of = g_coop_found_objects[0] != 0u ? (p2 ? 0 : 1) : -1;
+    g_coop_found_until = 0ull;
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] the find's thing 0x%08X 0x%08X is drawn for player %d alone\n", g_coop_found_objects[0], g_coop_found_objects[1], p2 ? 2 : 1);
+}
+
 static void hle_coop_found(CPUState* cpu) {
     if (g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu))
         return;
+    const bool finder_p2 = (g_coop_use.active && g_coop_use.p2) || cpu->gpr[5] == mem_read32(cpu, g_coop_p2 + 16u);
+    coop_found_notice(cpu, finder_p2);
+    coop_found_for_finder(cpu, finder_p2);
     // What player 2 finds is the players' together: both Tomes list player 1's
     // things (their own copies of weapons apart), so in player 2's list it
     // showed in neither.
@@ -9424,10 +9483,6 @@ static void hle_coop_found(CPUState* cpu) {
     // split held player 1's view with the words in it a frame later.
     if (g_coop_use.active && g_coop_use.p2)
         g_coop_use.found = true;
-    // Player 1's is tied to the game's camera too, as their cast's: seen from player 2's it hung
-    // in their half. Theirs alone, as player 2's is.
-    else if (coop_busy(cpu))
-        g_coop_p1_cast_shown = true;
     // A thing given as a scene of theirs ends (the monk's key: the script goes on
     // as the game's, after the cutscene, with player 1 the player): theirs too, in
     // their half with their pad. It showed in both.
@@ -9723,6 +9778,47 @@ static void words_rename(u8* words, const char* from, const char* to) {
     }
 }
 
+// What one player finds, told in the other's half: "Pius has found a Magickal Rune". From the
+// words the find shows (r3, its element), which name the chapter's character whoever found it.
+static void coop_found_notice(CPUState* cpu, bool p2) {
+    if (!guest_ram_range_valid(cpu, cpu->gpr[3] + WORDS_AT, 200u))
+        return;
+    char words[200];
+    u32 n = 0u;
+    for (u32 at = 0u; at < 199u && n + 1u < sizeof words; at++) {
+        const u8 c = mem_read8(cpu, cpu->gpr[3] + WORDS_AT + at);
+        if (c == 0u)
+            break;
+        if (c == '\\') {  // a colour or such: \a and its letter
+            at++;
+            if (mem_read8(cpu, cpu->gpr[3] + WORDS_AT + at) == 'a')
+                at++;
+            continue;
+        }
+        words[n++] = (char)(c >= 32u && c < 127u ? c : ' ');
+    }
+    words[n] = 0;
+    const char* item = strstr(words, " has picked up ");
+    item = item != NULL ? item + 15 : strstr(words, " has found ");
+    if (item != NULL && item[0] == ' ')  // " has found "
+        item += 11;
+    int who = (p2 ? g_settings.mod_p2_character : g_settings.mod_p1_character) - 1;
+    for (int i = 0; who < 0 && i < 12; i++)
+        if (kPlayerModel[i] == g_chapter_model)
+            who = i;
+    if (item == NULL || who < 0 || who >= 12) {
+        fprintf(stderr, "[coop] no notice for the find's words: %s\n", words);
+        return;
+    }
+    char notice[256];
+    snprintf(notice, sizeof notice, "%s has found %s", kCharacterWords[who][0], item);
+    n = (u32)strlen(notice);
+    while (n > 0u && (notice[n - 1u] == '!' || notice[n - 1u] == ' '))
+        notice[--n] = 0;
+    frontend_toast_player(p2 ? 0 : 1, notice);
+    fprintf(stderr, "[coop] notice for player %d: %s\n", p2 ? 1 : 2, notice);
+}
+
 static void hle_words_layout(CPUState* cpu) {
     if (coop_trace() && guest_ram_range_valid(cpu, cpu->gpr[3] + WORDS_AT, 120u)) {
         static char seen[8][100];
@@ -9802,8 +9898,10 @@ static void hle_message_open(CPUState* cpu) {
     static int keep = -1;
     if (keep < 0)
         keep = getenv("ED_COOP_EXAMINE") != NULL;
+    // Player 1's words show (coop_words_hold keeps them from stopping player 2). Passed over too,
+    // the podium's and the drawer's never showed in Paul's chapter.
     g_hle_passthrough = keep || !g_settings.mod_coop || g_coop_p2 == 0u || cpu->lr != EXAMINE_OPENS || coop_busy(cpu) ||
-                        coop_from_window_close(cpu);
+                        coop_from_window_close(cpu) || !(g_coop_use.active && g_coop_use.p2);
     if (g_hle_passthrough)
         return;
     const u32 words = cpu->gpr[3];
@@ -9816,6 +9914,81 @@ static void hle_message_open(CPUState* cpu) {
     if (getenv("ED_COOP_LOG") != NULL)
         fprintf(stderr, "[coop] an examine's close-up passed over for player %d (then script %d)\n",
                 g_coop_close.p2 ? 2 : 1, script);
+}
+
+// The words' own hold (0x80042A8C: only the window's opening and closing call it): the player
+// marked, busy bit 8, play held (bit 2) and the sound's mode. The game opens words without it over
+// its Tome. Player 1's words go without it too, and player 2 plays on: the window's input lock
+// keeps player 1 still, and player 2's turn opens that lock for them (coop_player_turn).
+// Not a cutscene's words, and not player 2's own (their half and pad, coop_hold_player1).
+// A script's own step may have held play just before (the urn, 0x8016820C): its bit goes too.
+static bool coop_no_pause(CPUState* cpu) {
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || cutscene_playing(cpu) || (g_coop_use.active && g_coop_use.p2))
+        return false;
+    const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u);
+    if ((busy & ~2u) != 0u)
+        return false;
+    // Let go as the script's end would: its input channels stay on with only the bit cleared, and
+    // player 2, standing, couldn't start.
+    if (busy != 0u) {
+        const u32 lr = cpu->lr, r3 = cpu->gpr[3], go = 1u;
+        u32 ignore = 0u;
+        hle_guest_call(cpu, COOP_PLAY_HOLD, &go, 1, 0.0, &ignore);
+        cpu->lr = lr;
+        cpu->gpr[3] = r3;
+    }
+    return true;
+}
+
+#define WORDS_HOLD 0x80042A8Cu
+#define WORDS_HOLD_OPENS 0x8002436Cu   // the return, in the window's opening
+#define WORDS_HOLD_CLOSES 0x800242C4u  // and its closing
+static bool g_coop_words_free;
+
+static void coop_words_hold(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (cpu->lr == WORDS_HOLD_OPENS) {
+        g_coop_words_free = coop_no_pause(cpu);
+        if (!g_coop_words_free)
+            return;
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] player 1's words open with no hold\n");
+    } else if (cpu->lr == WORDS_HOLD_CLOSES && g_coop_words_free) {
+        g_coop_words_free = false;
+    } else {
+        return;
+    }
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+// A find's own hold (0x80042BB8: only finds call it): play held, busy bit 16, and for the script
+// timers the bit (r13 - 24048, bit 2) and the byte (r13 - 25932) that say a find is up. Those two
+// stay: the rune inside the urn waits on them. Player 1 stays still by their controller not running.
+#define FIND_HOLD 0x80042BB8u
+static bool g_coop_find_free;
+
+static void coop_find_hold(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const bool on = cpu->gpr[3] != 0u;
+    if (!on && g_coop_found_out_of >= 0)  // a few frames on: it is still there as its close-up ends
+        g_coop_found_until = cpu->timebase / 675000ull + 4ull;
+    if (on) {
+        g_coop_find_free = coop_no_pause(cpu);
+        if (!g_coop_find_free)
+            return;
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] player 1's find opens with no hold\n");
+    } else if (g_coop_find_free) {
+        g_coop_find_free = false;
+    } else {
+        return;
+    }
+    const u32 flags = mem_read32(cpu, cpu->gpr[13] - 24048u);
+    mem_write32(cpu, cpu->gpr[13] - 24048u, on ? flags | 2u : flags & ~2u);
+    mem_write8(cpu, cpu->gpr[13] - 25932u, on ? 1u : 0u);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
 }
 
 // Player 1's controller: player 2's turn first, then their use if they
@@ -9834,6 +10007,16 @@ static void hle_coop_controller(CPUState* cpu) {
     // wanted: player 1's controller runs after it.
     g_hle_passthrough = true;
     g_hle_tail_call = false;
+    if ((g_coop_find_free || g_coop_words_free) && coop_trace() && g_coop_p2 != 0u && cpu->timebase / 675000ull % 30ull == 0ull) {
+        const u32 o2 = mem_read32(cpu, g_coop_p2 + 52u);
+        if (guest_ram_range_valid(cpu, o2, 12u))
+            fprintf(stderr, "[trace] no pause: player 2 at %.0f %.0f busy %u frame %llu\n", guest_read_f32(cpu, o2), guest_read_f32(cpu, o2 + 4u),
+                    mem_read32(cpu, cpu->gpr[13] - 23344u), (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    if (g_coop_find_free) {  // player 1 is looking at what they found
+        g_hle_passthrough = false;
+        return;
+    }
     if (g_coop_use.active || g_coop_p2 == 0u || !sda_ready(cpu))
         return;
     if (g_coop_close.script != 0) {  // what a passed-over examine leaves
@@ -9844,7 +10027,8 @@ static void hle_coop_controller(CPUState* cpu) {
             coop_use_start(cpu, script, g_coop_close.p2);
         return;
     }
-    if (g_coop_use_script != 0) {
+    // The game has one window: what player 2 pressed for waits for player 1's words to close.
+    if (g_coop_use_script != 0 && !g_coop_words_free) {
         const s32 script = g_coop_use_script;
         g_coop_use_script = 0;
         if (script == COOP_PROMPT_CLOSE_UP) {
@@ -12557,7 +12741,7 @@ bool tome_copy_hook_off(HleHandler fn) {
         OFF(coop_script_go_to_room), OFF(coop_cast), OFF(tw_mode_change), OFF(tw_tome_start), OFF(coop_controlled_id), OFF(coop_play_hold),
         OFF(coop_enchanted_look), OFF(coop_sign_follow), OFF(coop_lasting_find), OFF(coop_spells_update),
         OFF(coop_game_camera), OFF(hle_moves_let_go), OFF(hle_moves_want), OFF(hle_find_by_id), OFF(coop_position_copy),
-        OFF(coop_send_event), OFF(notify_GXSetDrawDone),
+        OFF(coop_send_event), OFF(notify_GXSetDrawDone), OFF(coop_words_hold), OFF(coop_find_hold), OFF(coop_found_object_draw),
 #undef OFF
     };
     static bool said[sizeof kOff / sizeof kOff[0]];
@@ -13070,6 +13254,26 @@ static void find_coop(CPUState* cpu) {
         hold->intercept = coop_play_hold;
     } else {
         fprintf(stderr, "[coop] an enchant's holding play not found: it stops play\n");
+    }
+    // An object's drawing (stwu r1,-736(r1)).
+    HleDispatchEntry* object_draw = hle_dispatch_entry(COOP_OBJECT_DRAW);
+    if (mem_read32(cpu, COOP_OBJECT_DRAW) == 0x9421FD20u && object_draw != NULL && object_draw->intercept == NULL && object_draw->notify == NULL)
+        object_draw->notify = coop_found_object_draw;
+    else
+        fprintf(stderr, "[coop] an object's drawing not found: what is found shows in both halves\n");
+    // A find's hold (stwu r1,-32(r1)).
+    HleDispatchEntry* find_hold = hle_dispatch_entry(FIND_HOLD);
+    if (mem_read32(cpu, FIND_HOLD) == 0x9421FFE0u && find_hold != NULL && find_hold->intercept == NULL && find_hold->notify == NULL)
+        find_hold->intercept = coop_find_hold;
+    else
+        fprintf(stderr, "[coop] a find's hold not found: finds stop both players\n");
+    // The words' hold (stwu r1,-16(r1), and the window's call of it at 0x80024368).
+    HleDispatchEntry* words_hold = hle_dispatch_entry(WORDS_HOLD);
+    if (mem_read32(cpu, WORDS_HOLD) == 0x9421FFF0u && mem_read32(cpu, WORDS_HOLD_OPENS - 4u) == 0x4801E725u && words_hold != NULL &&
+        words_hold->intercept == NULL && words_hold->notify == NULL) {
+        words_hold->intercept = coop_words_hold;
+    } else {
+        fprintf(stderr, "[coop] the words' hold not found: words stop both players\n");
     }
     // An enchanted thing's look (stwu r1,-16(r1); ... or r30,r3,r3 at +0x14).
     HleDispatchEntry* enchanted = hle_dispatch_entry(COOP_ENCHANTED_LOOK);

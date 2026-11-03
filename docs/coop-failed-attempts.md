@@ -111,3 +111,15 @@ Older failures are mostly recorded in code comments in `runtime/host/hle.c`, as 
 ## A thing found by player 1 going to player 2
 
 **Copying the found script's whole word to the other player's table.** Keeping both tables alike is right ("what is found is gone for both"), but the word has the script's timer at +4. With the urn, player 1's Broken Blue Urn left a timer for the rune, the copy ran out in `coop_script_timers`, and the rune, its close-up and the Tome's page all went to player 2 (`logs/run-20261103-*-s1-p1d`, frame 7457). What worked: the copy leaves the timer out.
+
+## Keeping the other player moving during a find
+
+**Passing over the play hold for words and finds (`0x800429D0`..`0x80042C10`), and running player 2's turn from the busy check.** Player 2 only crept a few units during the urn and rune, and soon after the user found Paul's chapter's cutscenes didn't take them to the right place. Which of these did it, if either, isn't known. All of it was taken out; the code and that build are in `logs/saved-changes/hold-experiment-removed/`. The user is making a save where the other player keeps moving, to compare with.
+
+## Showing a found item to one player
+
+**Skipping the close-up (the user did not ask for this, and rejected it).** Passing over `ACQUIRE` left the item ungiven: the rune never went in and could be found again and again, with its notice repeated (`logs/run-20261103-140848-find1`). Its opening and closing are what give the thing. Closing it by itself in a frame (bit 0 of `r8`) gave the thing but took the close-up away, which they also rejected. They want the item shown to its finder, once.
+
+**Holding the other half (`g_coop_p1_cast_shown`).** Keeps the item out, but with no pause the half is visibly frozen.
+
+**What works:** `coop_found_for_finder` and `coop_found_mark` mark the item's matrices as it is drawn (`0x8011A278`), and `build_view` (`gfx/interp.cpp`, `marked_out_of`) leaves them out of the other view. Seen in pictures for player 1's urn and rune (`logs/run-20261103-141926-one1`).

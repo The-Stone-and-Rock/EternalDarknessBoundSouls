@@ -28,3 +28,18 @@ In the user's play on that fix (`logs/run-20261103-*-s1-p2d`) both were visible 
 ## What holds player 1 during player 2's words
 
 The picture is `Screenshots for Claude/p1-held-1.png`. Opening words sets the busy mask (`r13-23344`, bits 8 and 2, by `0x801556CC`). The per-character update `0x80007490` asks it (`0x80155738`, called at `0x8000749C`) before it runs the player's controller, so player 1's controller doesn't run. Read in the code, not tried. To free player 1, these would all have to change while player 2's words are up: the answer that call gives for player 1 only (34 other places read the same mask), the game's pad (it's player 2's then, for the words, and player 1's controller reads the same one), and player 1's half (`coop_hold_player1` keeps a still picture of it).
+
+## Keeping the other player moving during a find: where it stands
+
+Measured with `build/runs/enchant/both.sh`: player 1's presses from a real run, player 2 walking in bursts by script, input and position counted for each moment.
+
+| Build | Player 2's input read during the urn and rune | Player 2's position during them |
+|---|---|---|
+| Restore point (`01b3d85`) | No | Doesn't change |
+| Now (uncommitted) | Yes (266 and 120 reads) | Doesn't change |
+
+An examine doesn't hold anyone: `hle_message_open` passes its window over. A find does, on the restore point too.
+
+Tried, with player 2's turn run from `coop_busy_ask` during player 1's words and finds: answering "not busy" to everything in their turn (they can now start from standing in the words, not confirmed by hand), opening the input masks for their turn, and clearing `r13-23344` for their turn. None moved them during a find. A hook on `0x8014ED04` was never asked in this sequence, so that isn't what stops them, and it was taken out. Not known: what does. Next: trace their controller (`0x80045BC4`) during a find to see where it stops.
+
+Holding player 2's half with `g_coop_p1_cast_shown` during player 1's finds kept the item out of it, but froze the picture, so it was taken out. The item shows in both halves again until there's a way to leave it out of one view.

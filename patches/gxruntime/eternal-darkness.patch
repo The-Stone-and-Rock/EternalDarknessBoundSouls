@@ -5005,7 +5005,7 @@ index 421bd9e..69b25fd 100644
 +bool DisplayShowsHDR(SDL_Window*) { return true; }  // EDR: SDR white stays 1.0, any display
  } // namespace aurora::webgpu::utils
 diff --git a/graphics/aurora/lib/gfx/common.cpp b/graphics/aurora/lib/gfx/common.cpp
-index a64dd2d..b0e6a63 100644
+index a64dd2d..626f324 100644
 --- a/graphics/aurora/lib/gfx/common.cpp
 +++ b/graphics/aurora/lib/gfx/common.cpp
 @@ -10,6 +10,10 @@
@@ -5267,7 +5267,7 @@ index a64dd2d..b0e6a63 100644
 +      continue;
 +    PhotoView view = g_views[player];
 +    view.aspect = aspect;
-+    auto uniforms = interp::split_build(frame.uniforms.size(), photo::projection, &view, view.hideHud, photo::flare);
++    auto uniforms = interp::split_build(player, frame.uniforms.size(), photo::projection, &view, view.hideHud, photo::flare);
 +    if (!uniforms) {
 +      note_whole("no draws kept");
 +      return {};
@@ -5328,7 +5328,7 @@ index a64dd2d..b0e6a63 100644
 +        }
 +        view.zoom = from.zoom + (view.zoom - from.zoom) * t;
 +        view.aspect = aspect;
-+        auto uniforms = interp::split_between(blended, size, photo::projection, &view, view.hideHud, photo::flare);
++        auto uniforms = interp::split_between(player, blended, size, photo::projection, &view, view.hideHud, photo::flare);
 +        if (uniforms)
 +          outputs.push_back(FrameOutput{.kind = FrameOutput::Kind::SplitBetween,
 +                                        .uniforms = std::move(uniforms),
@@ -9590,10 +9590,10 @@ index 0a23a3f..bb77937 100644
  unsigned long long dst_alpha_fallback_count() noexcept;
 diff --git a/graphics/aurora/lib/gfx/interp.cpp b/graphics/aurora/lib/gfx/interp.cpp
 new file mode 100644
-index 0000000..1745ed1
+index 0000000..2eb804c
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/interp.cpp
-@@ -0,0 +1,677 @@
+@@ -0,0 +1,704 @@
 +#include "interp.hpp"
 +
 +#include <atomic>
@@ -10086,7 +10086,7 @@ index 0000000..1745ed1
 +
 +namespace {
 +Uniforms build_view(const Frame& f, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
-+                    PhotoFlare flare, bool away = false);
++                    PhotoFlare flare, bool away = false, int player = -1, const std::vector<uint8_t>* real = nullptr);
 +} // namespace
 +
 +Uniforms photo_build(size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare) {
@@ -10122,25 +10122,25 @@ index 0000000..1745ed1
 +
 +void menu_over() noexcept { g_menuOver.store(true); }
 +
-+Uniforms split_build(size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare) {
++Uniforms split_build(int player, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare) {
 +  if (!g_split || !g_recording || g_frames[g_cur].draws.empty())
 +    return nullptr;
 +  // Player 2's view (the HUD hidden) shows player 2's own HUD: the game draws
 +  // it off the screen to the right (away, below).
-+  return build_view(g_frames[g_cur], uniformSize, fn, user, hideHud, flare, hideHud);
++  return build_view(g_frames[g_cur], uniformSize, fn, user, hideHud, flare, hideHud, player);
 +}
 +
-+Uniforms split_between(const Uniforms& blended, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
++Uniforms split_between(int player, const Uniforms& blended, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
 +                       PhotoFlare flare) {
 +  Frame& cur = g_frames[g_cur];
 +  if (!g_split || !g_recording || cur.draws.empty())
 +    return nullptr;
 +  if (!blended)
-+    return build_view(cur, uniformSize, fn, user, hideHud, flare, hideHud);
++    return build_view(cur, uniformSize, fn, user, hideHud, flare, hideHud, player);
 +  // The view from the frame as it was at that moment.
 +  std::vector<uint8_t> own = *blended;
 +  own.swap(cur.uniforms);
-+  Uniforms view = build_view(cur, uniformSize, fn, user, hideHud, flare, hideHud);
++  Uniforms view = build_view(cur, uniformSize, fn, user, hideHud, flare, hideHud, player, &own);
 +  own.swap(cur.uniforms);
 +  return view;
 +}
@@ -10154,8 +10154,19 @@ index 0000000..1745ed1
 +// whatever else shares its uniforms (moved off the left).
 +constexpr uint32_t kFlareSpriteVerts = 16u; // a flare's sprite is a quad or two; a line of text, many
 +constexpr float kHudAway = 4096.f; // Eternal Darkness's COOP_BAR_AWAY (hle.c)
++
++// A matrix the game marks for one player's view to leave out (Eternal Darkness's co-op, a thing one
++// player found: hle.c, coop_found_mark), in the lowest bits of its translation. Blending loses them,
++// so they are read from the frame as it was drawn.
++bool marked_out_of(const float (*m)[4], int player) {
++  uint32_t a = 0, b = 0, c = 0;
++  std::memcpy(&a, &m[0][3], sizeof a);
++  std::memcpy(&b, &m[1][3], sizeof b);
++  std::memcpy(&c, &m[2][3], sizeof c);
++  return (a & 0xFFu) == 0xD2u && (c & 0xFFu) == 0xE5u && (b & 0xFFu) == 0xA0u + static_cast<uint32_t>(player);
++}
 +Uniforms build_view(const Frame& f, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
-+                    PhotoFlare flare, bool away) {
++                    PhotoFlare flare, bool away, int player, const std::vector<uint8_t>* real) {
 +  const size_t size = (uniformSize + 3u) & ~size_t{3u};
 +  auto buf = pooled_buffer(size);
 +  std::memset(buf->data(), 0, size);
@@ -10267,13 +10278,29 @@ index 0000000..1745ed1
 +      std::memcpy(dst.projection, out, sizeof out);
 +    }
 +  }
++  // Matrices marked out of this view: all of what they place falls to one point.
++  if (player >= 0) {
++    const std::vector<uint8_t>& from = real != nullptr ? *real : f.uniforms;
++    for (const Draw& d : f.draws) {
++      if (d.vs + sizeof(Vs) > from.size() || d.vs + sizeof(Vs) > size)
++        continue;
++      if (marked_out_of(vs_at(from, d.vs).posnormalmatrix, player))
++        std::memset(reinterpret_cast<Vs*>(buf->data() + d.vs)->posnormalmatrix, 0, 3 * sizeof(float[4]));
++      if (d.xf + sizeof(Xf) > from.size() || d.xf + sizeof(Xf) > size)
++        continue;
++      const Xf& xf = xf_at(from, d.xf);
++      for (uint32_t m = 0; m < 10u; ++m)
++        if (marked_out_of(&xf.transformmatrices[3 * m], player))
++          std::memset(reinterpret_cast<Xf*>(buf->data() + d.xf)->transformmatrices[3 * m], 0, 3 * sizeof(float[4]));
++    }
++  }
 +  return buf;
 +}
 +} // namespace
 +} // namespace aurora::gfx::interp
 diff --git a/graphics/aurora/lib/gfx/interp.hpp b/graphics/aurora/lib/gfx/interp.hpp
 new file mode 100644
-index 0000000..d20e9d7
+index 0000000..4b32428
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/interp.hpp
 @@ -0,0 +1,83 @@
@@ -10355,9 +10382,9 @@ index 0000000..d20e9d7
 +// uniforms for one player's camera as photo_build does for the held frame.
 +// Null when this frame was not kept.
 +void set_split(bool on) noexcept;
-+Uniforms split_build(size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare);
++Uniforms split_build(int player, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare);
 +// A frame in between's view: as split_build, from blended uniforms (null: the frame's own).
-+Uniforms split_between(const Uniforms& blended, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
++Uniforms split_between(int player, const Uniforms& blended, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
 +                       PhotoFlare flare);
 +} // namespace aurora::gfx::interp
 diff --git a/graphics/aurora/lib/gfx/pipeline_cache.cpp b/graphics/aurora/lib/gfx/pipeline_cache.cpp
