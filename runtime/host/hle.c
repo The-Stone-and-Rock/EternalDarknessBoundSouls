@@ -7141,6 +7141,28 @@ static void notify_room_ticket(CPUState* cpu) {
 }
 
 
+// ED_COOP_TRACE=1 (play.sh): how each player's actions run, for building on them. Reads
+// only. [trace] lines: scripts and who they run as, prompts, the look's stages, windows,
+// the Tome's item page and the words it lays out.
+static bool coop_trace(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_COOP_TRACE") != NULL;
+    return on != 0;
+}
+
+static void trace_look(CPUState* cpu, const char* what) {
+    const u32 look = 0x80307108u, entry = look + (mem_read32(cpu, look + 0x40u) & 1u) * 32u;
+    fprintf(stderr, "[trace] %s r3 %d r4 %d lr 0x%08X who %u ctl %u | look stage %d script %d count %d words %d,%d | busy %d frame %llu\n", what,
+            (s32)cpu->gpr[3], (s32)cpu->gpr[4], cpu->lr, mem_read32(cpu, cpu->gpr[13] - 21496u), mem_read32(cpu, cpu->gpr[13] - 21488u),
+            (s32)mem_read32(cpu, entry), (s32)mem_read32(cpu, entry + 4u), (s32)mem_read32(cpu, entry + 8u), (s32)mem_read32(cpu, entry + 12u),
+            (s32)mem_read32(cpu, entry + 16u), (s32)mem_read32(cpu, cpu->gpr[13] - 23344u), (unsigned long long)(cpu->timebase / 675000ull));
+}
+static void notify_trace_prompt_use(CPUState* cpu) { trace_look(cpu, "prompt use"); }
+static void notify_trace_look_step(CPUState* cpu) { trace_look(cpu, "look step"); }
+static void notify_trace_busy(CPUState* cpu) { trace_look(cpu, "busy"); }
+static void notify_trace_prompt_set(CPUState* cpu) { trace_look(cpu, "prompt set"); }
+
 static void notify_script_later(CPUState* cpu) {
     room_log(cpu, "later");
 }
@@ -8905,6 +8927,10 @@ static bool continue_coop_use(CPUState* cpu) {
 #define TOME_ITEM_CODE_END 0x80104800u
 
 static void coop_run_script(CPUState* cpu) {
+    if (coop_trace() && sda_ready(cpu) && cpu->lr != 0x800CA940u && cpu->lr != 0x80153B84u) {
+        trace_look(cpu, "script run");
+        g_script_watch = 40u;  // the game functions it calls
+    }
     // An item player 2 used from their Tome. Its script asks if the player is in a zone
     // ("Paul cannot use that now.": they stood there, player 1 did not, and the words were
     // player 1's) and what it casts is cast by the controlled character. They are the
@@ -9058,6 +9084,27 @@ static void words_rename(u8* words, const char* from, const char* to) {
 }
 
 static void hle_words_layout(CPUState* cpu) {
+    if (coop_trace() && guest_ram_range_valid(cpu, cpu->gpr[3] + WORDS_AT, 120u)) {
+        static char seen[8][100];
+        static int next;
+        char now[100];
+        u32 n = 0u;
+        for (; n + 1u < sizeof now; n++) {
+            const u8 c = mem_read8(cpu, cpu->gpr[3] + WORDS_AT + n);
+            if (c == 0u)
+                break;
+            now[n] = (char)(c >= 32u && c < 127u ? c : 46);
+        }
+        now[n] = 0;
+        bool known = false;
+        for (int i = 0; i < 8; i++)
+            known = known || strcmp(seen[i], now) == 0;
+        if (!known) {
+            snprintf(seen[next], sizeof seen[next], "%s", now);
+            next = (next + 1) % 8;
+            fprintf(stderr, "[trace] words: %s\n", now);
+        }
+    }
     g_hle_passthrough = true;
     if (g_chapter_model < 0 || !sda_ready(cpu) || !guest_ram_range_valid(cpu, cpu->gpr[3] + WORDS_AT, WORDS_MOST))
         return;
@@ -9097,6 +9144,8 @@ static bool coop_from_window_close(CPUState* cpu) {
 }
 
 static void hle_message_open(CPUState* cpu) {
+    if (coop_trace())
+        trace_look(cpu, "window");
     static int keep = -1;
     if (keep < 0)
         keep = getenv("ED_COOP_EXAMINE") != NULL;
@@ -11377,6 +11426,22 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     static unsigned start_wait;
     static bool start_was;
     static unsigned quick_wait;  // pad reads for the Tome their quick spell asked for
+    if (coop_trace() && sda_ready(cpu)) {  // the Tome's item page, the spell it waits on
+        static const u32 kPage[3] = {24492u, 24508u, 24304u};
+        static u32 page[3], spell[3];
+        const u32 now[3] = {mem_read32(cpu, COOP_SPELL_ITEM), mem_read32(cpu, COOP_SPELL_ITEM + 12u), mem_read32(cpu, COOP_SPELL_ITEM + 16u)};
+        for (int i = 0; i < 3; i++) {
+            const u32 v = mem_read32(cpu, cpu->gpr[13] - kPage[i]);
+            if (v != page[i])
+                fprintf(stderr, "[trace] Tome r13-%u 0x%X -> 0x%X (owner %d sharing %d frame %llu)\n", kPage[i], page[i], v, owner, g_tw.sharing,
+                        (unsigned long long)(cpu->timebase / 675000ull));
+            page[i] = v;
+        }
+        if (memcmp(spell, now, sizeof now) != 0)
+            fprintf(stderr, "[trace] spell item %d spell 0x%08X flags 0x%X (owner %d frame %llu)\n", (s32)now[0], now[1], now[2], owner,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        memcpy(spell, now, sizeof now);
+    }
     g_coop_tome_owner = owner;
     // The world behind the Tome: a read is for the frame after it. For the world's,
     // the Tome's owner stands; for the Tome's, it is their pad as ever.
@@ -11566,6 +11631,11 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     g_coop_screen = closeup && owner == 1;
     if (owner == 1) {
         pad_held &= p2.button;
+        static u16 trace_pad;
+        if (coop_trace() && p2.button != trace_pad)
+            fprintf(stderr, "[trace] player 2's screen pad 0x%04X held 0x%04X screen %d busy %d frame %llu\n", p2.button, pad_held, g_coop_screen,
+                    coop_busy(cpu), (unsigned long long)(cpu->timebase / 675000ull));
+        trace_pad = p2.button;
         p2.button &= (u16)~pad_held;
         *pad = p2;
         pad->error = 0;
@@ -12139,6 +12209,18 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* ticket = hle_dispatch_entry(0x80155770u);
             if (ticket != NULL && ticket->notify == NULL && ticket->intercept == NULL)
                 ticket->notify = notify_room_ticket;
+            if (coop_trace()) {
+                static const struct {
+                    u32 at;
+                    void (*fn)(CPUState*);
+                } kTrace[] = {{0x80006EBCu, notify_trace_prompt_use}, {0x80024D78u, notify_trace_look_step},
+                              {0x801556CCu, notify_trace_busy}, {0x80117404u, notify_trace_prompt_set}};
+                for (u32 i = 0u; i < sizeof kTrace / sizeof kTrace[0]; i++) {
+                    HleDispatchEntry* entry = hle_dispatch_entry(kTrace[i].at);
+                    if (entry != NULL && entry->notify == NULL && entry->intercept == NULL)
+                        entry->notify = kTrace[i].fn;
+                }
+            }
             HleDispatchEntry* later = hle_dispatch_entry(0x80163C6Cu);
             if (getenv("ED_ROOM_LOG") != NULL && later != NULL && later->notify == NULL && later->intercept == NULL)
                 later->notify = notify_script_later;
@@ -12149,7 +12231,7 @@ static void find_coop(CPUState* cpu) {
             if (getenv("ED_ROOM_LOG") != NULL && run != NULL && run->notify == NULL && run->intercept == NULL)
                 run->notify = notify_script_run;
             HleDispatchEntry* call = hle_dispatch_entry(0x8015974Cu);
-            if (getenv("ED_ROOM_LOG") != NULL && call != NULL && call->notify == NULL && call->intercept == NULL)
+            if ((getenv("ED_ROOM_LOG") != NULL || coop_trace()) && call != NULL && call->notify == NULL && call->intercept == NULL)
                 call->notify = notify_script_call;
             HleDispatchEntry* stream = hle_dispatch_entry(0x80154118u);
             if (getenv("ED_STREAM_LOG") != NULL && stream != NULL && stream->notify == NULL)

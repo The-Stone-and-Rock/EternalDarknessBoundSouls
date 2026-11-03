@@ -7,3 +7,5 @@
   `git -C .deps/GXRuntime diff > patches/gxruntime/eternal-darkness.patch`.
 - `runtime/host/controls.cpp` may hold uncommitted test edits. Don't commit them.
 - Commit only when told, and don't push unless asked.
+- Add items seen in logs or code to `docs/items-log.md`, in any session, with only what was actually seen.
+- Player 2 menu work: read `docs/coop-player2-menu.md`, and add what each trace finds. `play.sh` turns on the `[trace]` log lines.
