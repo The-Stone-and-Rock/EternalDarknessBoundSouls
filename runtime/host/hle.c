@@ -557,10 +557,25 @@ static void restore_callback_context(CPUState* cpu,
     cpu->reserve_valid = saved->reserve_valid;
 }
 
+// What's done for player 2's Tome in its copy of the memory finishes there, before its turn
+// ends: run by the loop, later, its callback would land in the real memory.
+static bool g_tome_copy_turn;
+static HlePendingCallback g_tome_copy_callbacks[HLE_CALLBACK_QUEUE_CAPACITY];
+static u32 g_tome_copy_callback_count;
+
 static bool queue_guest_callback_after(CPUState* cpu, u32 address, s32 channel,
                                        s32 result) {
     if (address == 0)
         return true;
+    if (g_tome_copy_turn) {
+        if (g_tome_copy_callback_count == HLE_CALLBACK_QUEUE_CAPACITY) {
+            fprintf(stderr, "[tome-copy] too many callbacks in its turn\n");
+            return false;
+        }
+        const HlePendingCallback callback = {address, channel, result};
+        g_tome_copy_callbacks[g_tome_copy_callback_count++] = callback;
+        return true;
+    }
     if (g_callback_count == HLE_CALLBACK_QUEUE_CAPACITY) {
         fprintf(stderr, "[card] completion callback queue overflow\n");
         return false;
@@ -3767,6 +3782,18 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
 static int g_coop_tome_owner = -1;  // who has the screens that stop play
 static int g_tw_held_from = -1;  // which reads' the pad's held buttons are now, -1 starting
 static u16 g_tw_taps;  // what the Tome's owner pressed between the Tome's reads: a quick press is not lost
+// ED_COOP_TOME_COPY=2 (testing): player 2's Tome in a copy of the memory (tome_copy_step).
+static bool g_tome_copy_ask, g_tome_copy_open;
+static u16 g_tome_copy_held;  // what they held as it opened: not a press in it
+static u16 g_tome_copy_taps;  // what they pressed between its reads
+static u8 g_tome_copy_spell[24];  // what their cast asked of a Tome (COOP_SPELL_ITEM), for their copy alone
+static bool g_tome_copy_spell_set, g_tome_copy_spell_open;
+static int tome_copy_mode(void) {
+    static int mode = -1;
+    if (mode < 0)
+        mode = getenv("ED_COOP_TOME_COPY") != NULL ? atoi(getenv("ED_COOP_TOME_COPY")) : 0;
+    return mode;
+}
 // Player 2 has a close-up their action press opened (coop_menu_input): the
 // split is off (camera.c) and the close-up shows in their half.
 static bool g_coop_screen;
@@ -3877,8 +3904,49 @@ static void coop_watch(CPUState* cpu, const DolPadState* pad) {
 static bool coop_character_load(CPUState* cpu);
 #endif
 
+#ifdef ED_AURORA
+// Player 2's pad, for their Tome's frame in the copy.
+static void tome_copy_pad(CPUState* cpu, u32 out) {
+    DolPadState state[4];
+    memset(state, 0, sizeof state);
+    controls_set_tome_read(1);
+    controls_read_player2(&state[0]);
+    controls_set_tome_read(-1);
+    state[0].button |= g_tome_copy_taps;
+    g_tome_copy_taps = 0u;
+    g_tome_copy_held &= state[0].button;
+    state[0].button &= (u16)~g_tome_copy_held;
+    if ((g_tome_copy_held & 0x0100u) != 0u)
+        state[0].analog_a = 0u;
+    if ((g_tome_copy_held & 0x0200u) != 0u)
+        state[0].analog_b = 0u;
+    state[0].error = 0;
+    for (u32 i = 1; i < 4; i++)
+        state[i].error = -1;  // PAD_ERR_NO_CONTROLLER
+    for (u32 i = 0; i < 4; i++) {
+        const u32 p = out + i * 12u;
+        mem_write16(cpu, p, state[i].button);
+        mem_write8(cpu, p + 2u, (u8)state[i].stick_x);
+        mem_write8(cpu, p + 3u, (u8)state[i].stick_y);
+        mem_write8(cpu, p + 4u, (u8)state[i].substick_x);
+        mem_write8(cpu, p + 5u, (u8)state[i].substick_y);
+        mem_write8(cpu, p + 6u, state[i].trigger_left);
+        mem_write8(cpu, p + 7u, state[i].trigger_right);
+        mem_write8(cpu, p + 8u, state[i].analog_a);
+        mem_write8(cpu, p + 9u, state[i].analog_b);
+        mem_write8(cpu, p + 10u, (u8)state[i].error);
+        mem_write8(cpu, p + 11u, 0);
+    }
+    hle_set_u32(cpu, 0u);
+}
+#endif
+
 static void hle_PADRead(CPUState* cpu) {
 #ifdef ED_AURORA
+    if (g_tome_copy_turn) {
+        tome_copy_pad(cpu, hle_arg_u32(cpu, 0));
+        return;
+    }
     if (coop_character_load(cpu))
         return;  // the game loads a character's file first; this read runs after
 #endif
@@ -3898,9 +3966,11 @@ static void hle_PADRead(CPUState* cpu) {
                     state[0].stick_x, state[0].stick_y, (unsigned long long)(cpu->timebase / 675000ull));
         // Their pad is their Tome's, to the frames it closes on too: the A that chose
         // an item to use was their attack, and the B that left a look at what they stood by.
-        const bool tome_pad = g_coop_tome_owner == 1 && !g_coop_screen;
+        const bool tome_pad = (g_coop_tome_owner == 1 && !g_coop_screen) || g_tome_copy_open;
         if (tome_pad) {
-            if (tw_world_turn())
+            if (g_tome_copy_open)
+                g_tome_copy_taps |= state[0].button;
+            else if (tw_world_turn())
                 g_tw_taps |= state[0].button;
             const s32 error = state[0].error;
             memset(&state[0], 0, sizeof state[0]);
@@ -4149,6 +4219,8 @@ static void hle_PADSetSpec(CPUState* cpu) {
 // Handler registry
 // ---------------------------------------------------------------------------
 // Aurora-implemented SDK functions, matched by name against the generated table.
+bool tome_copy_hook_off(HleHandler fn);
+
 static const HleEntry kHandlers[] = {
     { "OSReport",          hle_OSReport },
     { "ARInit",            hle_ARInit },
@@ -4359,6 +4431,8 @@ static void notify_GXEnableBreakPt(CPUState* cpu) {
 }
 
 static void notify_OSSleepThread(CPUState* cpu) {
+    if (g_tome_copy_turn)
+        fprintf(stderr, "[tome-copy] a thread sleeps in the copy's turn (lr 0x%08X)\n", cpu->lr);
     if (hle_arg_u32(cpu, 0) == GX_FINISH_QUEUE)
         interrupt_commit_pe_finish();
 }
@@ -5177,6 +5251,9 @@ static bool hle_dispatch(CPUState* cpu, u32 address) {
     }
     HleDispatchEntry* entry = hle_dispatch_entry(address);
     if (entry == NULL)
+        return false;
+    if (g_tome_copy_turn && ((entry->intercept != NULL && tome_copy_hook_off(entry->intercept)) ||
+                             (entry->notify != NULL && tome_copy_hook_off(entry->notify))))
         return false;
 
     if (entry->intercept != NULL) {
@@ -7703,6 +7780,7 @@ static u32 g_coop_own_carry;  // player 2's own list, while their quick spell ha
 // at first; their Tome's Quick Spell page sets them: they are the game's
 // while their Tome is open, coop_quick_swap). ED_COOP_CAST_LOG says each
 // cast.
+#define COOP_NODE_STATE 24u
 #define COOP_QUICK 0x80334DE8u
 #define COOP_QUICKS 5u
 #define COOP_QUICK_CAST 0x800069DCu
@@ -7796,6 +7874,13 @@ static void coop_quick_cast(CPUState* cpu) {
         const u32 carried = mem_read32(cpu, g_coop_p2 + CARRY_LIST);
         g_coop_own_carry = carried;
         const u32 asked = mem_read32(cpu, COOP_SPELL_ITEM + COOP_SPELL_ITEM_TOME) & 1u;
+        u8 spell_was[24];
+        coop_bytes(cpu, COOP_SPELL_ITEM, spell_was, sizeof spell_was, true);
+        const u32 mode_asked_was = mem_read32(cpu, cpu->gpr[13] - 26188u), mode_now_was = mem_read32(cpu, cpu->gpr[13] - 26184u);
+        // Player 1's cast has the record, asking of their Tome: theirs is asked apart from it.
+        const bool beside = tome_copy_mode() == 2 && asked != 0u;
+        if (beside)
+            mem_write32(cpu, COOP_SPELL_ITEM + COOP_SPELL_ITEM_TOME, mem_read32(cpu, COOP_SPELL_ITEM + COOP_SPELL_ITEM_TOME) & ~1u);
         if (g_coop_turn_p1 != 0u)
             mem_write32(cpu, g_coop_p2 + CARRY_LIST, mem_read32(cpu, g_coop_turn_p1 + CARRY_LIST));
         coop_be_player2(cpu, true, was);
@@ -7803,10 +7888,27 @@ static void coop_quick_cast(CPUState* cpu) {
         coop_be_player2(cpu, false, was);
         mem_write32(cpu, g_coop_p2 + CARRY_LIST, carried);
         g_coop_own_carry = 0u;
-        if (!asked && (mem_read32(cpu, COOP_SPELL_ITEM + COOP_SPELL_ITEM_TOME) & 1u) != 0u)
-            g_coop_quick_tome = true;
+        if ((!asked || beside) && (mem_read32(cpu, COOP_SPELL_ITEM + COOP_SPELL_ITEM_TOME) & 1u) != 0u) {
+            if (tome_copy_mode() == 2) {
+                // The Tome it asks for is their copy's: the real record and mode are as they were,
+                // whatever player 1's Tome or cast is doing with them.
+                coop_bytes(cpu, COOP_SPELL_ITEM, g_tome_copy_spell, sizeof g_tome_copy_spell, true);
+                coop_bytes(cpu, COOP_SPELL_ITEM, spell_was, sizeof spell_was, false);
+                mem_write32(cpu, cpu->gpr[13] - 26188u, mode_asked_was);
+                mem_write32(cpu, cpu->gpr[13] - 26184u, mode_now_was);
+                g_tome_copy_spell_set = true;
+                g_tome_copy_ask = true;
+                fprintf(stderr, "[tome-copy] player 2's cast asks for their Tome\n");
+            } else {
+                g_coop_quick_tome = true;
+            }
+        } else if (beside) {
+            coop_bytes(cpu, COOP_SPELL_ITEM, spell_was, sizeof spell_was, false);
+        }
         if (getenv("ED_COOP_CAST_LOG") != NULL) {
             const u32 spell = mem_read32(cpu, cpu->gpr[13] - 22328u);
+            fprintf(stderr, "[coop] player 2's state %u, casting 0x%08X, record +16 0x%X, asked %u\n", mem_read32(cpu, g_coop_p2 + COOP_NODE_STATE), g_coop_casting[0],
+                    mem_read32(cpu, COOP_SPELL_ITEM + COOP_SPELL_ITEM_TOME), mem_read32(cpu, cpu->gpr[13] - 26188u));
             fprintf(stderr, "[coop] player 2 casts their quick spell %u (0x%08X): %s (frame %llu)\n", i, g_coop_quick[i],
                     spell != first ? "cast" : "not cast", (unsigned long long)(cpu->timebase / 675000ull));
         }
@@ -8180,10 +8282,34 @@ static void tw_block(CPUState* cpu, int save, int load) {
     }
 }
 
+#define TOME_COPY_GX_POINTER 26688u  // r13 -: the GX library's record, what it thinks the GPU holds
+#define TOME_COPY_GX_SIZE 0x4F8u     // the highest it's used at is +0x4F4 (its dirty state)
+#define TOME_COPY_LAST_PAGE 29060u   // r13 -: the page a Tome opens on: 0 Options, 1 Inventory, 2 Map, 3 Magick, 4 Journal
+#define TOME_COPY_JOURNAL 24448u     // r13 -: open on the Journal, for what's new in it
+#define TOME_COPY_PAGE_STATE 24244u  // r13 -: 3 while the Tome's pages run
+#define TOME_HAS_MAGICK 0x80109A68u
+static struct {
+    u8* copy;
+    u8* real;
+    bool started, has_magick;
+    bool stands_in;   // player 1 has no Tome: the world behind the Tome (g_tw) is for this one alone
+    u8* clean;        // the memory as player 1's Tome was asked for, before it was in it
+    bool clean_set;
+    unsigned turns;
+    int kinds_depth, kinds_count;
+    u8 kinds[sizeof g_coop_kinds_in];
+    double ms_most;
+} g_tome_copy;
+static bool g_coop_tome_p2;
+static bool g_coop_b_release;
+void aurora_split_menu(int player, int layout);
+
 // A quick state loaded: the frames are the game's own again.
 static void tw_state_loaded(void) {
+    g_tome_copy_ask = g_tome_copy_open = false;
     g_tw.sharing = g_tw.world_tick = g_tw.have_world = false;
-    dol_aurora_split_skip_views(false);
+    g_tome_copy.stands_in = g_tome_copy.clean_set = false;
+    dol_aurora_split_skip_views(0);
     dol_aurora_frame_unpaced(false);
     aurora_split_only_view(-1);
 }
@@ -8233,7 +8359,7 @@ static void tw_room_buffer(CPUState* cpu) {
 #define TW_FRAME_WAITS 0x801DFA50u
 #define TW_RETRACE_WAITS 0x801E4768u
 static void tw_retrace_wait(CPUState* cpu) {
-    if (cpu->lr == TW_RETRACE_WAITS && g_tw.sharing && !g_tw.world_tick) {
+    if (cpu->lr == TW_RETRACE_WAITS && ((g_tw.sharing && !g_tw.world_tick) || g_tome_copy_turn)) {
         g_hle_passthrough = false;
         g_hle_tail_call = false;
     } else {
@@ -8242,7 +8368,7 @@ static void tw_retrace_wait(CPUState* cpu) {
 }
 
 static void tw_frame_wait(CPUState* cpu) {
-    if (cpu->lr == TW_FRAME_WAITS && g_tw.sharing && !g_tw.world_tick) {
+    if (cpu->lr == TW_FRAME_WAITS && ((g_tw.sharing && !g_tw.world_tick) || g_tome_copy_turn)) {
         cpu->gpr[3] = 1u;
         g_hle_passthrough = false;
         g_hle_tail_call = false;
@@ -8253,9 +8379,331 @@ static void tw_frame_wait(CPUState* cpu) {
 
 static void coop_tome_player(CPUState* cpu, bool p2);
 
+// ED_COOP_TOME_COPY=1 (testing, off otherwise): test 1 of docs/coop-two-tomes-design.md. Once
+// a loop, with no Tome in it, the machine runs one game call on a copy of its memory, and it's
+// checked that nothing of that reached the real memory. The copy is made again every
+// TOME_COPY_EVERY turns, for what that costs. A guest call polls no interrupts. One asked with
+// the FPU not this thread's saves its registers as it takes it: that is done first, in the real memory.
+#define TOME_COPY_EVERY 600u
+#define TOME_COPY_CANARY 0x7E57C0DEu
+#define TOME_COPY_STACK 0x1000u
+
+static u64 tome_copy_ns(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (u64)now.tv_sec * 1000000000ull + (u64)now.tv_nsec;
+}
+
+static void tome_copy_test(CPUState* cpu) {
+    static int on = -1;
+    static u8* copy;
+    static u8* stack_was;
+    static unsigned turns, fpu_taken, bad;
+    static u64 copy_ns, turn_ns_most;
+    if (on < 0) {
+        on = tome_copy_mode() == 1;
+        if (on) {
+            copy = (u8*)malloc(cpu->ram_size);
+            stack_was = (u8*)malloc(TOME_COPY_STACK);
+            on = copy != NULL && stack_was != NULL;
+            fprintf(stderr, "[tome-copy] %s, %u MB of memory\n", on ? "on" : "no memory for it", cpu->ram_size / (1024u * 1024u));
+        }
+    }
+    if (!on)
+        return;
+    if ((cpu->msr & 0x00002000u) == 0u) {  // MSR[FP], as hle_guest_call
+        cpu->srr0 = cpu->pc;
+        cpu->srr1 = cpu->msr;
+        interrupt_switch_fpu_context(cpu);
+        fpu_taken++;
+    }
+    u64 t0 = tome_copy_ns();
+    if (turns % TOME_COPY_EVERY == 0u) {
+        memcpy(copy, cpu->ram, cpu->ram_size);
+        copy_ns = tome_copy_ns() - t0;
+    }
+    t0 = tome_copy_ns();
+    u8* const real = cpu->ram;
+    const u32 canary_at = GC_RAM_BASE + cpu->ram_size - 4u;
+    const u32 stack_at = (cpu->gpr[1] - TOME_COPY_STACK) & ~15u;
+    const u32 canary_was = mem_read32(cpu, canary_at);
+    memcpy(stack_was, real + (stack_at - GC_RAM_BASE), TOME_COPY_STACK);
+    const u32 id_real = mem_read32(cpu, cpu->gpr[13] - 21488u);
+    cpu->ram = copy;
+    mem_write32(cpu, canary_at, TOME_COPY_CANARY);
+    u32 id_copy = 0u;
+    const bool called = hle_guest_call(cpu, COOP_CONTROLLED_ID, NULL, 0, 0.0, &id_copy);
+    const bool in_copy = mem_read32(cpu, canary_at) == TOME_COPY_CANARY;
+    mem_write32(cpu, canary_at, canary_was);
+    cpu->ram = real;
+    const u64 took = tome_copy_ns() - t0;
+    if (took > turn_ns_most)
+        turn_ns_most = took;
+    const bool same = mem_read32(cpu, canary_at) == canary_was && memcmp(stack_was, real + (stack_at - GC_RAM_BASE), TOME_COPY_STACK) == 0;
+    const bool fresh = turns % TOME_COPY_EVERY != 0u || id_copy == id_real;
+    if (!called || !in_copy || !same || !fresh) {
+        if (bad++ < 20u)
+            fprintf(stderr, "[tome-copy] FAILED turn %u: called %d, in the copy %d, real memory the same %d, same id %d (0x%X 0x%X)\n", turns,
+                    called, in_copy, same, fresh, id_copy, id_real);
+    }
+    if (++turns % TOME_COPY_EVERY == 0u) {
+        fprintf(stderr, "[tome-copy] %u turns, %u failed, FPU taken %u times; copy %.2f ms, longest turn %.1f us\n", turns, bad, fpu_taken,
+                (double)copy_ns / 1e6, (double)turn_ns_most / 1e3);
+        turn_ns_most = 0u;
+    }
+}
+
+// ED_COOP_TOME_COPY=2 (testing, off otherwise): test 2 of docs/coop-two-tomes-design.md. Player
+// 2's Tome runs in a whole copy of the memory, where the game is alone and stopped, as the Tome
+// expects: its frames run here, as guest calls (no interrupts), before each of the world's.
+// To the rest of the host it's the world behind the Tome (g_tw) with them its owner. What it does
+// isn't sent to the real game yet. Nothing in the real memory knows of it; closing throws it away.
+
+// Into the copy or back. There's one GPU, so what the GX library knows of it goes along.
+static void tome_copy_swap(CPUState* cpu, bool in) {
+    const u32 gx = mem_read32(cpu, cpu->gpr[13] - TOME_COPY_GX_POINTER);
+    u8* const to = in ? g_tome_copy.copy : g_tome_copy.real;
+    if (guest_ram_range_valid(cpu, gx, TOME_COPY_GX_SIZE))
+        memcpy(to + (gx - GC_RAM_BASE), cpu->ram + (gx - GC_RAM_BASE), TOME_COPY_GX_SIZE);
+    cpu->ram = to;
+    dol_aurora_mem1_turn(to);
+}
+
+static void tome_copy_equips(CPUState* cpu);
+static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* spell_item);
+
+static void tome_copy_close(CPUState* cpu, const char* why) {
+    fprintf(stderr, "[tome-copy] player 2's Tome closes (%s) after %u turns, longest %.2f ms\n", why, g_tome_copy.turns, g_tome_copy.ms_most);
+    // Back as coop_tome_player leaves them, in the copy: their quick spells and counts come out of it.
+    cpu->ram = g_tome_copy.copy;
+    // What the Tome left for the world as it closes: the script an item left, the spell to cast.
+    const s32 script_left = (s32)mem_read32(cpu, cpu->gpr[13] - 26324u);
+    const u32 next_cast = mem_read32(cpu, COOP_NEXT_CAST);
+    u8 spell_item[24];
+    coop_bytes(cpu, COOP_SPELL_ITEM, spell_item, sizeof spell_item, true);
+    g_coop_kinds_depth = g_tome_copy.kinds_depth;
+    g_coop_kinds_in_count = g_tome_copy.kinds_count;
+    memcpy(g_coop_kinds_in, g_tome_copy.kinds, sizeof g_coop_kinds_in);
+    g_coop_tome_p2 = true;
+    coop_tome_player(cpu, false);
+    cpu->ram = g_tome_copy.real;
+    g_coop_tome_p2 = false;
+    g_tome_copy_open = false;
+    // What they held as it closed is not a press in play (the A that chose was their attack).
+    DolPadState pad;
+    controls_read_player2(&pad);
+    g_coop_p2_hold = pad.button;
+    g_coop_b_release = true;
+    if (g_tome_copy.stands_in) {
+        g_tome_copy.stands_in = false;
+        g_tw.sharing = g_tw.world_tick = false;
+        dol_aurora_split_skip_views(0);
+        dol_aurora_frame_unpaced(false);
+        aurora_split_only_view(-1);
+        aurora_split_menu(-1, 0);
+    } else if (g_tw.sharing) {
+        // Player 1's stays: theirs is the one menu, the world in player 2's half again.
+        aurora_split_menu(0, g_settings.mod_split);
+        aurora_split_only_view(1);
+    }
+    tome_copy_left(cpu, script_left, next_cast, spell_item);
+}
+
+// The callbacks its turn has asked for, in order, and those they ask for in turn (its loader's
+// chained reads). All before the frame that waits on them.
+static void tome_copy_callbacks(CPUState* cpu) {
+    for (u32 done = 0u; g_tome_copy_callback_count > 0u && done < 4096u; done++) {
+        const HlePendingCallback next = g_tome_copy_callbacks[0];
+        g_tome_copy_callback_count--;
+        memmove(g_tome_copy_callbacks, g_tome_copy_callbacks + 1, g_tome_copy_callback_count * sizeof g_tome_copy_callbacks[0]);
+        const u32 args[2] = {(u32)next.channel, (u32)next.result};
+        u32 ignore = 0u;
+        if (!hle_guest_call(cpu, next.address, args, 2, 0.0, &ignore))
+            fprintf(stderr, "[tome-copy] callback 0x%08X did not return\n", next.address);
+    }
+}
+
+// Once a loop while it's asked for or open. True: it ran, and the world's frame is next.
+static bool tome_copy_step(CPUState* cpu) {
+    if (!g_tome_copy_ask && !g_tome_copy_open)
+        return false;
+    const u32 sda = cpu->gpr[13];
+    const u32 mode_now = mem_read32(cpu, sda - 26240u), asked_now = mem_read32(cpu, sda - 26188u);
+    const bool world_stays = (mode_now == 2u || mode_now == 3u) && (asked_now == 2u || asked_now == 3u) && !cutscene_playing(cpu) &&
+                             g_coop_p2 != 0u && coop_listed(cpu, g_coop_p2);
+    if (!world_stays) {
+        g_tome_copy_ask = false;
+        if (g_tome_copy_spell_set) {
+            g_tome_copy_spell_set = false;
+            tome_copy_left(cpu, 0, 0u, NULL);
+        }
+        if (g_tome_copy_open)
+            tome_copy_close(cpu, "the world asks for something else");
+        return false;
+    }
+    // Player 1 asks for their Tome: the game's own way in, and it's the real world behind a Tome.
+    if (g_tome_copy.stands_in && asked_now == 3u) {
+        g_tome_copy.stands_in = false;
+        g_tw.sharing = g_tw.world_tick = false;
+    }
+    // Theirs has closed, with this one still open: it stands in again.
+    if (g_tome_copy_open && !g_tome_copy.stands_in && !g_tw.sharing && mode_now == 2u && asked_now == 2u) {
+        g_tome_copy.stands_in = true;
+        g_tw.sharing = true;
+        g_tw.world_tick = true;
+        aurora_split_menu(1, g_settings.mod_split);
+        aurora_split_only_view(0);
+    }
+    // One of these to each of the world's frames: with player 1's Tome, after its frame.
+    if (!g_tome_copy_ask && g_tw.sharing && !g_tome_copy.stands_in && g_tw.world_tick)
+        return false;
+    if ((cpu->msr & 0x00002000u) == 0u) {  // MSR[FP]: taken in the real memory, as hle_guest_call
+        cpu->srr0 = cpu->pc;
+        cpu->srr1 = cpu->msr;
+        interrupt_switch_fpu_context(cpu);
+    }
+    const bool opening = g_tome_copy_ask;
+    if (opening) {
+        g_tome_copy_ask = false;
+        if (g_tome_copy.copy == NULL)
+            g_tome_copy.copy = (u8*)malloc(cpu->ram_size);
+        if (g_tome_copy.copy == NULL || (g_tw.sharing && !g_tome_copy.clean_set))
+            return false;
+        g_tome_copy.real = cpu->ram;
+        memcpy(g_tome_copy.copy, g_tw.sharing ? g_tome_copy.clean : cpu->ram, cpu->ram_size);
+        g_tome_copy.turns = 0u;
+        g_tome_copy.ms_most = 0.0;
+        g_tome_copy.started = false;
+    }
+    const u64 t0 = tome_copy_ns();
+    const bool sharing_was = g_tw.sharing, tick_was = g_tw.world_tick;
+    dol_aurora_split_skip_views(2);
+    dol_aurora_frame_unpaced(true);
+    tome_copy_swap(cpu, true);
+    u32 ignore = 0u;
+    if (opening) {
+        coop_tome_player(cpu, true);
+        g_tome_copy.kinds_depth = g_coop_kinds_depth;
+        g_tome_copy.kinds_count = g_coop_kinds_in_count;
+        memcpy(g_tome_copy.kinds, g_coop_kinds_in, sizeof g_coop_kinds_in);
+        g_coop_kinds_depth = g_coop_kinds_in_count = 0;
+        mem_write32(cpu, sda - TOME_COPY_LAST_PAGE, 1u);
+        mem_write32(cpu, sda - TOME_COPY_JOURNAL, 0u);
+        mem_write32(cpu, sda - 26240u, 2u);
+        mem_write32(cpu, sda - 26188u, 3u);
+        for (u32 at = 0u; at < 24u; at += 4u)
+            mem_write32(cpu, COOP_SPELL_ITEM + at, 0u);  // a cast of player 1's that asked for their Tome
+        g_tome_copy_spell_open = g_tome_copy_spell_set;
+        if (g_tome_copy_spell_set)
+            coop_bytes(cpu, COOP_SPELL_ITEM, g_tome_copy_spell, sizeof g_tome_copy_spell, false);
+        g_tome_copy_spell_set = false;
+        g_tome_copy.has_magick = hle_guest_call(cpu, TOME_HAS_MAGICK, NULL, 0, 0.0, &ignore) && ignore != 0u;
+        DolPadState pad;
+        controls_read_player2(&pad);
+        g_tome_copy_held = pad.button;
+        g_tome_copy_taps = 0u;
+        g_tome_copy_open = true;
+        if (!sharing_was) {
+            g_tome_copy.stands_in = true;
+            aurora_split_menu(1, g_settings.mod_split);
+            aurora_split_only_view(0);
+        } else {
+            aurora_split_only_view(2);
+        }
+        fprintf(stderr, "[tome-copy] player 2's Tome opens in the copy%s\n", sharing_was ? ", beside player 1's" : "");
+    }
+    g_tw.sharing = true;
+    g_tw.world_tick = false;
+    g_coop_tome_p2 = true;
+    g_tome_copy_turn = true;
+    bool ok = true, leaving = false;
+    if (!g_tome_copy.started) {
+        ok = hle_guest_call(cpu, TW_MODE_CHANGE, NULL, 0, 0.0, &ignore);  // the game's own way in
+        tome_copy_callbacks(cpu);
+        g_tome_copy.started = true;
+    } else {
+        // Its way out runs from its frame (0x80111298, any state but 3) and waits for the
+        // room to come back, which it never does here: seen first, the copy is just left.
+        leaving = mem_read32(cpu, sda - 26188u) != 3u || mem_read32(cpu, sda - TOME_COPY_PAGE_STATE) != 3u;
+    }
+    if (ok && !leaving) {
+        const u32 none[3] = {0u, 0u, 0u};
+        hle_guest_call(cpu, 0x801E58C8u, none, 3, 0.0, &ignore);  // the Tome's fog, as its start set
+        static const u32 kAfterFrame[5] = {0x80113DF8u, 0x8013E518u, 0x801718C0u, 0x801DC9F8u, 0x8012EDDCu};  // as the loop, 0x800186E8
+        ok = hle_guest_call(cpu, mem_read32(cpu, sda - 26192u), NULL, 0, 0.0, &ignore);
+        for (u32 i = 0u; ok && i < 5u; i++)
+            ok = hle_guest_call(cpu, kAfterFrame[i], NULL, 0, 0.0, &ignore);
+        tome_copy_callbacks(cpu);
+    }
+    g_tome_copy_turn = false;
+    g_coop_tome_p2 = false;
+    tome_copy_swap(cpu, false);
+    dol_aurora_split_skip_views(0);
+    tome_copy_equips(cpu);
+    if (g_tome_copy.stands_in) {
+        g_tw.sharing = true;
+        g_tw.world_tick = true;
+        g_tw.worlds_left = 2u;  // tw_tome_next: no read is the Tome's, in the real game
+    } else {
+        g_tw.sharing = sharing_was;
+        g_tw.world_tick = tick_was;
+    }
+    g_tome_copy.turns++;
+    const double ms = (double)(tome_copy_ns() - t0) / 1e6;
+    if (ms > g_tome_copy.ms_most)
+        g_tome_copy.ms_most = ms;
+    if (!ok)
+        fprintf(stderr, "[tome-copy] a call in its turn did not return\n");
+    if (!ok || leaving)
+        tome_copy_close(cpu, ok ? "its own way out" : "a call did not return");
+    return true;
+}
+
+// The tabs player 2 has no use for: what leads to Journal or Options goes on past them.
+#define TOME_PAGE_INVENTORY 0x80102810u
+#define TOME_PAGE_MAP 0x80111B40u
+#define TOME_PAGE_MAGICK 0x8010AAF0u
+static void tome_copy_tab(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!g_tome_copy_turn)
+        return;
+    u32 to = TOME_PAGE_INVENTORY;
+    if (cpu->lr == 0x80103C44u) {  // back from the Inventory
+        u32 has = 0u;
+        hle_guest_call(cpu, TOME_HAS_MAGICK, NULL, 0, 0.0, &has);
+        to = has != 0u ? TOME_PAGE_MAGICK : TOME_PAGE_MAP;
+    }
+    g_hle_passthrough = false;
+    g_hle_tail_call = true;
+    cpu->pc = to;
+}
+
 static void tw_mode_change(CPUState* cpu) {
     g_hle_passthrough = true;
     if (!tw_on(cpu))
+        return;
+    tome_copy_test(cpu);
+    // ED_COOP_P1_QUICK=spell (testing): player 1's D-pad up casts that spell, as ED_COOP_P2_QUICK.
+    if (!g_tome_copy_turn && getenv("ED_COOP_P1_QUICK") != NULL)
+        mem_write32(cpu, COOP_QUICK + 4u, (u32)strtoul(getenv("ED_COOP_P1_QUICK"), NULL, 16));
+    // Player 1 is about to have their Tome: the world as it is, for a Tome of player 2's after.
+    if (tome_copy_mode() == 2 && (!g_tw.sharing || g_tome_copy.stands_in) && mem_read32(cpu, cpu->gpr[13] - 26240u) == 2u && mem_read32(cpu, cpu->gpr[13] - 26188u) == 3u) {
+        // The FPU taken first, as for any copy: a copy of memory that says another thread has
+        // it clears MSR[FP] at the Tome's start, and its next float is an exception.
+        if ((cpu->msr & 0x00002000u) == 0u) {
+            cpu->srr0 = cpu->pc;
+            cpu->srr1 = cpu->msr;
+            interrupt_switch_fpu_context(cpu);
+        }
+        if (g_tome_copy.clean == NULL)
+            g_tome_copy.clean = (u8*)malloc(cpu->ram_size);
+        g_tome_copy.clean_set = g_tome_copy.clean != NULL;
+        if (g_tome_copy.clean_set)
+            memcpy(g_tome_copy.clean, cpu->ram, cpu->ram_size);
+    }
+    const bool copy_ran = tome_copy_step(cpu);
+    g_hle_passthrough = true;  // a nested dispatch passes itself through
+    if (copy_ran && g_tome_copy.stands_in)
         return;
     const u32 sda = cpu->gpr[13];
     const u32 mode = mem_read32(cpu, sda - 26240u), asked = mem_read32(cpu, sda - 26188u);
@@ -8280,9 +8728,9 @@ static void tw_mode_change(CPUState* cpu) {
             mem_write32(cpu, sda - 26192u, TW_TOME_FRAME);
             g_tw.sharing = false;
             g_tw.world_tick = false;
-            dol_aurora_split_skip_views(false);
+            dol_aurora_split_skip_views(0);
             dol_aurora_frame_unpaced(false);
-            aurora_split_only_view(-1);
+            aurora_split_only_view(g_tome_copy_open ? 0 : -1);
             return;
         }
     }
@@ -8327,9 +8775,9 @@ static void tw_mode_change(CPUState* cpu) {
     }
     g_tw.world_tick = !g_tw.world_tick;
     g_tw.worlds_left = TW_WORLD_FRAMES;
-    dol_aurora_split_skip_views(!g_tw.world_tick);
+    dol_aurora_split_skip_views(g_tw.world_tick ? 0 : (g_coop_tome_owner == 1 ? 2 : 1));
     dol_aurora_frame_unpaced(true);
-    aurora_split_only_view(g_coop_tome_owner >= 0 ? 1 - g_coop_tome_owner : -1);
+    aurora_split_only_view(g_tome_copy_open ? 2 : g_coop_tome_owner >= 0 ? 1 - g_coop_tome_owner : -1);
 }
 
 static void cheat_apply(CPUState* cpu);
@@ -8947,7 +9395,14 @@ static bool continue_coop_use(CPUState* cpu) {
 #define TOME_ITEM_CODE 0x80102000u  // the Inventory page's item actions
 #define TOME_ITEM_CODE_END 0x80104800u
 
+static s32 g_tome_copy_use_script;  // the item last used in the copy: what its script was asked
+static u32 g_tome_copy_use_item;
+
 static void coop_run_script(CPUState* cpu) {
+    if (g_tome_copy_turn && cpu->lr >= TOME_ITEM_CODE && cpu->lr < TOME_ITEM_CODE_END) {
+        g_tome_copy_use_script = (s32)cpu->gpr[3];
+        g_tome_copy_use_item = cpu->gpr[4];
+    }
     if (coop_trace() && sda_ready(cpu) && cpu->lr != 0x800CA940u && cpu->lr != 0x80153B84u) {
         trace_look(cpu, "script run");
         g_script_watch = 40u;  // the game functions it calls
@@ -8956,7 +9411,7 @@ static void coop_run_script(CPUState* cpu) {
     // ("Paul cannot use that now.": they stood there, player 1 did not, and the words were
     // player 1's) and what it casts is cast by the controlled character. They are the
     // player for both, in the Tome's call and as it goes on when the Tome closes.
-    const bool tome_item = (cpu->lr == TOME_SCRIPT_RAN || (cpu->lr >= TOME_ITEM_CODE && cpu->lr < TOME_ITEM_CODE_END)) && g_coop_tome_owner == 1;
+    const bool tome_item = (cpu->lr == TOME_SCRIPT_RAN || (cpu->lr >= TOME_ITEM_CODE && cpu->lr < TOME_ITEM_CODE_END)) && (g_coop_tome_owner == 1 || g_tome_copy_turn);
     // The first zone's script in a room player 2 asked for (the first time in a Tome's room,
     // a scene of whoever arrives): the zone fires for player 1, standing where the game put
     // them, and the scene showed them. It goes on from the timers and its end (0x801EC1C8).
@@ -9136,6 +9591,19 @@ static void hle_words_layout(CPUState* cpu) {
         }
     }
     g_hle_passthrough = true;
+    // The labels by a page's L and R, in player 2's Tome, name the tab they go to: a label is
+    // yellow (\ay), with nothing after its one word.
+    if (g_tome_copy_turn && guest_ram_range_valid(cpu, cpu->gpr[3] + WORDS_AT, WORDS_MOST)) {
+        u8* const label = cpu->ram + (cpu->gpr[3] + WORDS_AT - GC_RAM_BASE);
+        const u8* const label_end = (const u8*)memchr(label, 0, 64u);
+        if (label_end != NULL && strstr((const char*)label, "\\ay") != NULL) {
+            const u32 n = (u32)(label_end - label);
+            if (n > 7u && memcmp(label + n - 7u, "Options", 7u) == 0 && !words_letter(label[n - 8u]))
+                words_rename(label, "Options", g_tome_copy.has_magick ? "Magick" : "Map");
+            else if (n > 7u && memcmp(label + n - 7u, "Journal", 7u) == 0 && !words_letter(label[n - 8u]))
+                words_rename(label, "Journal", "Inventory");
+        }
+    }
     if (g_chapter_model < 0 || !sda_ready(cpu) || !guest_ram_range_valid(cpu, cpu->gpr[3] + WORDS_AT, WORDS_MOST))
         return;
     int chapter = -1;
@@ -9553,7 +10021,6 @@ static void coop_send_event(CPUState* cpu) {
 #define COOP_FALLEN 2000.0f  // below where they last stood still by more, player 2 has fallen out
 #define COOP_INSIDE 30.0f    // nearer player 1 than this (across the floor), player 2 is inside them
 
-#define COOP_NODE_STATE 24u
 #define COOP_STATE_DOOR 121u
 #define COOP_STATE_ARRIVING 80u
 #define COOP_NODE_HELD_SET 0x801F6828u
@@ -11281,9 +11748,21 @@ static u32 coop_equip_names_find(CPUState* cpu, u32 id) {
 // player 1, as what is theirs fits their hands. A copy is player 2's: it goes
 // to them, with the hands the original takes.
 #define EQUIP_TAKE 0x800C9FD4u
+#define TOME_COPY_EQUIPS 16u
+static u32 g_tome_copy_equip[TOME_COPY_EQUIPS][5];
+static u32 g_tome_copy_equip_count;
 
 static void coop_equip_take(CPUState* cpu) {
     g_hle_passthrough = true;
+    if (g_tome_copy_turn) {
+        // In their Tome, in the copy: it shows there, and the real one is done after the turn.
+        if (cpu->lr >= TOME_ITEM_CODE && cpu->lr < TOME_ITEM_CODE_END && g_tome_copy_equip_count < TOME_COPY_EQUIPS) {
+            for (int i = 0; i < 5; i++)
+                g_tome_copy_equip[g_tome_copy_equip_count][i] = cpu->gpr[3 + i];
+            g_tome_copy_equip_count++;
+        }
+        return;
+    }
     if (g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu))
         return;
     const u32 item = cpu->gpr[4], p2 = mem_read32(cpu, g_coop_p2 + 16u);
@@ -11493,6 +11972,20 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     // The world behind the Tome: a read is for the frame after it. For the world's,
     // the Tome's owner stands; for the Tome's, it is their pad as ever.
     if (hle_coop_tome_shares()) {
+        // Player 1's Tome has closed with player 2's still open: their pad is theirs again.
+        if (g_tome_copy.stands_in && owner == 0) {
+            owner = -1;
+            g_coop_tome_owner = -1;
+            fprintf(stderr, "[tome-copy] player 1's Tome has closed; player 2's stays\n");
+        }
+        if (tome_copy_mode() == 2 && g_settings.mod_coop && g_coop_p2 != 0u && !g_coop_screen) {
+            DolPadState theirs;
+            controls_read_player2(&theirs);
+            const bool down = (theirs.button & 0x1000u) != 0u;
+            if (down && !start_was && !g_tome_copy_open && !g_tome_copy_ask)
+                g_tome_copy_ask = true;
+            start_was = down;
+        }
         // The buttons held at the last read, which make a press new: the world's and
         // the Tome's reads are different pads to it, each with its own (held by turns,
         // a button was a new press each time, and a Tome opened with it shut again).
@@ -11619,6 +12112,8 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
         }
         if (g_coop_assist_at != 0u && ++g_coop_assist_at > COOP_ASSIST_WINDOW)
             g_coop_assist_at = 0u;
+        if (g_tome_copy_ask)
+            return;
         if (start_wait > 0u) {
             start_wait--;
             pad->button |= 0x1000u;  // player 2's Start, as the game's
@@ -11641,6 +12136,10 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             coop_tome_player(cpu, false);
             owner = -1;
             aurora_split_menu(-1, 0);
+        }
+        if (start_pressed && (pad->button & 0x1000u) == 0u && tome_copy_mode() == 2) {
+            g_tome_copy_ask = true;
+            return;
         }
         if (start_pressed && (pad->button & 0x1000u) == 0u) {
             start_wait = COOP_START_WAIT;
@@ -11705,6 +12204,162 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     if (owner >= 0)
         aurora_split_menu(cutscene ? -1 : owner, g_settings.mod_split);
     g_coop_tome_owner = owner;
+}
+
+// What player 2 equipped in the copy, in the real game: the same call with them the player, as
+// in their Tome (coop_tome_player: their copies, their moves), and what the Tome's way out does
+// after one (0x80110D1C), which never runs for the copy.
+static void tome_copy_equips(CPUState* cpu) {
+    if (g_tome_copy_equip_count == 0u)
+        return;
+    coop_tome_player(cpu, true);
+    u32 ignore = 0u;
+    for (u32 i = 0u; i < g_tome_copy_equip_count; i++) {
+        fprintf(stderr, "[tome-copy] player 2 equips %u (hands %u) in the real game\n", g_tome_copy_equip[i][1], g_tome_copy_equip[i][3]);
+        hle_guest_call(cpu, EQUIP_TAKE, g_tome_copy_equip[i], 5, 0.0, &ignore);
+    }
+    hle_guest_call(cpu, EQUIP_MOVES, &g_coop_p2, 1, 0.0, &ignore);
+    coop_tome_player(cpu, false);
+    g_coop_next_cast_p2 = false;  // coop_tome_player's reading of the real memory: nothing's asked yet
+    g_tome_copy_equip_count = 0u;
+}
+
+// What the Tome left for the world, in the real game, as the world does when a Tome closes
+// (0x80008280: the script, and 2243's call first; 0x80008468 casts on its next frame). They're
+// the player, with their counts and zone words, as coop_run_script has it for a Tome's item.
+static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* spell_item) {
+    g_coop_next_cast_p2 = false;
+    u32 was[5];
+    if (next_cast != 0u && coop_listed(cpu, g_coop_p2)) {
+        fprintf(stderr, "[tome-copy] player 2's cast 0x%08X goes to the real game\n", next_cast);
+        const u32 next_was = mem_read32(cpu, COOP_NEXT_CAST);
+        u8 record_was[24];
+        coop_bytes(cpu, COOP_SPELL_ITEM, record_was, sizeof record_was, true);
+        mem_write32(cpu, COOP_NEXT_CAST, next_cast);
+        coop_bytes(cpu, COOP_SPELL_ITEM, (u8*)spell_item, 24u, false);
+        // As coop_cast: an item chosen is the original, as it shows; the one they hold is their copy.
+        const u32 item = mem_read32(cpu, COOP_SPELL_ITEM);
+        const u32 copy = coop_weapon_copy(cpu, item, false);
+        if (copy != 0u) {
+            mem_write32(cpu, COOP_SPELL_ITEM, mem_read32(cpu, copy + 16u));
+            g_coop_cast_words = COOP_CAST_WORDS_WAIT;
+        }
+        const u32 args[2] = {1u, COOP_NEXT_CAST};
+        u32 result = 0u;
+        coop_be_player2(cpu, true, was);
+        g_coop_turn_p1 = was[1];
+        g_coop_tome_cast = true;
+        hle_guest_call(cpu, COOP_CAST, args, 2, 0.0, &result);
+        g_coop_tome_cast = false;
+        coop_be_player2(cpu, false, was);
+        mem_write32(cpu, COOP_NEXT_CAST, next_was);
+        coop_bytes(cpu, COOP_SPELL_ITEM, record_was, sizeof record_was, false);
+    } else if (g_tome_copy_spell_open) {
+        // Backed out of what their cast asked: it's over, or no other could be begun.
+        const u32 none = 0u;
+        u32 ignored = 0u;
+        coop_be_player2(cpu, true, was);
+        hle_guest_call(cpu, COOP_CAST_SET, &none, 1, 0.0, &ignored);
+        coop_be_player2(cpu, false, was);
+        // Their cast left them in its state (64), where every later one is refused: out of it, as coop_talk_over.
+        if (mem_read32(cpu, g_coop_p2 + COOP_NODE_STATE) == 64u) {
+            const u32 state[2] = {g_coop_p2, 1u};
+            hle_guest_call(cpu, 0x801F64A0u, state, 2, 0.0, &ignored);
+            hle_guest_call(cpu, 0x801F6488u, state, 2, 0.0, &ignored);
+        }
+        fprintf(stderr, "[tome-copy] player 2 backs out of their cast\n");
+    }
+    g_tome_copy_spell_open = false;
+    if (script <= 0)
+        return;
+    fprintf(stderr, "[tome-copy] player 2's item leaves script %d for the real game\n", script);
+    coop_tome_player(cpu, true);
+    const u32 object = mem_read32(cpu, g_coop_p2 + 52u);
+    u32 info = 0u, ignore = 0u;
+    const bool zones = hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) && guest_ram_range_valid(cpu, info, 184u);
+    coop_be_player2(cpu, true, was);
+    g_coop_turn_p1 = was[1];
+    g_coop_tome_cast = true;
+    if (zones)
+        coop_zones_swap(cpu, info, true);
+    if (script == 2243) {
+        u32 who = 0u;
+        hle_guest_call(cpu, 0x801F62B8u, NULL, 0, 0.0, &who);
+        hle_guest_call(cpu, 0x801C4F48u, &who, 1, 0.0, &ignore);
+    }
+    // The Tome's call asked it first, and it went on from where that left its word: both are
+    // the real game's, or the first use only did what the Tome's call does.
+    if (g_tome_copy_use_script == script) {
+        const u32 asked[3] = {(u32)script, g_tome_copy_use_item, 0u};
+        hle_guest_call(cpu, COOP_RUN_SCRIPT, asked, 3, 0.0, &ignore);
+    }
+    const u32 args[3] = {(u32)script, 0u, 0u};
+    hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ignore);
+    mem_write32(cpu, cpu->gpr[13] - 26324u, 0u);  // as the world's call, 0x800082B0
+    g_tome_copy_use_script = 0;
+    if (zones)
+        coop_zones_swap(cpu, info, false);
+    g_coop_tome_cast = false;
+    coop_be_player2(cpu, false, was);
+    coop_tome_player(cpu, false);
+    g_coop_next_cast_p2 = false;
+}
+
+// Moving while casting ends the cast: 0x801C4F48(character) sets the word its spell looks at
+// (r13 - 22312), if that character is the controlled one. In player 2's turn that's still player
+// 1, so theirs was passed over and their spell went on. Their word is kept apart (g_coop_casting).
+#define COOP_CAST_CANCEL 0x801C4F48u
+static void coop_cast_cancel(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (g_tome_copy_turn || g_coop_p2 == 0u || !sda_ready(cpu) || cpu->gpr[3] != mem_read32(cpu, g_coop_p2 + 16u) ||
+        mem_read32(cpu, cpu->gpr[13] - 21488u) == cpu->gpr[3] || g_coop_casting[0] == 0u)
+        return;
+    g_coop_casting[3] = 1u;
+    fprintf(stderr, "[coop] player 2 moves: their cast ends\n");
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+// ED_COOP_CAST_TRACE=1 (testing, only reads): who ends a cast, and from where.
+static void notify_cast_trace(CPUState* cpu) {
+    const u32 frame = (u32)(cpu->timebase / 675000ull);
+    static u32 last_pc, last_lr, last_frame;
+    if (cpu->pc == last_pc && cpu->lr == last_lr && frame - last_frame < 30u)
+        return;
+    last_pc = cpu->pc;
+    last_lr = cpu->lr;
+    last_frame = frame;
+    fprintf(stderr, "[cast-trace] 0x%08X r3 0x%X r4 0x%X lr 0x%08X ctl %u who %u casting 0x%X turn %d state1 %u state2 %u frame %u\n", cpu->pc, cpu->gpr[3], cpu->gpr[4], cpu->lr,
+            mem_read32(cpu, cpu->gpr[13] - 21488u), mem_read32(cpu, cpu->gpr[13] - 21496u), mem_read32(cpu, cpu->gpr[13] - 22336u), g_coop_turn,
+            coop_player(cpu) != 0u ? mem_read32(cpu, coop_player(cpu) + COOP_NODE_STATE) : 0u, g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + COOP_NODE_STATE) : 0u, frame);
+}
+
+// In the copy's turn the game is alone: co-op's hooks that step the world or keep host state
+// stand aside, and what would have called them is said once. The rest (the SDK's, the drawing's) run.
+bool tome_copy_hook_off(HleHandler fn) {
+    static const struct {
+        HleHandler fn;
+        const char* name;
+    } kOff[] = {
+#define OFF(f) {f, #f}
+        OFF(hle_coop_controller), OFF(coop_sighting), OFF(coop_events), OFF(coop_character_step), OFF(hle_coop_found), OFF(coop_bar_frame),
+        OFF(coop_find_node), OFF(coop_stat_most), OFF(coop_thing_look), OFF(coop_talk_check), OFF(coop_script_timers), OFF(coop_door_motion),
+        OFF(coop_script_go_to_room), OFF(coop_cast), OFF(tw_mode_change), OFF(tw_tome_start), OFF(coop_controlled_id), OFF(coop_play_hold),
+        OFF(coop_enchanted_look), OFF(coop_sign_follow), OFF(coop_lasting_find), OFF(coop_spells_update),
+        OFF(coop_game_camera), OFF(hle_moves_let_go), OFF(hle_moves_want), OFF(hle_find_by_id), OFF(coop_position_copy),
+        OFF(coop_send_event), OFF(notify_GXSetDrawDone),
+#undef OFF
+    };
+    static bool said[sizeof kOff / sizeof kOff[0]];
+    for (size_t i = 0; i < sizeof kOff / sizeof kOff[0]; i++)
+        if (kOff[i].fn == fn) {
+            if (!said[i]) {
+                said[i] = true;
+                fprintf(stderr, "[tome-copy] stood aside in its turn: %s\n", kOff[i].name);
+            }
+            return true;
+        }
+    return false;
 }
 
 static void coop_test_swap(CPUState* cpu) {
@@ -12161,6 +12816,27 @@ static void find_coop(CPUState* cpu) {
         if (change != NULL && start != NULL && buffer != NULL) {
             change->intercept = tw_mode_change;
             start->intercept = tw_tome_start;
+            if (tome_copy_mode() == 2) {
+                HleDispatchEntry* cancel = hle_dispatch_entry(COOP_CAST_CANCEL);
+                if (cancel != NULL && cancel->intercept == NULL)
+                    cancel->intercept = coop_cast_cancel;
+            }
+            if (getenv("ED_COOP_CAST_TRACE") != NULL) {
+                static const u32 kCastEnds[] = {0x801C54C0u, 0x801C4F08u, 0x801C5118u, 0x801C51FCu, 0x801C588Cu, 0x801C5268u, 0x801C72ACu, 0x801C4F48u};
+                for (u32 i = 0u; i < sizeof kCastEnds / sizeof kCastEnds[0]; i++) {
+                    HleDispatchEntry* e = hle_dispatch_entry(kCastEnds[i]);
+                    if (e != NULL && e->notify == NULL)
+                        e->notify = notify_cast_trace;
+                }
+            }
+            if (tome_copy_mode() == 2) {
+                HleDispatchEntry* to_options = hle_dispatch_entry(0x80101600u);
+                HleDispatchEntry* to_journal = hle_dispatch_entry(0x80106FD4u);
+                if (to_options != NULL && to_options->intercept == NULL)
+                    to_options->intercept = tome_copy_tab;
+                if (to_journal != NULL && to_journal->intercept == NULL)
+                    to_journal->intercept = tome_copy_tab;
+            }
             buffer->intercept = tw_room_buffer;
             for (int i = 0; i < 11; i++) {
                 HleDispatchEntry* e = hle_dispatch_entry(kept[i]);

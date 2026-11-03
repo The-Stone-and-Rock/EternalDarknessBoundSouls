@@ -16,6 +16,18 @@ These come from the user, some of them more than once.
 - **The user plays the tests.** Their real play finds what scripts miss, and they press the buttons while you capture. Scripted presses for player 1 don't work with real controllers plugged in: the script pad joins as controller 3.
 - Commit only when told. Never commit `runtime/host/controls.cpp`.
 
+## Two Tomes (branch `tome-copy`)
+
+Both players' Tomes work at once, with player 2's in its own copy of memory. It runs only with `ED_COOP_TOME_COPY=2`. Details, results and limits are in `docs/coop-two-tomes-design.md`, so read that before changing it. A restore point from before this work is in `logs/saved-changes/working-01b3d85-before-tome-copy/` (see its `RESTORE.txt`), with the tag `coop-working-before-tome-copy`.
+
+To run it from PowerShell:
+
+```
+$env:ED_COOP_TOME_COPY = '2'; & 'C:\Program Files\Git\bin\sh.exe' tools/coop-test/play.sh saves/slot3.state NAME
+```
+
+Not done: sound from player 2's Tome, Mix, new spells from the Magick page, labels in other languages, on by default. To confirm by hand: both Tomes in both orders, and both pressing Enchant at the same moment. The scripted test edits in `runtime/host/controls.cpp` (`l`, `r`, right stick) are uncommitted, as asked, and scripted page turns need them.
+
 ## Next up
 
 1. **Trace Mix.** The user will make a save just before mixing a two-part key, and will say when it's ready. Have player 1 mix first, then reload and have player 2 do it. Add both parts to `docs/items-log.md`.
@@ -31,6 +43,8 @@ These come from the user, some of them more than once.
 | Camera glitch after player 2 closes a close-up | Slight, and not diagnosed. Which half and how long aren't known yet |
 | Player 2 pressing Enchant while player 1's Tome is open | Player 1's cast takes player 2's rune. `0x80335748` is shared. Left for two-Tome work |
 | Player 2 backing out of their Tome without casting | Later quick spell presses failed once. It may have been the stray-press bug fixed in `74b9891`. Not confirmed |
+| Hang after slot 7's character reload | With the settings of 2026-11-02 21:32, slot 7 reloads its characters on load (`characters changed (player 1 74, now 9...)`), then hung about 17 seconds later with `ED_COOP_TOME_COPY` off: `saves/reports/hang-20261102-215350.txt`. A second run, with the switch on, showed the same reload and no hang in about 70 seconds. Not diagnosed. Not seen on slot 3 |
+| Player 1's camera stuck | The user saw it just before closing `logs/run-20261102-223052-test2` (slot 3, about frame 31995, player 1 near `1228 429 26`, far from player 2, some time after player 1's Enchant and last Tome). Player 2's Tome never opened in that run, so no turn ran in a memory copy. Not diagnosed. The user wants it looked at after the two-Tome tests |
 | Scroll in an examine's Details | The user mentioned an error around the scroll. Nothing in the trace shows inside the window |
 | Right half during Anthony's Tome room scene | Stays on a close-up for the whole scene. The user was happy with it when player 2 triggered it |
 
@@ -79,8 +93,8 @@ The user re-saves these slots, so check a slot's date and what's in it before re
 |---|---|---|
 | 1 | 2026-11-02 20:21 | The room with the clock and key. Chapter not confirmed |
 | 2 | 2026-11-02 21:17 | Anthony's chapter: on the stairs just before the first Tome room entry |
-| 3 | 2026-11-02 20:45 | Karim's chapter: player 1 at the Tome room entrance. No first-entry scene |
-| 5 | 2026-11-02 19:01 | Both players have Enchant on a quick slot |
+| 3 | 2026-11-02 23:16 | Karim's chapter, with the Tome: Enchant on D-pad up for both, Tulwar and Chakrams to enchant. Karim and Paul, no reload |
+| 5 | 2026-11-02 19:01 | Both players have Enchant on a quick slot, but only keys to carry, and keys can't be enchanted, so it can't test Enchant |
 | 10 | 2026-11-02 20:03 | Bronze Necklace and the statue examine |
 
 
@@ -91,5 +105,6 @@ The user re-saves these slots, so check a slot's date and what's in it before re
 | `docs/coop-player2-menu.md` | The plan for a custom player 2 menu, and what's traced for it |
 | `docs/coop-failed-attempts.md` | What was tried and didn't work. Check it before writing a fix |
 | `docs/coop-two-tomes.md` | Why two game Tomes at once was set aside, and how the Tome works |
+| `docs/coop-two-tomes-design.md` | The design to try next for two Tomes: player 2's in its own copy of memory. Not built |
 | `docs/coop-todo.md` | The longer list of open issues |
 | `docs/items-log.md` | Items seen so far. Add to it in any session |

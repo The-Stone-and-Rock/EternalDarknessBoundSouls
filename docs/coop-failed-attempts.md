@@ -59,6 +59,20 @@ Set aside. Don't retry this by swapping more memory ranges. Details are in `docs
 | Branch `tome-world-wip` (`c5c266a`) | An earlier version of the world behind the Tome |
 | `logs/saved-changes/two-tomes-*` | Builds and patches of each step. Only on this machine, not in git |
 
+## Player 2's Tome in a copy of memory (test 2)
+
+Details are in `docs/coop-two-tomes-design.md`.
+
+**Closing by checking only the mode asked for.** It hung on close at `0x80110DC4`: Start sets `r13-24244` to 2, and the next frame ran the game's way out. Checking `r13-24244` before the frame fixed it (run `logs/run-20261102-221819-t2a`):
+
+```c
+leaving = mem_read32(cpu, sda - 26188u) != 3u;
+```
+
+**Leaving disc callbacks to the main loop.** The page turn spun forever at `0x80103C54`, and the callback would have run in real memory (`logs/run-20261102-222253-t2c`).
+
+**Matching tab labels by a `.` before the word.** The `.` in `[trace] words` lines is how the log prints a control byte. It isn't in the text.
+
 ## Older attempts
 
 Older failures are mostly recorded in code comments in `runtime/host/hle.c`, as what the code used to do and what went wrong, and in commit messages. Search both for the function or address before changing it.

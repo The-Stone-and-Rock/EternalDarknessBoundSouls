@@ -4,6 +4,8 @@
 branch `two-tomes-wip` (commit `618d29f`), for reference and not for merging. Backups with builds are
 in `logs/saved-changes/two-tomes-*` (not in git; only on this machine).
 
+The design to try next, not yet built: `docs/coop-two-tomes-design.md`.
+
 What `mods` keeps, checked by replayed runs on 2026-11-02:
 
 - The world keeps running behind one player's Tome (`bac33e8`, `c3b7f54`).

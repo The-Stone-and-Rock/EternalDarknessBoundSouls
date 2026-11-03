@@ -98,6 +98,9 @@ bool hle_guest_call_within(CPUState* cpu, u32 fn, const u32* args, int count, do
     }
     if (ok && result != NULL)
         *result = cpu->gpr[3];
+    if (!ok && getenv("ED_COOP_TOME_COPY") != NULL)  // why it stopped, for the Tome's copy (testing)
+        fprintf(stderr, "[guest-call] 0x%08X stopped after %u blocks: pc 0x%08X lr 0x%08X exception %u (was %u)\n", fn, blocks_used, cpu->pc, cpu->lr,
+                (unsigned)cpu->exception, (unsigned)exception);
     if (getenv("ED_GUEST_CALL_LOG") != NULL) {
         static unsigned shown;
         if (shown++ < 40u)
