@@ -18,6 +18,8 @@ __pycache__/
 settings.ini
 saves/
 logs/
+# Pictures taken of the game while testing.
+Screenshots for Claude/
 # HD texture packs you add (Dolphin format, tex1_*.png).
 textures/
 .DS_Store

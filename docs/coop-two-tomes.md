@@ -84,7 +84,7 @@ To play a session again from its log, `tools/coop-test/replay.py` makes a tempor
 header explains how). Slots start at different frames, so read the first `[split] on at frame` line
 first. Keep controllers untouched during a replay.
 
-- `winshot.ps1`: picture of the game window, to `E:\edwin.png`.
+- `winshot.ps1`: picture of the game window, to `Screenshots for Claude\`.
 - `burst.ps1 -seconds N -out DIR`: a run of frames plus `frames.csv`.
 - `items.ps1 DIR`: per-half count of item cells drawing, one digit per sample. A page with no items,
   like Options, reads low correctly.

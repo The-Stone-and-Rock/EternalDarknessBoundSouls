@@ -1,4 +1,5 @@
 param([string]$dir,[int]$from=0)
+if(-not (Test-Path $dir)){$dir = Join-Path ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\Screenshots for Claude'))) $dir}
 Add-Type -AssemblyName System.Drawing
 # one line per half: at each picture, how many of the four item cells (mace, sword, green, lower) have dark or vivid pixels
 $cells=@(@(0,156,22,28),@(38,156,26,28),@(38,190,26,22),@(4,222,26,26))

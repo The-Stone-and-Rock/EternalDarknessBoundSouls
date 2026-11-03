@@ -1,5 +1,7 @@
-param([int]$seconds = 40, [string]$out)
+param([int]$seconds = 40, [string]$out = "burst-$(Get-Date -Format yyyyMMdd-HHmmss)")
 # Watches the game's window without touching it: small pictures as fast as it can, with each half's brightness.
+# They go in Screenshots for Claude\, in a folder with the last part of -out as its name.
+$out = Join-Path ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\Screenshots for Claude'))) (Split-Path $out -Leaf)
 New-Item -ItemType Directory -Force $out | Out-Null
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
