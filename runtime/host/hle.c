@@ -11360,10 +11360,13 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
         start_wait = 0u;
         return;
     }
+    static u16 pad_held;  // what they held as their close-up opened: not a press in it
+    static bool quick_press;  // their Tome opened by a quick spell's button, still held
     if (g_coop_quick_tome) {
         g_coop_quick_tome = false;
         if (owner < 0) {
             owner = 1;
+            quick_press = true;
             quick_wait = COOP_START_WAIT;
             coop_tome_player(cpu, true);
             fprintf(stderr, "[coop] player 2's quick spell opens the Tome\n");
@@ -11406,6 +11409,12 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     if (hle_coop_tome_shares() && owner == 1) {
         p2.button |= g_tw_taps;
         g_tw_taps = 0u;
+    }
+    // The button that opened it, a press on the first world frame behind the Tome,
+    // cast player 1's spell from that slot, over the one their Tome was asking for.
+    if (quick_press) {
+        quick_press = false;
+        pad_held = p2.button;
     }
     const bool start = (p2.button & 0x1000u) != 0u;
     const bool start_pressed = start && !start_was;
@@ -11480,7 +11489,6 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
         aurora_split_menu(-1, 0);
         return;
     }
-    static u16 pad_held;  // what they held as their close-up opened: not a press in it
     if (owner < 0) {
         owner = g_coop_assist_at != 0u ? 1 : menu ? 0 : -1;
         g_coop_assist_at = 0u;
