@@ -1,0 +1,95 @@
+# Co-op: where things stand
+
+Written 2026-11-02. Read this first, then update it at the end of the session.
+
+## How to work on this
+
+These come from the user, some of them more than once.
+
+- **Check first.** Before calling something unknown or writing a fix, search the code comments, `git log` and these docs. A lot is already written down.
+- **Don't guess.** Say what's confirmed and what isn't. The logs don't show everything, so if the user says the game did something, believe them and find out why.
+- **The game allows one player.** Co-op works by making player 2 "the player" while they act. That switching is the design, not a bug. Only raise it when a real symptom points to it.
+- **When one player enters a room, the other follows automatically.** "Enters first" means which player triggered the move. There is no walking in second.
+- **Scenes and transitions belong to whoever triggered them.** If player 1 walks up to a zombie, player 1 gets bitten.
+- **Names in the game's text** come from the chosen model, because player selection is on.
+- **Keep what you learn.** Add findings to these docs as you go. Don't remove the `[trace]` logging.
+- **The user plays the tests.** Their real play finds what scripts miss, and they press the buttons while you capture. Scripted presses for player 1 don't work with real controllers plugged in: the script pad joins as controller 3.
+- Commit only when told. Never commit `runtime/host/controls.cpp`.
+
+## Next up
+
+1. **Trace Mix.** The user will make a save just before mixing a two-part key, and will say when it's ready. Have player 1 mix first, then reload and have player 2 do it. Add both parts to `docs/items-log.md`.
+2. **Retest the monk's scene** (player 2 rings the bell). `48b6c88` stopped a script's own hold counting as player 2's close-up, and that scene may use the same hold. It should still show in player 2's half.
+3. **Check other arrivals when player 2 triggers the move.** `48b6c88` puts player 2 on the arrival spot in any room their script asks for. Only Anthony's first Tome room entry has been seen.
+4. **Finish the player 2 menu traces:** the item list walk, the Magick page, and story scripts on opening the Tome. See `docs/coop-player2-menu.md`. No menu code exists yet.
+
+## Open bugs
+
+| Bug | What's known |
+|---|---|
+| Using a long item holds the other player | When player 1 used the Bronze Necklace (script `0x5E6`), player 2 couldn't move until it finished, and no presses of theirs were logged. The user wants them able to move. Player 1 during player 2's Use wasn't tested |
+| Camera glitch after player 2 closes a close-up | Slight, and not diagnosed. Which half and how long aren't known yet |
+| Player 2 pressing Enchant while player 1's Tome is open | Player 1's cast takes player 2's rune. `0x80335748` is shared. Left for two-Tome work |
+| Player 2 backing out of their Tome without casting | Later quick spell presses failed once. It may have been the stray-press bug fixed in `74b9891`. Not confirmed |
+| Scroll in an examine's Details | The user mentioned an error around the scroll. Nothing in the trace shows inside the window |
+| Right half during Anthony's Tome room scene | Stays on a close-up for the whole scene. The user was happy with it when player 2 triggered it |
+
+## Fixed on 2026-11-02 (branch `mods`, nothing pushed)
+
+| Commit | Fix |
+|---|---|
+| `2e00b69` | Player 2's close-up no longer freezes the picture |
+| `cefb179` | Player 1 isn't sent out of bounds after the Tome cutscene |
+| `638166c` | Player 1's camera follows player 1. What writes the wrong record isn't known. A `camera record ... named player 2` log line marks when it happens |
+| `74b9891` | Player 2's quick slot casts their rune, and player 1 can still cast |
+| `066076c` | Player 2 can use items from their Tome (the Bronze Necklace) |
+| `8fbe025` | Player 2 can examine the same thing more than once |
+| `3cd22cc` | Both players can take the key from the clock, and player 2 gets the Examine icon |
+| `dcafeca` | Player 2's close-up ends when it asks for another room |
+| `48b6c88` | A room's first scene plays on whoever asked for the room |
+| `bea486b`, `9dd5698` | The `[trace]` log, and these docs |
+
+## The pattern behind many of these bugs
+
+Game code runs while the wrong player's data is active. So when something works for player 1 and not player 2, check these first:
+
+- who "the player" is (`r13-26524`, `-21492`, `-21496`)
+- who the controlled character is (`-21488`, `-21484`)
+- the zones' "inside" words (`coop_zones_swap`)
+- the script words (`coop_states_swap`)
+- what a chapter script is told the character is (`hle_object_model`)
+- buttons still held when a screen closes, which reach the world as new presses
+
+## Tools
+
+| Tool | Use |
+|---|---|
+| `sh tools/coop-test/play.sh saves/slotN.state NAME` | Runs with every log and `[trace]` on. Logs go to `logs/run-*-NAME/`, which is not in git |
+| `tools/coop-test/burst.ps1 -seconds N -out DIR` | Captures frames while the user plays. Start it a few seconds after launch |
+| `tools/coop-test/sheet.ps1 -dir DIR -out FILE.jpg -pics 0,40,80` | Puts captured frames on one contact sheet. Run it from PowerShell |
+| `python -I tools/ppcd.py generated/main.dol ADDR COUNT` | Disassembles game code, and shows many instructions only as an opcode number |
+
+To compare what's on screen, capture a solo run of the same save first (`mod_coop = 0` in `settings.ini`), since that shows how it's meant to look. Set it back to 1 afterwards. Saves are in different chapters, so compare within one chapter.
+
+## Saves
+
+The user re-saves these slots, so check a slot's date and what's in it before relying on this.
+
+| Slot | When last noted | Where |
+|---|---|---|
+| 1 | 2026-11-02 20:21 | The room with the clock and key. Chapter not confirmed |
+| 2 | 2026-11-02 21:17 | Anthony's chapter: on the stairs just before the first Tome room entry |
+| 3 | 2026-11-02 20:45 | Karim's chapter: player 1 at the Tome room entrance. No first-entry scene |
+| 5 | 2026-11-02 19:01 | Both players have Enchant on a quick slot |
+| 10 | 2026-11-02 20:03 | Bronze Necklace and the statue examine |
+
+
+## Other docs
+
+| Doc | What it holds |
+|---|---|
+| `docs/coop-player2-menu.md` | The plan for a custom player 2 menu, and what's traced for it |
+| `docs/coop-failed-attempts.md` | What was tried and didn't work. Check it before writing a fix |
+| `docs/coop-two-tomes.md` | Why two game Tomes at once was set aside, and how the Tome works |
+| `docs/coop-todo.md` | The longer list of open issues |
+| `docs/items-log.md` | Items seen so far. Add to it in any session |

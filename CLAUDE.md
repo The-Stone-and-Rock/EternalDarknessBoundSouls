@@ -1,5 +1,7 @@
 # Eternal Darkness Recomp Fork
 
+- Start with `docs/coop-next-session.md`: where things stand, how the user wants this worked on, and what's next.
+
 - Co-op Tome work: read `docs/coop-two-tomes.md` and `docs/coop-todo.md` before changing anything.
 - Run a test session with every log on: `sh tools/coop-test/play.sh saves/slot7.state NAME`. Logs go
   to `logs/run-*-NAME/`; read `EVENTS.log` first. Freezes write `saves/reports/hang-*.txt`.
