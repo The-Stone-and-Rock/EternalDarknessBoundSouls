@@ -7053,15 +7053,19 @@ static void notify_scene_button(CPUState* cpu) {
 // 0x8000C724 reads object +580, the character's file number, via 0x80117C64)
 // and take another route when the player is not the chapter's own: Anthony's
 // stairs go to the desk room instead of the tomb. While another character is
-// played, scripts are told the player is the chapter's own.
+// played, scripts are told the player is the chapter's own. Player 2 too, while
+// they are the player: to a clock in this chapter they were no one it knew, and it asked for
+// no prompt.
 #define OBJECT_MODEL 0x80117C64u
 #define SCRIPT_MODEL_CALL 0x8000C7ACu
 
 static void hle_object_model(CPUState* cpu) {
     const u32 object = cpu->gpr[3];
-    if (cpu->lr == SCRIPT_MODEL_CALL && g_chapter_model >= 0 && player_model() >= 0 &&
-        object == mem_read32(cpu, cpu->gpr[13] - 26524u) && guest_ram_range_valid(cpu, object + 580u, 4u) &&
-        (s32)mem_read32(cpu, object + 580u) == player_model()) {
+    const bool their_turn = g_settings.mod_coop && g_coop_p2 != 0u && guest_ram_range_valid(cpu, g_coop_p2 + 52u, 4u) &&
+                            object == mem_read32(cpu, g_coop_p2 + 52u);
+    if (cpu->lr == SCRIPT_MODEL_CALL && g_chapter_model >= 0 && object == mem_read32(cpu, cpu->gpr[13] - 26524u) &&
+        guest_ram_range_valid(cpu, object + 580u, 4u) &&
+        (their_turn || (player_model() >= 0 && (s32)mem_read32(cpu, object + 580u) == player_model()))) {
         hle_set_u32(cpu, (u32)g_chapter_model);
         return;
     }
@@ -9072,11 +9076,32 @@ static void hle_words_layout(CPUState* cpu) {
             words_rename(words, kCharacterWords[chapter][k], kCharacterWords[choice][0]);
 }
 
+// A script going on as a window closes (the clock's words, then what A took from it): the
+// player is still held for it, so no controller runs to take up one passed over, and the
+// game waited for ever. Its next words open as the game opens them.
+static bool coop_from_window_close(CPUState* cpu) {
+    // Player 2's goes on as a use of theirs, from the window's close (coop_run_script).
+    if (g_coop_use.active && (g_coop_use.resume == WINDOW_CLOSE_RAN || g_coop_use.resume == FOUND_CLOSE_RAN))
+        return true;
+    u32 sp = cpu->gpr[1];
+    for (int f = 0; f < 16 && guest_ram_range_valid(cpu, sp, 8u); f++) {
+        const u32 caller = mem_read32(cpu, sp);
+        if (caller <= sp || !guest_ram_range_valid(cpu, caller, 8u))
+            break;
+        const u32 ret = mem_read32(cpu, caller + 4u);
+        if (ret == WINDOW_CLOSE_RAN || ret == FOUND_CLOSE_RAN)
+            return true;
+        sp = caller;
+    }
+    return false;
+}
+
 static void hle_message_open(CPUState* cpu) {
     static int keep = -1;
     if (keep < 0)
         keep = getenv("ED_COOP_EXAMINE") != NULL;
-    g_hle_passthrough = keep || !g_settings.mod_coop || g_coop_p2 == 0u || cpu->lr != EXAMINE_OPENS || coop_busy(cpu);
+    g_hle_passthrough = keep || !g_settings.mod_coop || g_coop_p2 == 0u || cpu->lr != EXAMINE_OPENS || coop_busy(cpu) ||
+                        coop_from_window_close(cpu);
     if (g_hle_passthrough)
         return;
     const u32 words = cpu->gpr[3];
