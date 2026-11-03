@@ -9923,7 +9923,9 @@ static void hle_message_open(CPUState* cpu) {
 // Not a cutscene's words, and not player 2's own (their half and pad, coop_hold_player1).
 // A script's own step may have held play just before (the urn, 0x8016820C): its bit goes too.
 static bool coop_no_pause(CPUState* cpu) {
-    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || cutscene_playing(cpu) || (g_coop_use.active && g_coop_use.p2))
+    // Player 2's own too with no use of theirs up: their Tome's item (tome_copy_left), with them the player.
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || cutscene_playing(cpu) || (g_coop_use.active && g_coop_use.p2) ||
+        mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2)
         return false;
     const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u);
     if ((busy & ~2u) != 0u)

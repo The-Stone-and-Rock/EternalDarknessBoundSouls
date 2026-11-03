@@ -123,3 +123,5 @@ Older failures are mostly recorded in code comments in `runtime/host/hle.c`, as 
 **Holding the other half (`g_coop_p1_cast_shown`).** Keeps the item out, but with no pause the half is visibly frozen.
 
 **What works:** `coop_found_for_finder` and `coop_found_mark` mark the item's matrices as it is drawn (`0x8011A278`), and `build_view` (`gfx/interp.cpp`, `marked_out_of`) leaves them out of the other view. Seen in pictures for player 1's urn and rune (`logs/run-20261103-141926-one1`).
+
+**Judging "player 2's own" by `g_coop_use` alone.** An item from player 2's Tome runs with no use up (`tome_copy_left`), so `coop_no_pause` took their words for player 1's and let go of the hold: the words showed in player 1's half and the game froze (`logs/run-20261103-142333-before`, `who 70`). It's in commit `c8f69bc`; fixed after it by also asking whether they are the player (`r13-21492`). `build/runs/enchant/p2urn.sh` replays player 2's urn.
