@@ -4140,6 +4140,8 @@ static void hle_PADRead(CPUState* cpu) {
     }
     if (!g_coop_pad_p1)
         coop_menu_input(cpu, menu, cutscene, &state[0]);
+    else
+        state[0].button &= (u16)~0x1000u;  // their Tome once player 2's words are done: one window
 #endif
     skip_card_select(cpu, &state[0]);
     if (g_mash_to_gameplay)
@@ -8642,6 +8644,53 @@ static void tome_copy_swap(CPUState* cpu, bool in) {
 static void tome_copy_equips(CPUState* cpu);
 static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* spell_item);
 
+// Player 1's words or find, up as the copy is made, are theirs and stay in the real game. In the
+// copy they showed in player 2's Tome, and player 2's B closed them there: the script they lead to
+// ran on in the copy, every find of it passed by, and came back to the world as an item's. Gone from
+// the copy, which is all this writes: the words freed, the window let go, nothing left to run.
+#define TOME_COPY_FIND_STEP 0x80024434u
+#define TOME_COPY_FIND_RECORD 0x8030A6E8u
+#define TOME_COPY_WORDS_RECORD 0x8023E458u
+static void tome_copy_no_window(CPUState* cpu) {
+    const u32 sda = cpu->gpr[13], window = mem_read32(cpu, sda - 25960u);
+    u32 ignore = 0u;
+    if (window != 0u && guest_ram_range_valid(cpu, window, 32u)) {
+        u32 words[2] = {mem_read32(cpu, TOME_COPY_WORDS_RECORD + 12u), 0u};
+        if (mem_read32(cpu, window) == TOME_COPY_FIND_STEP) {
+            words[0] = mem_read32(cpu, TOME_COPY_FIND_RECORD);
+            words[1] = mem_read32(cpu, TOME_COPY_FIND_RECORD + 4u);
+        }
+        for (int i = 0; i < 2; i++)
+            if (words[i] != 0u)
+                hle_guest_call(cpu, 0x801DA4D8u, &words[i], 1, 0.0, &ignore);
+        hle_guest_call(cpu, 0x8013DB94u, &window, 1, 0.0, &ignore);
+        fprintf(stderr, "[tome-copy] the window up as it opened is left out of the copy\n");
+    }
+    mem_write32(cpu, sda - 25960u, 0u);  // the window
+    mem_write32(cpu, sda - 25944u, 0u);  // the script its closing runs
+    mem_write32(cpu, sda - 25948u, 0u);
+    mem_write32(cpu, sda - 23552u, 0u);  // the input's focus
+    mem_write32(cpu, sda - 23556u, 0u);
+    mem_write32(cpu, sda - 23344u, 0u);  // busy
+    mem_write32(cpu, sda - 24048u, mem_read32(cpu, sda - 24048u) & ~(2u | 4u | 32u));  // what the holds set
+    mem_write8(cpu, sda - 25932u, 0u);
+    mem_write32(cpu, sda - 25696u, 0u);
+    mem_write32(cpu, sda - 23040u, 1u);
+    mem_write32(cpu, sda - 26324u, 0u);  // a script left for the world
+    // The Magick page's help is for whoever the game opened it for (0x8010AEF0: 499 and not 500, 989
+    // and not 990, 991 and not 992 play script 2020; not 622, script 887 goes on with it): done, for
+    // this copy alone. Played here, it ended by closing their Tome. The game's own stay as they are.
+    const u32 set = mem_read32(cpu, sda - 26528u);
+    if (guest_ram_range_valid(cpu, set, 4u + 992u / 8u + 4u)) {
+        static const u16 kDone[4][2] = {{499u, 500u}, {989u, 990u}, {991u, 992u}, {0u, 622u}};
+        for (int i = 0; i < 4; i++) {
+            const u32 from = set + 4u + (u32)kDone[i][0] / 32u * 4u, to = set + 4u + (u32)kDone[i][1] / 32u * 4u;
+            if (i == 3 || ((mem_read32(cpu, from) >> (kDone[i][0] % 32u)) & 1u) != 0u)
+                mem_write32(cpu, to, mem_read32(cpu, to) | 1u << (kDone[i][1] % 32u));
+        }
+    }
+}
+
 static void tome_copy_close(CPUState* cpu, const char* why) {
     fprintf(stderr, "[tome-copy] player 2's Tome closes (%s) after %u turns, longest %.2f ms\n", why, g_tome_copy.turns, g_tome_copy.ms_most);
     // Back as coop_tome_player leaves them, in the copy: their quick spells and counts come out of it.
@@ -8753,6 +8802,14 @@ static bool tome_copy_step(CPUState* cpu) {
             return false;
         g_tome_copy.real = cpu->ram;
         memcpy(g_tome_copy.copy, g_tw.sharing ? g_tome_copy.clean : cpu->ram, cpu->ram_size);
+        // The story's flags as they are now: the snapshot is from before player 1's Tome, and a page's
+        // first visit is told by them (r13 - 26528: the count, then the bits).
+        const u32 flags = mem_read32(cpu, sda - 26528u);
+        if (guest_ram_range_valid(cpu, flags, 4u)) {
+            const u32 flags_size = 4u + (mem_read32(cpu, flags) + 31u) / 32u * 4u;
+            if (flags_size <= 1028u && guest_ram_range_valid(cpu, flags, flags_size))
+                memcpy(g_tome_copy.copy + (flags - GC_RAM_BASE), cpu->ram + (flags - GC_RAM_BASE), flags_size);
+        }
         g_tome_copy.turns = 0u;
         g_tome_copy.ms_most = 0.0;
         g_tome_copy.started = false;
@@ -8764,6 +8821,7 @@ static bool tome_copy_step(CPUState* cpu) {
     tome_copy_swap(cpu, true);
     u32 ignore = 0u;
     if (opening) {
+        tome_copy_no_window(cpu);
         coop_tome_player(cpu, true);
         g_tome_copy.kinds_depth = g_coop_kinds_depth;
         g_tome_copy.kinds_count = g_coop_kinds_in_count;

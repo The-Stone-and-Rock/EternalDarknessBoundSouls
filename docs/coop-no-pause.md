@@ -17,6 +17,8 @@ Confirmed in the user's play on 2026-11-03: slot 1's urn and rune from both play
 | Player 1 stops when a Tome page's help opens | The same focus, over a Tome the game opened for player 2 | `hle_coop_controller` |
 | The item shows in both halves | It's a world object tied to the game's camera. Its matrices are marked as it's drawn, and the other view collapses them | `coop_found_for_finder`, `coop_found_mark`, `build_view` in `gfx/interp.cpp` |
 | Player 1's half is a still picture in player 2's close-up | Their half is drawn from their last camera, following them | `camera_split_update` |
+| Player 1's text shows in player 2's Tome, and player 2's B skips player 1's finds | The copy of memory took player 1's window and its script: their B closed it there, and the script ran on in the copy as theirs. Left out of the copy as it opens | `tome_copy_no_window` |
+| Player 2's Tome plays the Magick page's help every time, on that page, then closes | The copy came from a snapshot taken before player 1's Tome, with flag 989 on and 990 off, so it looked like a first visit. The copy takes the real flags, and the help counts as done in the copy alone. Player 1's real text isn't touched | `tome_copy_step`, `tome_copy_no_window` |
 | Both players in attack position | Seen in one build, which called `0x801223B8` to clear an object's mark. Taken out and not traced. Don't call it for this. The players not being each other's threat is `coop_send_event` | `docs/coop-failed-attempts.md` |
 
 ## Don't
@@ -26,6 +28,8 @@ Confirmed in the user's play on 2026-11-03: slot 1's urn and rune from both play
 - **Don't widen a hold check to an address range.** `0x800429D0`..`0x80042C10` takes in other holds, and Paul's cutscenes stopped going to the right place. Which part did it wasn't proven.
 - **Don't treat the two players' mechanics as different.** A fix for one is the fix for the other. Start by asking what the other player's turn has that this one lacks.
 
+**The two Tomes stay separate.** Anything up when player 2's Tome opens stays in the real game. Fix what the copy takes, inside the copy. Never change the real game's scripts or text for it.
+
 ## How to test
 
 Scripts have missed these bugs, so test the way the user plays.
@@ -33,11 +37,13 @@ Scripts have missed these bugs, so test the way the user plays.
 - **Start the other player from standing still.** One already walking coasts on and looks fine.
 - **Run the sequence past its last step,** into the spell page's help and out of it.
 - **Run both players.** `build/runs/enchant/both.sh NAME EXE` replays player 1's urn with player 2 walking. `P1SCRIPT=... sh build/runs/enchant/p2urn.sh NAME` replays player 2's with player 1 walking. Both are gitignored. `[trace] no pause` and `[trace] player 1's turn` log positions.
+- **Press Start during the other player's text and finds.** `P1CUT=frame sh build/runs/enchant/p1start.sh NAME P2SCRIPT` replays player 1's urn with player 2's presses. Live controllers mix into scripted runs, so check the pad log for presses not in the script.
 - **Then have the user play it.** Believe what they see over the log.
 
 ## Limits
 
 - Notices read the game's English words (`has picked up`, `has found`). Other wordings get no notice, and a log line says so.
 - Spell pages aren't traced, so a spell found may not give a notice.
+- Player 1's Start does nothing during player 2's text and finds, and works once they close.
 - Only slot 1's urn and Paul's podium have been played.
 - Player 1's bars are likely hidden during player 2's close-up, and their camera follows them without turning.
