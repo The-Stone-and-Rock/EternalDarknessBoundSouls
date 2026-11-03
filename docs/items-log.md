@@ -10,6 +10,7 @@ Items found while tracing, in any session. Only what was seen in a log or writte
 | Tulwar | 9 | | 2, 1 | | Comment at `coop_rehold`, `runtime/host/hle.c` |
 | Chakrams | 11 | | 2, 0 | | Comment at `coop_rehold`, `runtime/host/hle.c` |
 | Talisman | 10 | 1874 | | Five uses in slot 3 for player 2. When used up: "The Magick in this item has been completely drained. It cannot be used anymore." Casts `0x40011041` twice | `logs/run-20261103-093522-hand9` |
+| Circle of Power (3 Point) | | 2129 (the find, on the desk in save 2) | | Tome page: "Circles of Power describe the amount of power that a spell will have. The more points within that circle, the stronger the spell will be." | `logs/run-20261103-181505-both` |
 
 ## Not yet matched to a name
 

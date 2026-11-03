@@ -1529,6 +1529,9 @@ bool hle_coop_screen(void);                                    // hle.c
 bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* zoom);  // hle.c
 bool hle_game_menu_open(CPUState* cpu);                         // hle.c
 bool hle_coop_tome_shares(void);                                // hle.c
+bool hle_coop_player1_tome_up(void);
+bool hle_coop_cameras_lent(void);
+bool hle_coop_player1_camera(float eye[3], float target[3], float* zoom);
 
 #define SPLIT_PITCH_LOW 0.05f
 #define SPLIT_PITCH_HIGH 1.30f
@@ -1604,9 +1607,13 @@ void camera_split_update(CPUState* cpu) {
         const Vec3 game_eye = read_vec(cpu, cpu->gpr[4]), game_target = read_vec(cpu, cpu->gpr[6]);
         const Vec3 game_k = normalize(read_vec(cpu, cpu->gpr[5]));
         Vec3 p1_now;
-        if (g_p1_cam_set && player_position(cpu, &p1_now) && length(sub(game_target, game_eye)) > 0.0f && length(game_k) > 0.0f) {
-            const Vec3 moved = sub(p1_now, g_p1_cam_at);
-            const Vec3 eye1 = add(g_p1_cam_eye, moved), target1 = add(g_p1_cam_target, moved);
+        float own1_eye[3], own1_target[3], zoom1 = 1.0f;
+        const bool own1 = hle_coop_player1_camera(own1_eye, own1_target, &zoom1);
+        if ((own1 || (g_p1_cam_set && player_position(cpu, &p1_now))) && length(sub(game_target, game_eye)) > 0.0f && length(game_k) > 0.0f) {
+            // Their own camera as their turn stepped it; until then, the last they had, following them.
+            const Vec3 moved = own1 ? v3(0.0f, 0.0f, 0.0f) : sub(p1_now, g_p1_cam_at);
+            const Vec3 eye1 = own1 ? v3(own1_eye[0], own1_eye[1], own1_eye[2]) : add(g_p1_cam_eye, moved);
+            const Vec3 target1 = own1 ? v3(own1_target[0], own1_target[1], own1_target[2]) : add(g_p1_cam_target, moved);
             Vec3 x1, y1, z1, x2, y2, z2;
             look_axes(game_eye, game_target, game_k, &x1, &y1, &z1);
             look_axes(eye1, target1, game_k, &x2, &y2, &z2);
@@ -1618,7 +1625,7 @@ void camera_split_update(CPUState* cpu) {
                 rot[2 * 3 + c] = dot(axes[c], z1);
             }
             const Vec3 rel = sub(eye1, game_eye);
-            aurora_split_set_view(0, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), 1.0f, true);
+            aurora_split_set_view(0, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), zoom1, true);
             aurora_split_hold(-1);
         } else {
             aurora_split_set_view(0, kSame, 0.0f, 0.0f, 0.0f, 1.0f, true);
@@ -1651,10 +1658,14 @@ void camera_split_update(CPUState* cpu) {
         split_off(frame, "no camera");
         return;
     }
-    g_p1_cam_eye = eye;
-    g_p1_cam_target = target;
-    g_p1_cam_at = p1_here;
-    g_p1_cam_set = true;
+    // Only while the game's camera is theirs: it's lent to player 2 a few frames before their close-up
+    // counts, and player 1's half was then framed from player 2's.
+    if (!hle_coop_cameras_lent()) {
+        g_p1_cam_eye = eye;
+        g_p1_cam_target = target;
+        g_p1_cam_at = p1_here;
+        g_p1_cam_set = true;
+    }
     // The world's level directions, for player 2's turn round player 1.
     Vec3 e1 = normalize(flatten(v3(1.0f, 0.0f, 0.0f), k));
     if (length(e1) < 0.5f)
@@ -1747,7 +1758,9 @@ void camera_split_update(CPUState* cpu) {
 #ifdef ED_AURORA
     static const float kIdentity[9] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
     aurora_split_hold(hle_coop_player2_held() ? 1 : -1);
-    aurora_split_set_view(0, kIdentity, 0.0f, 0.0f, 0.0f, 1.0f, hle_coop_tome_shares());  // the Tome's words are in the frame
+    // Their own Tome's words are in the frame. Behind player 2's, their HUD is theirs: left out, their
+    // words went, and hiding brought back what's drawn for player 2's half (their prompt) in theirs.
+    aurora_split_set_view(0, kIdentity, 0.0f, 0.0f, 0.0f, 1.0f, hle_coop_player1_tome_up());
     aurora_split_set_view(1, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), zoom2, true);
     aurora_split_set(true, g_settings.mod_split);
 #else

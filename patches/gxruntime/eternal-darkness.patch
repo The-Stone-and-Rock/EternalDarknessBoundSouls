@@ -9590,10 +9590,10 @@ index 0a23a3f..bb77937 100644
  unsigned long long dst_alpha_fallback_count() noexcept;
 diff --git a/graphics/aurora/lib/gfx/interp.cpp b/graphics/aurora/lib/gfx/interp.cpp
 new file mode 100644
-index 0000000..2eb804c
+index 0000000..d14d5fb
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/interp.cpp
-@@ -0,0 +1,704 @@
+@@ -0,0 +1,705 @@
 +#include "interp.hpp"
 +
 +#include <atomic>
@@ -10125,9 +10125,10 @@ index 0000000..2eb804c
 +Uniforms split_build(int player, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare) {
 +  if (!g_split || !g_recording || g_frames[g_cur].draws.empty())
 +    return nullptr;
++  // Only player 2's view brings it back, HUD hidden or not (their close-up shows the game's HUD too).
 +  // Player 2's view (the HUD hidden) shows player 2's own HUD: the game draws
 +  // it off the screen to the right (away, below).
-+  return build_view(g_frames[g_cur], uniformSize, fn, user, hideHud, flare, hideHud, player);
++  return build_view(g_frames[g_cur], uniformSize, fn, user, hideHud, flare, player == 1, player);
 +}
 +
 +Uniforms split_between(int player, const Uniforms& blended, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
@@ -10136,11 +10137,11 @@ index 0000000..2eb804c
 +  if (!g_split || !g_recording || cur.draws.empty())
 +    return nullptr;
 +  if (!blended)
-+    return build_view(cur, uniformSize, fn, user, hideHud, flare, hideHud, player);
++    return build_view(cur, uniformSize, fn, user, hideHud, flare, player == 1, player);
 +  // The view from the frame as it was at that moment.
 +  std::vector<uint8_t> own = *blended;
 +  own.swap(cur.uniforms);
-+  Uniforms view = build_view(cur, uniformSize, fn, user, hideHud, flare, hideHud, player, &own);
++  Uniforms view = build_view(cur, uniformSize, fn, user, hideHud, flare, player == 1, player, &own);
 +  own.swap(cur.uniforms);
 +  return view;
 +}

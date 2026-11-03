@@ -135,3 +135,11 @@ Confirmed in the user's play for slot 1's urn. See `docs/coop-no-pause.md`. No h
 **Doesn't help, and likely gave them an attack stance:** clearing bit 4 of the object's marks through `0x801223B8` around the controller. The user saw both players in attack position in that build only. `0x801223B8` is a large function with more to it than the bit. Not traced.
 
 Seen by script: `logs/run-20261103-145338-live7` (player 2's urn, player 1 walking), `logs/run-*-regress1` (player 1's urn). `build/runs/enchant/p2urn.sh` replays player 2's urn; `P1SCRIPT` walks player 1.
+
+## Player 2 frozen during player 1's look at the circle (2026-11-03)
+
+**Answering "nobody's busy" only inside player 2's turn, and opening the input masks there.** Their turn ran and read their stick (`[coop] player 2's pad`), and they didn't move: a character's step asks `0x80155738` outside the turn too (`logs/run-20261103-175329-p1look8`).
+
+**Taking a hold's channel at +16 being 0 as the hold being over.** It's still 0 the frame after the hold starts, then counts down from about `0x0FFFFFFF`, so the look ended itself on its first frame. Only the busy word says whether it's over.
+
+**Reading the busy word in `coop_p1_close_up` during player 2's turn.** The turn lets the hold go, so the word reads 0 and the look ended itself. `g_coop_p1_look_open` covers the turn.
