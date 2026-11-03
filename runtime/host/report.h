@@ -25,6 +25,7 @@ void report_frame(void);
 
 // A menu holds the game (frontend.cpp): no frames, but no hang either.
 void report_pause(bool paused);
+void report_pad_read(void);  // a game frame reached the pad: for ED_COOP_TRACE's stall line
 
 // Write a report of the given kind ("hang", "stopped", "crash", "gx") with a
 // one-line description; with_state also saves a quick state beside it (the

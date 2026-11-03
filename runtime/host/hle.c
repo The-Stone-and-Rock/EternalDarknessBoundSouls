@@ -4023,6 +4023,7 @@ static void hle_PADRead(CPUState* cpu) {
     u32 motor_mask = dol_platform_pad_read(state);
     controls_set_tome_read(-1);
     {
+        report_pad_read();
         static int pad_log = -1;  // ED_COOP_PAD_LOG=1: player 1's pad as it changes, and the Tome's owner
         static u16 pad_was;
         if (pad_log < 0)
@@ -5050,8 +5051,10 @@ void hle_frame_boundary(void) {
     }
     sync_widescreen_option(&dolrecomp_cpu);
     // Esc / the controller's Back button opens the in-game menu here, at
-    // a frame boundary, with the frame just drawn behind it.
-    frontend_frame();
+    // a frame boundary, with the frame just drawn behind it. Not in a turn of player 2's Tome:
+    // memory then is its copy, which a save state would take for the game.
+    if (!g_tome_copy_turn)
+        frontend_frame();
 }
 #endif
 
@@ -6940,6 +6943,23 @@ static void moves_repair(CPUState* cpu, u32 node, bool p2) {
         fprintf(stderr, "[coop] player %d (%d) played slot %d's moves (%d's): theirs again\n", p2 ? 2 : 1, model, k,
                 g_p2_moves[k].model);
         hle_guest_call(cpu, MOVES_WANT, args, 2, 0.0, &ignore);
+        // Player 1's part was already in the game's slot, so the game gave them its table as it
+        // was, and that was never made: they asked first for the slot of ours (the same character
+        // as player 2). Every move then came back empty, and the next one waited for ever.
+        const u32 table_now = mem_read32(cpu, object + 648u), ready = mem_read32(cpu, object + 644u), sets = mem_read32(cpu, object + 652u);
+        if (!p2 && guest_ram_range_valid(cpu, table_now, 170u * 4u) && guest_ram_range_valid(cpu, ready + 20u, 2u) && guest_ram_range_valid(cpu, sets, 16u)) {
+            bool empty = true;
+            for (u32 i = 0u; i < 170u && empty; i++)
+                empty = mem_read32(cpu, table_now + i * 4u) == 0u;
+            const u32 n = mem_read16(cpu, ready + 20u);
+            for (u32 i = 0u; empty && i < n && guest_ram_range_valid(cpu, sets + i * 16u, 16u); i++) {
+                const u32 id = mem_read32(cpu, sets + i * 16u);
+                if (id < 170u)
+                    mem_write32(cpu, table_now + id * 4u, sets + i * 16u);
+            }
+            if (empty)
+                fprintf(stderr, "[coop] player 1's moves table was empty: made from %u sets\n", n);
+        }
         return;
     }
 }
@@ -7157,10 +7177,31 @@ static void hle_object_model(CPUState* cpu) {
 // was waited on for ever. While another character is played, such an
 // animation is passed over: the character carries on as they were.
 #define PLAY_ANIMATION 0x80123224u
+static void room_log(CPUState* cpu, const char* what);
 
 static void hle_play_animation(CPUState* cpu) {
     g_hle_passthrough = true;
-    if (player_model() < 0)
+    // ED_ANIM_TRACE=1 (testing, only reads): each animation played that the last few calls did not, with who asks.
+    static int anim_trace = -1;
+    if (anim_trace < 0)
+        anim_trace = getenv("ED_ANIM_TRACE") != NULL;
+    if (anim_trace && guest_ram_range_valid(cpu, cpu->gpr[4] + 184u, 4u)) {
+        static u32 recent[64];
+        static unsigned next;
+        const u32 mark = cpu->gpr[3] ^ cpu->gpr[4];
+        bool seen = false;
+        for (int i = 0; i < 64 && !seen; i++)
+            seen = recent[i] == mark;
+        const u32 anim_set = mem_read32(cpu, cpu->gpr[4] + 184u);
+        if (!seen || anim_set == 0u) {
+            recent[next++ % 64u] = mark;
+            fprintf(stderr, "[anim-trace] object 0x%08X set 0x%08X r5 0x%X r6 0x%X player 0x%08X |", cpu->gpr[3], anim_set, cpu->gpr[5], cpu->gpr[6], mem_read32(cpu, cpu->gpr[13] - 26524u));
+            room_log(cpu, "play");
+        }
+    }
+    // In co-op too, with the chapter's own character: Paul's waited for ever on 0x80516F70, which has no set.
+    const bool chosen = player_model() >= 0;
+    if (!chosen && (!g_settings.mod_coop || g_coop_p2 == 0u))
         return;
     const u32 animation = cpu->gpr[4];
     const u32 set = guest_ram_range_valid(cpu, animation + 184u, 4u) ? mem_read32(cpu, animation + 184u) : 0u;
@@ -7173,7 +7214,7 @@ static void hle_play_animation(CPUState* cpu) {
                 guest_ram_range_valid(cpu, resource, 296u) ? mem_read32(cpu, resource + 284u) : 0u, cpu->lr);
     // No set at all (Michael, Karim's chapter's first animation), or a
     // resource naming no file.
-    if (set != 0u && (!guest_ram_range_valid(cpu, resource, 296u) || mem_read32(cpu, resource + 280u) != 0u ||
+    if (set != 0u && (!chosen || !guest_ram_range_valid(cpu, resource, 296u) || mem_read32(cpu, resource + 280u) != 0u ||
                       mem_read32(cpu, resource + 284u) != 0u))
         return;
     static unsigned told;
@@ -8251,6 +8292,7 @@ static struct {
 } g_tw;
 
 bool hle_coop_tome_shares(void) { return g_tw.sharing; }
+
 static bool tw_world_turn(void) { return g_tw.sharing && g_tw.world_tick; }
 // A pad read is for the frame after it.
 static bool tw_tome_next(void) { return g_tw.sharing && g_tw.world_tick && g_tw.worlds_left <= 1u; }
@@ -8303,6 +8345,30 @@ static struct {
 static bool g_coop_tome_p2;
 static bool g_coop_b_release;
 void aurora_split_menu(int player, int layout);
+
+// The in-game menu over a Tome: the renderer took the menu's frames for the Tome's and the world's,
+// only keeping them, so nothing of the menu was shown and the game looked frozen. While it's up,
+// the frames are plain ones, and as the menu closes the views go back as the Tome had them.
+void hle_coop_ui_over(bool on) {
+    static bool over;
+    if (on && (g_tw.sharing || g_tome_copy_open || g_coop_tome_owner >= 0)) {
+        over = true;
+        aurora_split_menu(-1, 0);
+        aurora_split_only_view(-1);
+        dol_aurora_split_skip_views(0);
+    } else if (!on && over) {
+        over = false;
+        if (g_tome_copy.stands_in) {
+            aurora_split_menu(1, g_settings.mod_split);
+            aurora_split_only_view(0);
+        } else {
+            if (g_coop_tome_owner >= 0)
+                aurora_split_menu(g_coop_tome_owner, g_settings.mod_split);
+            aurora_split_only_view(g_tome_copy_open ? 2 : g_coop_tome_owner >= 0 ? 1 - g_coop_tome_owner : -1);
+        }
+    }
+}
+
 
 // A quick state loaded: the frames are the game's own again.
 static void tw_state_loaded(void) {

@@ -3373,6 +3373,8 @@ void update_start_up_cover() {
                         IM_COL32(0, 0, 0, 255));
 }
 
+extern "C" void hle_coop_ui_over(bool on);
+
 extern "C" void frontend_frame(void) {
     update_start_up_cover();
     static Uint64 calibration_test_at = 0;
@@ -3456,8 +3458,10 @@ extern "C" void frontend_frame(void) {
     g_options_return = Screen::InGame;
     g_selected = 0;
     report_pause(true);
+    hle_coop_ui_over(true);
     if (!run_menu())
         dol_aurora_request_quit();  // window closed while paused
+    hle_coop_ui_over(false);
     report_pause(false);
     menu_was_held = false;
 }

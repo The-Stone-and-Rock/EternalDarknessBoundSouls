@@ -393,6 +393,12 @@ void report_frame(void) {
     atomic_store(&g_last_frame, now_ms());
 }
 
+static atomic_llong g_last_pad;
+
+void report_pad_read(void) {
+    atomic_store(&g_last_pad, now_ms());
+}
+
 void report_pause(bool paused) {
     atomic_fetch_add(&g_pauses, paused ? 1 : -1);
     if (!paused)
@@ -415,6 +421,22 @@ static THREAD_RET watchdog_main(void* arg) {
             gx_reported = true;
             report_write("gx", "the renderer could not decode a frame (it dropped it and went on)",
                          true);
+        }
+        // ED_COOP_TRACE=1: the pad unread with no hang seen (the picture still, the fps counter
+        // going, no report: logs/run-20261103-105156-paul-coop). Where the game is, once each time.
+        static int stall_trace = -1;
+        static bool stall_told;
+        if (stall_trace < 0)
+            stall_trace = getenv("ED_COOP_TRACE") != NULL;
+        const long long pad_last = atomic_load(&g_last_pad);
+        if (stall_trace && pad_last != 0 && atomic_load(&g_pauses) == 0 && now - pad_last > 4000) {
+            if (!stall_told) {
+                stall_told = true;
+                fprintf(stderr, "[stall] no pad read for %lld ms, last frame %lld ms ago\n", now - pad_last, now - atomic_load(&g_last_frame));
+                main_request_pcdump();
+            }
+        } else {
+            stall_told = false;
         }
         const long long last = atomic_load(&g_last_frame);
         if (last == 0 || atomic_load(&g_pauses) > 0 ||
