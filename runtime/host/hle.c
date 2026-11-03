@@ -7133,9 +7133,13 @@ static void notify_room_change(CPUState* cpu) {
 
 // A new room asked for since the cutscene began (coop_cutscene_over).
 static bool g_coop_room_asked;
+static bool g_coop_room_asked_now;  // and for coop_menu_input
+static unsigned long long g_trace_ticket_frame;  // ED_COOP_TRACE: both players' places, frame by frame, after this
 
 static void notify_room_ticket(CPUState* cpu) {
     g_coop_room_asked = true;
+    g_coop_room_asked_now = true;
+    g_trace_ticket_frame = cpu->timebase / 675000ull;
     if (getenv("ED_ROOM_LOG") != NULL)
         room_log(cpu, "ticket");
 }
@@ -11426,6 +11430,18 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     static unsigned start_wait;
     static bool start_was;
     static unsigned quick_wait;  // pad reads for the Tome their quick spell asked for
+    if (coop_trace() && sda_ready(cpu) && g_coop_p2 != 0u && g_trace_ticket_frame != 0ull) {  // a room change: where they are
+        const unsigned long long frame = cpu->timebase / 675000ull;
+        static unsigned long long last;
+        if (frame != last && frame < g_trace_ticket_frame + 300ull) {
+            const u32 o1 = mem_read32(cpu, cpu->gpr[13] - 26524u), o2 = mem_read32(cpu, g_coop_p2 + 52u);
+            if (guest_ram_range_valid(cpu, o1, 12u) && guest_ram_range_valid(cpu, o2, 12u))
+                fprintf(stderr, "[trace] room move +%llu game player %.0f %.0f %.0f | player 2 %.0f %.0f %.0f | who %u owner %d screen %d busy %d\n", frame - g_trace_ticket_frame,
+                        guest_read_f32(cpu, o1), guest_read_f32(cpu, o1 + 4u), guest_read_f32(cpu, o1 + 8u), guest_read_f32(cpu, o2), guest_read_f32(cpu, o2 + 4u), guest_read_f32(cpu, o2 + 8u),
+                        mem_read32(cpu, cpu->gpr[13] - 21496u), owner, g_coop_screen, mem_read32(cpu, cpu->gpr[13] - 23344u));
+        }
+        last = frame;
+    }
     if (coop_trace() && sda_ready(cpu)) {  // the Tome's item page, the spell it waits on
         static const u32 kPage[3] = {24492u, 24508u, 24304u};
         static u32 page[3], spell[3];
@@ -11534,6 +11550,17 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     else if (!closeup && owner == 1 && closeup_grace > 0u && !menu && !cutscene) {
         closeup_grace--;
         closeup = true;
+    }
+    // A close-up of theirs that asks for another room (walking into a way out, no door's
+    // prompt) ends with it: player 2 kept the screen into the new room, its scene in their
+    // half and player 1's held. Play goes on as when player 1 asked for it.
+    if (g_coop_room_asked_now) {
+        g_coop_room_asked_now = false;
+        if (owner == 1 && !menu && !cutscene) {
+            closeup = false;
+            closeup_grace = 0u;
+            g_coop_assist_at = 0u;
+        }
     }
     DolPadState p2;
     controls_read_player2(&p2);
