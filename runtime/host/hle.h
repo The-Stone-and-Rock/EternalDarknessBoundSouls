@@ -71,6 +71,10 @@ void hle_coop_prompt_load(const void* in);
 size_t hle_coop_magick_size(void);
 void hle_coop_magick_save(void* out);
 void hle_coop_magick_load(const void* in);
+// Player 2's spell list; load(NULL) for a state with none: it starts again.
+size_t hle_coop_spells_size(void);
+void hle_coop_spells_save(void* out);
+void hle_coop_spells_load(const void* in);
 // True while a save would catch co-op half-way (player 2's Tome open): the
 // save waits.
 bool hle_save_held(void);

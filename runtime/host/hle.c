@@ -3788,10 +3788,11 @@ static u16 g_tome_copy_held;  // what they held as it opened: not a press in it
 static u16 g_tome_copy_taps;  // what they pressed between its reads
 static u8 g_tome_copy_spell[24];  // what their cast asked of a Tome (COOP_SPELL_ITEM), for their copy alone
 static bool g_tome_copy_spell_set, g_tome_copy_spell_open;
+static void magick_trace(CPUState* cpu);
 static int tome_copy_mode(void) {
     static int mode = -1;
     if (mode < 0)
-        mode = getenv("ED_COOP_TOME_COPY") != NULL ? atoi(getenv("ED_COOP_TOME_COPY")) : 0;
+        mode = getenv("ED_COOP_TOME_COPY") != NULL ? atoi(getenv("ED_COOP_TOME_COPY")) : 2;  // two Tomes: 0 the old way, 1 the empty turns
     return mode;
 }
 // Player 2 has a close-up their action press opened (coop_menu_input): the
@@ -4024,6 +4025,7 @@ static void hle_PADRead(CPUState* cpu) {
     controls_set_tome_read(-1);
     {
         report_pad_read();
+        magick_trace(cpu);
         static int pad_log = -1;  // ED_COOP_PAD_LOG=1: player 1's pad as it changes, and the Tome's owner
         static u16 pad_was;
         if (pad_log < 0)
@@ -7823,6 +7825,7 @@ static u32 g_coop_own_carry;  // player 2's own list, while their quick spell ha
 // cast.
 #define COOP_NODE_STATE 24u
 #define COOP_QUICK 0x80334DE8u
+#define COOP_MAGICK_RECORD 0x80334D50u
 #define COOP_QUICKS 5u
 #define COOP_QUICK_CAST 0x800069DCu
 #define COOP_QUICK_SLOT (SCRATCH_HUD + 0xC00u)  // the one cast, for the handler to read
@@ -7873,6 +7876,54 @@ static void coop_be_player2(CPUState* cpu, bool on, u32 was[5]) {
 
 // Player 2's quick spells the game's (their Tome opens) or player 1's back
 // (it closes), player 2's kept as their Tome left them.
+// With ED_COOP_TRACE (only reads): each word of the magick record that changes, for tracing the
+// Magick page: what a spell made writes, and what's lost with player 2's copy.
+#define COOP_MAGICK_SIZE 0xD0u
+static void magick_trace(CPUState* cpu) {
+    static u32 was[COOP_MAGICK_SIZE / 4u];
+    static bool have;
+    if (!coop_trace())
+        return;
+    for (u32 i = 0u; i < COOP_MAGICK_SIZE / 4u; i++) {
+        const u32 now = mem_read32(cpu, COOP_MAGICK_RECORD + i * 4u);
+        if (have && now != was[i])
+            fprintf(stderr, "[magick] +0x%02X 0x%08X -> 0x%08X (frame %llu, Tome owner %d)\n", i * 4u, was[i], now, (unsigned long long)(cpu->timebase / 675000ull), g_coop_tome_owner);
+        was[i] = now;
+    }
+    have = true;
+}
+
+// Each player's spell list is their own: a spell one makes on the Magick page isn't the other's.
+// The record's runes and circles (+0, +4) stay one for both. Its spells (+8) and chosen circles
+// (+0x38) are kept here for player 2 and put in their Tome's copy as it opens. A spell with its name
+// known (0x08000000: not one made by hand, 0x04000000) goes to them from the game's record, for one
+// found. Runes the game no longer has: another game, so their list starts again.
+#define COOP_SPELL_WORDS 24u
+static u32 g_coop_spells[COOP_SPELL_WORDS], g_coop_spells_runes;
+static bool g_coop_spells_have;
+static void coop_spells_in(CPUState* cpu) {
+    const u32 runes = mem_read32(cpu, COOP_MAGICK_RECORD);
+    if (g_coop_spells_have && (runes & g_coop_spells_runes) != g_coop_spells_runes)
+        g_coop_spells_have = false;
+    if (!g_coop_spells_have)
+        memset(g_coop_spells, 0, sizeof g_coop_spells);
+    for (u32 i = 0u; i < 12u; i++) {
+        const u32 spell = COOP_MAGICK_RECORD + 8u + i * 4u, circle = spell + 0x30u;
+        if ((mem_read32(cpu, spell) & 0x08000000u) != 0u) {
+            g_coop_spells[i] = mem_read32(cpu, spell);
+            if (g_coop_spells[12u + i] == 0u)
+                g_coop_spells[12u + i] = mem_read32(cpu, circle);
+        }
+        mem_write32(cpu, spell, g_coop_spells[i]);
+        mem_write32(cpu, circle, g_coop_spells[12u + i]);
+    }
+    g_coop_spells_have = true;
+    g_coop_spells_runes = runes;
+    if (coop_trace())
+        fprintf(stderr, "[magick] player 2's spells: %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X\n", g_coop_spells[0], g_coop_spells[1], g_coop_spells[2], g_coop_spells[3], g_coop_spells[4], g_coop_spells[5],
+                g_coop_spells[6], g_coop_spells[7], g_coop_spells[8], g_coop_spells[9], g_coop_spells[10], g_coop_spells[11]);
+}
+
 static void coop_quick_swap(CPUState* cpu, bool p2) {
     for (u32 i = 0; i < COOP_QUICKS; i++) {
         const u32 at = COOP_QUICK + i * 4u;
@@ -8547,6 +8598,18 @@ static void tome_copy_close(CPUState* cpu, const char* why) {
     const u32 next_cast = mem_read32(cpu, COOP_NEXT_CAST);
     u8 spell_item[24];
     coop_bytes(cpu, COOP_SPELL_ITEM, spell_item, sizeof spell_item, true);
+    // The spells they made stay theirs, for their next Tome. The game's record is player 1's.
+    for (u32 i = 0u; i < COOP_SPELL_WORDS; i++)
+        g_coop_spells[i] = mem_read32(cpu, COOP_MAGICK_RECORD + 8u + i * 4u);
+    // What their Tome changed in the magick record: it goes with the copy.
+    for (u32 i = 0u; coop_trace() && i < COOP_MAGICK_SIZE / 4u; i++) {
+        const u32 at = COOP_MAGICK_RECORD + i * 4u, copy_word = mem_read32(cpu, at);
+        cpu->ram = g_tome_copy.real;
+        const u32 real_word = mem_read32(cpu, at);
+        cpu->ram = g_tome_copy.copy;
+        if (copy_word != real_word)
+            fprintf(stderr, "[magick] player 2's copy +0x%02X 0x%08X, real 0x%08X\n", i * 4u, copy_word, real_word);
+    }
     g_coop_kinds_depth = g_tome_copy.kinds_depth;
     g_coop_kinds_in_count = g_tome_copy.kinds_count;
     memcpy(g_coop_kinds_in, g_tome_copy.kinds, sizeof g_coop_kinds_in);
@@ -8651,6 +8714,7 @@ static bool tome_copy_step(CPUState* cpu) {
         coop_tome_player(cpu, true);
         g_tome_copy.kinds_depth = g_coop_kinds_depth;
         g_tome_copy.kinds_count = g_coop_kinds_in_count;
+        coop_spells_in(cpu);
         memcpy(g_tome_copy.kinds, g_coop_kinds_in, sizeof g_coop_kinds_in);
         g_coop_kinds_depth = g_coop_kinds_in_count = 0;
         mem_write32(cpu, sda - TOME_COPY_LAST_PAGE, 1u);
@@ -13206,6 +13270,34 @@ typedef struct {
     u32 casting[4];
     u8 own, pad[3];  // 2: quick spells of their own (1: a copy of player 1's, from before they began with none)
 } HleCoopMagick;
+
+// Player 2's spell list, a state of its own too.
+typedef struct {
+    u32 spells[COOP_SPELL_WORDS], runes, have;
+} HleCoopSpells;
+
+size_t hle_coop_spells_size(void) {
+    return sizeof(HleCoopSpells);
+}
+
+void hle_coop_spells_save(void* out) {
+    HleCoopSpells s;
+    memcpy(s.spells, g_coop_spells, sizeof s.spells);
+    s.runes = g_coop_spells_runes;
+    s.have = g_coop_spells_have;
+    memcpy(out, &s, sizeof s);
+}
+
+void hle_coop_spells_load(const void* in) {
+    g_coop_spells_have = false;
+    if (in == NULL)
+        return;
+    HleCoopSpells s;
+    memcpy(&s, in, sizeof s);
+    memcpy(g_coop_spells, s.spells, sizeof g_coop_spells);
+    g_coop_spells_runes = s.runes;
+    g_coop_spells_have = s.have != 0u;
+}
 
 size_t hle_coop_magick_size(void) {
     return sizeof(HleCoopMagick);

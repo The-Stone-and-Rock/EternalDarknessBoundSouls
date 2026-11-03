@@ -117,6 +117,7 @@ static const QsBlob k_blobs[] = {
      false},
     {"COOP", hle_coop_state_size, hle_coop_state_save, hle_coop_state_load, false},
     {"COMG", hle_coop_magick_size, hle_coop_magick_save, hle_coop_magick_load, false},
+    {"COSP", hle_coop_spells_size, hle_coop_spells_save, hle_coop_spells_load, false},
     {"COKN", hle_coop_kinds_size, hle_coop_kinds_save, hle_coop_kinds_load, false},
     {"COPR", hle_coop_prompt_size, hle_coop_prompt_save, hle_coop_prompt_load, false},
 #endif
