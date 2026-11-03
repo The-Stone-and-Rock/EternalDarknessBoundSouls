@@ -7136,6 +7136,7 @@ static void notify_room_ticket(CPUState* cpu) {
         room_log(cpu, "ticket");
 }
 
+
 static void notify_script_later(CPUState* cpu) {
     room_log(cpu, "later");
 }
@@ -8889,6 +8890,10 @@ static bool continue_coop_use(CPUState* cpu) {
 #define PROMPT_USE_RAN 0x8000704Cu
 #define WINDOW_CLOSE_RAN 0x800242E4u
 #define FOUND_CLOSE_RAN 0x800244C0u
+// As for the script a close-up's end runs (0x80025194), which makes its look ready again
+// for whoever is in its zone: run as player 1, away from it, the next press on Details
+// found the look at its end, and the close-up never let them go.
+#define CLOSE_UP_END_RAN 0x80025198u
 #define COOP_SCRIPT_WAIT_RAN 0x80168388u
 
 #define TOME_SCRIPT_RAN 0x800082ACu  // the world's call, as a Tome closes, of the script an item left
@@ -8938,7 +8943,7 @@ static void coop_run_script(CPUState* cpu) {
                             (s32)cpu->gpr[3], cpu->lr, 10);
         coop_state_to_game(cpu, (s32)cpu->gpr[3]);
     }
-    if (!g_coop_screen || g_coop_use.active || (cpu->lr != PROMPT_USE_RAN && cpu->lr != WINDOW_CLOSE_RAN && cpu->lr != FOUND_CLOSE_RAN) ||
+    if (!g_coop_screen || g_coop_use.active || (cpu->lr != PROMPT_USE_RAN && cpu->lr != WINDOW_CLOSE_RAN && cpu->lr != FOUND_CLOSE_RAN && cpu->lr != CLOSE_UP_END_RAN) ||
         (s32)cpu->gpr[3] <= 0)
         return;
     const u32 ran = cpu->lr;
