@@ -101,3 +101,13 @@ if (!chosen && (!g_settings.mod_coop || g_coop_p2 == 0u))
 ## Older attempts
 
 Older failures are mostly recorded in code comments in `runtime/host/hle.c`, as what the code used to do and what went wrong, and in commit messages. Search both for the function or address before changing it.
+
+## Player 2's item whose script opens words
+
+**Leaving the script's word in the game's table.** In `tome_copy_left` both steps ran in the game's table. Closing the words then ran the script for player 2 from their own table (`coop_use_start`), where it had no word, so it began again from its start. It asked for the Tome again and waited for ever, with the words gone and no rune (`logs/run-20261103-122356-s1-p2`). What worked: move the word to their table when the words open.
+
+**Setting `r13-24928` and `r13-24924` back for the invisible players.** They differed in the invisible save, so I took them for the show flags, without checking. They aren't: the setter at `0x80043BE8` gives `r13-26276` and `r13-26272`, which were 1 all along. Nothing changed. What worked: `r13-23456`, found by patching a copy of the save and looking.
+
+## A thing found by player 1 going to player 2
+
+**Copying the found script's whole word to the other player's table.** Keeping both tables alike is right ("what is found is gone for both"), but the word has the script's timer at +4. With the urn, player 1's Broken Blue Urn left a timer for the rune, the copy ran out in `coop_script_timers`, and the rune, its close-up and the Tome's page all went to player 2 (`logs/run-20261103-*-s1-p1d`, frame 7457). What worked: the copy leaves the timer out.

@@ -7891,6 +7891,24 @@ static void magick_trace(CPUState* cpu) {
         was[i] = now;
     }
     have = true;
+    // And the story's flags (r13 - 26528: the count, then the bits), for what a thing found sets.
+    static u32 flags_was[256];
+    static bool flags_have;
+    const u32 set = mem_read32(cpu, cpu->gpr[13] - 26528u);
+    if (!guest_ram_range_valid(cpu, set, 4u))
+        return;
+    const u32 count = mem_read32(cpu, set);
+    const u32 words = (count + 31u) / 32u;
+    if (words > 256u || !guest_ram_range_valid(cpu, set + 4u, words * 4u))
+        return;
+    for (u32 i = 0u; i < words; i++) {
+        const u32 now = mem_read32(cpu, set + 4u + i * 4u);
+        for (u32 bit = 0u; flags_have && now != flags_was[i] && bit < 32u; bit++)
+            if (((now ^ flags_was[i]) >> bit & 1u) != 0u)
+                fprintf(stderr, "[flag] %u %s (frame %llu)\n", i * 32u + bit, (now >> bit & 1u) != 0u ? "on" : "off", (unsigned long long)(cpu->timebase / 675000ull));
+        flags_was[i] = now;
+    }
+    flags_have = true;
 }
 
 // Each player's spell list is their own: a spell one makes on the Magick page isn't the other's.
@@ -8334,6 +8352,7 @@ static void coop_play_hold(CPUState* cpu) {
 #define TW_WORLD_FRAMES 1u
 static const u32 kTwSwitches[] = {22216u, 23760u, 23456u, 24920u, 24048u, 21936u, 21996u, 21896u, 21892u, 21800u, 21796u, 21700u};
 #define TW_SWITCHES (sizeof kTwSwitches / sizeof kTwSwitches[0])
+#define TW_OBJECTS_OFF 2u  // r13 - 23456 in kTwSwitches
 static struct {
     bool sharing, world_tick, have_world;
     unsigned worlds_left;  // the world's frames to come before the Tome's, this one among them
@@ -8437,6 +8456,7 @@ static void tw_tome_start(CPUState* cpu) {
         tw_switches(cpu, g_tw.world, NULL);
         // The world's frames know of no menu (its asking may have set these already).
         g_tw.world[TW_SWITCHES] = g_tw.world[TW_SWITCHES + 1u] = 0u;
+        g_tw.world[TW_OBJECTS_OFF] = 0u;  // the Tome's own (0x8014ED04): kept, nobody moved or was drawn, then or after it
         g_tw.have_world = true;
     }
     g_hle_passthrough = true;
@@ -8888,6 +8908,7 @@ static void tw_mode_change(CPUState* cpu) {
         cpu->lr = lr;
         tw_switches(cpu, g_tw.world, g_tw.tome);
         g_tw.world[TW_SWITCHES] = g_tw.world[TW_SWITCHES + 1u] = 0u;
+        g_tw.world[TW_OBJECTS_OFF] = 0u;  // the Tome's own (0x8014ED04): kept, nobody moved or was drawn, then or after it
         mem_write32(cpu, sda - 26240u, 3u);
         mem_write32(cpu, sda - 26188u, 3u);
         mem_write32(cpu, sda - 26192u, TW_TOME_FRAME);
@@ -9403,6 +9424,10 @@ static void hle_coop_found(CPUState* cpu) {
     // split held player 1's view with the words in it a frame later.
     if (g_coop_use.active && g_coop_use.p2)
         g_coop_use.found = true;
+    // Player 1's is tied to the game's camera too, as their cast's: seen from player 2's it hung
+    // in their half. Theirs alone, as player 2's is.
+    else if (coop_busy(cpu))
+        g_coop_p1_cast_shown = true;
     // A thing given as a scene of theirs ends (the monk's key: the script goes on
     // as the game's, after the cutscene, with player 1 the player): theirs too, in
     // their half with their pad. It showed in both.
@@ -9871,10 +9896,14 @@ static void coop_script_timers(CPUState* cpu) {
                 at = to + i * 8u;
         }
         if (at != NULL) {
-            if (word != NULL)
+            if (word != NULL) {
                 memcpy(at, word, 8u);
-            else
+                // Not its timer: a script going on by one (the urn broken, then the rune inside)
+                // ran for the other player too, and what came next was theirs.
+                at[4] = at[5] = 0u;
+            } else {
                 memset(at, 0, 8u);
+            }
             coop_bytes(cpu, SCRIPT_STATES, game, SCRIPT_STATES_SIZE, false);
         }
     }
@@ -12135,6 +12164,14 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
                 memset(pad, 0, sizeof *pad);
                 pad->error = error;
             }
+            // Words in a Tome the game opened for player 2 (a rune they found) go on in the world's
+            // frames, and took player 1's B while their half showed them: player 2's pad for those.
+            if (owner == 1 && mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u) {
+                controls_set_tome_read(1);
+                controls_read_player2(pad);
+                controls_set_tome_read(-1);
+                pad->error = 0;
+            }
             return;
         }
         if (owner == 0) {
@@ -12440,6 +12477,34 @@ static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* s
         fprintf(stderr, "[tome-copy] its script opened words: no second step\n");
     }
     mem_write32(cpu, COOP_SPELL_ITEM, item_was);
+    // Words their item opened are theirs, in their half with their pad, as a close-up of theirs:
+    // with no Tome of the game's up, the words showed in player 1's half and took player 1's B.
+    // The script's word goes with them: closing the words runs it as theirs (coop_use_start), from
+    // their table, and from its start it asked for the Tome again and waited for ever.
+    if (mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u) {
+        g_coop_assist_at = 1u;
+        // From this frame: player 1's half showed the words for a moment first.
+        g_coop_screen = true;
+        coop_hold_player1();
+        for (u32 i = 0u; i < 10u; i++) {
+            const u32 word = SCRIPT_STATES + i * 8u;
+            if ((s16)mem_read16(cpu, word) != script)
+                continue;
+            u8* to = NULL;
+            for (u32 k = 0u; k < 10u && to == NULL; k++)
+                if ((s16)(g_coop_states.p2[k * 8u] << 8 | g_coop_states.p2[k * 8u + 1u]) == script)
+                    to = g_coop_states.p2 + k * 8u;
+            for (u32 k = 0u; k < 10u && to == NULL; k++)
+                if (g_coop_states.p2[k * 8u] == 0u && g_coop_states.p2[k * 8u + 1u] == 0u)
+                    to = g_coop_states.p2 + k * 8u;
+            if (to == NULL)
+                break;
+            coop_bytes(cpu, word, to, 8u, true);
+            for (u32 b = 0u; b < 8u; b += 4u)
+                mem_write32(cpu, word + b, 0u);
+            break;
+        }
+    }
     mem_write32(cpu, cpu->gpr[13] - 26324u, 0u);  // as the world's call, 0x800082B0
     g_tome_copy_use_script = 0;
     if (zones)
