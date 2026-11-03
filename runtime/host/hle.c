@@ -3896,8 +3896,12 @@ static void hle_PADRead(CPUState* cpu) {
         if (pad_log && (state[0].button != 0u || state[0].stick_x != 0 || state[0].stick_y != 0))
             fprintf(stderr, "[coop] player 2's pad: buttons 0x%04X stick %d %d (frame %llu)\n", state[0].button,
                     state[0].stick_x, state[0].stick_y, (unsigned long long)(cpu->timebase / 675000ull));
-        if (tw_world_turn() && g_coop_tome_owner == 1) {  // their pad is their Tome's
-            g_tw_taps |= state[0].button;
+        // Their pad is their Tome's, to the frames it closes on too: the A that chose
+        // an item to use was their attack, and the B that left a look at what they stood by.
+        const bool tome_pad = g_coop_tome_owner == 1 && !g_coop_screen;
+        if (tome_pad) {
+            if (tw_world_turn())
+                g_tw_taps |= state[0].button;
             const s32 error = state[0].error;
             memset(&state[0], 0, sizeof state[0]);
             state[0].error = error;
@@ -3909,7 +3913,7 @@ static void hle_PADRead(CPUState* cpu) {
         if ((g_coop_p2_hold & 0x0200u) != 0u)
             state[0].analog_b = 0u;
         // What's pressed in their Tome is not for the world (a B there ran a prompt's script).
-        g_coop_p2_buttons = hle_coop_tome_shares() && g_coop_tome_owner == 1 ? 0u : state[0].button;
+        g_coop_p2_buttons = state[0].button;
         state[0].button &= (u16)~0x1000u;  // their Start opens their own Tome (coop_menu_input)
         if (g_coop_screen)
             memset(&state[0], 0, sizeof state[0]);  // their pad runs the close-up instead
@@ -8887,7 +8891,39 @@ static bool continue_coop_use(CPUState* cpu) {
 #define FOUND_CLOSE_RAN 0x800244C0u
 #define COOP_SCRIPT_WAIT_RAN 0x80168388u
 
+#define TOME_SCRIPT_RAN 0x800082ACu  // the world's call, as a Tome closes, of the script an item left
+#define TOME_ITEM_CODE 0x80102000u  // the Inventory page's item actions
+#define TOME_ITEM_CODE_END 0x80104800u
+
 static void coop_run_script(CPUState* cpu) {
+    // An item player 2 used from their Tome. Its script asks if the player is in a zone
+    // ("Paul cannot use that now.": they stood there, player 1 did not, and the words were
+    // player 1's) and what it casts is cast by the controlled character. They are the
+    // player for both, in the Tome's call and as it goes on when the Tome closes.
+    const bool tome_item = cpu->lr == TOME_SCRIPT_RAN || (cpu->lr >= TOME_ITEM_CODE && cpu->lr < TOME_ITEM_CODE_END);
+    if (tome_item && g_coop_tome_owner == 1 && g_coop_p2 != 0u && !g_coop_use.active && sda_ready(cpu) &&
+        coop_listed(cpu, g_coop_p2)) {
+        const u32 args[3] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5]};
+        const u32 ran = cpu->lr;
+        u32 was[5], ignore = 0u;
+        const u32 object = mem_read32(cpu, g_coop_p2 + 52u);
+        u32 info = 0u;
+        const bool zones = hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) && guest_ram_range_valid(cpu, info, 184u);
+        coop_be_player2(cpu, true, was);
+        g_coop_turn_p1 = was[1];  // the Tome is player 1's (coop_has_tome)
+        g_coop_tome_cast = true;
+        if (zones)
+            coop_zones_swap(cpu, info, true);  // "is the player in this zone" (0x8016A7DC) is theirs
+        hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ignore);
+        if (zones)
+            coop_zones_swap(cpu, info, false);
+        g_coop_tome_cast = false;
+        coop_be_player2(cpu, false, was);
+        cpu->lr = ran;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
     g_hle_passthrough = true;
     // The game itself going on with a script of player 2's when what it waited for
     // is done (0x8016839C: the monk they rang for has come up the stairs): it goes
@@ -10316,7 +10352,7 @@ static void coop_script_item(CPUState* cpu) {
         !coop_listed(cpu, g_coop_p2))
         return;
     const u32 self = mem_read32(cpu, cpu->gpr[13] - 21492u);
-    const u32 first = g_coop_use.active && g_coop_use.p2 ? g_coop_use.was[1] : g_coop_turn ? g_coop_turn_p1 : 0u;
+    const u32 first = g_coop_use.active && g_coop_use.p2 ? g_coop_use.was[1] : g_coop_turn || g_coop_tome_cast ? g_coop_turn_p1 : 0u;
     const u32 other = self == g_coop_p2 ? first : g_coop_p2;
     if (!guest_ram_range_valid(cpu, other, CARRY_LIST + 4u))
         return;
