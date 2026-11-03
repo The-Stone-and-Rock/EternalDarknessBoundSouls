@@ -20,6 +20,8 @@ frame, not confirmed to be the effect).
   - The other player's bars and prompts are hidden while a Tome is open.
   - Untested: a door, cutscene, death or area change while a Tome is open; quick saving with a Tome open; save or load from the Tome; a Tome page other than the inventory.
 - Using an item holds player 2: when player 1 used an item from the Tome in slot 1 (script `0x5E6`), player 2 could not move until it finished. They should be able to move. Run `logs/run-20261102-193536-use-coop`, frames 8797 to 9210: player 2 stays at `-1225 -147 0` and no press of theirs is logged. Cause not found. A custom player 2 menu needs this fixed too.
+- Retest the monk's scene (player 2 rings the bell): a script's hold no longer counts as player 2's close-up, and that scene may use the same hold.
+- In the Tome room's first-entry scene, the right half (player 2's) stays on a close-up for the whole scene, while the left half plays the camera's moves. The user was happy with how it looks when player 2 triggers it.
 - Player 2 cannot cast in room `0x72` (needs a run with `ED_COOP_CAST_LOG=1`).
 - Both players held for about 30 seconds at the bottom of the stairs (room `0x67`),
   seen once, just after "the game's collision test ran on".

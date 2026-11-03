@@ -43,6 +43,12 @@ The script's check, `0x8016A7DC`, reads the zones' "inside" words, and player 1'
 
 **Finding a window's close only by the return address on the stack.** That fixed player 1, but player 2's script is started by `coop_use_start`, so the address isn't on their stack, and the window was still passed over (`logs/run-20261102-202844-p2-clock`). It also has to check `g_coop_use.resume` (`3cd22cc`).
 
+## Anthony's first Tome room scene showed player 1 when player 2 triggered it
+
+**Running the scene's script as player 2.** Script 1351 ran with `who 76 ctl 76`, and the picture still showed Anthony (`logs/cap-slot2-scene-p2`). The camera is aimed at the room's arrival spot, so it shows whoever stands there. What worked: player 2 takes the arrival spot, and player 1 goes beside them, in `coop_follow`.
+
+**Treating the move as a door, or comparing the scene with slot 3.** Slot 3 is Karim's chapter, with no first-entry scene. Compare frames with a solo run of the same save instead.
+
 ## Two game Tomes at once
 
 Set aside. Don't retry this by swapping more memory ranges. Details are in `docs/coop-two-tomes.md`.

@@ -34,6 +34,8 @@ This doesn't use the Tome, so a menu doesn't replace it. One record at `0x803071
 | Close the words | 2 to 3 | Through the window's close. Exit prompt (7) offered |
 | Exit | 3 to 4 | Stage set to 0, end script runs (2240 at the place traced) |
 
+Scene and transition belong to whoever triggered the room move. The other player is brought along automatically. To see how something should look, capture a solo run of the same save (`tools/coop-test/burst.ps1`), since logs don't show the picture.
+
 A chapter's scripts can also ask which character an object is (`0x8000C724`). Player 2 is told they're the chapter's own while they're the player.
 
 ## What a menu has to do

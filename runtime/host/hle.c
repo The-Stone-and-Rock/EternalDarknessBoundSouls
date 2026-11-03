@@ -7134,11 +7134,15 @@ static void notify_room_change(CPUState* cpu) {
 // A new room asked for since the cutscene began (coop_cutscene_over).
 static bool g_coop_room_asked;
 static bool g_coop_room_asked_now;  // and for coop_menu_input
+static bool g_coop_entered_p2;  // player 2 asked for the room: the first zone's scene there is theirs
+static s32 g_coop_arrival_scene;
 static unsigned long long g_trace_ticket_frame;  // ED_COOP_TRACE: both players' places, frame by frame, after this
 
 static void notify_room_ticket(CPUState* cpu) {
     g_coop_room_asked = true;
     g_coop_room_asked_now = true;
+    g_coop_entered_p2 = g_coop_p2 != 0u && mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u);
+    g_coop_arrival_scene = 0;
     g_trace_ticket_frame = cpu->timebase / 675000ull;
     if (getenv("ED_ROOM_LOG") != NULL)
         room_log(cpu, "ticket");
@@ -8092,7 +8096,16 @@ static void coop_controlled_id(CPUState* cpu) {
 #define COOP_PLAY_HOLD 0x80199EA0u
 #define COOP_ENCHANT_HOLDS 0x801C36B4u  // the return address
 
+// A script's own step holding play (0x8016820C), not a look opening: what a way out does
+// for its transition. Run as player 2's, it isn't a close-up of theirs: taken for one, the
+// transition showed in their half at their cameras, with player 1's view held.
+#define SCRIPT_HOLD_FROM 0x8016820Cu
+#define SCRIPT_HOLD_TO 0x801682A8u
+static bool g_coop_script_hold;
+
 static void coop_play_hold(CPUState* cpu) {
+    if (cpu->lr >= SCRIPT_HOLD_FROM && cpu->lr < SCRIPT_HOLD_TO && g_coop_p2 != 0u && sda_ready(cpu))
+        g_coop_script_hold = cpu->gpr[3] == 0u && mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u);
     if (cpu->lr != COOP_ENCHANT_HOLDS || g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu)) {
         g_hle_passthrough = true;
         return;
@@ -8890,7 +8903,7 @@ static bool continue_coop_use(CPUState* cpu) {
         coop_be_player2(cpu, false, g_coop_use.was);
         // What it opened is theirs from this frame on: player 1's half keeps
         // their last view from before it (not a frame with its words).
-        if (coop_busy(cpu) || g_coop_use.found) {
+        if ((coop_busy(cpu) && !g_coop_script_hold) || g_coop_use.found) {
             g_coop_screen = true;
             coop_hold_player1();
         }
@@ -8927,6 +8940,10 @@ static bool continue_coop_use(CPUState* cpu) {
 #define COOP_SCRIPT_WAIT_RAN 0x80168388u
 
 #define TOME_SCRIPT_RAN 0x800082ACu  // the world's call, as a Tome closes, of the script an item left
+#define ARRIVAL_ZONE_RAN 0x80134B38u
+#define ARRIVAL_TIMER_RAN 0x80163E5Cu
+#define ARRIVAL_END_RAN 0x801EC1C8u
+#define COOP_ARRIVAL_FRAMES 600ull
 #define TOME_ITEM_CODE 0x80102000u  // the Inventory page's item actions
 #define TOME_ITEM_CODE_END 0x80104800u
 
@@ -8939,8 +8956,17 @@ static void coop_run_script(CPUState* cpu) {
     // ("Paul cannot use that now.": they stood there, player 1 did not, and the words were
     // player 1's) and what it casts is cast by the controlled character. They are the
     // player for both, in the Tome's call and as it goes on when the Tome closes.
-    const bool tome_item = cpu->lr == TOME_SCRIPT_RAN || (cpu->lr >= TOME_ITEM_CODE && cpu->lr < TOME_ITEM_CODE_END);
-    if (tome_item && g_coop_tome_owner == 1 && g_coop_p2 != 0u && !g_coop_use.active && sda_ready(cpu) &&
+    const bool tome_item = (cpu->lr == TOME_SCRIPT_RAN || (cpu->lr >= TOME_ITEM_CODE && cpu->lr < TOME_ITEM_CODE_END)) && g_coop_tome_owner == 1;
+    // The first zone's script in a room player 2 asked for (the first time in a Tome's room,
+    // a scene of whoever arrives): the zone fires for player 1, standing where the game put
+    // them, and the scene showed them. It goes on from the timers and its end (0x801EC1C8).
+    if (g_coop_entered_p2 && cpu->timebase / 675000ull > g_trace_ticket_frame + COOP_ARRIVAL_FRAMES)
+        g_coop_entered_p2 = false;
+    if (g_coop_entered_p2 && g_coop_arrival_scene == 0 && cpu->lr == ARRIVAL_ZONE_RAN && !g_coop_prompt_look && !g_coop_turn && (s32)cpu->gpr[3] > 0)
+        g_coop_arrival_scene = (s32)cpu->gpr[3];
+    const bool arrival_scene = g_coop_entered_p2 && (s32)cpu->gpr[3] == g_coop_arrival_scene &&
+                               (cpu->lr == ARRIVAL_ZONE_RAN || cpu->lr == ARRIVAL_TIMER_RAN || cpu->lr == ARRIVAL_END_RAN);
+    if ((tome_item || arrival_scene) && g_coop_p2 != 0u && !g_coop_use.active && sda_ready(cpu) &&
         coop_listed(cpu, g_coop_p2)) {
         const u32 args[3] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5]};
         const u32 ran = cpu->lr;
@@ -9585,8 +9611,13 @@ static void coop_follow(CPUState* cpu, u32 player) {
     }
     float at[3];
     coop_place(cpu, o1, at);
-    for (u32 i = 0; i < 3u; i++)
-        guest_write_f32(cpu, o2 + i * 4u, at[i]);
+    for (u32 i = 0; i < 3u; i++) {
+        // They asked for the room: its arrival spot is theirs, what plays there framed on it.
+        const float arrival = guest_read_f32(cpu, o1 + i * 4u);
+        guest_write_f32(cpu, o2 + i * 4u, g_coop_entered_p2 ? arrival : at[i]);
+        if (g_coop_entered_p2)
+            guest_write_f32(cpu, o1 + i * 4u, at[i]);
+    }
     for (u32 i = 0; i < 4u; i++)  // facing as player 1
         mem_write32(cpu, o2 + 44u + i * 4u, mem_read32(cpu, o1 + 44u + i * 4u));
     stood_z = at[2];
@@ -11544,7 +11575,9 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     // A close-up player 2's press opened stops play for them; a moment
     // without (between its pages) does not end it.
     static unsigned closeup_grace;
-    bool closeup = !menu && !cutscene && (owner == 1 || g_coop_assist_at != 0u) && coop_busy(cpu);
+    if (!coop_busy(cpu))
+        g_coop_script_hold = false;
+    bool closeup = !menu && !cutscene && (owner == 1 || g_coop_assist_at != 0u) && coop_busy(cpu) && !g_coop_script_hold;
     if (closeup && owner == 1)
         closeup_grace = 20u;
     else if (!closeup && owner == 1 && closeup_grace > 0u && !menu && !cutscene) {
@@ -11556,10 +11589,10 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     // half and player 1's held. Play goes on as when player 1 asked for it.
     if (g_coop_room_asked_now) {
         g_coop_room_asked_now = false;
-        if (owner == 1 && !menu && !cutscene) {
+        if (!menu && !cutscene) {
             closeup = false;
             closeup_grace = 0u;
-            g_coop_assist_at = 0u;
+            g_coop_assist_at = 0u;  // or the new room's first scene is taken for theirs
         }
     }
     DolPadState p2;
