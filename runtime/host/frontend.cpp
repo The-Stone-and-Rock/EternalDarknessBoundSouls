@@ -2740,8 +2740,7 @@ float overlay_dp() {
 }
 
 // On-screen frames per second (game frames, i.e. calls here), refreshed each
-// second while the FPS counter option is on. With frames in between, the
-// screen's instead: every frame presented, which falls below the screen's
+// second while the FPS counter option is on: every picture presented, which falls below the screen's
 // rate only when frames in between are late and skipped. Drawn through Aurora's ImGui,
 // which covers the whole screen: the RmlUi context covers only the game
 // picture, so in 4:3 (and in the game's letterboxed scenes) the counter sat
@@ -2819,8 +2818,10 @@ void update_fps_counter() {
     const float dp = overlay_dp();
     ImFont* font = g_fps_font != nullptr ? g_fps_font : ImGui::GetFont();
     char text[32];
-    std::snprintf(text, sizeof text, "%d FPS",
-                  dol_aurora_frames_between() ? static_cast<int>(aurora_get_fps() + 0.5f) : shown_fps);
+    // Pictures shown, not this function's calls: with a Tome up in co-op the game loop takes turns between the
+    // world and the Tome, two or three passes to a picture, and it said 120 at a steady 60.
+    const int presented = static_cast<int>(aurora_get_fps() + 0.5f);
+    std::snprintf(text, sizeof text, "%d FPS", presented > 0 ? presented : shown_fps);
     const float size = 18.f * dp;
     const ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.f, text);
     const ImVec2 at{14.f * dp, 10.f * dp};
