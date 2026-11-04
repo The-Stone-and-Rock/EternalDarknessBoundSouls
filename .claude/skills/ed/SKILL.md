@@ -55,6 +55,6 @@ A recording holds only what it reads, so believe what the user saw over it. The 
 
 `ed test` runs every scenario in `tools/ed/scenarios` (nobody should hold a controller). A fix isn't done until it passes. When the user finds something a scenario missed, add one: their presses come from the run's log (`player N's pad`). `ed diff RUN_A RUN_B` shows what's new between two runs.
 
-`ED_RUN_SCRIPT=DELAY:SCRIPT,...` runs a level's script from the host, for reaching a door or an examine without walking there. It isn't a real zone or press: code that branches on those return addresses isn't exercised. `ED_RUN_FRAMES` closes every running copy of the game by name, so don't use it with one open. `tools/ed/facts/checks/watch_door.py RUN` reads a door frame by frame.
+`ED_COOP_P2_PUT=frame,x,y,z` puts player 2 at a place in the room, to reach a rope or a desk without a walk (`ed check` calls the jump SENT: allow it). `ED_RUN_SCRIPT=DELAY:SCRIPT,...` runs a level's script from the host, for reaching a door or an examine without walking there. It isn't a real zone or press: code that branches on those return addresses isn't exercised. `ED_RUN_FRAMES` closes every running copy of the game by name, so don't use it with one open. `tools/ed/facts/checks/watch_door.py RUN` reads a door frame by frame.
 
 `ED_INPUT_SCRIPT` goes round `controls.cpp`, so player 1's button handling needs the user's play. Say what wasn't covered.

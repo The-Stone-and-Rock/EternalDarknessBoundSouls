@@ -12,7 +12,7 @@
 
 Group and entry are in the level's room text.
 
-**`n` is bits:** 1 blends into the close-up, or it cuts. 2 (`ed221` only) falls back to words only. 4 calls `0x80043C88(0)` on opening and `(1)` on closing. That runs later in the frame (`0x80043CCC`, from `0x80008214`), on **main**'s list, and sets `r13-26272`, which gates the controller at `0x80007460`. What it hides on screen isn't known. The game changes `n` itself if `0x801F0638` or `0x801F077C` answers (kind 3 tests only the first), and `0x800255A4` answering clears bit 1.
+**`n` is bits:** 1 blends into the close-up, or it cuts. 2 (`ed221` only) falls back to words only. 4 calls `0x80043C88(0)` on opening and `(1)` on closing. That runs later in the frame (`0x80043CCC`, from `0x80008214`), on **main**'s list, and sets `r13-26272`, which gates the controller at `0x80007460`. In co-op it's kept out of a press: `coop_show_asked`. The game changes `n` itself if `0x801F0638` or `0x801F077C` answers (kind 3 tests only the first), and `0x800255A4` answering clears bit 1.
 
 **`ed221`'s tag** is the placed thing's: `0x801F6160(tag, r13-23276)`, the same as `fn78(2, tag)`. Script 1263 in level 2: `ed221(69, 3, Camera09, 0, 2029, -1)` is type 21, Bronze Necklace, room 217. If the thing is gone or carried it uses the last argument as the entry, and **if that's negative (116 of 124 calls) it stops asking**, so EXAMINE on it is gone for good.
 

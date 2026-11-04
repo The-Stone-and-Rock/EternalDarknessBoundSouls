@@ -1,0 +1,37 @@
+{
+ "name": "lever-tome-in-scene",
+ "proves": "Player 1's Tome opens over player 2's scene and closes after it: the scene ends as player 2's, and both walk.",
+ "save": "saves/lever.state",
+ "frames": 13800,
+ "seconds": 120,
+ "p1": "13000,13004,0x1000,0,0,0;13300,13304,0x1000,0,0,0;13500,13540,0x0000,100,0,0",
+ "p2": "12700,12703,b;12740,12743,b;12770,12880,ldown;12900,12906,a;13560,13600,lleft",
+ "source": "The bookshelf in Anthony's chapter, room 147, script 1794. saves/lever.state is a copy of the user's slot 9 of 2026-11-04 01:32, both players in front of it. The Yes/No is scrolled to, as the user did.",
+ "expect": [
+  {
+   "check": "log",
+   "pattern": "player 1's Tome opens in the copy, over player 2's close-up"
+  },
+  {
+   "check": "log",
+   "pattern": "runs for player 2 \\(frame 131"
+  },
+  {
+   "check": "moved",
+   "who": "p1",
+   "from": 13490,
+   "to": 13550,
+   "min": 20
+  },
+  {
+   "check": "moved",
+   "who": "p2",
+   "from": 13550,
+   "to": 13650,
+   "min": 50
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}

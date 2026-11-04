@@ -1,0 +1,17 @@
+{
+ "name": "p2cam-door",
+ "proves": "Player 1 walks through a door and player 2 is brought along: player 2's first look in the new room is at their new place, not at the old room's numbers. Anthony's chapter, room 147 to 150, as the user played it (logs/run-20261104-011724-p2cam-leave): the old numbers fell in CameraRgn07, so player 2 got Camera07 and lost themselves on the stairs. saves/p2cam-door.state is a copy of the user's slot 9 from that run.",
+ "save": "saves/p2cam-door.state",
+ "frames": 11100,
+ "seconds": 120,
+ "p1": "10760,10860,0x0000,-70,127,0",
+ "p2": "",
+ "source": "the user's stick from logs/run-20261104-011724-p2cam-leave, frames 11471-11521",
+ "expect": [
+  {"check": "no_log", "pattern": "script run r3 1067 "},
+  {"check": "room", "room": 150, "who": "both"},
+  {"check": "camera", "who": "p1", "frame": 11050, "name": "Camera01"},
+  {"check": "camera", "who": "p2", "frame": 11050, "name": "Camera01"},
+  {"check": "rules"}
+ ]
+}

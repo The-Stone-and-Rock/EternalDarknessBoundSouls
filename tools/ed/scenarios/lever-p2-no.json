@@ -1,0 +1,33 @@
+{
+ "name": "lever-p2-no",
+ "proves": "Player 2 answers No: nothing moves, and both play on.",
+ "save": "saves/lever.state",
+ "frames": 13350,
+ "seconds": 120,
+ "p1": "13160,13200,0x0000,100,0,0",
+ "p2": "12700,12703,b;12740,12743,b;12770,12880,ldown;12900,12906,b;13100,13140,lleft",
+ "source": "The bookshelf in Anthony's chapter, room 147, script 1794. saves/lever.state is a copy of the user's slot 9 of 2026-11-04 01:32, both players in front of it. The Yes/No is scrolled to, as the user did.",
+ "expect": [
+  {
+   "check": "no_log",
+   "pattern": "\\[flag\\] 373 on"
+  },
+  {
+   "check": "moved",
+   "who": "p2",
+   "from": 13090,
+   "to": 13160,
+   "min": 50
+  },
+  {
+   "check": "moved",
+   "who": "p1",
+   "from": 13150,
+   "to": 13220,
+   "min": 20
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}

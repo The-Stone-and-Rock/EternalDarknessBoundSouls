@@ -1,0 +1,45 @@
+{
+ "name": "lever-p1",
+ "proves": "Player 1 moves the book: the reference. The scene is theirs, player 2's camera stays, both walk after.",
+ "save": "saves/lever.state",
+ "frames": 13600,
+ "seconds": 120,
+ "p1": "12700,12703,0x0200,0,0,0;12740,12743,0x0200,0,0,0;12770,12880,0x0000,0,-127,0;12900,12906,0x0100,0,0,0;13360,13400,0x0000,100,0,0",
+ "p2": "13300,13340,lleft",
+ "source": "The bookshelf in Anthony's chapter, room 147, script 1794. saves/lever.state is a copy of the user's slot 9 of 2026-11-04 01:32, both players in front of it. The Yes/No is scrolled to, as the user did.",
+ "expect": [
+  {
+   "check": "log",
+   "pattern": "\\[flag\\] 373 on"
+  },
+  {
+   "check": "camera",
+   "who": "p1",
+   "frame": 13100,
+   "name": "PuzzleCam02"
+  },
+  {
+   "check": "camera",
+   "who": "p2",
+   "frame": 13100,
+   "name": "Camera01"
+  },
+  {
+   "check": "moved",
+   "who": "p1",
+   "from": 13350,
+   "to": 13450,
+   "min": 20
+  },
+  {
+   "check": "moved",
+   "who": "p2",
+   "from": 13290,
+   "to": 13350,
+   "min": 50
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}

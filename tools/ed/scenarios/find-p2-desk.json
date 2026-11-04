@@ -1,0 +1,48 @@
+{
+ "name": "find-p2-desk",
+ "proves": "Player 2 finds the Circle of Power on the desk: its close-up, find and tutorial words in their Tome all end, and they walk off. A close-up of theirs now lasts through a script's hold, so this checks one that ends in a find. Player 1 walks through it. They're put at the desk (ED_COOP_P2_PUT), not walked there.",
+ "save": "saves/p2cam-door.state",
+ "env": {
+  "ED_COOP_P2_PUT": "10740,413,115,-44"
+ },
+ "frames": 12300,
+ "seconds": 150,
+ "p1": "11100,11140,0x0000,100,0,0",
+ "p2": "10788,10791,b;10848,10851,b;10892,10902,b;10917,10926,b;10941,10950,b;11398,11403,b;11500,11600,ldown;11610,11616,b;11630,11730,ldown;11740,11746,b;11760,11860,ldown;11870,11876,b;11890,11990,ldown;12000,12006,b;12020,12120,ldown;12130,12136,b;12150,12250,ldown;12260,12266,b;12280,12380,ldown;12390,12396,b;",
+ "source": "player 2's presses from logs/run-20261104-012821-p2cam-fix, then scrolls and presses for the words",
+ "expect": [
+  {
+   "check": "log",
+   "pattern": "has acquired a .*Circle of Power"
+  },
+  {
+   "check": "log",
+   "pattern": "notice for player 1: .*Circle of Power"
+  },
+  {
+   "check": "log",
+   "pattern": "words: .*Quick Spell"
+  },
+  {
+   "check": "moved",
+   "who": "p1",
+   "from": 11090,
+   "to": 11150,
+   "min": 20
+  },
+  {
+   "check": "moved",
+   "who": "p2",
+   "from": 11990,
+   "to": 12250,
+   "min": 50
+  },
+  {
+   "check": "rules",
+   "allow": [
+    "SENT",
+    "CAMERA"
+   ]
+  }
+ ]
+}

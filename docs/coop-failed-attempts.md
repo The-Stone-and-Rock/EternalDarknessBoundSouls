@@ -160,3 +160,55 @@ hle_guest_call(cpu, COOP_SEND_EVENT, event, 4, 0.0, &ignore);
 ```
 
 What it left out, found since (`docs/game/systems/doors.md`, `Arrival`): the game reads this event's answer, the motion to play, and then sends event 191 with it. `hle_guest_call` returns only `r3`, and the answer is in `r4`.
+
+## Player 2's camera lost when player 1 leaves the room (2026-11-04)
+
+Not a failed attempt: the cause, kept here so it isn't chased again. Player 2's turn runs before `coop_follow` brings them, so their first look in the new room used the old room's numbers. In `logs/run-20261104-011724-p2cam-leave` those fell in room 150's `CameraRgn07` and `MuffledVoicesRgn01` (scripts 1067 and 933, `who 70`, frame 11535), and at their place on the stairs no region sets another camera. It depends on where they stood in the old room, so it can look fixed and come back. Fix: `coop_left_behind` skips their look and camera step until they're brought, and `coop_look_line` starts fresh on arrival. Scenario `p2cam-door`. Script-tested only until the user confirms it in play.
+
+## The bookshelf's lever (2026-11-04)
+
+Anthony's chapter, room 147, script 1794. Player 2's Yes hung the game for both. Five things were wrong, each hiding the next. Reference: `lever-p1` and a solo run of `saves/lever.state` (`logs/run-20261104-021859-solo-ref`).
+
+| What | Cause | Fix |
+|---|---|---|
+| The hang | The shelf calls the script back when it's done (event 6, `0x801F7748`), with player 1 the player and their word in. Player 2's word, at 100, the one that lets go, never ran | `coop_script_sends` notes who sent the thing; `coop_run_script` runs the call back for them |
+| Player 1 looked at the shelf with no press, and was held | A scene turns the zones off, and a look with them off clears the looker's inside words (`0x80134BE8`). Alone the controller doesn't run in a scene; player 1's does in player 2's close-up. Every zone then fired for them at its end | `coop_scan_player1` passes that look over |
+| The scene never showed in player 2's half | Its script's hold ended their close-up as it began | `closeup` in `coop_menu_input`: a script's hold doesn't begin one, but one begun stays theirs |
+| Player 1's EXAMINE gone after any close-up of player 2's | The game's use of a press clears what's on show (`0x80006FD8`), with player 1 still the player, so it took player 1's prompt, and zones ask only on the way in | `coop_prompt_clear` goes to player 1's only in their own turn. Player 2's stale DETAIL over their words went with it |
+| Player 1's icon still not seen | The game's element stayed at player 2's place: `coop_close_up_prompt` puts it back but wasn't reached as a close-up ends | Called at "play goes on" |
+
+**What didn't work:**
+
+- **Player 1's icon during player 2's close-up, using player 2's own element at player 1's place.** It showed in player 2's half: with the split's owner set, only their view draws the HUD. What worked: an element of player 1's own at `COOP_PROMPT_P1_AWAY`, which only player 1's view brings back (`coop_p1_icon_show`, `farRight` in `build_view`).
+- **Doing fn111 (`player_on`) to whoever asked, for Pius vanishing in the scene.** Run as player 2 at the frame's end (`0x80043CCC`, `0x80043C94`), Pius still vanished. It was the right function and the wrong fix: see below. Don't apply fn111 for the other player. Keep it out of the words altogether.
+- **Telling the user that walking during the scene and Pius vanishing were the game's limits.** They weren't, and the no-pause work already had the answer. Read what the words gate before calling something a limit.
+
+**Scripts:** the Yes/No is below the first page: scroll with the stick, or A does nothing. The same goes for the Tome's tutorial words. A press of player 2's during player 1's scene waits, and their close-up opens as it ends.
+
+**Not tested:** the monk's bell (it needs Paul in chapter 7, and no save has it), which is the likeliest other scene to feel `closeup` staying theirs through a hold. A state saved mid-scene: `g_coop_sent_script` isn't in save states, so one loaded there would hang as before.
+
+## The other player vanished and stopped during a scene (2026-11-04)
+
+The one cause for both: the game's show flags. `fn111(0)` (and a look's flag 4, `0x80043C88`) hide "the player" so a scene's camera sees past them. They're one set of words, read as "the player" at that moment:
+
+| Word | Reads it | What it did in co-op |
+|---|---|---|
+| `r13-26276` | `0x8002794C`: no draw if it's 0 and the object is `r13-26524` | The draw runs outside anyone's turn, so that's always player 1's body: Pius vanished whoever pressed |
+| `r13-26272` | `0x80007460`: main's controller doesn't run if it's 0 | Player 1's controller is where player 2's turn and player 1's turn both run (`hle_coop_controller`): nobody walked |
+
+What worked, `coop_show_asked`: asked for in a press of a player's, neither word is touched. The one who pressed goes from their own view alone, with what they hold, through the found item's marks (`g_coop_unseen`, `coop_found_mark`). Scenes with no press still go to the game.
+
+Then each hold had to let the other player go:
+
+| What | Cause | Fix |
+|---|---|---|
+| Player 2 stopped in player 1's scene | `coop_p1_close_up` asked for busy to be exactly 2, and a scene makes it 34, so the look ended as the scene began | `held` allows bit 32 |
+| Player 1 stopped in player 2's scene | `coop_script_hold_go` refuses anything but bit 2, so nothing was let go | `coop_hold_open` and `coop_hold_shut`, the code player 2's turn already had in player 1's look, now shared |
+| Player 2's icon made and freed every frame over their own scene | The pad's read in player 1's turn saw busy 0 | That turn puts the busy word back after opening the hold. The game is still told nobody's busy (`coop_busy_ask`) |
+| Player 1's EXAMINE stayed after they walked off during player 2's scene | `coop_scan_player1` passed over their zones with zones off, which also stopped them leaving one. Passing over had been the fix for the zones firing again | Their scan runs with zones on and puts the word back after |
+| Player 1 had no icon on walking back to the shelf during player 2's scene, or after it till they'd left its zone | `coop_run_script` left the zone's script to player 2's close-up. That's for a find, whose word was copied to them | Only when their own word for it has begun |
+| The other player's icon half off their half during a scene | The scene's bars cross the middle of the HUD, so `widescreen_hud_shift` left that band's side elements where they were | What spans a split's whole frame doesn't count as being in the middle (`gxcore_draw.cpp`). The bars' own check first looked for thin and untextured, and didn't catch them |
+
+`cutscene_playing` is false in this scene (`[trace] player 1's look over`: cutscene 0), though it shows bars. Which of its two asks says no wasn't traced. `coop_show_asked` stands aside whenever it's true.
+
+Scenarios: `lever-scene-p1-walks`, `lever-scene-p2-walks`. Test from standing, in the direction away from the shelf: walking into the shelf stops them and looks like this bug.

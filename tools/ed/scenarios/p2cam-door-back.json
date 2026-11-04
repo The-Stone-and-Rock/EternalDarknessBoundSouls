@@ -1,0 +1,37 @@
+{
+ "name": "p2cam-door-back",
+ "proves": "Player 1 through the door, then back: player 2 is brought along both ways with the room's own camera, not a zone of the old numbers. The way back is the door's script run from the host, not a walk.",
+ "save": "saves/p2cam-door.state",
+ "run_script": "460:892,520:892",
+ "frames": 11600,
+ "seconds": 80,
+ "p1": "10760,10860,0x0000,-70,127,0",
+ "p2": "",
+ "source": "written for the kit",
+ "expect": [
+  {
+   "check": "no_log",
+   "pattern": "script run r3 1067 "
+  },
+  {
+   "check": "camera",
+   "who": "p2",
+   "frame": 11000,
+   "name": "Camera01"
+  },
+  {
+   "check": "camera",
+   "who": "p2",
+   "frame": 11500,
+   "name": "Camera01"
+  },
+  {
+   "check": "room",
+   "room": 147,
+   "who": "both"
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}

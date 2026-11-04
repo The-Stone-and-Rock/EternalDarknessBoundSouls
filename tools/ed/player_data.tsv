@@ -57,3 +57,6 @@ r13	-21784	4	the fade's ticks	none: both players share one fade
 abs	0x80334388	1320	the Inventory's slots, 44 bytes each	tome_copy
 abs	0x80588DF0	8160	equipment, 20 records by holder id	coop_rehold
 abs	0x8058AFFC	44	the room change's ticket	coop_follow
+r13	-23040	4	zones on (0x8019C088, fn26, a scene): a look with them off clears the looker's inside words (0x80134BE8)	coop_scan_player1
+r13	-26276	4	show word (fn111): 0 leaves r13-26524's body undrawn (0x8002794C), which is player 1's whoever asked	coop_show_asked
+r13	-26272	4	show word for main (fn111, 0x80043C88): 0 stops main's controller (0x80007460) and with it both players' turns	coop_show_asked

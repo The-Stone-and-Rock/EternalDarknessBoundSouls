@@ -1,0 +1,32 @@
+{
+ "name": "p2cam-door-spot",
+ "proves": "As p2cam-door with player 2 standing somewhere else: which zone the old numbers fall in depends on where they stood.",
+ "save": "saves/p2cam-door.state",
+ "env": {
+  "ED_COOP_P2_PUT": "10730,800,400,-48"
+ },
+ "frames": 11200,
+ "seconds": 60,
+ "p1": "10760,10860,0x0000,-70,127,0",
+ "p2": "",
+ "source": "written for the kit",
+ "expect": [
+  {
+   "check": "camera",
+   "who": "p2",
+   "frame": 11100,
+   "name": "Camera01"
+  },
+  {
+   "check": "room",
+   "room": 150,
+   "who": "both"
+  },
+  {
+   "check": "rules",
+   "allow": [
+    "SENT"
+   ]
+  }
+ ]
+}

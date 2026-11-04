@@ -4,6 +4,16 @@ Written 2026-11-02. Read this first, then update it at the end of the session.
 
 ## Start here (updated 2026-11-03)
 
+**Player 2's camera when player 1 leaves a room: fixed 2026-11-04, confirmed by the user in play, uncommitted.** Their first look in the new room ran at the old room's numbers: `docs/coop-failed-attempts.md`. `ed test p2cam-door`.
+
+**The bookshelf's lever: fixed 2026-11-04 by script only, uncommitted, the user hasn't played it.** Player 2's Yes hung both. Five causes, in `docs/coop-failed-attempts.md`. `ed test lever-p2`. `saves/lever.state` and `saves/p2cam-door.state` are copies for the scenarios, so re-saving a slot doesn't break them.
+
+**The other player vanishing and stopping during a press's scene: fixed 2026-11-04 by script only, uncommitted, the user hasn't played it.** The game's show flags: `coop_show_asked`. `ed test lever-scene-p1-walks` and `lever-scene-p2-walks`. Each player's icon stays through the other's scene too. A press by player 1 on their own icon during player 2's scene is the thing to watch.
+
+**100 save state slots (2026-11-04).** The user will save glitched rooms in them to test. Ask which slot and what goes wrong, and copy a slot under its own name before a scenario uses it.
+
+**Held by the user:** a door tour in the kit (each door in a chapter, both players arriving with the right camera) and a way to move player 1. Don't build them until asked.
+
 **Pius's skeletal body, for either player (built 2026-11-04, the user has issues still to work out with the model: ask them what).** RB or C on Pius's frame in Character select. He's still made as Pius, with body 86 from level 13 filed under his number, and that body's own moves over his where it has them. `ed system players`, Bodies. Not established: RB on a real controller, the first-frame fix by eye, and one freeze at a door that didn't come back (`saves/reports/hang-20261104-004653`). His file has no door or ladder moves. The staff isn't added: the user may want it later.
 
 **Pickups and words don't stop either player, and the item shows only to whoever found it.** The user confirmed this in play for slot 1's urn, from both players. If it breaks again, read `docs/coop-no-pause.md` first: it lists each symptom and its cause. Don't rebuild it from scratch, and don't skip the close-up.

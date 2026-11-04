@@ -1,0 +1,47 @@
+{
+ "name": "lever-scene-p1-walks",
+ "proves": "Player 2 moves the book: from standing, player 1 walks during the scene with their own camera, and player 1's stay on: the game's show flags are kept out of it.",
+ "save": "saves/lever.state",
+ "frames": 13500,
+ "seconds": 120,
+ "p1": "13000,13120,0x0000,-100,-100,0",
+ "p2": "12700,12703,b;12740,12743,b;12770,12880,ldown;12900,12906,a;13360,13400,lleft",
+ "source": "The bookshelf in Anthony's chapter, room 147, script 1794, the user's rule: the other player keeps playing and stays in the scene. saves/lever.state is a copy of the user's slot 9 of 2026-11-04 01:32.",
+ "expect": [
+  {
+   "check": "log",
+   "pattern": "\\[flag\\] 373 on"
+  },
+  {
+   "check": "log",
+   "pattern": "player 2 is hidden from their own view alone"
+  },
+  {
+   "check": "log",
+   "pattern": "player 1's prompt 6 in player 2's close-up"
+  },
+  {
+   "check": "camera",
+   "who": "p2",
+   "frame": 13100,
+   "name": "PuzzleCam02"
+  },
+  {
+   "check": "moved",
+   "who": "p1",
+   "from": 13000,
+   "to": 13120,
+   "min": 200
+  },
+  {
+   "check": "moved",
+   "who": "p2",
+   "from": 13350,
+   "to": 13450,
+   "min": 50
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}

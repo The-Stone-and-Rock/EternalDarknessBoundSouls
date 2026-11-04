@@ -1,0 +1,69 @@
+{
+ "name": "lever-p2",
+ "proves": "Player 2 moves the book: the scene shows in their half on the room's PuzzleCams, player 1 keeps their camera, its end runs as player 2's (the hang), neither player's zones fire again by themselves, and both walk after.",
+ "save": "saves/lever.state",
+ "frames": 13600,
+ "seconds": 120,
+ "p1": "13300,13340,0x0000,100,0,0",
+ "p2": "12700,12703,b;12740,12743,b;12770,12880,ldown;12900,12906,a;13360,13400,lleft",
+ "source": "The bookshelf in Anthony's chapter, room 147, script 1794. saves/lever.state is a copy of the user's slot 9 of 2026-11-04 01:32, both players in front of it. The Yes/No is scrolled to, as the user did.",
+ "expect": [
+  {
+   "check": "log",
+   "pattern": "\\[flag\\] 373 on"
+  },
+  {
+   "check": "log",
+   "pattern": "runs for player 2 \\(frame 131"
+  },
+  {
+   "check": "no_log",
+   "pattern": "run r3 1794 r4 -?\\d+ lr 0x80134B38 who 1 "
+  },
+  {
+   "check": "no_log",
+   "pattern": "holds them alone"
+  },
+  {
+   "check": "camera",
+   "who": "p2",
+   "frame": 12950,
+   "name": "PuzzleCam01"
+  },
+  {
+   "check": "camera",
+   "who": "p2",
+   "frame": 13100,
+   "name": "PuzzleCam02"
+  },
+  {
+   "check": "camera",
+   "who": "p1",
+   "frame": 13100,
+   "name": "Camera01"
+  },
+  {
+   "check": "camera",
+   "who": "p2",
+   "frame": 13280,
+   "name": "Camera01"
+  },
+  {
+   "check": "moved",
+   "who": "p1",
+   "from": 13290,
+   "to": 13350,
+   "min": 20
+  },
+  {
+   "check": "moved",
+   "who": "p2",
+   "from": 13350,
+   "to": 13450,
+   "min": 50
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}
