@@ -66,7 +66,7 @@ namespace {
 
 // --- Input ------------------------------------------------------------------
 
-enum Button { kUp, kDown, kLeft, kRight, kAccept, kBack, kMenu, kButtonCount };
+enum Button { kUp, kDown, kLeft, kRight, kAccept, kBack, kMenu, kCostume, kButtonCount };
 
 SDL_Gamepad* g_pad = nullptr;
 
@@ -101,6 +101,7 @@ void read_buttons(bool held[kButtonCount]) {
     held[kBack] = btn(SDL_GAMEPAD_BUTTON_EAST);
     // The GameCube pad has no Back/Select, so the game never sees it.
     held[kMenu] = btn(SDL_GAMEPAD_BUTTON_BACK);
+    held[kCostume] = btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
 }
 
 // Keyboard presses since the last poll, from RmlUi key events.
@@ -146,6 +147,7 @@ public:
             g_key_pressed[kMenu] = true;
             break;
         case KI_BACK: case KI_K: g_key_pressed[kBack] = true; break;
+        case KI_C: g_key_pressed[kCostume] = true; break;
         default: break;
         }
     }
@@ -497,6 +499,11 @@ int& chosen_character() {
     return g_characters_player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
 }
 
+// Pius's other body, for whoever's page this is (hle.c costume_on).
+int& chosen_costume() {
+    return g_characters_player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume;
+}
+
 int& chosen_stats() {
     return g_characters_player == 1 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats;
 }
@@ -534,7 +541,11 @@ const CharacterInfo kCharacterInfo[13] = {
 std::string character_details_rml(int i) {
     const CharacterInfo& c = kCharacterInfo[i];
     std::string out = "<div class=\"bio\"><div class=\"bio-name\">" + escape(kCharacters[i]) +
-                      "</div><div class=\"bio-year\">" + escape(c.year) + "</div><div class=\"bio-about\">" +
+                      "</div><div class=\"bio-year\">" + escape(c.year) +
+                      (i == 1 ? std::string(" &#183; ") + (chosen_costume() != 0 ? "Skeletal form" : "His own form") +
+                                    " (RB or C to change)"
+                              : std::string()) +
+                      "</div><div class=\"bio-about\">" +
                       escape(c.about) + "</div><div class=\"meters\">";
     // Bars on one scale (150, the most any has), in the game's own colours.
     const struct {
@@ -868,6 +879,8 @@ void build_mods_rows() {
     auto character_row = [](int player) {
         const int chosen = player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
         Row r{player == 1 ? "Player 2 character" : "Player 1 character", kCharacters[chosen]};
+        if (chosen == 1 && (player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume) != 0)
+            r.value += ", skeletal";
         if ((player == 1 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats) == 1)
             r.value += " (own stats)";
         r.page = 1;
@@ -2020,7 +2033,8 @@ void render() {
     g_doc->GetElementById("hint")->SetInnerRML(
         g_screen == Screen::InGame    ? "Up/Down choose &#183; Left/Right change &#183; A select &#183; B resume"
         : g_screen == Screen::Problem ? "Up/Down choose &#183; A select"
-        : g_screen == Screen::Characters ? "Arrows choose &#183; A select &#183; B back"
+        : g_screen == Screen::Characters ? (g_selected == 0 ? "Arrows choose &#183; A select &#183; RB or C costume &#183; B back"
+                                                            : "Arrows choose &#183; A select &#183; B back")
                                       : "Up/Down choose &#183; Left/Right change &#183; A select &#183; B back");
     g_doc->SetClass("spread", spread);
     // The main menu opens with the emblem instead of a heading.
@@ -2345,6 +2359,12 @@ bool run_menu() {
             if (pressed[kUp] || pressed[kDown] || pressed[kLeft] || pressed[kRight]) {
                 move_in_roster(pressed[kLeft] ? -1 : pressed[kRight] ? 1 : 0,
                                pressed[kUp] ? -1 : pressed[kDown] ? 1 : 0);
+                dirty = true;
+            }
+            // Pius's frame: his other form, the body only.
+            if (pressed[kCostume] && g_selected == 0) {
+                chosen_costume() = chosen_costume() != 0 ? 0 : 1;
+                settings_save();
                 dirty = true;
             }
         } else {

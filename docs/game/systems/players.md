@@ -29,3 +29,15 @@ Every save holds the same in both, so only the code tells them apart. `0x801F5F8
 **When something works for one player and not the other:** run the working function through `ed needs` and compare what their turn has with what this one lacks. See "The pattern behind many of these bugs" in `docs/coop-next-session.md`.
 
 **Each turn:** `hle_coop_controller` is player 1's, and `coop_player1_turn` is theirs during player 2's close-up.
+
+## Bodies
+
+**A body is only the mesh and its bones.** Moves come from the character's file (`chars/charNNNN.cpk`), and name and stats from who they're made as. Each level's `U_LevelNN.bin` has a list of bodies by character number: `ED_BORROW_CHAPTER=N` with a character whose body isn't there prints the level's list, with sizes and bones. Level 1 has only 0, Pius. Level 13 has 9, 86, 96 to 98, 139 and 142 to 147.
+
+**A player's body is read from the chapter's list (`r13-26452`) by their number as they're made.** So to change only the body, file another body under their number before the making, as `costume_file` does for Pius (number 0) with body 86 from level 13. `ed151` changes it in play for the story, Anthony's rotting, but also changes the number and reopens the moves.
+
+**A body twists on another's moves, so each must play its own file's.** That's the rule from `a36ae62`, `086e16e` and `f91f649`, and it held here: on Pius's moves, body 86's robe flew about and his motions ended after 9 frames instead of playing out. On its own moves it looks right. `p2_moves_load` loads a part from any character's file, and `costume_moves` writes that part's moves over the wearer's table each frame, since a change of weapon remakes it. A table is 170 pointers by move number, and all files use the same numbers.
+
+**A body's file may not have every move.** `char0086.cpk` has one part of 17: 2 (walk), 3, 4 (attack), 5, 6, 15, 16, 17 (stand), 24, 77 to 81, 118, 155, 156. It has no 25, 103 or 104, so door and ladder motions stay Pius's and are cut short after a few frames, with no arrival motion. The player stands through the fade. Weapon moves not in its list stay Pius's too. To check a file's moves, read `tools/ed/facts/checks/moves_of.py N`.
+
+**One freeze wasn't explained:** `saves/reports/hang-20261104-004653`, at a door in costume, in the one run with `ED_ANIM_TRACE` on, walking and attacking. The same run without it passed twice. The main thread was waiting at `0x800085E8`. Watch for it.

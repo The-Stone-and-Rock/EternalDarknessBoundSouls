@@ -12,6 +12,7 @@ The goal: the game believes it was built for two players, using what the game al
 | Pickups, words and examines don't stop the other player | Confirmed on slot 1's urn and rune, and Paul's podium | `coop_no_pause`, `coop_words_hold`, `coop_find_hold`. `docs/coop-no-pause.md` lists each symptom | Skip the close-up: its opening and closing give the item |
 | The item shows only to its finder, once; the other gets a notice | Confirmed on the urn | `coop_found_for_finder`, `coop_found_mark`, `coop_found_notice` | Hold the other half |
 | Character choice for each player, their names in the game's words | Works | `mod_p1_character`, `mod_p2_character`, `hle_object_model` | Compare a scene across chapters: compare with solo on the same save |
+| Pius's other body, each player's, RB or C on his frame | Built, not yet confirmed by the user | `costume_on`, `costume_file`, `costume_moves` in `hle.c`, `chosen_costume` in `frontend.cpp` | Add a separate character for it: he stays Pius |
 | Whoever triggers a room or scene gets it; the other follows | The user's rule | `coop_follow`, `48b6c88` | Treat one player walking in second: there's no such thing |
 | Player 2's prompts, and their close-ups in their half | Works | `coop_close_up_prompt`, `coop_prompt_player1s`, `coop_scan_player1` | |
 | Player 2's own bars, weapons and hold | Works | `coop_rehold`, `0832701` | |

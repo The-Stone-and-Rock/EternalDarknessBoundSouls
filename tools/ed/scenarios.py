@@ -3,7 +3,7 @@ plays it, and checks the rules. A fix isn't done until these pass: the user shou
 
 A scenario is JSON:
   name, what it proves, save, p1 (ED_INPUT_SCRIPT presses), p2 (ED_PAD2_SCRIPT presses), frames (when to close),
-  run_script (ED_RUN_SCRIPT, DELAY:SCRIPT,...: a script run as a zone would, twice for its zone and its prompt's press)
+  env (more variables for the run), run_script (ED_RUN_SCRIPT, DELAY:SCRIPT,...: a script run as a zone would, twice for its zone and its prompt's press)
   expect: list of checks, each {"check": ..., ...}:
     log       pattern must appear in the run's log
     no_log    pattern must not
@@ -11,6 +11,7 @@ A scenario is JSON:
     moved     who walked at least min units from frame `from` to `to`, or while `during` is true: window, busy, screen, words_p1, words_p2
     stayed    who stayed within max units over the same
     camera    who's camera is the room's camera `name` at `frame` (from the room's table on the disc)
+    field     who's field (p1hp, p1m...) reads `value` on the run's last frame
     plays     who was at some point in player state `state` with motion `anim`
     room      the run ends in room `room`; with who: both, player 2 ended within `within` units of player 1 (default 400)
     rules     no findings from `ed check`, other than those in `allow`
@@ -46,6 +47,7 @@ def run_game(s):
     env['ED_INPUT_SCRIPT'] = s.get('p1', '')
     env['ED_PAD2_SCRIPT'] = s.get('p2', '')
     env['ED_RUN_SCRIPT'] = s.get('run_script', '')
+    env.update(s.get('env', {}))
     r = subprocess.run(['sh', 'tools/ed/run.sh', s['save'], name], cwd=disc.ROOT, env=env, capture_output=True, text=True, errors='replace')
     # run.sh's first line is this run's folder. A name search could find an older run when this one never started, and pass it.
     lines = (r.stdout or '').strip().split('\n')
@@ -108,6 +110,10 @@ def judge(s, run, rows):
             have = recording.camera_name(rooms, r, c['who'])
             if have != c['name']:
                 fails.append('%s\'s camera at frame %d is %s, wanted %s' % (c['who'], r['frame'], have, c['name']))
+        elif kind == 'field':
+            last = rows[-1] if rows else {}
+            if last.get(c['field']) != c['value']:
+                fails.append('%s is %s at the end, wanted %s' % (c['field'], last.get(c['field']), c['value']))
         elif kind == 'plays':
             st, an = ('%sst' % c['who'], '%sanim' % c['who'])
             if not any(r.get(st) == c['state'] and r.get(an) == c['anim'] for r in rows):

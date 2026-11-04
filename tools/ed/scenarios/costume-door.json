@@ -1,0 +1,56 @@
+{
+ "name": "costume-door",
+ "proves": "Player 1 as Pius in his other body: still model 0 with his own stats, walks and attacks on the body's own moves, goes through a door by the game's script, and nothing freezes. Player 2 follows. The door's motion isn't its own: that file has none.",
+ "save": "saves/slot7.state",
+ "env": {
+  "ED_COSTUME": "1,0",
+  "ED_TEST_P1_CHARACTER": "0,1"
+ },
+ "run_script": "1000:656,1060:656",
+ "frames": 25000,
+ "seconds": 80,
+ "p1": "24100,24150,0x0000,0,100,0;24170,24220,0x0000,100,0,0;24300,24304,0x0100,0,0,0",
+ "p2": "",
+ "expect": [
+  {
+   "check": "log",
+   "pattern": "player 1 wears Pius's other body"
+  },
+  {
+   "check": "log",
+   "pattern": "part 0 of /Chars/char0086.cpk"
+  },
+  {
+   "check": "moved",
+   "who": "p1",
+   "from": 24100,
+   "to": 24220,
+   "min": 50
+  },
+  {
+   "check": "plays",
+   "who": "p1",
+   "state": 1,
+   "anim": 2
+  },
+  {
+   "check": "plays",
+   "who": "p1",
+   "state": 6,
+   "anim": 4
+  },
+  {
+   "check": "room",
+   "room": 154,
+   "who": "both"
+  },
+  {
+   "check": "field",
+   "field": "p1m",
+   "value": 0
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}

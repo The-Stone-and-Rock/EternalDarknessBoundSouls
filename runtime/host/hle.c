@@ -6771,6 +6771,28 @@ static int player_model(void) {
     return choice >= 1 && choice <= 12 ? kPlayerModel[choice - 1] : -1;
 }
 
+// Pius's other body, the Liche: Alex's last chapter has it (the list of bodies in
+// U_Level13.bin, as character 86). Only the body: his file's moves, his name and
+// his stats stay, because he is still made as Pius, with this body filed under
+// his number (costume_file). ED_COSTUME=p1,p2 (testing) overrides the settings.
+#define PIUS_MODEL 0
+#define COSTUME_BODY 86
+#define COSTUME_CHAPTER 13
+
+static bool costume_on(int player) {
+    static int test[2] = {-2, -2};
+    if (test[0] == -2) {
+        const char* t = getenv("ED_COSTUME");
+        if (t == NULL || sscanf(t, "%d,%d", &test[0], &test[1]) != 2)
+            test[0] = test[1] = -1;
+    }
+    if (test[player] >= 0)
+        return test[player] != 0;
+    if (player == 0)
+        return g_settings.mod_p1_character == 1 && g_settings.mod_p1_costume != 0;
+    return g_settings.mod_coop && g_settings.mod_p2_character == 1 && g_settings.mod_p2_costume != 0;
+}
+
 static int player_type(int model) {
     for (int i = 0; i < 12; i++)
         if (kPlayerModel[i] == model)
@@ -6822,6 +6844,7 @@ static void hle_chapter_body(CPUState* cpu) {
 #define SCRATCH_RAM 0x81800000u
 #define SCRATCH_BODY 0x81C00000u  // past the most level data unpacks to (0x3D3100 bytes)
 #define SCRATCH_BODY2 0x81E00000u  // player 2's (co-op), when theirs is another chapter's too
+#define SCRATCH_COSTUME 0x81F00000u  // the costume's body (costume_file)
 #define SCRATCH_HUD 0x81FFF000u  // player 2's bars (coop_bar_copy), COOP_BAR_SLOT each
 #define SCRATCH_END 0x82000000u
 static struct {
@@ -6862,7 +6885,9 @@ static struct {
 static struct {
     int model, part;  // what is in the slot, -1 nothing
     u32 ready, sets;
-} g_p2_moves[P2_MOVES_SLOTS] = {{-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}};
+} g_p2_moves[P2_MOVES_SLOTS + 2] = {{-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}};
+// The costume's own moves: past the four, and past the first body (slot 4 would be on SCRATCH_BODY).
+#define COSTUME_MOVES_SLOT 5
 
 // A part's place in a file's list (16 bytes each, the id at +8), or -1.
 static int moves_listed(CPUState* cpu, u32 list, u32 count, int part) {
@@ -6886,7 +6911,7 @@ static int moves_part(CPUState* cpu, u32 list, u32 count, int part) {
 }
 
 static void p2_moves_clear(void) {
-    for (int k = 0; k < P2_MOVES_SLOTS; k++)
+    for (int k = 0; k < P2_MOVES_SLOTS + 2; k++)
         g_p2_moves[k].model = g_p2_moves[k].part = -1;
 }
 
@@ -7009,6 +7034,48 @@ static void hle_moves_want(CPUState* cpu) {
     hle_set_u32(cpu, 1u);
 }
 
+// A body twists on another's moves: each must play its own file's (a36ae62, 086e16e).
+// The costume's file has only 17, with the same numbers as a playable's: standing and
+// more, no door or ladder. So wherever it has a move, its own goes in the wearer's table
+// over Pius's (a table is 170 pointers by number, which a change of weapon remakes:
+// so this looks each frame), and what it hasn't stays Pius's.
+static bool costume_object(CPUState* cpu, u32 object);
+
+static void costume_moves_on(CPUState* cpu, u32 object) {
+    static bool failed;
+    if (failed || !costume_object(cpu, object))
+        return;
+    const u32 table = mem_read32(cpu, object + 648u);
+    if (!guest_ram_range_valid(cpu, table, 170u * 4u))
+        return;
+    if (g_p2_moves[COSTUME_MOVES_SLOT].model != COSTUME_BODY && !p2_moves_load(cpu, COSTUME_MOVES_SLOT, COSTUME_BODY, 0)) {
+        failed = true;
+        return;
+    }
+    const u32 sets = g_p2_moves[COSTUME_MOVES_SLOT].sets;
+    const u32 n = mem_read16(cpu, g_p2_moves[COSTUME_MOVES_SLOT].ready + 20u);
+    for (u32 i = 0u; i < n; i++) {
+        const u32 id = mem_read32(cpu, sets + i * 16u);
+        if (id < 170u)
+            mem_write32(cpu, table + id * 4u, sets + i * 16u);
+    }
+}
+
+// Each frame, for what remakes the table with no move played yet (a change of weapon).
+static void costume_moves(CPUState* cpu, u32 node) {
+    if (node != 0u && guest_ram_range_valid(cpu, node + 52u, 4u))
+        costume_moves_on(cpu, mem_read32(cpu, node + 52u));
+}
+
+// And before any move of theirs is looked up, so the first is their own: from the frame's
+// look alone, the first picture after they were made showed Pius's standing, twisted.
+#define PLAY_BY_NUMBER 0x80122920u
+
+static void hle_play_by_number(CPUState* cpu) {
+    g_hle_passthrough = true;
+    costume_moves_on(cpu, cpu->gpr[3]);
+}
+
 // A player playing from a slot not theirs (player 2 from the others', player
 // 1 from player 2's), or player 2 holding another's moves (a state saved
 // while they shared one): theirs asked for again, the same part.
@@ -7077,6 +7144,14 @@ static int borrow_p2(void) {
     return p2 >= 0 && g_chapter_model >= 0 && p2 != g_chapter_model && p2 != p1 ? p2 : -1;
 }
 
+// The costume's body, unless this chapter's own list has it (Alex's last).
+static bool borrow_costume(CPUState* cpu) {
+    if (!costume_on(0) && !costume_on(1))
+        return false;
+    const u32 own = pack_list(cpu, g_pack.pack, false);
+    return own != 0u && mem_read32(cpu, own) > COSTUME_BODY && mem_read32(cpu, own + 8u + COSTUME_BODY * 8u) == 0u;
+}
+
 static unsigned g_playables_made;  // records of the chapter's kind made since the chapter loaded
 
 static void hle_pack_load(CPUState* cpu) {
@@ -7093,7 +7168,7 @@ static void hle_pack_load(CPUState* cpu) {
             g_chapter_model = kChapterModel[chapter];
         g_playables_made = 0u;
     }
-    if (g_pack.stage == 0 && cpu->lr == CHAPTER_PACK_CALL && (borrow_p1() >= 0 || borrow_p2() >= 0)) {
+    if (g_pack.stage == 0 && cpu->lr == CHAPTER_PACK_CALL && (borrow_p1() >= 0 || borrow_p2() >= 0 || costume_on(0) || costume_on(1))) {
         g_pack.caller = cpu->lr;
         g_pack.stage = 1;
         cpu->lr = HLE_PACK_RETURN;
@@ -7112,14 +7187,19 @@ static bool start_borrow(CPUState* cpu, int model, u32 kept) {
     for (int c = 0; c < 12 && chapter < 0; c++)
         if (kChapterModel[c] == model)
             chapter = c;
+    if (model == COSTUME_BODY)
+        chapter = COSTUME_CHAPTER;
     if (chapter < 0)
         return false;
     if (cpu->ram_size < SCRATCH_END - GC_RAM_BASE) {
         fprintf(stderr, "[player] no scratch for their chapter's data: %d has no body\n", model);
         return false;
     }
+    // ED_BORROW_CHAPTER=n (testing): another chapter's data, to list its bodies.
+    if (getenv("ED_BORROW_CHAPTER") != NULL)
+        chapter = atoi(getenv("ED_BORROW_CHAPTER"));
     char name[48];
-    if (model == ANTHONY)
+    if (model == ANTHONY && getenv("ED_BORROW_CHAPTER") == NULL)
         snprintf(name, sizeof name, "/U_Tony0.bin");
     else
         snprintf(name, sizeof name, "/levels/level%02d/U_Level%02d.bin", chapter, chapter);
@@ -7147,7 +7227,8 @@ static bool continue_pack_load(CPUState* cpu) {
         g_pack.base = mem_read32(cpu, cpu->gpr[13] - LEVEL_HEAP_BASE);
         g_pack.used = mem_read32(cpu, cpu->gpr[13] - LEVEL_HEAP_USED);
         if ((borrow_p1() >= 0 && start_borrow(cpu, borrow_p1(), SCRATCH_BODY)) ||
-            (borrow_p2() >= 0 && start_borrow(cpu, borrow_p2(), SCRATCH_BODY2)))
+            (borrow_p2() >= 0 && start_borrow(cpu, borrow_p2(), SCRATCH_BODY2)) ||
+            (borrow_costume(cpu) && start_borrow(cpu, COSTUME_BODY, SCRATCH_COSTUME)))
             return true;
     } else if (g_pack.stage == 2) {
         // Theirs made addresses (pack, then its list); the body's address goes
@@ -7173,7 +7254,7 @@ static bool continue_pack_load(CPUState* cpu) {
             // next one unpacks over it.
             const u32 size = mem_read32(cpu, theirs + 12u + want * 8u);
             const u32 kept = g_pack.kept;
-            const u32 room = (g_pack.kept == SCRATCH_BODY ? SCRATCH_BODY2 : SCRATCH_HUD) - kept;
+            const u32 room = (g_pack.kept == SCRATCH_BODY ? SCRATCH_BODY2 : g_pack.kept == SCRATCH_BODY2 ? SCRATCH_COSTUME : SCRATCH_HUD) - kept;
             if (size != 0u && size <= room && guest_ram_range_valid(cpu, body, size) &&
                 guest_ram_range_valid(cpu, kept, size)) {
                 memmove(cpu->ram + (kept - GC_RAM_BASE), cpu->ram + (body - GC_RAM_BASE), size);
@@ -7186,14 +7267,23 @@ static bool continue_pack_load(CPUState* cpu) {
             fprintf(stderr, "[player] no body for %u in their chapter's pack\n", want);
             if (theirs != 0u) {
                 fprintf(stderr, "[player] its bodies (%u):", mem_read32(cpu, theirs));
-                for (u32 i = 0; i < mem_read32(cpu, theirs) && i < 200u; i++)
-                    if (mem_read32(cpu, theirs + 8u + i * 8u) != 0u)
-                        fprintf(stderr, " %u", i);
+                for (u32 i = 0; i < mem_read32(cpu, theirs) && i < 200u; i++) {
+                    const u32 them = mem_read32(cpu, theirs + 8u + i * 8u);
+                    if (them == 0u)
+                        continue;
+                    // Each body's size and its bones (+8): moves fit only a body with as many.
+                    fprintf(stderr, " %u", i);
+                    if (guest_ram_range_valid(cpu, them, 16u))
+                        fprintf(stderr, "(%uB,%ub)", mem_read32(cpu, theirs + 12u + i * 8u), mem_read16(cpu, them + 8u));
+                }
                 fprintf(stderr, "\n");
             }
         }
         // Then player 2's, when theirs is borrowed too.
         if (g_pack.kept == SCRATCH_BODY && borrow_p2() >= 0 && start_borrow(cpu, borrow_p2(), SCRATCH_BODY2))
+            return true;
+        // Then the costume's.
+        if (g_pack.kept != SCRATCH_COSTUME && borrow_costume(cpu) && start_borrow(cpu, COSTUME_BODY, SCRATCH_COSTUME))
             return true;
     } else {
         return false;
@@ -7490,6 +7580,45 @@ static void story_player_model(CPUState* cpu) {
 
 static bool g_coop_spawning;  // coop_spawn is making player 2
 
+// A character's body is taken from the chapter's list by their number as they're
+// made, so what's filed under Pius's number as a player is made is what they wear.
+// His own entry is kept, to put back for the other player or with the costume off.
+static void costume_file(CPUState* cpu, bool on) {
+    static u32 plain_list, plain[2];
+    const u32 list = mem_read32(cpu, cpu->gpr[13] - 26452u);
+    if (!guest_ram_range_valid(cpu, list, 8u) || mem_read32(cpu, list + 4u) != 0x6B5u || mem_read32(cpu, list) <= COSTUME_BODY)
+        return;
+    const u32 entry = list + 8u + PIUS_MODEL * 8u, costume = list + 8u + COSTUME_BODY * 8u;
+    if (mem_read32(cpu, costume) == 0u)
+        return;
+    if (mem_read32(cpu, entry) != mem_read32(cpu, costume) && (plain_list != list || plain[0] != mem_read32(cpu, entry))) {
+        plain_list = list;
+        plain[0] = mem_read32(cpu, entry);
+        plain[1] = mem_read32(cpu, entry + 4u);
+    }
+    if (on) {
+        mem_write32(cpu, entry, mem_read32(cpu, costume));
+        mem_write32(cpu, entry + 4u, mem_read32(cpu, costume + 4u));
+    } else if (plain_list == list) {
+        mem_write32(cpu, entry, plain[0]);
+        mem_write32(cpu, entry + 4u, plain[1]);
+    }
+}
+
+// Whether an object wears the costume: its body (+60) is it, as a player. The game's own Liche,
+// in Alex's last chapter, keeps its moves: its number is 86, a player's Pius's 0.
+static bool costume_object(CPUState* cpu, u32 object) {
+    const u32 list = mem_read32(cpu, cpu->gpr[13] - 26452u);
+    return guest_ram_range_valid(cpu, list, 8u) && mem_read32(cpu, list + 4u) == 0x6B5u && mem_read32(cpu, list) > COSTUME_BODY &&
+           guest_ram_range_valid(cpu, object + 580u, 4u) && (s32)mem_read32(cpu, object + 580u) == PIUS_MODEL &&
+           mem_read32(cpu, list + 8u + COSTUME_BODY * 8u) != 0u && mem_read32(cpu, object + 60u) == mem_read32(cpu, list + 8u + COSTUME_BODY * 8u);
+}
+
+static bool costume_worn(CPUState* cpu, u32 node) {
+    const u32 object = node != 0u && guest_ram_range_valid(cpu, node + 52u, 4u) ? mem_read32(cpu, node + 52u) : 0u;
+    return costume_object(cpu, object);
+}
+
 static void hle_spawn_create(CPUState* cpu) {
     const u32 rec = cpu->gpr[3];
     const int want = player_model();
@@ -7517,6 +7646,8 @@ static void hle_spawn_create(CPUState* cpu) {
         fprintf(stderr, "[player] player 2 from the save (saved as %d) made as %d\n", (s32)mem_read32(cpu, rec + 20u),
                 model);
         mem_write32(cpu, rec + 20u, (u32)model);
+        if (model == PIUS_MODEL)
+            costume_file(cpu, costume_on(1));
         g_hle_passthrough = true;
         return;
     }
@@ -7553,6 +7684,11 @@ static void hle_spawn_create(CPUState* cpu) {
         if (kind >= 0)
             mem_write32(cpu, rec + 16u, (u32)kind);
         fprintf(stderr, "[player] made as %d (the chapter's %d)\n", want, g_chapter_model);
+        if (want == PIUS_MODEL) {
+            costume_file(cpu, costume_on(0));
+            if (costume_on(0))
+                fprintf(stderr, "[player] player 1 wears Pius's other body\n");
+        }
         // TEST ED_PLAYER_KEEP=1 kind, 2 model, 3 both: the made character
         // given back the chapter's character's.
         if (getenv("ED_PLAYER_KEEP") != NULL && g_spawn_return.caller == 0u) {
@@ -7604,9 +7740,17 @@ static void coop_spawn(CPUState* cpu, u32 player) {
     if (model >= 0)
         mem_write32(cpu, rec + 20u, (u32)model);
     mem_write32(cpu, rec + 40u, mem_read32(cpu, player + 8u));
+    const bool pius = (s32)mem_read32(cpu, rec + 20u) == PIUS_MODEL;
+    if (pius) {
+        costume_file(cpu, costume_on(1));
+        if (costume_on(1))
+            fprintf(stderr, "[player] player 2 wears Pius's other body\n");
+    }
     g_coop_spawning = true;
     const bool created = hle_guest_call(cpu, COOP_SPAWN_CREATE, &rec, 1, 0.0, &made);
     g_coop_spawning = false;
+    if (pius)
+        costume_file(cpu, costume_on(0));
     if (!created || made == 0u) {
         fprintf(stderr, "[coop] the game made no player 2\n");
         return;
@@ -13752,7 +13896,11 @@ static void characters_reload(CPUState* cpu, u32 player) {
         else
             p2_wrong = want2 >= 0 && !coop_character_loaded(cpu, want2);
     }
-    const u32 choice = ((u32)(want1 & 0xFFFF) << 16) | (u32)(want2 & 0xFFFF);
+    const bool wearing1 = want1 == PIUS_MODEL && costume_on(0);
+    const bool wearing2 = g_settings.mod_coop && (want2 >= 0 ? want2 : p1) == PIUS_MODEL && costume_on(1);
+    if (costume_worn(cpu, player) != wearing1 || (g_coop_found && g_coop_p2 != 0u && coop_listed(cpu, g_coop_p2) && costume_worn(cpu, g_coop_p2) != wearing2))
+        p2_wrong = true;
+    const u32 choice = ((u32)(want1 & 0x3FFF) << 16) | (u32)(want2 & 0xFFFF) | (wearing1 ? 0x80000000u : 0u) | (wearing2 ? 0x40000000u : 0u);
     if ((p1 == want1 && !p2_wrong) || choice == g_reload_tried)
         return;
     g_reload_tried = choice;
@@ -13807,6 +13955,7 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
     if (player == 0u)
         return;
     characters_reload(cpu, player);
+    costume_moves(cpu, player);
     if (g_coop_p2 == 0u)
         coop_adopt(cpu, player);
     if (!g_settings.mod_coop) {
@@ -13822,6 +13971,7 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
     if (g_coop_p2 != 0u) {
         moves_repair(cpu, g_coop_p2, true);
         moves_repair(cpu, player, false);
+        costume_moves(cpu, g_coop_p2);
         coop_door_proxy(cpu);
         coop_follow(cpu, player);
         coop_prompt_show(cpu, !coop_busy(cpu) && !game_menu_open(cpu) && !cutscene_playing(cpu));
@@ -14356,6 +14506,9 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* moves = hle_dispatch_entry(MOVES_WANT);
             if (moves != NULL && moves->intercept == NULL && moves->notify == NULL)
                 moves->intercept = hle_moves_want;
+            HleDispatchEntry* by_number = hle_dispatch_entry(PLAY_BY_NUMBER);
+            if (by_number != NULL && by_number->intercept == NULL && by_number->notify == NULL)
+                by_number->intercept = hle_play_by_number;
             HleDispatchEntry* pack = hle_dispatch_entry(PACK_LOAD);
             if (pack != NULL && pack->intercept == NULL && pack->notify == NULL)
                 pack->intercept = hle_pack_load;

@@ -4,6 +4,8 @@ Written 2026-11-02. Read this first, then update it at the end of the session.
 
 ## Start here (updated 2026-11-03)
 
+**Pius's skeletal body, for either player (built 2026-11-04, the user has issues still to work out with the model: ask them what).** RB or C on Pius's frame in Character select. He's still made as Pius, with body 86 from level 13 filed under his number, and that body's own moves over his where it has them. `ed system players`, Bodies. Not established: RB on a real controller, the first-frame fix by eye, and one freeze at a door that didn't come back (`saves/reports/hang-20261104-004653`). His file has no door or ladder moves. The staff isn't added: the user may want it later.
+
 **Pickups and words don't stop either player, and the item shows only to whoever found it.** The user confirmed this in play for slot 1's urn, from both players. If it breaks again, read `docs/coop-no-pause.md` first: it lists each symptom and its cause. Don't rebuild it from scratch, and don't skip the close-up.
 
 Don't argue with what the user saw in play. Don't ask them to name or re-explain things they've already said. Test with a real run before saying anything works, and test from standing still.
