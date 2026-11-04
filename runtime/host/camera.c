@@ -1512,7 +1512,7 @@ void camera_held_end(CPUState* cpu) {
  * are read once, by LookAt). The world's up is the camera's up vector (+Z in
  * this game). */
 /* Split-screen (Mods: split-screen co-op). Each frame in play the renderer
- * draws the game's frame once for each player (aurora_split_set_view: a
+ * draws the game's frame once for each player (dol_aurora_split_set_view: a
  * camera in the game camera's view space) and shows the two in halves of the
  * window; in a cutscene, the Tome or with no player, the frame shows whole.
  * Player 1 sees the game's own camera. Player 2 has a camera that circles
@@ -1521,7 +1521,7 @@ void camera_held_end(CPUState* cpu) {
  * forward and back). */
 #ifdef ED_AURORA
 void aurora_split_set(bool on, int layout);
-void aurora_split_set_view(int player, const float rot[9], float x, float y, float z, float zoom, bool hide_hud);
+void dol_aurora_split_set_view(int player, const float rot[9], float x, float y, float z, float zoom, bool hide_hud);
 void aurora_split_hold(int player);
 #endif
 
@@ -1628,13 +1628,13 @@ void camera_split_update(CPUState* cpu) {
                 rot[2 * 3 + c] = dot(axes[c], z1);
             }
             const Vec3 rel = sub(eye1, game_eye);
-            aurora_split_set_view(0, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), zoom1, true);
+            dol_aurora_split_set_view(0, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), zoom1, true);
             aurora_split_hold(-1);
         } else {
-            aurora_split_set_view(0, kSame, 0.0f, 0.0f, 0.0f, 1.0f, true);
+            dol_aurora_split_set_view(0, kSame, 0.0f, 0.0f, 0.0f, 1.0f, true);
             aurora_split_hold(0);
         }
-        aurora_split_set_view(1, kSame, 0.0f, 0.0f, 0.0f, 1.0f, false);
+        dol_aurora_split_set_view(1, kSame, 0.0f, 0.0f, 0.0f, 1.0f, false);
         aurora_split_set(true, g_settings.mod_split);
         if (!g_split_on)
             fprintf(stderr, "[split] on at frame %llu (player 2's close-up)\n", frame);
@@ -1763,8 +1763,8 @@ void camera_split_update(CPUState* cpu) {
     aurora_split_hold(hle_coop_player2_held() ? 1 : -1);
     // Their own Tome's words are in the frame. Behind player 2's, their HUD is theirs: left out, their
     // words went, and hiding brought back what's drawn for player 2's half (their prompt) in theirs.
-    aurora_split_set_view(0, kIdentity, 0.0f, 0.0f, 0.0f, 1.0f, hle_coop_player1_tome_up());
-    aurora_split_set_view(1, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), zoom2, true);
+    dol_aurora_split_set_view(0, kIdentity, 0.0f, 0.0f, 0.0f, 1.0f, hle_coop_player1_tome_up());
+    dol_aurora_split_set_view(1, rot, dot(rel, x1), dot(rel, y1), dot(rel, z1), zoom2, true);
     aurora_split_set(true, g_settings.mod_split);
 #else
     (void)rot;

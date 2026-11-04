@@ -21,6 +21,10 @@ The goal: the game believes it was built for two players, using what the game al
 
 **The camera is the part that isn't settled:** it works sometimes. Its fixed cameras are in the disc's rooms (`ed room N`), and `ed check` flags any eye that isn't one of them. See `ed system camera`.
 
+## Held until the user asks
+
+- **Unstable frame rates, and true 120 fps in co-op.** The user recalls true 120 causing issues in the past, so don't work on it until they ask. When they do, start at Frame rate in `ed system graphics`. What's there now, which they haven't played: co-op still tries frames in between, and when they cost too much the game slows to about 50 Hz until the back-off stops them, retrying at longer and longer gaps.
+
 ## Their rules for working
 
 - Use the normal player as the reference: `ed how THING` first, and a solo run of the same save to look at.

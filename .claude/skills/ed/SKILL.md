@@ -20,6 +20,7 @@ Everything runs from the repo root as `python -I tools/ed/ed.py COMMAND`. `build
 | Prompts, regions, buttons | `ed system prompts` | `ed prompts`, `ed verb` |
 | Levels | `ed system levels` | `ed level` |
 | Which player a function reads | `ed system players` | `ed who ADDR`, `ed needs ADDR` |
+| Character shadows, lamps, graphics options, frame rate | `ed system graphics` | `ed flicker RUN`, `ed lamps RUN`, `ed graphics [SAVE] [OPTION]` |
 | Words these pages use | `ed system glossary` | |
 
 ## Before writing anything

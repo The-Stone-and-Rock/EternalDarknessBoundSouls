@@ -9,6 +9,9 @@ Start with these, before writing anything:
 
 The game, not a room:
   build [step]          (once, and after the disc or dol change) make build/ed-db
+  flicker [RUN]         each player's shadows and picture, frame by frame, from a run with ED_RUN_PROBE=1
+  lamps [RUN...]        the lamps each room was seen to have, from a run with AURORA_SHADOW_LOG
+  graphics [SAVE] [OPT] every graphics option at every value: what it did to the picture, frame rate and log
   system [NAME]         a system's page: what it is everywhere, every way in, every rule. No NAME lists them
   script ID [--level N] a script, readable: functions named, words and cameras filled in. No level: which levels have it
   room N [--level N]    a room's cameras, regions with what each runs, doors, entries and markers doors use
@@ -470,6 +473,21 @@ def cmd_diff(argv):
 def cmd_test(argv):
     import scenarios
     return scenarios.main(argv)
+
+
+def cmd_flicker(argv):
+    import gfxcheck
+    gfxcheck.cmd_flicker(argv)
+
+
+def cmd_lamps(argv):
+    import gfxcheck
+    gfxcheck.cmd_lamps(argv)
+
+
+def cmd_graphics(argv):
+    import gfxcheck
+    gfxcheck.cmd_graphics(argv)
 
 
 def cmd_how(argv):

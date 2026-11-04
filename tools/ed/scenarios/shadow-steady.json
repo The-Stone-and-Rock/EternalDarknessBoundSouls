@@ -1,0 +1,34 @@
+{
+ "name": "shadow-steady",
+ "proves": "Character shadows hold steady from frame to frame in room 338, the corpse's and player 2's too, though the game leaves their flattened draws out now and then. Player 1 walks off and their camera sweeps, with player 2 standing: player 2's picture doesn't jump. saves/shadow-room338.state is a copy of slot 10 of 2026-11-04 11:20.",
+ "save": "saves/shadow-room338.state",
+ "env": {
+  "ED_RUN_PROBE": "1"
+ },
+ "frames": 15700,
+ "seconds": 90,
+ "p1": "14750,15650,0x0000,0,127,0",
+ "source": "docs/coop-failed-attempts.md: the user's flicker on slot 10, and player 2's view jumping when player 1's camera sweeps",
+ "expect": [
+  {
+   "check": "no_log",
+   "pattern": "WebGPU error"
+  },
+  {
+   "check": "flicker",
+   "view": 0
+  },
+  {
+   "check": "flicker",
+   "view": 1,
+   "max_step": 3.0
+  },
+  {
+   "check": "stayed",
+   "who": "p2",
+   "from": 14750,
+   "to": 15650,
+   "max": 5
+  }
+ ]
+}

@@ -15,6 +15,7 @@ A scenario is JSON:
     plays     who was at some point in player state `state` with motion `anim`
     room      the run ends in room `room`; with who: both, player 2 ended within `within` units of player 1 (default 400)
     rules     no findings from `ed check`, other than those in `allow`
+    flicker   needs env ED_RUN_PROBE: player `view` (0 or 1), the picture's one-frame spikes of over `threshold` (0.25; the fault was 0.6 to 0.8, and moments between frames differ from frames by about 0.13) at most `spikes` (0), its largest step at most `max_step`, and no shadows dropping out for a frame
 
 Limits, as docs/coop-failed-attempts.md records: ED_INPUT_SCRIPT goes round controls.cpp, so player 1's held-over and Tome
 button handling isn't tested here. ED_RUN_SCRIPT calls the script from the host, whose return address is neither a zone's nor a
@@ -85,6 +86,18 @@ def judge(s, run, rows):
         kind = c['check']
         if kind == 'log' and not re.search(c['pattern'], log):
             fails.append('never logged: %s' % c['pattern'])
+        elif kind == 'flicker':
+            import gfxcheck
+            v = gfxcheck.summary(os.path.join(run, 'probe.txt'), c.get('threshold', 0.25)).get('views', {}).get(c['view'])
+            if v is None:
+                fails.append('player %d: no probe of their view' % (c['view'] + 1))
+            else:
+                if len(v['col']['spikes']) > c.get('spikes', 0):
+                    fails.append('player %d: %d one-frame spikes: %s' % (c['view'] + 1, len(v['col']['spikes']), v['col']['spikes'][:5]))
+                if 'max_step' in c and v['col']['max'] > c['max_step']:
+                    fails.append('player %d: picture jumped by %.2f (at most %.2f)' % (c['view'] + 1, v['col']['max'], c['max_step']))
+                if v['tile_drops']:
+                    fails.append('player %d: shadows dropped out for a frame at %s' % (c['view'] + 1, v['tile_drops'][:5]))
         elif kind == 'no_log':
             m = re.search(c['pattern'], log)
             if m:

@@ -343,3 +343,28 @@ Not looked at yet: how `interp.cpp` rebuilds uniforms for each view (`build_view
 - With either Tome open, the frame's effects don't run at all: no `[glow]` line, no casters. The Tome pages are fine, but the other player's half loses these shadows until it closes (`logs/run-20261104-121409-tomes1`).
 - Player 2's view jumps with them standing still, when player 1's camera starts a sweep (`logs/run-20261104-120740-fix1`, about F15277 and F15472), and stays offset between the two. `both.tsv` shows player 2's eye and target unchanged, so it's in how their view is built from the game camera's (`camera.c`, `aurora_split_set_view`), and `up` from the game's camera is used for both. Not traced further.
 
+## The flicker found: four causes, measured from inside the renderer (2026-11-04)
+
+`ed flicker` measures each view of each moment with no capture. `docs/game/systems/graphics.md` has how it all works now. Not yet played by the user. The open items above are answered here.
+
+| What was seen | Cause | Fix | Measured |
+|---|---|---|---|
+| Single frames where shadows change, with everyone still | The game leaves some characters' flattened draws out now and then, and those decided who casts: tiles went from 6 to 2 for one frame. Timing around them was an even 17 ms, so it isn't a late frame. Why it does isn't traced | Someone flattened in the last 30 frames still casts, while a lit body stands there (`kFlatMemory`) | Slot 10 standing: 3 to 7 spikes a run to 0 |
+| Player 2's picture jumping when player 1's camera moves, and staying offset through a sweep | The view was set straight away from the game thread, up to a frame ahead of the draws, so it was worked out for a camera the frame wasn't drawn with | `dol_aurora_split_set_view`, in the GX stream | The largest step in their picture over the walk, 6.2 to 1.5. Their view and the drawn eye now change on the same frame |
+| Whole rooms with no character shadows (155, 152, 151), and a way to lose them when a prompt shows | "The scene's last draw's uniforms" was a flag for the next draw to reach the upload. A 3D draw that went no further left it to the HUD's, so places were worked out with a flat projection, or player 2's hidden HUD's, all zeros | That draw's own, and only a scene draw's | Slots 4, 5, 7, 8: mask 255 everywhere to 243 to 253 |
+| Shadows shifting on moments between frames with a moving camera | Tiles were in the view space of the frame's own camera, and a moment has a blended one | `at_this_moment` | Two small spikes on moments in the walk, not seen after. Few moments ran in co-op, so this is mostly unmeasured |
+
+**Also found and fixed:** a character appearing or passing close took another's slot, and all its lamps' weights (closest pairs first now). Ambient occlusion in a half used the whole window's shape, so it looked twice as far sideways (`ssao::set_view_shape`). The darkening quad wasn't left out of a frame with nobody flattened.
+
+**The 120 fps setting did nothing in co-op: always 60.**
+
+| Tried | What happened | Why |
+|---|---|---|
+| As it was | `shown=61/61, caught_up=61`, even with every effect off. Solo is 120 | "The game waits at its present" was taken as behind. It does that whenever a frame takes a little over one game frame from its retrace, and the pace waited up to 30 ms for the worst of the last second, which kept each frame starting late |
+| Pace at most 19 ms, behind only over 33 ms, with a back-off | Latency from 27.7 to 18.9 ms, the game's wait from about 9 to under 6 ms. **Still 60 in co-op**, now because it costs too much: with moments on, the game slowed to about 50 Hz and the back-off stopped them | 5 full redraws a game frame. `[split-cost]`: submitting and showing went from 2.3 to 10 ms on the worker |
+
+Not done: leaving out the game's own frame, which nobody sees in a split. Its EFB copies and readbacks are used next frame, so it isn't a simple skip.
+
+**Not a fault:** room 147's lamps differ between saves. A character only holds the lamps nearest them. The characters' places worked out from the camera match `both.tsv`, so the camera's right.
+
+**`ed test` on the final build:** 17 of 20 in one run. `lever-p1` (player 1 walked 13, wanted 20) and `lever-p2` (script 1794 "frame 131..", which already varied by run) passed when run again, and `shadow-steady` passed once its threshold was set above the 0.13 moments differ from frames by. Not established: that `lever-p1` isn't affected by the new timing. It failed once and passed once.
