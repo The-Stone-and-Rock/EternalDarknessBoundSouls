@@ -2,8 +2,10 @@
 div { display: block; }
 span { display: inline; }
 
-/* The Tome: ink on parchment pages bound in dark leather. Art drawn by
-   tools/ui/make_tome_art.py. */
+/* Every submenu, in the launcher and over the game: one sheet of the parchment
+   (res/ui/pause.png), sized by the window's height, so it keeps its shape and
+   everything on it fits at any window size. Behind it, the launcher's picture
+   dimmed; over the game, the dimmed paused frame. */
 body {
 	width: 100%;
 	height: 100%;
@@ -14,10 +16,11 @@ body {
 	justify-content: center;
 	font-family: "IM FELL English";
 	font-weight: normal;
-	font-size: 25dp;
+	font-size: 3.2vh;
 	color: #2a1810;
-	background-color: #120a05;
-	decorator: image(tome/leather.png fill);
+	background-color: #000000;
+	decorator: image(launcher.png cover);
+	image-color: #5c5c5c;
 }
 
 /* Over the game the page sits on the dimmed, paused frame. */
@@ -28,23 +31,41 @@ body.overlay {
 
 #book {
 	display: flex;
-	padding: 6dp;
-	background-color: #5e3f1c;
-	border: 1dp #2a1a0c;
-	border-radius: 3dp;
+	flex-direction: column;
+	width: 102.6vh;   /* the picture's own shape, 706 by 578 */
+	height: 84vh;
+	padding: 5.5vh 0 6.5vh 0;
+	box-sizing: border-box;
+	decorator: image(pause.png fill);
+}
+
+#heading {
+	font-size: 5vh;
+	text-align: center;
+	flex-shrink: 0;
+}
+
+#pages {
+	display: flex;
+	flex: 1;
+	min-height: 0;
 }
 
 .page {
-	position: relative;
 	display: flex;
 	flex-direction: column;
-	width: 470dp;
-	padding: 30dp 50dp 20dp 50dp;
-	border: 1dp #8a6a3a;
-	decorator: image(tome/parchment.png fill);
+	flex: 1;
+	padding: 0 16vh;
 }
 
-/* Options opens as a spread; every other menu is a single page. */
+.menu {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	justify-content: center;
+}
+
+/* Button mapping: two columns on the one sheet. */
 #page1 {
 	display: none;
 }
@@ -54,99 +75,153 @@ body.spread #page1 {
 }
 
 body.spread .page {
-	width: 430dp;
+	padding: 0 2vh 0 8vh;
 }
 
-/* Hand-ruled frame inside the page edge. */
-.rule {
-	position: absolute;
-	left: 13dp;
-	top: 13dp;
-	right: 13dp;
-	bottom: 13dp;
-	border: 1dp #7a201266;
-	pointer-events: none;  /* over the rows: the pointer goes through to them */
+body.spread #page1 {
+	padding: 0 8vh 0 2vh;
 }
 
-#emblem,
-#emblem-divider {
-	display: none;
+body.spread .menu {
+	justify-content: flex-start;
+	margin-top: 1vh;
 }
 
-/* The emblem sits midway between the page's ruled frame (its line ends 14dp
-   down, the emblem starts at the 30dp padding: 16dp) and the divider's line
-   (7dp margin + half the 18dp divider: 16dp). */
-body.branded #emblem {
-	display: block;
-	width: 220dp;
-	height: 220dp;
-	margin: 0 auto 7dp auto;
-}
-
-body.branded #emblem-divider {
-	display: block;
-	width: 300dp;
-	height: 18dp;
-	margin: 0 auto 12dp auto;
-}
-
-#heading {
-	font-family: "IM FELL English SC";
-	font-size: 38dp;
-	color: #8e1b12;
-	text-align: center;
-	margin-bottom: 4dp;
-}
-
-body.branded #heading {
-	display: none;
-}
-
-/* "I · Display": a section of a spread. */
+/* A small heading over a group of rows. */
 .section {
-	font-family: "IM FELL English SC";
-	font-size: 22dp;
-	color: #7a2012;
-	border-bottom: 1dp #7a201280;
-	padding: 0 2dp 2dp 2dp;
-	margin: 16dp 0 4dp 0;
+	font-size: 2.4vh;
+	color: #4a3018;
+	padding: 0 1.4vh;
+	margin: 1.4vh 0 0.3vh 0;
 }
 
-/* A break between groups of rows on a single page. */
+/* A break between groups of rows: only space. */
 .gap {
-	height: 24dp;
-	margin: 4dp 70dp;
-	decorator: image(tome/rule.png contain center center);
+	height: 1.8vh;
+	flex-shrink: 0;
 }
 
-/* Each row a frame of its own, shown round the chosen one. */
+/* A row: the name at the left, its control at the right. Each has a frame of
+   its own, shown round the chosen one. */
 .row {
 	display: flex;
 	align-items: center;
-	padding: 2dp 12dp;
+	flex-shrink: 0;
+	min-height: 3.3vh;
+	padding: 0.1vh 1.2vh;
 	border: 2dp transparent;
 	border-radius: 8dp;
 }
 
-/* The red-ink diamond the chosen row once had (the glowing frame now). */
-.mark {
-	display: none;
-}
-
-/* Dotted leader from a setting to its value. */
 .leader {
 	flex: 1;
-	height: 22dp;
-	margin: 0 8dp;
-	decorator: image(tome/leader.png repeat-x left bottom);
+	min-width: 2vh;
 }
 
-.label { }
-
 .value {
-	font-style: italic;
-	color: #5a3a20;
+	display: flex;
+	align-items: center;
 	white-space: nowrap;
+}
+
+/* The longest pages (Controls, Button mapping): the same letters, smaller, so
+   every row stays on the sheet. */
+body.dense .row {
+	font-size: 2.6vh;
+}
+
+/* Back, and the plain lists of actions (a save slot's page): centred. */
+.row.back,
+body.centered .row {
+	justify-content: center;
+}
+
+.row.back {
+	width: 40%;
+	margin: 0 auto;
+}
+
+body.centered .row {
+	width: 60%;
+	margin: 0 auto;
+}
+
+body.centered .row .leader {
+	flex: 0;
+	min-width: 1.2vh;
+	width: 1.2vh;
+}
+
+/* A choice among several: arrows round it, the value in the middle so it stays
+   put as it changes. */
+.chev {
+	display: block;
+	width: 2.6vh;
+	height: 2.6vh;
+	line-height: 2.2vh;
+	font-size: 3.6vh;
+	text-align: center;
+	color: #7a2012;
+}
+
+.pick {
+	display: block;
+	min-width: 16vh;
+	text-align: center;
+}
+
+/* On or off. Red ink with the knob to the right, or a hollow outline. */
+.switch {
+	display: block;
+	width: 4.8vh;
+	height: 2.4vh;
+	box-sizing: border-box;
+	border: 2dp #5a3a20;
+	border-radius: 1.2vh;
+	background-color: #2a181018;
+}
+
+.switch.on {
+	border-color: #6a140d;
+	background-color: #8e1b12;
+}
+
+.knob {
+	display: block;
+	width: 1.5vh;
+	height: 1.5vh;
+	margin: 0.25vh 0 0 0.25vh;
+	border-radius: 0.75vh;
+	background-color: #5a3a20;
+}
+
+.switch.on .knob {
+	margin-left: 2.65vh;
+	background-color: #f0e4c8;
+}
+
+/* A level from none to all (the volumes). */
+.slider {
+	display: block;
+	width: 15vh;
+	height: 1vh;
+	box-sizing: border-box;
+	border: 1dp #5a3a20;
+	border-radius: 0.5vh;
+	background-color: #2a181018;
+}
+
+.slider-fill {
+	display: block;
+	height: 100%;
+	border-radius: 0.5vh;
+	background-color: #8e1b12;
+}
+
+.slider-value {
+	display: block;
+	width: 8vh;
+	text-align: right;
 }
 
 /* The chosen row: the game's own glowing frame (its memory card screen's),
@@ -164,22 +239,31 @@ body.branded #heading {
 
 .row.disabled,
 .row.disabled .value {
-	color: #8a7a62;
+	color: #7a6a52;
 }
 
 .row.selected.disabled {
 	color: #6a5a4a;
 }
 
+.row.disabled .switch {
+	border-color: #8a7a62;
+	background-color: transparent;
+}
+
+.row.disabled .switch .knob {
+	background-color: #8a7a62;
+}
+
+/* The chosen row's help, always the same height, so a longer text never moves
+   the rows as the selection moves. */
 .note {
-	/* Always two lines tall, so a longer help text never resizes (and so
-	   re-centres) the page as the selection moves. */
-	height: 48dp;
+	flex-shrink: 0;
+	height: 5.6vh;
 	overflow: hidden;
-	margin-top: 14dp;
-	font-style: italic;
-	font-size: 18dp;
-	color: #6a4a2a;
+	margin: 1vh 12vh 0 12vh;
+	font-size: 2.2vh;
+	color: #4a3018;
 	text-align: center;
 }
 
@@ -187,40 +271,34 @@ body.branded #heading {
 	position: absolute;
 	left: 0;
 	right: 0;
-	bottom: 16dp;
-	font-size: 17dp;
-	font-style: italic;
-	color: #a08660;
-	text-align: center;
-}
-
-body.overlay #hint {
+	bottom: 2.2vh;
+	font-size: 2.2vh;
 	color: #d2bf98;
+	text-align: center;
 }
 
 /* Button and key icons (Kenney Input Prompts, CC0) in their menu versions
    (res/ui/glyphs/ink: white keys with an ink rim, coloured buttons as they
    are), drawn straight on the parchment. */
 img.glyph {
-	width: 32dp;
-	height: 32dp;
-	margin-left: 4dp;
+	width: 3.2vh;
+	height: 3.2vh;
+	margin-left: 0.4vh;
 	vertical-align: middle;
 }
 
 .sep {
 	display: inline-block;
-	width: 18dp;
+	width: 1.8vh;
 }
 
 .keycap {
 	display: inline-block;
-	padding: 1dp 8dp;
-	margin-left: 4dp;
+	padding: 0.1vh 0.8vh;
+	margin-left: 0.4vh;
 	border: 1dp #5a3a20;
 	border-radius: 4dp;
-	font-size: 17dp;
-	font-style: normal;
+	font-size: 1.7vh;
 	color: #2a1810;
 	vertical-align: middle;
 }
@@ -229,45 +307,29 @@ img.glyph {
 	color: #8a7a62;
 }
 
-/* Long lists (Button mapping): tighter rows. */
-body.compact .row {
-	padding: 1dp 2dp;
-	font-size: 21dp;
-}
-
-body.compact .page {
-	width: 560dp;
-	padding-top: 22dp;
-}
-
-body.compact #heading {
-	font-size: 32dp;
-}
-
-/* Character select: one wide page with every character at once, a frame for
-   their portrait over their name, six to a line. */
+/* Character select: every character at once, a frame for their portrait over
+   their name, and beside them the highlighted character's details. */
 body.roster .page {
-	width: 1060dp;
-	padding: 16dp 40dp 10dp 40dp;
+	padding: 0 7vh;
 }
 
-/* Twelve frames, the details, the break and Back on one screen. */
-body.roster #heading {
-	font-size: 32dp;
-	margin-bottom: 0;
+.roster-wrap {
+	display: flex;
+	align-items: flex-start;
 }
 
-.roster {
+.roster-wrap .roster {
 	display: flex;
 	flex-wrap: wrap;
 	justify-content: center;
-	margin-top: 10dp;
+	width: 47vh;
+	flex-shrink: 0;
 }
 
 .tile {
-	width: 106dp;
-	margin: 4dp 5dp;
-	padding: 4dp;
+	width: 9.2vh;
+	margin: 0.3vh 0.5vh;
+	padding: 0.4vh;
 	border: 2dp transparent;
 	border-radius: 8dp;
 	text-align: center;
@@ -276,15 +338,19 @@ body.roster #heading {
 /* The character's portrait (from the player's disc: frontend.cpp
    ensure_portraits), the chapter pictures' 126x89 shape. */
 .portrait {
-	height: 74dp;
+	height: 6.5vh;
 	border: 1dp #7a201266;
 	background-color: #3a24120f;
 }
 
+.portrait img {
+	width: 100%;
+	height: 100%;
+}
+
 .name {
-	margin-top: 3dp;
-	font-family: "IM FELL English SC";
-	font-size: 19dp;
+	margin-top: 0.2vh;
+	font-size: 1.9vh;
 }
 
 /* The highlighted character: the menus' glowing frame. */
@@ -303,86 +369,73 @@ body.roster #heading {
 }
 
 body.roster .row {
-	width: 340dp;
+	width: 44vh;
 	margin: 0 auto;
-	font-size: 22dp;
-	padding: 1dp 12dp;
+	justify-content: center;
+	font-size: 2.4vh;
+	min-height: 3vh;
+}
+
+body.roster .row .leader {
+	flex: 0;
+	min-width: 1.2vh;
+	width: 1.2vh;
 }
 
 body.roster .gap {
-	height: 14dp;
-	margin: 2dp 70dp;
-}
-
-.portrait img {
-	width: 100%;
-	height: 100%;
-}
-
-/* Character select: the frames, and beside them the highlighted character's
-   details. */
-.roster-wrap {
-	display: flex;
-	align-items: flex-start;
-}
-
-.roster-wrap .roster {
-	width: 520dp;
-	flex-shrink: 0;
+	height: 0.8vh;
 }
 
 .roster-details {
 	flex: 1;
-	margin: 14dp 0 0 18dp;
-	padding: 14dp 18dp;
-	border: 1dp #7a201266;
+	margin: 0.6vh 0 0 1.6vh;
+	padding: 1.2vh 1.6vh;
 	background-color: #3a24120f;
+	border-radius: 8dp;
 }
 
 .bio-name {
-	font-family: "IM FELL English SC";
-	font-size: 32dp;
-	color: #8e1b12;
+	font-size: 3.2vh;
 }
 
 .bio-year {
-	font-family: "IM FELL English SC";
-	font-size: 22dp;
-	color: #7a2012;
-	margin-bottom: 8dp;
+	font-size: 2.1vh;
+	color: #5a3a20;
+	margin-bottom: 0.8vh;
 }
 
 .bio-about {
-	font-size: 20dp;
-	height: 104dp;
+	font-size: 1.9vh;
+	height: 11vh;
 	overflow: hidden;
 }
 
 .meters {
-	margin-top: 10dp;
+	margin-top: 1vh;
 }
 
 .meter {
 	display: flex;
 	align-items: center;
-	margin: 6dp 0;
+	margin: 0.6vh 0;
 }
 
 .meter-name {
-	width: 92dp;
-	font-family: "IM FELL English SC";
-	font-size: 22dp;
+	width: 8.6vh;
+	font-size: 2vh;
 }
 
 .meter-bar {
 	flex: 1;
-	height: 16dp;
+	height: 1.2vh;
 	border: 1dp #2a1810;
+	border-radius: 0.6vh;
 	background-color: #2a181030;
 }
 
 .meter-fill {
 	height: 100%;
+	border-radius: 0.6vh;
 }
 
 .meter-fill.health { background-color: #9c1a12; }
@@ -390,34 +443,19 @@ body.roster .gap {
 .meter-fill.sanity { background-color: #2d7a2a; }
 
 .meter-value {
-	width: 40dp;
-	margin-left: 10dp;
-	font-style: italic;
-	font-size: 19dp;
+	width: 4vh;
+	margin-left: 1vh;
+	font-size: 1.8vh;
 	color: #5a3a20;
 }
 
-/* The main menu: its rows centred, Start game larger. */
-body.branded .row {
-	justify-content: center;
-}
-
-body.branded .row .leader {
-	flex: 0;
-	width: 16dp;
-}
-
-body.branded .row.big {
-	font-size: 34dp;
-	padding: 6dp 2dp;
-}
-
 /* The launcher: the picture fills the window and the menu sits on its blank
-   parchment (the middle third across, 41% to 88% down); no Tome page, notes
-   or directions. */
+   parchment (the middle third across, 41% to 88% down); no heading, notes or
+   directions. */
 body.launcher {
 	decorator: image(launcher.png cover);
-	background-color: #000000;
+	image-color: #ffffff;
+	font-size: 25dp;
 }
 
 body.launcher #book {
@@ -427,32 +465,42 @@ body.launcher #book {
 	width: 32%;
 	height: 47%;
 	padding: 0;
-	border-width: 0;
-	background-color: transparent;
+	decorator: none;
 	align-items: center;
 	justify-content: center;
 }
 
-body.launcher .page {
+body.launcher #pages,
+body.pause #pages {
+	display: block;
+	flex: none;
 	width: 100%;
-	padding: 0;
-	border-width: 0;
-	decorator: none;
-	background-color: transparent;
-	justify-content: center;
 }
 
-body.launcher .rule,
-body.launcher #emblem,
-body.launcher #emblem-divider,
+body.launcher .page,
+body.pause .page,
+body.launcher .menu,
+body.pause .menu {
+	display: block;
+}
+
+body.launcher .page {
+	padding: 0;
+}
+
+body.launcher #heading,
 body.launcher .note,
 body.launcher #hint {
 	display: none;
 }
 
 /* Continue, Main menu, Load game, Options, Mods and Quit, with their two
-   breaks, all on the parchment. */
+   breaks, all on the parchment. Each row a frame's width, centred. */
 body.launcher .row {
+	width: 62%;
+	min-height: 0;
+	margin: 0 auto;
+	justify-content: center;
 	font-size: 26dp;
 	padding: 1dp 2dp;
 	color: #2a1810;
@@ -463,46 +511,38 @@ body.launcher .row.big {
 	padding: 2dp 2dp;
 }
 
-body.launcher .gap {
+body.launcher .row .leader {
+	flex: 0;
+	min-width: 16dp;
+	width: 16dp;
+}
+
+body.launcher .gap,
+body.pause .gap {
 	height: 16dp;
 	margin: 2dp 70dp;
+	decorator: image(tome/rule.png contain center center);
 }
-
-/* The chosen row: the game's own glowing frame (its memory card screen's),
-   the ink kept black. Each row a frame's width, centred. */
-body.launcher .row {
-	width: 62%;
-	margin: 0 auto;
-	justify-content: center;
-	border: 2dp transparent;
-	border-radius: 8dp;
-}
-
 
 /* The pause menu (the game's menu over it, dimmed): the launcher's parchment
    in its frame (res/ui/pause.png, cut from launcher.png), the rows centred
    on it in the launcher's ink, the chosen one in the glowing frame. */
+body.pause {
+	font-size: 25dp;
+}
+
 body.pause #book {
 	width: 44%;
 	height: 72%;
 	padding: 0;
-	border-width: 0;
-	background-color: transparent;
-	decorator: image(pause.png fill);
 	align-items: center;
 	justify-content: center;
 }
 
 body.pause .page {
-	width: 100%;
 	padding: 0 0 2% 0;
-	border-width: 0;
-	decorator: none;
-	background-color: transparent;
-	justify-content: center;
 }
 
-body.pause .rule,
 body.pause .note {
 	display: none;
 }
@@ -514,16 +554,10 @@ body.pause #heading {
 
 body.pause .row {
 	width: 62%;
+	min-height: 0;
 	margin: 0 auto;
 	justify-content: center;
 	font-size: 26dp;
 	padding: 1dp 2dp;
 	color: #2a1810;
-	border: 2dp transparent;
-	border-radius: 8dp;
-}
-
-body.pause .gap {
-	height: 16dp;
-	margin: 2dp 70dp;
 }
