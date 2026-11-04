@@ -5908,6 +5908,113 @@ static void find_player_modes(CPUState* cpu) {
     fprintf(stderr, "[camera] the player's mode bits not found: looking closely is told by the game's zoom\n");
 }
 
+// The room's lights for the renderer's shadows and haze (gxcore_draw.cpp set_room_lights), from the game's own grid.
+// 0x804F0780 is a list of the room's models, 16 bytes each, and +4 of the first points at the grid: its count at +4,
+// the far corner at +8, the size of a cell as u16s at +20, cells across at +27, +28, +29 (x fastest), and the cells
+// at +32. Those follow it: 20 bytes each, a lamp count at +8 and the lamps at +12. A lamp is 20 bytes: place,
+// colour at +12, power at +16. Seen the same way in the start of all 12 chapters. Sent when the room's grid changes.
+static s16 g_coop_list_offset, g_coop_actor_offset, g_coop_stats_offset, g_coop_health_offset, g_coop_room_offset;  // defined with the co-op code below
+#define LIGHT_GRID_POINTER 0x804F0784u
+#define LIGHT_GRID_LAMPS 96
+
+static void room_lights_update(CPUState* cpu) {
+#ifdef ED_AURORA
+    static u32 sent_grid, sent_mark;
+    // AURORA_SHADOW_LOG: the game's frame now and then, among the renderer's lines (`ed chapters`). Its count isn't the game's.
+    static int sync = -1;
+    if (sync < 0)
+        sync = getenv("AURORA_SHADOW_LOG") != NULL;
+    if (sync && cpu->timebase / 675000ull % 20ull == 0ull)
+        fprintf(stderr, "[sync] game frame %llu\n", (unsigned long long)(cpu->timebase / 675000ull));
+    const u32 grid = mem_read32(cpu, LIGHT_GRID_POINTER);
+    if (grid < 0x80000000u || grid >= 0x81800000u || mem_read32(cpu, grid + 32u) != grid + 36u)
+        return;
+    const u32 cells = grid + 36u;
+    const u32 first = mem_read32(cpu, cells + 12u);
+    if (first < 0x80000000u || first >= 0x81800000u)
+        return;
+    const u32 mark = mem_read32(cpu, first) ^ mem_read32(cpu, first + 4u) ^ mem_read32(cpu, grid + 8u);
+    if (grid == sent_grid && mark == sent_mark)
+        return;
+    // Near a door the game has the next room loaded too, and this pointer goes back and forth between the two, for as
+    // long as 280 frames seen in room 1: 12 lamps, its own, and 34, the next room's. Rooms load at the same place
+    // (r13-25984), so what's preloaded lies after it: while the room's own grid is good, one further on isn't this
+    // room's. Checked against the disc for rooms 1, 242, 243 and 246.
+    static s32 sent_room = -1;
+    const s32 room = g_coop_room_offset != 0 ? (s32)mem_read32(cpu, cpu->gpr[13] + (u32)(s32)g_coop_room_offset) : -1;
+    if (sent_grid != 0u && room == sent_room && grid > sent_grid && mem_read32(cpu, sent_grid + 32u) == sent_grid + 36u) {
+        const u32 was = mem_read32(cpu, sent_grid + 48u);
+        if (was >= 0x80000000u && was < 0x81800000u &&
+            (mem_read32(cpu, was) ^ mem_read32(cpu, was + 4u) ^ mem_read32(cpu, sent_grid + 8u)) == sent_mark)
+            return;
+    }
+    sent_room = room;
+    const u32 count = mem_read32(cpu, grid + 4u);
+    const u32 sizes = mem_read32(cpu, grid + 20u), last = mem_read32(cpu, grid + 24u), across = mem_read32(cpu, grid + 28u);
+    const int dims[3] = {(int)(last & 0xFFu), (int)(across >> 24), (int)((across >> 16) & 0xFFu)};
+    if (count == 0u || count > 20000u || count != (u32)dims[0] * (u32)dims[1] * (u32)dims[2])
+        return;
+    sent_grid = grid;
+    sent_mark = mark;
+    const float origin[3] = {guest_read_f32(cpu, grid + 8u), guest_read_f32(cpu, grid + 12u), guest_read_f32(cpu, grid + 16u)};
+    const float size[3] = {(float)(sizes >> 16), (float)(sizes & 0xFFFFu), (float)(last >> 16)};
+    static float lamps[LIGHT_GRID_LAMPS * 7];
+    static u32 seen[LIGHT_GRID_LAMPS];
+    int lamp_count = 0;
+    u8* per_cell = (u8*)malloc((size_t)count * 3u);
+    if (per_cell == NULL)
+        return;
+    for (u32 c = 0; c < count; c++) {
+        const u32 cell = cells + c * 20u;
+        const u32 here = mem_read32(cpu, cell + 8u), list = mem_read32(cpu, cell + 12u);
+        for (u32 i = 0; i < 3u; i++) {
+            per_cell[c * 3u + i] = 255u;
+            if (i >= here)
+                continue;
+            const u32 lamp = list + i * 20u;
+            int found = -1;
+            for (int n = 0; n < lamp_count && found < 0; n++)
+                if (seen[n] == lamp || (lamps[n * 7] == guest_read_f32(cpu, lamp) && lamps[n * 7 + 1] == guest_read_f32(cpu, lamp + 4u) &&
+                                        lamps[n * 7 + 2] == guest_read_f32(cpu, lamp + 8u)))
+                    found = n;
+            if (found < 0 && lamp_count < LIGHT_GRID_LAMPS) {
+                found = lamp_count++;
+                seen[found] = lamp;
+                float* out = lamps + found * 7;
+                for (u32 k = 0; k < 3u; k++)
+                    out[k] = guest_read_f32(cpu, lamp + k * 4u);
+                const u32 colour = mem_read32(cpu, lamp + 12u);
+                out[3] = (float)(colour >> 24) / 255.0f;
+                out[4] = (float)((colour >> 16) & 0xFFu) / 255.0f;
+                out[5] = (float)((colour >> 8) & 0xFFu) / 255.0f;
+                out[6] = (float)mem_read32(cpu, lamp + 16u);
+            }
+            if (found >= 0)
+                per_cell[c * 3u + i] = (u8)found;
+        }
+    }
+    fprintf(stderr, "[room-lights] grid 0x%08X: %d lamps, %d x %d x %d cells\n", grid, lamp_count, dims[0], dims[1], dims[2]);
+    dol_aurora_set_room_lights(lamps, lamp_count, origin, size, dims, per_cell);
+    free(per_cell);
+#else
+    (void)cpu;
+#endif
+}
+
+// The Health, Sanity and Magick help that opens the Tome by itself (scripts 480, 694, 821) never comes: its "done" flags
+// are on, as the game itself has them from later chapters (0x800076xx). The Tome's opening (0x80102A8C) and a first hit
+// (0x80061FFC) each look at only these. r13-26528: the count, then the bits, flag >> 5 words, bit flag & 31.
+static void meter_help_off(CPUState* cpu) {
+    static const u32 kDone[] = {864u, 717u, 600u};
+    const u32 set = mem_read32(cpu, cpu->gpr[13] - 26528u);
+    if (set < 0x80000000u || set >= 0x81800000u)
+        return;
+    for (size_t i = 0; i < sizeof kDone / sizeof kDone[0]; i++) {
+        const u32 word = set + 4u + (kDone[i] >> 5) * 4u;
+        mem_write32(cpu, word, mem_read32(cpu, word) | (1u << (kDone[i] & 31u)));
+    }
+}
+
 static void notify_look_at(CPUState* cpu) {
     if (cpu->lr != g_camera_look_at_return)
         return;
@@ -5921,6 +6028,8 @@ static void notify_look_at(CPUState* cpu) {
     }
     camera_look_at(cpu);
     camera_split_update(cpu);
+    room_lights_update(cpu);
+    meter_help_off(cpu);
 }
 
 // The game's collision, for the third-person camera's line test: the world a
@@ -10004,7 +10113,7 @@ static void both_record(CPUState* cpu, const DolPadState* p1) {
 // (the same script twice is walking into its zone, then pressing on its prompt). Nothing happens without the variable.
 static void test_run_script(CPUState* cpu) {
     static int on = -1;
-    static char list[512];
+    static char list[8192];
     static unsigned long long first;
     if (on < 0) {
         const char* text = getenv("ED_RUN_SCRIPT");

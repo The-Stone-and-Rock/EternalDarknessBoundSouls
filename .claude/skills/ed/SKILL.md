@@ -20,8 +20,10 @@ Everything runs from the repo root as `python -I tools/ed/ed.py COMMAND`. `build
 | Prompts, regions, buttons | `ed system prompts` | `ed prompts`, `ed verb` |
 | Levels | `ed system levels` | `ed level` |
 | Which player a function reads | `ed system players` | `ed who ADDR`, `ed needs ADDR` |
-| Character shadows, lamps, graphics options, frame rate | `ed system graphics` | `ed flicker RUN`, `ed lamps RUN`, `ed graphics [SAVE] [OPTION]` |
+| Character shadows, lamps, graphics options, frame rate | `ed system graphics` | `ed chapters N`, `ed lights ROOM`, `ed flicker RUN`, `ed lamps RUN`, `ed graphics [SAVE] [OPTION]` |
 | Words these pages use | `ed system glossary` | |
+
+**A graphics change is judged on the whole game, in pictures:** `ed chapters N` for each of saves 1 to 12, before and after (`--name`, `--compare A B`), and read the sheets. A single room or a metric has passed things the user could see at once. The door is a teleport: log what breaks for them (`docs/chapter-tour-review.md`), don't take it for the game.
 
 ## Before writing anything
 

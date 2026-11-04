@@ -9,6 +9,10 @@ Start with these, before writing anything:
 
 The game, not a room:
   build [step]          (once, and after the disc or dol change) make build/ed-db
+  chapters N [--room R] [--long] [--name NAME]  every room of a chapter, from its save (slots 1 to 12), through the game's own door
+                        scripts: both Tomes, starts, cameras, each player's shadow, lamps, flicker, with sheets of pictures to read.
+                        A room with findings is run again for longer. --compare A B. Run before and after any graphics change
+  lights ROOM           a room's lamps from its file on the disc: place, colour, power, how far each carries
   flicker [RUN]         each player's shadows and picture, frame by frame, from a run with ED_RUN_PROBE=1
   lamps [RUN...]        the lamps each room was seen to have, from a run with AURORA_SHADOW_LOG
   graphics [SAVE] [OPT] every graphics option at every value: what it did to the picture, frame rate and log
@@ -488,6 +492,16 @@ def cmd_lamps(argv):
 def cmd_graphics(argv):
     import gfxcheck
     gfxcheck.cmd_graphics(argv)
+
+
+def cmd_chapters(argv):
+    import chapters
+    chapters.main(argv)
+
+
+def cmd_lights(argv):
+    import lights
+    lights.main(argv)
 
 
 def cmd_how(argv):

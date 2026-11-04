@@ -66,7 +66,7 @@ namespace {
 
 // --- Input ------------------------------------------------------------------
 
-enum Button { kUp, kDown, kLeft, kRight, kAccept, kBack, kMenu, kCostume, kButtonCount };
+enum Button { kUp, kDown, kLeft, kRight, kAccept, kBack, kMenu, kCostume, kPageLeft, kPageRight, kButtonCount };
 
 SDL_Gamepad* g_pad = nullptr;
 
@@ -102,6 +102,8 @@ void read_buttons(bool held[kButtonCount]) {
     // The GameCube pad has no Back/Select, so the game never sees it.
     held[kMenu] = btn(SDL_GAMEPAD_BUTTON_BACK);
     held[kCostume] = btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    held[kPageLeft] = btn(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+    held[kPageRight] = btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
 }
 
 // Keyboard presses since the last poll, from RmlUi key events.
@@ -148,6 +150,8 @@ public:
             break;
         case KI_BACK: case KI_K: g_key_pressed[kBack] = true; break;
         case KI_C: g_key_pressed[kCostume] = true; break;
+        case KI_Q: g_key_pressed[kPageLeft] = true; break;
+        case KI_E: g_key_pressed[kPageRight] = true; break;
         default: break;
         }
     }
@@ -1096,16 +1100,23 @@ void save_slot(int slot) {
     g_close = true;
 }
 
-// Left and right on a list of slots: ten on, or back, staying on the list.
+// LB and RB on a list of slots (and left and right on a slot): the page before or the next, round and round,
+// at the same place on the page. From Back, the page's first slot.
 void slots_jump(int dir) {
     const int slots = static_cast<int>(g_rows.size()) - 1;
-    g_selected = std::clamp(g_selected + dir * kSlotsShown, 0, std::max(slots - 1, 0));
+    if (slots <= 0)
+        return;
+    const int pages = (slots - 1) / kSlotsShown + 1;
+    const bool on_slot = g_selected < slots;
+    const int page = ((on_slot ? g_selected / kSlotsShown : g_slots_page) + dir + pages) % pages;
+    g_selected = std::min(page * kSlotsShown + (on_slot ? g_selected % kSlotsShown : 0), slots - 1);
 }
 
 std::string slots_note(int row, int slots) {
-    const int from = row / kSlotsShown * kSlotsShown;
-    return "Showing " + std::to_string(from + 1) + " to " + std::to_string(std::min(from + kSlotsShown, slots)) + " of " +
-           std::to_string(slots) + ". Left and right go ten at a time.";
+    const int page = row / kSlotsShown;
+    const int from = page * kSlotsShown;
+    return "Page " + std::to_string(page + 1) + " of " + std::to_string((slots - 1) / kSlotsShown + 1) + ": " + std::to_string(from + 1) + " to " +
+           std::to_string(std::min(from + kSlotsShown, slots)) + " of " + std::to_string(slots) + ". LB and RB change page.";
 }
 
 void build_states() {
@@ -1362,7 +1373,7 @@ Row vibration_row() {
 namespace enhancement {
 enum { kGlow, kOcclusion, kHdr, kShadows, kHdTextures, kOcclusionQuality, kPerPixel, kSmaa, kSharpen, kShafts, kCharShadows, kShadowEdges, kContact, kVolumetric, kSkin, kSpellRim, kCount };
 const char* const kNames[kCount] = {"Glow", "Ambient occlusion", "HDR", "Baked shadows", "HD textures", "Occlusion quality",
-                                    "Per-pixel lighting", "SMAA", "Sharpening", "Light shafts", "Character shadows", "Shadow edges", "Contact shadows", "Volumetric lighting", "Skin scattering", "Spell glow"};
+                                    "Per-pixel lighting", "SMAA", "Sharpening", "Light shafts", "Character shadows", "Shadow edges", "Contact shadows", "Haze", "Skin scattering", "Spell glow"};
 const char* const kLevels[] = {"Off", "Soft", "Strong"};
 
 bool available(int which) {
@@ -1398,7 +1409,7 @@ std::string value(int which) {
     }
     case kShadowEdges: return g_settings.shadow_hard ? "Hard" : "Soft";
     case kContact: return on_off(g_settings.contact_shadows);
-    case kVolumetric: return kLevels[g_settings.volumetric];
+    case kVolumetric: return g_settings.volumetric == 0 ? "Off" : std::to_string(g_settings.volumetric) + "%";
     case kSkin: return on_off(g_settings.skin_scatter);
     case kSpellRim: return on_off(g_settings.spell_rim);
     default: return "";
@@ -1420,7 +1431,7 @@ void change(int which, int dir) {
     case kCharShadows: cycle(g_settings.char_shadows, 3, dir); break;
     case kShadowEdges: g_settings.shadow_hard = !g_settings.shadow_hard; break;
     case kContact: g_settings.contact_shadows = !g_settings.contact_shadows; break;
-    case kVolumetric: cycle(g_settings.volumetric, 3, dir); break;
+    case kVolumetric: g_settings.volumetric = std::clamp(g_settings.volumetric + dir * 5, 0, 100); break;
     case kSkin: g_settings.skin_scatter = !g_settings.skin_scatter; break;
     case kSpellRim: g_settings.spell_rim = !g_settings.spell_rim; break;
     default: return;
@@ -1610,6 +1621,8 @@ void build_options_rows() {
             first = false;
             r.toggle = which == kHdTextures || which == kPerPixel || which == kSmaa || which == kContact ||
                        which == kSkin || which == kSpellRim;
+            if (which == kVolumetric)
+                r.slider = g_settings.volumetric;
             r.enabled = available(which);
             r.note = kNotes[which];
             if (which == kHdTextures && !available(which))
@@ -2208,6 +2221,7 @@ void render() {
         : g_screen == Screen::Problem ? "Up/Down choose &#183; A select"
         : g_screen == Screen::Characters ? (g_selected == 0 ? "Arrows choose &#183; A select &#183; RB or C costume &#183; B back"
                                                             : "Arrows choose &#183; A select &#183; B back")
+        : slot_list                   ? "Up/Down choose &#183; LB/RB page &#183; A select &#183; B back"
                                       : "Up/Down choose &#183; Left/Right change &#183; A select &#183; B back");
     g_doc->SetClass("spread", spread);
     // The launcher: its picture behind it (res/ui/launcher.png), the menu on
@@ -2565,6 +2579,10 @@ bool run_menu() {
                 r.change(pressed[kLeft] ? -1 : +1);
                 dirty = true;
             }
+        }
+        if ((g_screen == Screen::States || g_screen == Screen::Play) && (pressed[kPageLeft] || pressed[kPageRight])) {
+            slots_jump(pressed[kPageLeft] ? -1 : +1);
+            dirty = true;
         }
         if (pressed[kAccept]) {
             activate_selected();

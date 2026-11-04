@@ -36,7 +36,7 @@ OPTIONS = {
     'char_shadows': [0, 1, 2],
     'shadow_hard': [0, 1],
     'contact_shadows': [0, 1],
-    'volumetric': [0, 1, 2],
+    'haze': [0, 25, 50, 100],
     'skin_scatter': [0, 1],
     'spell_rim': [0, 1],
     'sharp_shadows': [0, 1],
@@ -225,10 +225,14 @@ def cmd_graphics(argv):
     def settings_with(key=None, value=None):
         path = os.path.join(out_dir, 'settings.ini')
         lines = []
+        found = False
         for line in open(base_ini, encoding='utf8', errors='replace'):
             if key is not None and line.startswith(key + ' = '):
                 line = '%s = %s\n' % (key, value)
+                found = True
             lines.append(line)
+        if key is not None and not found:  # newer than this settings.ini, which the game writes when it next saves
+            lines.append('%s = %s\n' % (key, value))
         open(path, 'w', encoding='utf8').writelines(lines)
         return path
 
@@ -273,7 +277,7 @@ def cmd_graphics(argv):
         if only and key not in only:
             continue
         for value in values:
-            if key not in base or str(value) == base[key]:
+            if str(value) == base.get(key):
                 continue
             run = run_one(save, 'gfx-%s-%s' % (key, value), settings_with(key, value), frames)
             changed, d, errs, drops = report('%s = %s' % (key, value), run, log_text(run))

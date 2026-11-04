@@ -31,7 +31,7 @@ Settings g_settings = {
     .char_shadows = 1,
     .shadow_hard = false,
     .contact_shadows = true,
-    .volumetric = 1,
+    .volumetric = 50,
     .skin_scatter = true,
     .spell_rim = true,
     .hdr_peak = 1000,
@@ -160,8 +160,10 @@ void settings_load(void) {
             g_settings.char_shadows = clamp_int(n, 0, 2);
         else if (strcmp(key, "shadow_hard") == 0)
             g_settings.shadow_hard = n != 0;
-        else if (strcmp(key, "volumetric") == 0)
-            g_settings.volumetric = clamp_int(n, 0, 2);
+        else if (strcmp(key, "haze") == 0)
+            g_settings.volumetric = clamp_int(n, 0, 100);
+        else if (strcmp(key, "volumetric") == 0)  // as it was saved: off, soft, strong
+            g_settings.volumetric = clamp_int(n, 0, 2) * 50;
         else if (strcmp(key, "skin_scatter") == 0)
             g_settings.skin_scatter = n != 0;
         else if (strcmp(key, "spell_rim") == 0)
@@ -279,7 +281,7 @@ void settings_save(void) {
     fprintf(f, "char_shadows = %d\n", g_settings.char_shadows);
     fprintf(f, "shadow_hard = %d\n", g_settings.shadow_hard ? 1 : 0);
     fprintf(f, "contact_shadows = %d\n", g_settings.contact_shadows ? 1 : 0);
-    fprintf(f, "volumetric = %d\n", g_settings.volumetric);
+    fprintf(f, "haze = %d\n", g_settings.volumetric);
     fprintf(f, "skin_scatter = %d\n", g_settings.skin_scatter ? 1 : 0);
     fprintf(f, "spell_rim = %d\n", g_settings.spell_rim ? 1 : 0);
     fprintf(f, "anti_aliasing = %d\n", g_settings.anti_aliasing);
@@ -372,8 +374,7 @@ void settings_apply_graphics(void) {
     static const float kCharShadows[] = {0.f, 0.5f, 0.8f};
     dol_aurora_set_char_shadows(kCharShadows[g_settings.char_shadows]);
     dol_aurora_set_shadow_hard(g_settings.shadow_hard);
-    static const float kVolumetric[] = {0.f, 0.45f, 0.9f};
-    dol_aurora_set_volumetric(kVolumetric[g_settings.volumetric]);
+    dol_aurora_set_volumetric(0.9f * (float)g_settings.volumetric / 100.f);
     dol_aurora_set_skin_scatter(g_settings.skin_scatter);
     dol_aurora_set_spell_rim(g_settings.spell_rim);
     dol_aurora_set_contact_shadows(g_settings.contact_shadows ? 0.45f : 0.f);

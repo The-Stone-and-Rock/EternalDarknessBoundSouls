@@ -27,7 +27,7 @@ typedef struct {
     int char_shadows;     // characters' shadows: 0 the game's own, 1 light, 2 dark (from the game's lights)
     bool shadow_hard;     // their edges: crisp at any distance, not softening further from the character
     bool contact_shadows; // short shadows where characters meet what's round them
-    int volumetric;       // the air lit by lamps and spells: 0 off, 1 soft, 2 strong
+    int volumetric;       // the haze, the air lit by lamps and spells: 0 off to 100 percent
     bool skin_scatter;    // light through skin, with per-pixel lighting
     bool spell_rim;       // spells' meshes with glowing edges, and their sparks shining
     int anti_aliasing;    // 1: 4x multisampling (from the next start)

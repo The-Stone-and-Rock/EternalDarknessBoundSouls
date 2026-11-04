@@ -343,6 +343,23 @@ Not looked at yet: how `interp.cpp` rebuilds uniforms for each view (`build_view
 - With either Tome open, the frame's effects don't run at all: no `[glow]` line, no casters. The Tome pages are fine, but the other player's half loses these shadows until it closes (`logs/run-20261104-121409-tomes1`).
 - Player 2's view jumps with them standing still, when player 1's camera starts a sweep (`logs/run-20261104-120740-fix1`, about F15277 and F15472), and stays offset between the two. `both.tsv` shows player 2's eye and target unchanged, so it's in how their view is built from the game camera's (`camera.c`, `aurora_split_set_view`), and `up` from the game's camera is used for both. Not traced further.
 
+## Lamps found by watching the draws: why shadows jumped, went missing and never faded (2026-11-04)
+
+The user, after the flicker fixes below: shadows jump about or don't show, aren't tied to each player and enemy, and the points of light don't fade. `ed flicker` passed throughout, as it only sees a value jump and come straight back. **The game has every lamp in a table: `ed system graphics`, The game's lights.**
+
+| Tried | What happened | Why |
+|---|---|---|
+| Working lamps out from the lights on the draws, kept once seen | Lamps at places there are none, kept for ever, as a haze and as a place to cast from. Lamps in the table missed until someone stood near: the corpse in room 338 cast from a lamp further off than (-1209,-1,234) | A light's place in a draw is in view space. One taken during a camera sweep came out somewhere else. Room 338's (95,-1,85) came out at (49,36,80) and (120,66,71) too |
+| One curve for all lamps, 500 to 1700 units | No lamp faded by its own light, and the haze was the same radius for all | A lamp's power (1,500 to 10,000) is how far it carries |
+| A lamp within a character's radius (about 200) counted as inside them | Their shadow swung to another lamp as they passed under one, and back | The bounds are the test now |
+| Lamps as low as the head | A black shape across the floor from a torch beside someone | They're lifted for the shadow |
+| Eight places for who casts | With enemies, no shadow for the players at all. Room 138: 8 places, all the enemies' | `kMaxCasters`, 32 |
+| Contact shadows at full on a body | Legs went black, once for each tile near | `body`, as shadows |
+| Fading a lamp's shadows in from nothing whenever someone's found | The user: the Tome room's effects come after the room loads in | At once when they're first found. The easing is only for walking between lamps |
+| Taking `0x804F0784` as it stood | Other rooms' lamps near doors, back and forth | The next room's is the higher address |
+| Running scripts that open words as door teleports (`ed chapters`) | Their words stayed up over every room after | They're tried last |
+| Measuring the flash in room 52 with all shadows off | Nothing to read: with no tiles the probe has no grid | Turn off only the haze |
+
 ## The flicker found: four causes, measured from inside the renderer (2026-11-04)
 
 `ed flicker` measures each view of each moment with no capture. `docs/game/systems/graphics.md` has how it all works now. Not yet played by the user. The open items above are answered here.

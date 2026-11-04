@@ -5,11 +5,11 @@ How the renderer's own shadows find what casts them and from where. It's all in 
 ## A frame
 
 1. **The game's own shadow:** each character's mesh, flattened on the floor, drawn twice into the EFB's alpha, then one full-screen quad darkens by it. With Character shadows on, both are left out.
-2. **Who casts:** each place with a flattened draw is someone. **The game leaves some flattened draws out now and then, with everyone standing still** (the corpse's and player 2's in room 338, every few seconds; every other world frame with a Tome up). Why isn't traced. So someone flattened in the last 30 frames still casts, for as long as a lit body is where they stand (`kFlatMemory`).
+2. **Who casts:** each place with a flattened draw is someone, up to 32 (`kMaxCasters`). That's more than can show (8 tiles): a monster's two flattened draws can be two places, and with 8 places four monsters left the players with no shadow. **The game leaves some flattened draws out now and then, with everyone standing still** (the corpse's and player 2's in room 338, every few seconds; every other world frame with a Tome up). Why isn't traced. So someone flattened in the last 30 frames still casts, for as long as a lit body is where they stand (`kFlatMemory`).
 3. **Their draws:** every lot of lights on something no bigger than a person, with their place inside it.
 4. **The camera:** the frame's first room draw's matrix (`g_sh.view`).
-5. **Lamps:** lights with `distatt` z of 0.1 or more, on characters and the room only, kept in world space for the room (`g_lamps`). Each character casts from their two nearest, easing at 5% a frame. A lamp in them or in the floor casts nothing.
-6. **The tiles:** the 8 strongest shadows, each in a 1024 tile of a depth atlas, in perspective from its lamp.
+5. **Lamps: the room's own, from the game.** See The game's lights. Each character casts from the two strongest of the three their cell lists, each fading by its own power, easing at 5% a frame as they walk and at once when they're first found (a room's arrival). A lamp in their body or in the floor casts nothing. For a shadow a lamp is lifted to at least 1.7 times their height: from about head height the shadow runs nearly flat, and a torch threw a black shape across the floor.
+6. **The tiles:** everyone's strongest shadow first, nearest the camera first, then second lamps, 8 in all, each in a 1024 tile of a depth atlas, in perspective from its lamp.
 7. **Where the scene ends** (`glow_scene_split`, found at the display copy), each view rebuilds each pixel's place from depth, using the projection of the scene's last 3D draw **as uploaded for that view**, then darkens it.
 
 ## What doesn't cast or light
@@ -20,9 +20,21 @@ The Tome and interaction icons don't. A prompt's model has a small viewport, so 
 
 The camera code runs on the game thread, up to a frame ahead of the renderer. A view goes in the GX stream (`dol_aurora_split_set_view`) so it's used with the draws it was worked out for. **Anything else sent from the game thread to the renderer for one frame has to go the same way.**
 
+## The game's lights
+
+**They're on the disc, and in memory: `ed lights ROOM`.** Each room has one grid over it. `0x804F0780` is a list of the room's models, 16 bytes each, and +4 points at the grid (the same in the start of all 12 chapters): +4 cell count, +8 the far corner, +20 a cell's size as 3 u16, +27 +28 +29 cells across (x fastest), +32 the cells, which follow. A cell is 20 bytes: its middle (3 s16), +8 a lamp count (always 3), +12 its lamps, +16 its fills. A lamp or fill is 20 bytes: place, r g b a, power. The game's lookup is `0x801E6B7C(grid, place, ...)`, which blends the fills of neighbouring cells.
+
+**A lamp's fade is its power:** `0x801E54BC` gives `GXInitLightAttn` a0 = 1.5 x power over k0 + k1 d + k2 d^2. A lamp's k are 1, 1, 0.8 and a fill's 9500, 3, 0.0385. So `reach` (where it's 0.3%) is 25 times the square root of power. A shadow's whole to half of it, and gone at it. A room is mostly baked light, so a lamp that's 1% at 470 units still plainly lights the floor there: faded by 1%, shadows were all but gone. The haze has a radius of its own, by the same power (`haze`).
+
+**Near a door that pointer goes back and forth:** the game has the next room loaded too, and for up to 280 frames seen, `0x804F0784` alternates between this room's grid and that one's. Rooms load at the same place, so the next room's grid is the higher address (rooms 1, 242, 243, 246 against the disc). `room_lights_update` in `hle.c` holds the room's grid while it's still good.
+
+`room_lights_update` sends the lamps and each cell's three in the GX stream when the grid changes (`dol_aurora_set_room_lights`).
+
+**The haze** is a bar now, 0 to 100, in Options > Graphics > Effects (`haze` in settings.ini, 50 by default; an old `volumetric` of 0, 1, 2 reads as 0, 50, 100). It takes the 12 lamps nearest anyone, fading in and out, as a room can have 57.
+
 ## Lamps seen, by save
 
-From `AURORA_SHADOW_LOG` and `ed lamps`. A room's list depends on where the players stand: each character only holds the lamps nearest them. World units.
+The old way of finding them, from `AURORA_SHADOW_LOG` and `ed lamps`, and now only useful as what was seen. World units.
 
 | Save | Room | Lamp, colour |
 |---|---|---|
@@ -37,12 +49,13 @@ From `AURORA_SHADOW_LOG` and `ed lamps`. A room's list depends on where the play
 | karim-start | 338 | (95,-1,85) 235,195,109; (949,917,236) and (101,1212,180) lilac 211,193,244 |
 | coop-apart | 100 | (-54,199,941) 134,96,188; (-1001,-584,522) 79,137,255; (-13,-1019,635) 118,59,132 |
 
-Lights aren't in `ed room`: the room files' lights haven't been read from the disc.
 
 ## Measuring
 
 - `ED_RUN_PROBE=1 sh tools/ed/run.sh SAVE NAME`, then `ed flicker RUN`: each player's shadows and picture, for every view of every moment drawn, from inside the renderer, so no capture and no window in front. The `shadows` lines are the mask; the `picture` lines are after shadows and haze, before post. One line's fields, with the camera and each tile: `logs/run-*/probe.txt`.
 - `ed graphics [SAVE] [OPTION...]`: every value of every option, one change at a time. It runs the base twice, as the lamps flicker: a change under that can't be told from it. `detail` is for what's too fine for the small picture (sharpening, SMAA).
+- `ed chapters N`: every room of a chapter from saves 1 to 12, by door script. It says where each player's shadow is against where they stand, the lamps against the disc, and flicker, starts, cameras and Tomes, with a sheet of every room to read. **Run it before and after a graphics change.** A frame-difference check can't see a shadow on the wrong lamp, or missing, or from the wrong person: `ed flicker` passed all of those. `docs/chapter-tour-review.md` has what the first tour found.
+- `ed lights ROOM`: a room's lamps from the disc. A few rooms' tables (6,534 records) aren't read cleanly, so what it says is missing there means little.
 - `ed lamps RUN`: needs `AURORA_SHADOW_LOG`.
 - `ed test shadow-steady`.
 - `AURORA_SHADOW_LOG=N`: every Nth frame, and each frame the flattened draws or lots of lights change. `AURORA_SHADOW_FRAMEDRAWS=1`: every draw of a frame whose flattened draws changed, and of the frame before. `DOL_INTERP_LOG=1`: `[interp]` rates and `[split-cost]`. `DOL_GX_TIME=1`: `[gx-time]`.
