@@ -1352,8 +1352,9 @@ Row vibration_row() {
 // Graphics enhancements: the options' rows and photo mode change the same
 // values, applied at once.
 namespace enhancement {
-enum { kGlow, kOcclusion, kHdr, kShadows, kHdTextures, kCount };
-const char* const kNames[kCount] = {"Glow", "Ambient occlusion", "HDR", "Baked shadows", "HD textures"};
+enum { kGlow, kOcclusion, kHdr, kShadows, kHdTextures, kOcclusionQuality, kPerPixel, kSmaa, kSharpen, kShafts, kCharShadows, kShadowEdges, kContact, kVolumetric, kSkin, kSpellRim, kCount };
+const char* const kNames[kCount] = {"Glow", "Ambient occlusion", "HDR", "Baked shadows", "HD textures", "Occlusion quality",
+                                    "Per-pixel lighting", "SMAA", "Sharpening", "Light shafts", "Character shadows", "Shadow edges", "Contact shadows", "Volumetric lighting", "Skin scattering", "Spell glow"};
 const char* const kLevels[] = {"Off", "Soft", "Strong"};
 
 bool available(int which) {
@@ -1361,6 +1362,10 @@ bool available(int which) {
         return dol_aurora_hdr_available();
     if (which == kHdTextures)
         return texpack_count() != 0;
+    if (which == kShadowEdges)
+        return g_settings.char_shadows != 0;  // the game's own have none to choose
+    if (which == kSkin)
+        return g_settings.per_pixel_lighting;  // it's worked out with it
     return true;
 }
 
@@ -1371,6 +1376,23 @@ std::string value(int which) {
     case kHdr: return available(which) ? on_off(g_settings.hdr) : "Not on this display";
     case kShadows: return g_settings.sharp_shadows ? "Sharp" : "Original";
     case kHdTextures: return available(which) ? on_off(g_settings.hd_textures) : "No pack";
+    case kOcclusionQuality: return g_settings.ssao_high ? "High" : "Standard";
+    case kPerPixel: return on_off(g_settings.per_pixel_lighting);
+    case kSmaa: return on_off(g_settings.smaa);
+    case kSharpen: {
+        static const char* const kAmounts[] = {"Off", "Low", "Medium", "High"};
+        return kAmounts[g_settings.sharpen];
+    }
+    case kShafts: return kLevels[g_settings.shafts];
+    case kCharShadows: {
+        static const char* const kKinds[] = {"The game's", "Light", "Dark"};
+        return kKinds[g_settings.char_shadows];
+    }
+    case kShadowEdges: return g_settings.shadow_hard ? "Hard" : "Soft";
+    case kContact: return on_off(g_settings.contact_shadows);
+    case kVolumetric: return kLevels[g_settings.volumetric];
+    case kSkin: return on_off(g_settings.skin_scatter);
+    case kSpellRim: return on_off(g_settings.spell_rim);
     default: return "";
     }
 }
@@ -1382,6 +1404,17 @@ void change(int which, int dir) {
     case kHdr: g_settings.hdr = !g_settings.hdr; break;
     case kShadows: g_settings.sharp_shadows = !g_settings.sharp_shadows; break;
     case kHdTextures: g_settings.hd_textures = !g_settings.hd_textures; break;
+    case kOcclusionQuality: g_settings.ssao_high = !g_settings.ssao_high; break;
+    case kPerPixel: g_settings.per_pixel_lighting = !g_settings.per_pixel_lighting; break;
+    case kSmaa: g_settings.smaa = !g_settings.smaa; break;
+    case kSharpen: cycle(g_settings.sharpen, 4, dir); break;
+    case kShafts: cycle(g_settings.shafts, 3, dir); break;
+    case kCharShadows: cycle(g_settings.char_shadows, 3, dir); break;
+    case kShadowEdges: g_settings.shadow_hard = !g_settings.shadow_hard; break;
+    case kContact: g_settings.contact_shadows = !g_settings.contact_shadows; break;
+    case kVolumetric: cycle(g_settings.volumetric, 3, dir); break;
+    case kSkin: g_settings.skin_scatter = !g_settings.skin_scatter; break;
+    case kSpellRim: g_settings.spell_rim = !g_settings.spell_rim; break;
     default: return;
     }
     settings_apply_graphics();
@@ -1393,6 +1426,17 @@ const char* const kNotes[kCount] = {
     "Light brighter than white on an HDR display.",
     "Sharp: the rooms' light maps upscaled. Original: as on the disc.",
     "",
+    "High: fuller, cleaner shade, at full size. It takes more of the graphics card.",
+    "Smoother light across characters and things, from the game's own lights.",
+    "Smooths edges MSAA can't reach, such as cut-out textures.",
+    "Crisper textures. The HUD and text aren't touched.",
+    "Soft beams from lamps and flames, cut by what stands in their way.",
+    "Cast from the game's own lights, how dark. The game's: flat on the floor.",
+    "Soft: blurs further from the character, as real shadows do. Hard: a crisp edge all along.",
+    "Short, dark shadows where characters meet the floor and walls.",
+    "Hazy air round the room's lamps and spells, with the characters' shadows through it.",
+    "A warm glow where light turns to shade on skin.",
+    "Spells shine, and the edges of their shapes glow.",
 };
 
 }  // namespace enhancement
@@ -1544,7 +1588,7 @@ void build_options_rows() {
     // Graphics: the enhancements, most visible first (HDR is with Display).
     {
         using namespace enhancement;
-        static const int kOrder[] = {kHdTextures, kShadows, kOcclusion, kGlow};
+        static const int kOrder[] = {kHdTextures, kShadows, kCharShadows, kShadowEdges, kContact, kPerPixel, kSkin, kOcclusion, kOcclusionQuality, kGlow, kSpellRim, kVolumetric, kShafts, kSmaa, kSharpen};
         for (int which : kOrder) {
             Row r{kNames[which], value(which)};
             if (which == kHdTextures)
@@ -2077,7 +2121,8 @@ void render() {
     // The pause menu: the launcher's parchment over the dimmed game.
     g_doc->SetClass("pause", g_screen == Screen::InGame);
     // The mapping list and the save states are long: tighten the rows.
-    g_doc->SetClass("compact", g_screen == Screen::Mapping || g_screen == Screen::States);
+    g_doc->SetClass("compact", g_screen == Screen::Mapping || g_screen == Screen::States ||
+                                   (g_screen == Screen::OptionsPage && g_options_section == 3));
     // Character select: one wide page, every frame at once.
     g_doc->SetClass("roster", g_screen == Screen::Characters);
     // Over the game the page lies on the dimmed, paused frame.

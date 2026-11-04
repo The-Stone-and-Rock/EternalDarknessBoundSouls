@@ -212,3 +212,134 @@ Then each hold had to let the other player go:
 `cutscene_playing` is false in this scene (`[trace] player 1's look over`: cutscene 0), though it shows bars. Which of its two asks says no wasn't traced. `coop_show_asked` stands aside whenever it's true.
 
 Scenarios: `lever-scene-p1-walks`, `lever-scene-p2-walks`. Test from standing, in the direction away from the shelf: walking into the shelf stops them and looks like this bug.
+
+## Character shadows (2026-11-04)
+
+How the game does it, from `AURORA_DRAW_DUMP=N`: each character's mesh, flattened on the floor, is drawn twice with colour off and alpha on. One full-screen quad at the end (src InvDstAlpha 7, dst DstAlpha 6) darkens by that alpha. Characters are skinned on the CPU, so `has_pos_mtx_idx` is 0 on them. What worked is in `gfx/shadow.hpp`.
+
+**What didn't work, finding who casts:**
+
+- **`has_pos_mtx_idx`, as skinned draws.** Nothing has it.
+- **Every lit draw.** Slot 7's room is lit too. Only some rooms are, so the bookshelf room hid this.
+- **The lit draws up to the next flattened draw.** A character's solid draws come far earlier, with the room's. Only their translucent parts are just before the flattened ones.
+- **The unbroken run of nearby draws before the flattened one.** The same, and it gave a tile of minimum size.
+- What worked: the lit draw just before a flattened draw has that character's own lights, and every lit draw with exactly those lights is them.
+
+**What didn't work, choosing the light:**
+
+- **The strongest by the game's attenuation.** It's the slow fill light past the camera (`distatt` z near 0.04), so shadows fell behind the characters where nobody sees them.
+- **The strongest room lamp (`distatt` z 0.1 or more), with no other test.** In slot 1 it was below the floor: the characters went black, with a dark disc round them. A light has to be at least a little above them, using where they stand to their middle as up.
+
+**Also:** a place past the tile's depth range compared with the atlas's cleared 1 as blocked, which darkened the whole room. A contact shadow cut off at a set distance drew a hard disc on the floor: it fades now.
+
+**Comparing:** the lanterns flicker, so brightness can't be compared between two runs. Use `AURORA_SHADOW_SHOW=1`.
+
+**The hang seen in these runs isn't from this:** `hang-20261104-093201` is the `0x80325188` bad priority thread after the character reload, in `docs/coop-no-pause.md`'s limits. It hit two of the runs on slot 7, one on a build before these shadows' casters, and it wasn't reproduced after.
+
+**Later the same day:**
+
+- **Looking along the depth buffer for furniture between a shadow and its caster, to stop one going through a bench onto the wall.** It broke long floor shadows into speckles, as the floor itself read as in the way at a low angle, and it didn't remove the faint shadow past the bench. Taken out. A shorter fade (`along` in `tile_shadow`) hides that tail. The room still isn't a caster, so a shadow can pass through furniture.
+- **Contact shadows from anything in the depth buffer.** The room's corners made a round patch where the effect fades. Only what's in the character's tile counts now (`is_caster`).
+- **Easing the light's direction through a camera cut.** It's in view space, so a shadow would swing from the wrong way for a dozen frames. It snaps if the camera turned (`g_sceneCameraCut`). No cut has been watched in a run yet.
+
+## Spells, skin and lit air (2026-11-04)
+
+To cast in a test: `ED_COOP_P2_QUICK=00010504 ED_COOP_P2_MAGICK=60 ED_PAD2_SCRIPT="23700,23712,up"` on slot 7. The script's button is `up`, not `dup`, and a press too soon after a load does nothing. It takes a few seconds: the column and ring have gone by frame 23950, so look at several frames.
+
+A spell is: flat sparks (a 63x63 sheet, no normals), one mesh with normals that leaves no depth (146 vertices), the rune and ring, and a real light on the room. So a rim shader can only go on the mesh. The sparks can only glow.
+
+**What didn't work:**
+
+- **The mesh in the glow pass, with a strong rim.** The column blew out to solid white, and its wisps were lost. Only the sparks glow now, and the rim is slight.
+- **Skin scattering on every lit draw.** Lit rooms took it too: the desk's paper went orange. A character has several lights and a lit room surface one, so it needs three or more (`plan.cpp`). The colour test is still a guess at what's skin: nothing says what a surface is.
+- **Volumetrics at 0.0016 a unit, radius 220.** The whole room went yellow.
+
+## Shadows and light in play: what the user saw (2026-11-04)
+
+Karim's chapter, the Tome room, `logs/run-20261104-104226-kariem-live`. They saw shadows that changed with the camera, showed only when running, and lights flickering. All were from these effects, and none from the game.
+
+**What each character's eight lights are** (`AURORA_SHADOW_LOG=1` prints them, `[shadow-lights]`):
+
+| Slots | What | How to tell |
+|---|---|---|
+| 0 to 2 | Fills, on a ring about 1,000 units out, about level with them | `distatt` z 0.0385 |
+| 3 | A fill about 600 units out towards the camera, which goes with it. Its view-space place follows the camera | `distatt` z 0.0385 |
+| 4 | Far off, about 1,000,000 units | `distatt` 128, 0, -127 |
+| 5 to 7 | The room's real lamps, nearest first, so **they change slots as a character moves** | `distatt` z 0.8 |
+
+A lamp can be chest height or in the floor: the Tome room's glowing circle has one at the knees.
+
+| What they saw | Cause | Fix |
+|---|---|---|
+| Shadows only when running | "A light has to be above them" (upness 0.3) rejected nearly every lamp, so standing fell back to straight down | Only that it's above the floor and not inside them (`casting_lamp`) |
+| Shadows depending on the camera | With no lamp through that test it fell back to the fills, slot 3 among them | Lamps only. With none, from straight above them |
+| Shadows not drawing properly | Cast as if from a far-off light along one direction, when the lamps are close | In perspective from the lamp (`tile_rows`) |
+| Lights flickering, in both halves at once | The haze's lamps were the characters' nearest three, so a lamp went fully on and off as anyone walked | Each lamp is kept in the world once seen, and fades (`g_lamps`) |
+| Black characters | Their own shadow on the side already turned from the lamp, then another player's shadow on their face | On a character it's a light shade (`body` in `shade`) |
+| A knee gone white | A lamp almost touching it: per pixel its fall-off climbs without end | Capped when per pixel (`emit_light`) |
+| A flame washed to white | The haze added over what's bright | It screens over it, and tends to a limit |
+
+**Comparing:** measure flicker on `shots.csv`'s left and right columns. Both jumping at once with one player standing is something global. Standing still showed nothing in any setting: it needs movement. `saves/karim-start.state` is a copy from just after Jump to Game's load-in, for `ed test shadow-karim`.
+
+**Shader names:** `cast` and `self` are reserved in WGSL, as many ordinary words are. Each crashed the game on load, whenever shadows were on, and only showed in a run with them on.
+
+**Still not done:** nothing bounces. There's no light passing from surface to surface: only the game's own baked light, these lamps, and the haze. The room isn't in the atlas, so a shadow can go through furniture.
+
+## Shadows that followed player 1 (2026-11-04)
+
+The user, on `saves/slot10.state` (Karim, room 338): player 2's shadow disappears or misbehaves out of player 1's view, and shadows jump between lamps. Recorded in `logs/run-20261104-112543-roomwalk`. Player 2 stood still at (-677,-625) while their shadow changed direction and vanished as player 1 walked.
+
+`AURORA_SHADOW_LOG=30` logs each frame's flattened draws and lots of lights (`[shadow-set]`). Test: `ED_INPUT_SCRIPT="14750,15700,0x0000,0,127,0" ED_RUN_FRAMES=16000 sh tools/ed/run.sh saves/slot10.state NAME`, which walks player 1 away with player 2 still.
+
+| Tried | What happened | Why |
+|---|---|---|
+| The lights of the last lit draw before a flattened draw say who it is | The corpse's flat took player 2's lights, and two characters became one. A flat could also take the room's | The order isn't what it looked like: not everyone has translucent parts just before their flat |
+| One lot of lights is one character | Player 2's shadow vanished with them standing still: only their translucent parts cast | A body and its translucent parts can have different lights |
+| Any lit thing the size of a person casts too, as flats might go missing out of view | It looked right for a while, and it was covering the fault above | In room 338 flats didn't go missing: both players had one in all 49 samples, in view or not. Not checked in other rooms, or for enemies |
+| The lamp from each character's own slots 5 to 7 | Player 2's lamp changed as player 1 walked | Not proven. Those slots swap order as a character moves, and the fault was gone once lamps were picked from the room's list by distance |
+| Up is from where they stand to the middle of their body | Any way at all on someone lying down | Height is the world's: the camera's third column |
+
+**What works:** each place with a flat draw is one character (within 80 units). Every lot of lights no bigger than a person with that place inside it is theirs (`fill_shadow`). Each keeps a slot by their place in the world, and each lamp in the room has a weight for them: the nearest two, the second at 0.55, less with distance from 500 to 1700 units, easing at 5% a frame. So two lamps' shadows overlap as someone passes between them, and there's no moment it switches. The 8 strongest shadows get a place in the atlas (3072, in 9 tiles of 1024).
+
+**A dark polygon or square on a pillar:** a hexagon at F15350 and a square at F15300, gone once draws were matched by place. Probably the room's draws in a character's tile, cut by the tile's near plane, but that wasn't confirmed.
+
+**Not yet seen:** enemies; the user's own eyes on any of this; two players crossing the same lamps.
+
+## Shadows and lights flickering, tripping together (2026-11-04)
+
+The user, after the fix above: "The shadows flicker frequently still. Some of the lights appear to trip together." Recorded in `logs/run-20261104-115843-roomwalk2`.
+
+**How to measure it:** the screen video, not the quarter-second pictures. A half with a still camera and a still player shows anything that changes as a fault. Count frames that jump and come straight back, per half, reading `video.mkv` with ffmpeg at 60 frames a second. The scripts for this aren't in the kit yet. The video has to have the game in front. The user's own walk had 63 such frames in 92 seconds, 21 of them in both halves at once.
+
+| Tried | What happened | Why |
+|---|---|---|
+| Choosing where the frame's effects run from the frame before's count of 3D-to-flat switches | One frame with no character shadows and different light, in both halves, whenever the order changed. The Examine prompt appearing is one: 40 to 31.6 mean brightness in player 2's half for that one frame | Run too early, the flattened draws haven't happened, so there are no casters, and ours replace the game's. Run too late, the HUD is in it |
+| The haze's six lamps nearest the characters | One player walking turned lamps on and off in the other's half, several at once, with the pillar's outline left dark in the difference pictures | The list depended on where the characters were. It's now every lamp the room has, up to 12, kept once seen |
+| The haze's colour taken from whichever character's lights came last | Not measured alone | Each lamp's colour now eases |
+| Shadows reaching 1000 units from what casts them | Huge black shapes sweeping over a pillar from someone near a lamp | Now they fade out from 1.2 to 3.5 times the character's radius |
+| Fading from 0.7 to 2.6 radii, and a lamp right beside someone fading to nothing | Too much: player 2's shadow all but went | Kept at 1.2 to 3.5, and a close lamp fades to half |
+| Lamps from any lit draw | Tome pages and lit icon models could have been taken for room lamps | Only the lights on characters and on the room (`fromWorld` in `fill_shadow`) |
+
+**What works:** `glow_scene_mark` notes each switch from the scene to something flat, and at the display copy, when the frame is over, `glow_scene_split` cuts the still-open pass at the last one. The effects run once a frame at the place the scene really ended. If the pass changed in between, `glow_scene_here` runs them at its end, and `AURORA_GLOW_LOG=1` prints a line for each such frame. There were none in these runs.
+
+**Still open: single frames in player 2's half.** About one every 3 seconds, up to about 1.3 of 255 in that half's mean brightness (the frames this fixed reached 10.7), even with both players standing still. In the difference picture every shadow in that half changes at once, including a sharp-edged patch by the corpse. `logs/run-20261104-124412-fix4`, 28.4 s in the video. Counted over the same 45-second scripted walk with `ED_SETTINGS` pointing at a copy of `settings.ini`:
+
+| Setting | Player 1's half | Player 2's half |
+|---|---|---|
+| As the user has it | 1 to 2 | 10 to 15 |
+| `frame_rate = 60` | 2 | 3 |
+| `volumetric = 0` | 1 | 7 |
+| `char_shadows`, `contact_shadows`, `volumetric` all 0 | 1 | 0 |
+
+| Tried for this | What happened | Why not |
+|---|---|---|
+| A character's draws in an earlier pass, so left out of the atlas | `AURORA_SHADOW_DRAWS=1`: none elsewhere in 8,517 lines, always 3 passes | Ruled out |
+| Each half's projection from the frame's first room draw, not its last (which could be a flare or a spark) | 13 spikes in player 2's half against 10 to 15: no change | Reverted |
+
+Not looked at yet: how `interp.cpp` rebuilds uniforms for each view (`build_view`) and the order each view's `WriteBuffer` and submit run in.
+
+**Also still open:**
+
+- With either Tome open, the frame's effects don't run at all: no `[glow]` line, no casters. The Tome pages are fine, but the other player's half loses these shadows until it closes (`logs/run-20261104-121409-tomes1`).
+- Player 2's view jumps with them standing still, when player 1's camera starts a sweep (`logs/run-20261104-120740-fix1`, about F15277 and F15472), and stays offset between the two. `both.tsv` shows player 2's eye and target unchanged, so it's in how their view is built from the game camera's (`camera.c`, `aurora_split_set_view`), and `up` from the game's camera is used for both. Not traced further.
+

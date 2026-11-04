@@ -1,0 +1,17 @@
+{
+ "name": "shadow-karim",
+ "proves": "Karim's chapter from its start, where the user saw shadows only while running: each player's shadow is cast from the room's real lamps even standing still, not from straight above or a fill that goes with the camera. Then both run. saves/karim-start.state is a copy made just after Jump to Game's load-in.",
+ "save": "saves/karim-start.state",
+ "env": {"AURORA_SHADOW_LOG": "1"},
+ "frames": 11150,
+ "seconds": 60,
+ "p1": "10900,11000,0x0000,0,127,0",
+ "p2": "10960,11060,lright",
+ "source": "written for the kit, from the user's session in logs/run-20261104-104226-kariem-live",
+ "expect": [
+  {"check": "log", "pattern": "caster 1 of [0-9]+ stands .* nearest lamps [0-9]+ "},
+  {"check": "no_log", "pattern": "WebGPU error"},
+  {"check": "moved", "who": "p1", "from": 10900, "to": 11000, "min": 50},
+  {"check": "moved", "who": "p2", "from": 10960, "to": 11060, "min": 50}
+ ]
+}

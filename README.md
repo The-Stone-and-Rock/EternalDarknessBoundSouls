@@ -129,6 +129,7 @@ folder, or the Mac app's
   for closer or further, and kept inside the room by the game's own collision)
   or *First person (beta)* (through their eyes, looking around with the right stick). Both hold still while you aim.
 - **New baked shadows** (below): the rooms' light and shadow redrawn sharp.
+- **Character shadows cast from the game's own lights, contact shadows, volumetric lighting, skin scattering, glowing spells, per-pixel lighting, full-size ambient occlusion, SMAA, sharpening and light shafts**, each under **Options > Graphics**.
 - **Crisp game text**: the game's lettering redrawn in two styles, *Sharp* or
   *Tome* (old typefaces), or *Original* as on the disc.
 - **HD texture packs** in Dolphin's format.

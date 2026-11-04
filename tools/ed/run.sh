@@ -2,14 +2,17 @@
 # run.sh SAVE NAME: the game exactly as the user plays it (their settings.ini), with every log, the both-player
 # recording (both.tsv) and pictures (shots/), under logs/run-*-NAME/. `ed check` reads it when it's closed.
 #   sh tools/ed/run.sh saves/slot1.state urn
-# ED_RUN_FRAMES=N closes the game at guest frame N. Test presses come through the environment as usual
+# SAVE as `launcher`: from the launcher, for Jump to Game and what loads in, with no save to load.
+#   sh tools/ed/run.sh launcher kariem
+# ED_RUN_SHOTS_W=N takes the pictures N wide (960), to look at the graphics closely. ED_RUN_FRAMES=N closes the game at guest frame N. Test presses come through the environment as usual
 # (ED_INPUT_SCRIPT, ED_PAD2_SCRIPT); the user's own controllers work the same.
 cd "$(dirname "$0")/../.." || exit 1
 STATE=${1:?a save state}; NAME=${2:-run}
 R="logs/run-$(date +%Y%m%d-%H%M%S)-$NAME"; mkdir -p "$R/shots"; echo "$R"
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/ed/shots.ps1 -dir "$R/shots" -everyMs "${ED_RUN_SHOTS_MS:-250}" >/dev/null 2>&1 &
-ED_BOTH="$R/both.tsv" ED_QUICKLOAD="$STATE" ED_ROOM_LOG=1 ED_COOP_LOG=1 ED_COOP_CAST_LOG=1 ED_COOP_PAD_LOG=1 ED_COOP_TRACE=1 \
-    build-win/EternalDarkness.exe generated/main.dol --iso dump/GEDP01.iso --no-launcher \
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/ed/shots.ps1 -dir "$R/shots" -everyMs "${ED_RUN_SHOTS_MS:-250}" -width "${ED_RUN_SHOTS_W:-960}" >/dev/null 2>&1 &
+if [ "$STATE" = launcher ]; then SKIP=; else SKIP=--no-launcher; export ED_QUICKLOAD="$STATE"; fi
+ED_BOTH="$R/both.tsv" ED_ROOM_LOG=1 ED_COOP_LOG=1 ED_COOP_CAST_LOG=1 ED_COOP_PAD_LOG=1 ED_COOP_TRACE=1 \
+    build-win/EternalDarkness.exe generated/main.dol --iso dump/GEDP01.iso $SKIP \
     --max-blocks 1000000000000000 2>&1 | python -u -I tools/coop-test/pagelog.py "$R" 20000 &
 GAME=$!
 if [ -n "$ED_RUN_FRAMES" ]; then
