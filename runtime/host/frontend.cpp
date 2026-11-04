@@ -322,8 +322,11 @@ std::string escape(const std::string& text) {
 
 std::string on_off(bool v) { return v ? "On" : "Off"; }
 
-// Save state slots: saves/slot1.state to saves/slot10.state.
-constexpr int kSlotCount = 10;
+// Save state slots: saves/slot1.state to saves/slot100.state. F1-F10 save to the first ten
+// (quickstate.c); the menus reach them all, kSlotsShown at a time.
+constexpr int kSlotCount = 100;
+constexpr int kSlotsShown = 10;
+int g_slots_page = 0;
 
 std::string slot_path(int slot) {
     return "saves/slot" + std::to_string(slot) + ".state";
@@ -1063,7 +1066,7 @@ void build_launcher() {
 
 // Load game: the used save slots; one chosen opens what can be done with it
 // (build_slot). Continue loads the newest. In the game, Save states lists all
-// ten (build_states), and a slot's page can save there too.
+// of them (build_states), and a slot's page can save there too.
 int g_slot_chosen = 0;
 bool g_slot_from_states = false;  // the slot page was opened from Save states
 
@@ -1086,10 +1089,24 @@ void save_slot(int slot) {
     g_close = true;
 }
 
+// Left and right on a list of slots: ten on, or back, staying on the list.
+void slots_jump(int dir) {
+    const int slots = static_cast<int>(g_rows.size()) - 1;
+    g_selected = std::clamp(g_selected + dir * kSlotsShown, 0, std::max(slots - 1, 0));
+}
+
+std::string slots_note(int row, int slots) {
+    const int from = row / kSlotsShown * kSlotsShown;
+    return "Showing " + std::to_string(from + 1) + " to " + std::to_string(std::min(from + kSlotsShown, slots)) + " of " +
+           std::to_string(slots) + ". Left and right go ten at a time.";
+}
+
 void build_states() {
     for (int slot = 1; slot <= kSlotCount; slot++) {
         const bool used = slot_used(slot);
         Row r{"Slot " + std::to_string(slot), used ? slot_time(slot) : "empty"};
+        r.note = slots_note(slot - 1, kSlotCount);
+        r.change = slots_jump;
         r.activate = [slot, used] {
             if (!used) {
                 save_slot(slot);
@@ -1113,10 +1130,15 @@ void build_states() {
 }
 
 void build_play() {
+    int used_slots = 0;
+    for (int slot = 1; slot <= kSlotCount; slot++)
+        used_slots += slot_used(slot);
     for (int slot = 1; slot <= kSlotCount; slot++) {
         if (!slot_used(slot))
             continue;
         Row r{"Slot " + std::to_string(slot), slot_time(slot)};
+        r.note = slots_note(static_cast<int>(g_rows.size()), used_slots);
+        r.change = slots_jump;
         r.activate = [slot] {
             g_slot_chosen = slot;
             g_slot_from_states = false;
@@ -1862,7 +1884,8 @@ void build_in_game() {
     states.gap = true;
     states.activate = [] {
         g_screen = Screen::States;
-        g_selected = 0;
+        // At the first empty slot, for a run of saves: all used, the first.
+        g_selected = std::max(free_slot() - 1, 0);
     };
     g_rows.push_back(states);
 
@@ -1977,8 +2000,17 @@ void render() {
     std::string rml[2];
     bool spread = false;
     bool in_roster = false;
+    // A list of slots shows ten at a time, the chosen one's, with Back under them.
+    const bool slot_list = g_screen == Screen::States || g_screen == Screen::Play;
+    const int slot_rows = static_cast<int>(g_rows.size()) - 1;
+    if (slot_list && g_selected < slot_rows)
+        g_slots_page = g_selected / kSlotsShown;
+    if (slot_list)
+        g_slots_page = std::clamp(g_slots_page, 0, std::max(slot_rows - 1, 0) / kSlotsShown);
     for (size_t i = 0; i < g_rows.size(); i++) {
         const Row& r = g_rows[i];
+        if (slot_list && static_cast<int>(i) < slot_rows && static_cast<int>(i) / kSlotsShown != g_slots_page)
+            continue;
         if (r.tile) {
             // A portrait frame and the name under it, four to a line.
             if (!in_roster)
@@ -2044,7 +2076,7 @@ void render() {
     g_doc->SetClass("launcher", g_screen == Screen::Launcher);
     // The pause menu: the launcher's parchment over the dimmed game.
     g_doc->SetClass("pause", g_screen == Screen::InGame);
-    // The mapping list and the ten save states are long: tighten the rows.
+    // The mapping list and the save states are long: tighten the rows.
     g_doc->SetClass("compact", g_screen == Screen::Mapping || g_screen == Screen::States);
     // Character select: one wide page, every frame at once.
     g_doc->SetClass("roster", g_screen == Screen::Characters);

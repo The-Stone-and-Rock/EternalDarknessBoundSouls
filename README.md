@@ -134,7 +134,7 @@ folder, or the Mac app's
 - **HD texture packs** in Dolphin's format.
 - **Modern controls**, remapping, and button prompts that match your controller
   (Xbox, PlayStation or Switch icons), the game's own prompts included.
-- **Save anywhere**: the pause menu has four save slots that hold the whole moment,
+- **Save anywhere**: the pause menu has 100 save slots that hold the whole moment,
   besides the game's own memory-card saves (cards in slots A and B both work).
 - **A launcher**: Continue, New game or any save slot straight from the start,
   and Options for everything here.
@@ -185,7 +185,7 @@ as you switch.
 - The launcher's **Play** offers Continue (your newest save slot), New game or
   any slot. **Options** holds the display, sound, controls and game settings.
 - In the game, the menu button (above) or **Esc** opens this port's pause menu:
-  four save slots, Options, Return to title screen, Return to launcher, Quit.
+  100 save slots, Options, Return to title screen, Return to launcher, Quit.
 - Saves: `saves/` (the pause menu's slots) and `ed-GEDP01-slot-a.dolcard` (the
   game's memory card; a `...-slot-b.dolcard` beside it is slot B).
 - If something goes wrong, send the files in `saves/reports/` with a few words on
@@ -234,7 +234,7 @@ cp /path/to/disc.iso dump/GEDP01.iso          # the European disc
 after that it lives in Options and the menu leads with Play. Play offers
 Continue (the newest save slot), New game, or any used slot, so a save loads
 without going through the game first. In the game, Esc or the controller's Back/Select button pauses into a
-menu with four save slots (`saves/`), the same options, and a way back to the
+menu with 100 save slots (`saves/`), the same options, and a way back to the
 launcher. Menus work with the keyboard (arrows, Enter, Esc), a controller
 (d-pad or stick, A, B) or the mouse.
 

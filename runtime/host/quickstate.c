@@ -62,7 +62,8 @@ static bool g_boot_saved;
 // save to slot 1-10; F11 loads the newest (as the launcher's Continue).
 #define QS_KEY_F1 58
 #define QS_KEY_LOAD_NEWEST 68  // F11
-#define QS_SLOTS 10
+#define QS_SLOTS 10        // F1-F10
+#define QS_SLOT_FILES 100  // all the slots, for F11's newest (kSlotCount in frontend.cpp)
 #define QS_RECORD_STATE "build/runs/record.state"
 #define QS_RECORD_PAD "build/runs/record.pad"
 // Blocks to wait for the GX FIFO to reach a command boundary before going
@@ -314,7 +315,7 @@ void quickstate_poll(unsigned long long blocks) {
             } else {
                 int newest = 0;
                 time_t newest_time = 0;
-                for (int s = 1; s <= QS_SLOTS; s++) {
+                for (int s = 1; s <= QS_SLOT_FILES; s++) {
                     struct stat st;
                     snprintf(path, sizeof path, "saves/slot%d.state", s);
                     if (stat(path, &st) == 0 && st.st_mtime >= newest_time)
