@@ -23,7 +23,7 @@ The goal: the game believes it was built for two players, using what the game al
 
 ## Held until the user asks
 
-- **Unstable frame rates, and true 120 fps in co-op.** The user recalls true 120 causing issues in the past, so don't work on it until they ask. When they do, start at Frame rate in `ed system graphics`. What's there now, which they haven't played: co-op still tries frames in between, and when they cost too much the game slows to about 50 Hz until the back-off stops them, retrying at longer and longer gaps.
+- **Unstable frame rates, and true 120 fps in co-op.** The user recalls true 120 causing issues in the past, so don't work on it until they ask. When they do, start at Frame rate in `ed system graphics`. Co-op is capped at 60 for now, by `settings_apply`, and the setting stays for solo. Most co-op games do the same, as the user says. Lifting the cap brings back frames in between that cost too much: the game slowed to about 50 Hz until the back-off stopped them.
 
 ## Their rules for working
 

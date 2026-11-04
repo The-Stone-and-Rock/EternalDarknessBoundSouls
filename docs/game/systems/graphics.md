@@ -49,8 +49,12 @@ Lights aren't in `ed room`: the room files' lights haven't been read from the di
 
 ## Frame rate
 
+**A Tome open in co-op:** the FPS counter says 120, with one Tome or both, and that's game-loop passes, not pictures. It's by design (`bac33e8`, the comment on `TW_MODE_CHANGE` in `hle.c`): the loop runs the world's frame, then the Tome's, then the other Tome's in the copy, and only the world's waits for the retrace. So each keeps 60. `[screen]` (`DOL_INTERP_LOG=1`) counts what's really shown: 60.0 with one Tome or both. `ED_TW_WORLD_FRAMES=N` (testing) gives the Tome one frame in N+1 passes: at 2 the counter says 90 and the Tome updates 30 times a second, at 3 it says 80 and 20. The world stayed at 60, worst frame 18 ms, at all three. It can't reach 60 passes this way: the world alone is 60.
+
 **Held by the user:** review unstable frame rates and true 120 in co-op only when they ask. They recall true 120 causing issues in the past, and what those issues were isn't recorded here: ask them.
 
 The game steps at 60. Above that, Aurora replays the frame with blended matrices. A frame reaching its present over 33 ms after its retrace is behind and goes alone. Behind 6 times soon stops frames in between for 2 seconds, doubling if it soon trips again. The pace waits at most 19 ms from the retrace.
 
-Solo at 120 shows 120. **Co-op shows 60 on this PC, even with every effect off:** 5 full redraws a game frame (each player's two moments, and the game's own frame, which nobody sees) don't fit in 16.7 ms, and the game slowed to about 50 Hz when they ran. The game's own frame is the one to cut, and that needs care: its EFB copies and readbacks are what the game uses next frame.
+Solo at 120 shows 120. **Split-screen co-op is capped at 60** (`settings_apply`; the Frame rate row shows 60 and is for solo). Without the cap, 5 full redraws a game frame (each player's two moments, and the game's own frame, which nobody sees) didn't fit in 16.7 ms on this PC, even with every effect off, and the game slowed to about 50 Hz when they ran. To lift it, the game's own frame is the one to cut, and that needs care: its EFB copies and readbacks are what the game uses next frame.
+
+With the cap, against the same scenarios just before it, frames over 25 ms: `shadow-steady` 13 of 1065 to 2 of 1104 (worst 45 to 27 ms), `lever-tomes` 79 of 1358 to 2 of 1469 (worst 36 to 33 ms). One run of each.

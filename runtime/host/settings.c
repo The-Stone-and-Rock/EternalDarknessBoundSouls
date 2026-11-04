@@ -338,7 +338,9 @@ void settings_apply(void) {
     static const int kRenderLines[] = {0, 720, 1080, 1440, 2160};
     dol_aurora_set_render_height(kRenderLines[g_settings.render_scale]);
     dol_aurora_set_fullscreen(g_settings.fullscreen);
-    dol_aurora_set_frame_rate(g_settings.frame_rate);
+    // Split-screen co-op plays at the game's own 60: each moment between frames is drawn twice, once for each
+    // player, and they don't fit. The setting is kept for solo. `ed system graphics`, Frame rate.
+    dol_aurora_set_frame_rate(g_settings.mod_coop ? 60 : g_settings.frame_rate);
     dol_aurora_set_audio_buffer_ms(g_settings.audio_buffer_ms);
     dol_aurora_set_vibration(g_settings.vibration);
 #endif

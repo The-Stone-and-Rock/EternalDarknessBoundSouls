@@ -3849,7 +3849,7 @@ index a13ce39..d140bb7 100644
   * EFB readback (GXRuntime recomp patch): arm a one-shot copy of the next
   * submitted frame's present source; take returns tightly packed RGBA8 rows
 diff --git a/graphics/aurora/lib/aurora.cpp b/graphics/aurora/lib/aurora.cpp
-index b09ef4d..86a16bc 100644
+index b09ef4d..5991b62 100644
 --- a/graphics/aurora/lib/aurora.cpp
 +++ b/graphics/aurora/lib/aurora.cpp
 @@ -1,6 +1,17 @@
@@ -4695,7 +4695,7 @@ index b09ef4d..86a16bc 100644
          }
          pass.End();
        }
-@@ -362,67 +1040,238 @@ void end_frame() noexcept {
+@@ -362,67 +1040,251 @@ void end_frame() noexcept {
              .label = "ImGui render pass",
              .colorAttachmentCount = attachments.size(),
              .colorAttachments = attachments.data(),
@@ -4761,6 +4761,19 @@ index b09ef4d..86a16bc 100644
 +        window::SurfaceLock surfaceLock;
 +        if (window::is_presentable()) {
 +          status = g_surface.Present();
++          // DOL_INTERP_LOG: pictures really shown, once a second. The FPS counter counts the game's frames.
++          static const bool s_screenLog = std::getenv("DOL_INTERP_LOG") != nullptr;
++          if (s_screenLog) {
++            static auto s_from = std::chrono::steady_clock::now();
++            static int s_shown = 0;
++            ++s_shown;
++            const double s_secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - s_from).count();
++            if (s_secs >= 1.0) {
++              std::fprintf(stderr, "[screen] %.1f pictures a second\n", s_shown / s_secs);
++              s_shown = 0;
++              s_from = std::chrono::steady_clock::now();
++            }
++          }
 +        }
 +      }
 +      return static_cast<bool>(status);
@@ -4955,7 +4968,7 @@ index b09ef4d..86a16bc 100644
      gfx::after_submit();
  
      TracyPlotConfig("aurora: lastVertSize", tracy::PlotFormatType::Memory, false, true, 0);
-@@ -440,7 +1289,7 @@ void end_frame() noexcept {
+@@ -440,7 +1302,7 @@ void end_frame() noexcept {
      TracyPlot("aurora: lastIndexSize", static_cast<int64_t>(gfx::g_stats.lastIndexSize));
      TracyPlot("aurora: lastStorageSize", static_cast<int64_t>(gfx::g_stats.lastStorageSize));
      TracyPlot("aurora: lastTextureUploadSize", static_cast<int64_t>(gfx::g_stats.lastTextureUploadSize));
@@ -4964,7 +4977,7 @@ index b09ef4d..86a16bc 100644
  
  #endif
  }
-@@ -475,6 +1324,87 @@ void aurora_set_resampler(AuroraSampler sampler) {
+@@ -475,6 +1337,87 @@ void aurora_set_resampler(AuroraSampler sampler) {
    (void)sampler;
  #endif
  }

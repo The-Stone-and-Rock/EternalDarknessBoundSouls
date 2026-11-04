@@ -9317,7 +9317,9 @@ static void tw_mode_change(CPUState* cpu) {
         mem_write32(cpu, sda - 26192u, TW_WORLD_FRAME);
     }
     g_tw.world_tick = !g_tw.world_tick;
-    g_tw.worlds_left = TW_WORLD_FRAMES;
+    // ED_TW_WORLD_FRAMES=N (testing): the world's frames to one of the Tome's.
+    const unsigned s_world_frames = getenv("ED_TW_WORLD_FRAMES") != NULL ? (unsigned)atoi(getenv("ED_TW_WORLD_FRAMES")) : TW_WORLD_FRAMES;
+    g_tw.worlds_left = s_world_frames;
     dol_aurora_split_skip_views(g_tw.world_tick ? 0 : (g_coop_tome_owner == 1 ? 2 : 1));
     dol_aurora_frame_unpaced(true);
     aurora_split_only_view(g_tome_copy_open ? 2 : g_coop_tome_owner >= 0 ? 1 - g_coop_tome_owner : -1);

@@ -820,7 +820,10 @@ void build_mods_rows() {
     Row coop{"Split-screen co-op", on_off(g_settings.mod_coop)};
     coop.section = "I \u00b7 Co-op";
     coop.toggle = true;
-    coop.change = [](int) { g_settings.mod_coop = !g_settings.mod_coop; };
+    coop.change = [](int) {
+        g_settings.mod_coop = !g_settings.mod_coop;
+        changed();  // co-op has its own frame rate
+    };
     g_rows.push_back(coop);
 
     static const char* const kSplit[] = {"Side by side", "Above and below"};
@@ -1518,9 +1521,11 @@ void build_options_rows() {
             if (choices[i] == g_settings.frame_rate)
                 shown = g_settings.frame_rate;
     }
-    Row rate{"Frame rate", std::to_string(shown)};
-    rate.enabled = faster;
-    if (!faster) {
+    Row rate{"Frame rate", std::to_string(g_settings.mod_coop ? 60 : shown)};
+    rate.enabled = faster && !g_settings.mod_coop;
+    if (g_settings.mod_coop) {
+        rate.note = "Split-screen co-op plays at 60. This setting is for playing alone.";
+    } else if (!faster) {
 #ifdef __PROSPERO__
         rate.note = "Your TV is running at 60 Hz. 120 needs a TV that takes 120 Hz, with Enable 120 Hz "
                     "Output on in the PS5's Screen and Video settings.";

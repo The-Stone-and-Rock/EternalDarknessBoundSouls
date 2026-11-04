@@ -15,7 +15,7 @@ frame, not confirmed to be the effect).
 
 - The world behind the Tome (in testing, not committed): each player's Tome and quick spells leave the world running.
   - Both the world and the Tome run at 60 while a Tome is open, measured in the save in slot 7. `TW_WORLD_FRAMES` in `runtime/host/hle.c` is the balance if a heavier room falls short.
-  - The Tome's yellow cursor border pulses twice too fast in co-op (175 ms a cycle, 342 in solo). Its cause is not found yet.
+  - The Tome's yellow cursor border pulses twice too fast in co-op (175 ms a cycle, 342 in solo). It goes by the game loop's passes, not the Tome's frames: about 180, 230 and 260 ms with `ED_TW_WORLD_FRAMES` 1, 2 and 3, which is 342 x 60 / passes a second. Which counter it reads isn't found yet.
   - Both players' Tomes open together: the game runs at about 80% speed. The state swapped is in `runtime/host/tome_state.inc`.
   - The other player's bars and prompts are hidden while a Tome is open.
   - Untested: a door, cutscene, death or area change while a Tome is open; quick saving with a Tome open; save or load from the Tome; a Tome page other than the inventory.
