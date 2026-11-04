@@ -3984,6 +3984,17 @@ static void tome_copy_pad(CPUState* cpu, u32 out) {
 }
 #endif
 
+#ifdef ED_AURORA
+// ED_BOTH=path (tools/ed): one row a frame with both players side by side.
+static void both_record(CPUState* cpu, const DolPadState* p1);
+static void test_run_script(CPUState* cpu);
+static struct {
+    u16 button;
+    s8 x, y;
+} g_both_p2_pad;  // player 2's pad as read, before a Tome or a close-up takes it
+static s32 g_both_script;  // the last script started, apart from zones
+#endif
+
 static void hle_PADRead(CPUState* cpu) {
 #ifdef ED_AURORA
     if (g_tome_copy_turn) {
@@ -4001,6 +4012,9 @@ static void hle_PADRead(CPUState* cpu) {
         controls_set_tome_read(hle_coop_tome_shares() ? g_coop_tome_owner == 1 : -1);
         controls_read_player2(&state[0]);
         controls_set_tome_read(-1);
+        g_both_p2_pad.button = state[0].button;
+        g_both_p2_pad.x = state[0].stick_x;
+        g_both_p2_pad.y = state[0].stick_y;
         static int pad_log = -1;  // ED_COOP_PAD_LOG=1: player 2's pad when anything is pressed
         if (pad_log < 0)
             pad_log = getenv("ED_COOP_PAD_LOG") != NULL;
@@ -4083,6 +4097,8 @@ static void hle_PADRead(CPUState* cpu) {
     }
 #ifdef ED_AURORA
     coop_watch(cpu, &state[0]);
+    both_record(cpu, &state[0]);
+    test_run_script(cpu);
 #endif
     if (camera_pad_buttons(cpu, state[0].button))
         state[0].stick_x = state[0].stick_y = 0;
@@ -9694,6 +9710,142 @@ static void coop_found_for_finder(CPUState* cpu, bool p2) {
         fprintf(stderr, "[coop] the find's thing 0x%08X 0x%08X is drawn for player %d alone\n", g_coop_found_objects[0], g_coop_found_objects[1], p2 ? 2 : 1);
 }
 
+// ED_BOTH=path: one row a frame, player 1 and player 2 side by side, for tools/ed (ed check, ed see).
+// It only reads: a log that calls the game's code changes the game (docs/coop-failed-attempts.md).
+// The columns are named in the file's first line, and tools/ed/recording.py reads them by name.
+// The motion a player's object plays: 0x801222F0, by reading.
+static int both_motion(CPUState* cpu, u32 node) {
+    if (node == 0u || !guest_ram_range_valid(cpu, node + 52u, 4u))
+        return -1;
+    const u32 object = mem_read32(cpu, node + 52u);
+    if (!guest_ram_range_valid(cpu, object + 64u, 4u))
+        return -1;
+    const u32 block = mem_read32(cpu, object + 64u);
+    if (!guest_ram_range_valid(cpu, block + 2176u, 2u))
+        return -1;
+    const u32 channel = block + mem_read16(cpu, block + 2176u) * 272u;
+    if (!guest_ram_range_valid(cpu, channel + 184u, 4u))
+        return -1;
+    const u32 motion = mem_read32(cpu, channel + 184u);
+    return motion != 0u && guest_ram_range_valid(cpu, motion, 4u) ? (s32)mem_read32(cpu, motion) : -1;
+}
+
+static void both_record(CPUState* cpu, const DolPadState* p1) {
+    static FILE* f;
+    static int on = -1;
+    static unsigned long long last = ~0ull;
+    if (on < 0) {
+        const char* path = getenv("ED_BOTH");
+        on = path != NULL && (f = fopen(path, "w")) != NULL;
+        if (on)
+            fprintf(f, "frame\tms\troom\tentry\twho\tctl\tp1x\tp1y\tp1z\tp1st\tp1hp\tp1m\tp2x\tp2y\tp2z\tp2st\tp2hp\tp2m\t"
+                       "p1b\tp1sx\tp1sy\tp2b\tp2sx\tp2sy\tex\tey\tez\ttx\tty\ttz\tfov\t"
+                       "p1ex\tp1ey\tp1ez\tp1tx\tp1ty\tp1tz\tp2ex\tp2ey\tp2ez\tp2tx\tp2ty\tp2tz\t"
+                       "busy\thold\tfocus\tfocus2\twindow\tscript\tmode\tmode2\t"
+                       "screen\towner\tshares\tcopy\tcopyp1\tlent\tcutscene\tmenu\t"
+                       "ticket\tfade\tp1anim\tp2anim\tcamidx\tcamhash\tp1carry\tp2carry\n");
+    }
+    if (!on || !sda_ready(cpu))
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (frame == last)
+        return;
+    last = frame;
+    const u32 sda = cpu->gpr[13];
+    struct timespec ts;
+    timespec_get(&ts, TIME_UTC);
+    fprintf(f, "%llu\t%lld\t%d\t0x%08X\t0x%X\t0x%X", frame, (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000,
+            (s32)mem_read32(cpu, sda + (u32)(s32)g_coop_room_offset), mem_read32(cpu, 0x8058B018u), mem_read32(cpu, sda - 21492u), mem_read32(cpu, sda - 21488u));
+    u32 them = coop_player(cpu);
+    if (g_coop_p2 != 0u && them == g_coop_p2)  // player 2 is "the player" in a use of theirs
+        them = g_coop_use.active && g_coop_use.p2 ? g_coop_use.was[1] : g_coop_turn_p1;
+    const u32 nodes_of_both[2] = {them, g_coop_p2};
+    for (int i = 0; i < 2; i++) {
+        const u32 node = nodes_of_both[i];
+        const u32 object = node != 0u && guest_ram_range_valid(cpu, node + 52u, 4u) ? mem_read32(cpu, node + 52u) : 0u;
+        float at[3] = {0.0f, 0.0f, 0.0f};
+        if (guest_ram_range_valid(cpu, object, 16u))
+            for (u32 k = 0u; k < 3u; k++)
+                at[k] = guest_read_f32(cpu, object + k * 4u);
+        int state = -1, health = -1, model = -1;
+        if (object != 0u) {
+            const u32 actor = mem_read32(cpu, node + (u32)(s32)g_coop_actor_offset);
+            const u32 stats = mem_read32(cpu, node + (u32)(s32)g_coop_stats_offset);
+            state = (int)mem_read32(cpu, node + COOP_NODE_STATE);
+            if (guest_ram_range_valid(cpu, stats + (u32)(s32)g_coop_health_offset, 2u))
+                health = (s16)mem_read16(cpu, stats + (u32)(s32)g_coop_health_offset);
+            if (guest_ram_range_valid(cpu, actor, 160u))
+                model = (s16)mem_read16(cpu, actor + 154u);
+        }
+        fprintf(f, "\t%.1f\t%.1f\t%.1f\t%d\t%d\t%d", at[0], at[1], at[2], state, health, model);
+    }
+    fprintf(f, "\t0x%X\t%d\t%d\t0x%X\t%d\t%d", p1->button, p1->stick_x, p1->stick_y, g_both_p2_pad.button, g_both_p2_pad.x, g_both_p2_pad.y);
+    for (u32 k = 0u; k < 6u; k++)
+        fprintf(f, "\t%.1f", guest_read_f32(cpu, CAMERA_VIEW + k * 4u));
+    fprintf(f, "\t%.2f", guest_read_f32(cpu, CAMERA_VIEW + CAMERA_VIEW_FOV));
+    for (u32 k = 0u; k < 6u; k++)
+        fprintf(f, "\t%.1f", g_coop_p1_view_frame != 0ull ? g_coop_p1_view[k] : 0.0f);
+    for (u32 k = 0u; k < 6u; k++)
+        fprintf(f, "\t%.1f", g_coop_own_view_frame != 0ull ? g_coop_own_view[k] : 0.0f);
+    fprintf(f, "\t0x%X\t0x%X\t0x%X\t0x%X\t0x%X\t%d\t%d\t%d", mem_read32(cpu, sda - 23344u), mem_read32(cpu, sda - 25696u),
+            mem_read32(cpu, sda - 23552u), mem_read32(cpu, sda - 23556u), mem_read32(cpu, sda - 25960u),
+            g_both_script, (s32)mem_read32(cpu, sda - 26188u), (s32)mem_read32(cpu, sda - 24244u));
+    fprintf(f, "\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d", g_coop_screen, g_coop_tome_owner, hle_coop_tome_shares(), g_tome_copy_open,
+            g_tome_copy_p1, g_coop_cameras.lent, cutscene_playing(cpu), game_menu_open(cpu));
+    // The room change's countdown (ticket +0), the fade's ticks, and the motion each player is playing (0x801222F0, by reading).
+    fprintf(f, "\t%d\t%d\t%d\t%d", (s32)mem_read32(cpu, 0x8058AFFCu), (s32)mem_read32(cpu, sda - 21784u),
+            both_motion(cpu, nodes_of_both[0]), both_motion(cpu, nodes_of_both[1]));
+    // Which camera the game's own records are on: the current index's eye record (0x80603178 + n*136), +124 the room's entry, its +52 hash.
+    const s32 camera_index = (s32)mem_read32(cpu, sda - 26864u);
+    u32 camera_hash = 0u;
+    if (camera_index >= 0 && camera_index < 12) {
+        const u32 entry = mem_read32(cpu, 0x80603178u + (u32)camera_index * 136u + 124u);
+        if (guest_ram_range_valid(cpu, entry + 52u, 4u))
+            camera_hash = mem_read32(cpu, entry + 52u);
+    }
+    fprintf(f, "\t%d\t0x%X", camera_index, camera_hash);
+    // How much each carries (node +48, its count at +8), to see an item leave.
+    for (int i = 0; i < 2; i++) {
+        const u32 node = nodes_of_both[i];
+        const u32 list = node != 0u && guest_ram_range_valid(cpu, node + 48u, 4u) ? mem_read32(cpu, node + 48u) : 0u;
+        fprintf(f, "\t%d", guest_ram_range_valid(cpu, list + 8u, 4u) ? (s32)mem_read32(cpu, list + 8u) : -1);
+    }
+    fprintf(f, "\n");
+    fflush(f);  // a freeze keeps every row up to it
+}
+
+// ED_RUN_SCRIPT=DELAY:SCRIPT[,DELAY:SCRIPT...]: for tests. Runs a level's script as a zone would, DELAY frames after the run starts
+// (the same script twice is walking into its zone, then pressing on its prompt). Nothing happens without the variable.
+static void test_run_script(CPUState* cpu) {
+    static int on = -1;
+    static char list[512];
+    static unsigned long long first;
+    if (on < 0) {
+        const char* text = getenv("ED_RUN_SCRIPT");
+        on = text != NULL;
+        if (on)
+            snprintf(list, sizeof list, "%s", text);
+    }
+    if (!on || !sda_ready(cpu))
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (first == 0ull)
+        first = frame;
+    int delay = 0, script = 0, used = 0;
+    if (sscanf(list, "%d:%d%n", &delay, &script, &used) != 2) {
+        on = 0;
+        return;
+    }
+    if (frame - first < (unsigned long long)delay || mem_read32(cpu, cpu->gpr[13] - RUNNING_SCRIPT) != 0u)
+        return;
+    u32 args[3] = {(u32)script, 0u, 0u};
+    u32 ignore = 0u;
+    fprintf(stderr, "[test] frame %llu: running script %d\n", frame, script);
+    hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ignore);
+    const char* rest = list + used;
+    memmove(list, *rest == ',' ? rest + 1 : rest, strlen(rest) + 1);
+}
+
 static void hle_coop_found(CPUState* cpu) {
     if (g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu))
         return;
@@ -9897,6 +10049,8 @@ static void coop_run_script(CPUState* cpu) {
         g_tome_copy_use_script = (s32)cpu->gpr[3];
         g_tome_copy_use_item = cpu->gpr[4];
     }
+    if (cpu->lr != 0x800CA940u && cpu->lr != 0x80153B84u && cpu->lr != ARRIVAL_ZONE_RAN)
+        g_both_script = (s32)cpu->gpr[3];  // not the zones', which run every frame
     if (coop_trace() && sda_ready(cpu) && cpu->lr != 0x800CA940u && cpu->lr != 0x80153B84u) {
         trace_look(cpu, "script run");
         g_script_watch = 40u;  // the game functions it calls

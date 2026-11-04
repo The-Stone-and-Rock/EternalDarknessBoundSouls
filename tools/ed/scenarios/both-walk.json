@@ -1,0 +1,41 @@
+{
+ "name": "both-walk",
+ "proves": "Nothing up: both players walk at once from standing, each camera stays on the room's own camera. The first check after any change.",
+ "save": "saves/slot1.state",
+ "frames": 7700,
+ "seconds": 120,
+ "p1": "6900,6940,0x0000,0,100,0;6960,7000,0x0000,100,0,0;7020,7060,0x0000,0,-100,0;7080,7120,0x0000,-100,0,0;7140,7180,0x0000,0,100,0;7200,7240,0x0000,100,0,0;7260,7300,0x0000,0,-100,0;7320,7360,0x0000,-100,0,0;7380,7420,0x0000,0,100,0;7440,7480,0x0000,100,0,0;7500,7540,0x0000,0,-100,0;7560,7600,0x0000,-100,0,0",
+ "p2": "6800,6840,lup;6860,6900,lright;6920,6960,ldown;6980,7020,lleft;7040,7080,lup;7100,7140,lright;7160,7200,ldown;7220,7260,lleft;7280,7320,lup;7340,7380,lright;7400,7440,ldown;7460,7500,lleft;7520,7560,lup;7580,7620,lright;7640,7680,ldown;7700,7740,lleft",
+ "source": "written for the kit",
+ "expect": [
+  {
+   "check": "moved",
+   "who": "p1",
+   "from": 6900,
+   "to": 7600,
+   "min": 100
+  },
+  {
+   "check": "moved",
+   "who": "p2",
+   "from": 6800,
+   "to": 7600,
+   "min": 100
+  },
+  {
+   "check": "camera",
+   "who": "p1",
+   "frame": 7000,
+   "name": "Camera01"
+  },
+  {
+   "check": "camera",
+   "who": "p2",
+   "frame": 7000,
+   "name": "Camera01"
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}

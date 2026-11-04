@@ -2,6 +2,8 @@
 
 Items found while tracing, in any session. Only what was seen in a log or written in the code. A blank means not seen yet.
 
+**The Item id column is a handle: it lasts one play, and the same number can be another item later.** The game's own table is `ed item`, by type id, always the same. Bronze Necklace is type 21, Tulwar 84, Chakrams 82, Talisman 150, Blue Urn 31.
+
 | Item | Item id | Use script | Hands | Description (from the game) | Source |
 |---|---|---|---|---|---|
 | Bronze Necklace | 102 | 1510 (`0x5E6`), then `0x8C0` | | "A well-crafted Bronze Necklace, resplendent with glowing gems." | Runs on slot 1 and slot 10, 2026-11-02. A shared quest item. Refuses with "cannot use that now" outside its zone |

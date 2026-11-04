@@ -1,0 +1,43 @@
+{
+ "name": "urn-p1",
+ "proves": "Player 1 uses the urn from their Tome: player 2 starts from standing and keeps walking through its words, pickup and rune; the rune goes in once.",
+ "save": "saves/slot1.state",
+ "frames": 10450,
+ "seconds": 240,
+ "p1": "8707,8710,0x1000;8777,8781,0x0100,0,0,255;8792,8797,0x0100,0,0,255;8852,8860,0x0200;9188,9192,0x0200;9387,9394,0x0200;9530,9540,0x0200;9558,9567,0x0200;9602,9611,0x0200;9629,9638,0x0200;9657,9666,0x0200;9699,9709,0x0200;9790,9795,0x0200;10249,10252,0x1000;10314,10317,0x0004;10323,10327,0x0004;10336,10343,0x0100,0,0,255;10363,10370,0x0200;10377,10382,0x0200",
+ "p2": "6800,6840,lup;6860,6900,lright;6920,6960,ldown;6980,7020,lleft;7040,7080,lup;7100,7140,lright;7160,7200,ldown;7220,7260,lleft;7280,7320,lup;7340,7380,lright;7400,7440,ldown;7460,7500,lleft;7520,7560,lup;7580,7620,lright;7640,7680,ldown;7700,7740,lleft;7760,7800,lup;7820,7860,lright;7880,7920,ldown;7940,7980,lleft;8000,8040,lup;8060,8100,lright;8120,8160,ldown;8180,8220,lleft;8240,8280,lup;8300,8340,lright;8360,8400,ldown;8420,8460,lleft;8480,8520,lup;8540,8580,lright;8600,8640,ldown;8660,8700,lleft;8720,8760,lup;8780,8820,lright;8840,8880,ldown;8900,8940,lleft;8960,9000,lup;9020,9060,lright;9080,9120,ldown;9140,9180,lleft;9200,9240,lup;9260,9300,lright;9320,9360,ldown;9380,9420,lleft;9440,9480,lup;9500,9540,lright;9560,9600,ldown;9620,9660,lleft;9680,9720,lup;9740,9780,lright;9800,9840,ldown;9860,9900,lleft;9920,9960,lup;9980,10020,lright;10040,10080,ldown;10100,10140,lleft;10160,10200,lup;10220,10260,lright;10280,10320,ldown;10340,10380,lleft",
+ "source": "player 1's presses from logs/run-20261103-124055-s1-p1e; player 2's walk in bursts, the way docs/coop-no-pause.md says to test",
+ "expect": [
+  {
+   "check": "log",
+   "pattern": "While fumbling"
+  },
+  {
+   "check": "log",
+   "pattern": "picked up a"
+  },
+  {
+   "check": "log",
+   "pattern": "found a"
+  },
+  {
+   "check": "count",
+   "pattern": "words: .*has picked up a .*Broken Blue Urn",
+   "n": 1
+  },
+  {
+   "check": "count",
+   "pattern": "words: .*has found a .*Magickal Rune",
+   "n": 1
+  },
+  {
+   "check": "moved",
+   "who": "p2",
+   "during": "words_p1",
+   "min": 40
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}

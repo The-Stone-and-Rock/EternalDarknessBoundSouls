@@ -149,3 +149,14 @@ Seen by script: `logs/run-20261103-145338-live7` (player 2's urn, player 1 walki
 **Their world reads marked as the Tome's.** `camera_set_menu` then told the camera a menu was open, and the user saw player 2's camera bounce. Not measured: the code was changed from what the user saw, and the jump log came after.
 
 **Reading player 1's pad twice a frame, world then Tome, to keep the camera out of it.** Each change marks everything held as held over (`controls.cpp`, `g_tome_was`, `g_held_over`), so no press got through and their Tome couldn't be closed (`logs/run-*-s1-both`). `ED_INPUT_SCRIPT` skips that code, so the replays closed it fine: **scripted presses for player 1 can't test `controls.cpp`.**
+
+## Door arrival for player 2
+
+**Sending event 238 to player 2 on arrival, as the player** (`2fa5936`, in `coop_follow`, with current, its node and the model all theirs for the call). They stopped where they were, twisted, in mid motion. `862e14d` removed it, and sets state 80 on them instead, so the motion they were in runs on.
+
+```c
+const u32 event[4] = {COOP_ARRIVED_EVENT /* 238 */, id, id, 0u};
+hle_guest_call(cpu, COOP_SEND_EVENT, event, 4, 0.0, &ignore);
+```
+
+What it left out, found since (`docs/game/systems/doors.md`, `Arrival`): the game reads this event's answer, the motion to play, and then sends event 191 with it. `hle_guest_call` returns only `r3`, and the answer is in `r4`.

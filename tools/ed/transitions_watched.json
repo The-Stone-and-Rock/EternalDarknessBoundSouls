@@ -1,0 +1,12 @@
+{
+ "2": "Watched (L03/898, slot 1): no motion. Black in about 14 frames, 0.23 s, and the player is just there, standing",
+ "9": "Door. Watched (L03/656, slot 7): the player steps forward on motion 25 as it fades, 1 s to the room change. Arrives on motion 25 again, moving out of the door for 106 frames, then motion 2 for 23 frames, in control after about 2.1 s",
+ "12": "Climb up. Watched (L03/642, slot 3): motion 103 as it fades, 1 s. Arrives on motion 104 for 60 frames, then motion 2 for 23 frames, in control after about 1.4 s",
+ "15": "Climb down. Watched (L03/1097, slot 1): motion 104 as it fades, 1 s. Arrives on motion 103 for 80 frames, then motion 2 for 23 frames, in control after about 1.7 s",
+ "0": "A cut, no fade. Tome returns, mirrors. Not watched",
+ "1": "Short fade, no motion. L04's elevator. Not watched",
+ "3": "Long fade, no motion. Mostly no prompt. Not watched",
+ "6": "Long fade, motion 2. L04's two jump-overs. Not watched",
+ "16": "Game code only, 0x800E8E14, to room 83: 62 tick fade after 128 ticks. Not watched",
+ "17": "Loads the room and doesn't place the player: the tick calls only 0x80152298(room, flags). ed29 (script 1023, in 15 levels) and 5 game code sites. Fade set by the caller. Not watched"
+}

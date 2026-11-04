@@ -1,0 +1,16 @@
+{
+ "name": "door-climb",
+ "proves": "A ladder for a normal player 1, through the game's own script from the host: CLIMB DOWN's script, motion 104, room 21, then motion 103. Player 2 comes too, and nothing freezes. Not a real walk-up or press.",
+ "save": "saves/slot1.state",
+ "run_script": "400:1097,460:1097",
+ "frames": 7500,
+ "seconds": 60,
+ "p1": "",
+ "p2": "",
+ "expect": [
+  {"check": "plays", "who": "p1", "state": 121, "anim": 104},
+  {"check": "plays", "who": "p1", "state": 80, "anim": 103},
+  {"check": "room", "room": 21, "who": "both"},
+  {"check": "rules"}
+ ]
+}

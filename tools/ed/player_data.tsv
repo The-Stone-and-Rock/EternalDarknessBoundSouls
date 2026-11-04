@@ -1,0 +1,59 @@
+# The game's data that means "the one player". The game was built with one of each, so any function touching these does the
+# wrong thing for player 2 unless the host's helper has theirs in. `ed needs ADDR` lists which of these a function reaches.
+# kind (r13, abs, call), where, size, what it is, the host helper that handles it. Every row is from runtime/host/hle.c.
+r13	-26524	4	the player's object	coop_be_player2
+r13	-21492	4	current: the player's node	coop_be_player2
+r13	-21496	4	current: the player's id	coop_be_player2
+r13	-21488	4	main: the main character's id	coop_be_player2. coop_player_turn doesn't move it
+r13	-21484	4	main: the main character's node. fn93 takes from it	coop_be_player2. coop_player_turn doesn't move it
+r13	-22336	4	the spell being cast	coop_be_player2
+r13	-22320	4	casting word	coop_be_player2
+r13	-22316	4	casting word	coop_be_player2
+r13	-22312	4	casting word	coop_be_player2
+r13	-25008	4	threat found	g_coop_threat
+r13	-25004	4	threat found	g_coop_threat
+r13	-25680	48	the controller's state	coop_state
+r13	-23604	56	the pad routine's state (input focus -23552, -23556 are in it)	coop_state
+r13	-29016	4	interact word	coop_state (kCoopInteract)
+r13	-24032	4	interact word	coop_state (kCoopInteract)
+r13	-23196	4	interact word	coop_state (kCoopInteract)
+r13	-23192	4	interact word	coop_state (kCoopInteract)
+r13	-21996	4	interact word	coop_state (kCoopInteract)
+r13	-23344	4	busy: the play hold's word	coop_no_pause, coop_busy_ask
+r13	-25696	4	hold word, 0x80006D0C asks it	coop_script_hold_go
+r13	-23040	4	hold word	coop_play_hold
+r13	-24048	4	find's bit 2, script timers wait on it	coop_find_hold
+r13	-25932	4	find word, script timers wait on it	coop_find_hold
+r13	-23060	4	hold's input channel	coop_script_hold_go
+r13	-23052	4	hold's input channel	coop_script_hold_go
+r13	-23056	4	hold's input channel	coop_play_hold
+r13	-25648	4	controller's channel	coop_player1_turn
+r13	-25960	4	the open words window	tome_copy_no_window
+r13	-23228	4	the running script	coop_run_script
+r13	-26188	4	the Tome's mode	coop_menu_input, tome_copy_step
+r13	-24244	4	the mode asked for (Start sets 2)	coop_menu_input, tome_copy_step
+r13	-23456	4	players shown	(see docs/coop-failed-attempts.md)
+abs	0x805880A0	816	raw and processed pads, the input channels	coop_state
+abs	0x805D7900	768	control blocks	coop_state
+abs	0x803012E0	52	the camera's view: eye, target, up, FOV	coop_camera_step, g_coop_cameras
+abs	0x80602B18	400	the cameras' records (each names who it follows)	g_coop_cameras, coop_cameras_own
+abs	0x80335A38	168	the six prompts	coop_prompt_player1s, coop_scan_player1
+abs	0x805CAA40	80	the script words: each script's step and timer	coop_states_swap
+abs	0x80334D50	208	the magick record	coop_spells_in, coop_quick_swap
+abs	0x80334DE8	20	the five quick spells	coop_quick_swap
+abs	0x80335748	24	the Tome's record: word 0 hovered or first pick, word 1 second pick, by ed20	tome_copy_left
+call	0x80123F70	0	asks for the character info (zones' inside words at +180)	coop_zones_swap
+call	0x8016A7DC	0	reads the zones' inside words	coop_zones_swap
+call	0x80155738	0	asks if anyone is busy	coop_busy_ask
+call	0x801F5F88	0	finds a node by id (their list answers for player 2)	hle_find_by_id
+abs	0x803090C4	32	the look being set up: words, camera (ed219, ed220, ed221)	none: one copy, never swapped. coop_player_turn leaves it to who's in it
+abs	0x80307108	64	the two looks on offer, copied from it	none: one copy, never swapped. coop_player_turn leaves it to who's in it
+r13	-24492	4	the Inventory page's state: list, actions, mix, check	tome_copy_step (check: page state only)
+r13	-24536	4	the mix script, the first pick's +42	tome_copy: separate because it lives in the copy
+r13	-24504	4	the Inventory's name window	tome_copy: separate because it lives in the copy
+r13	-26324	4	the script left for the Tome's end (ed9)	tome_copy_left
+r13	-25592	4	reload byte: 1 loads until full, from event 208	none yet
+r13	-21784	4	the fade's ticks	none: both players share one fade
+abs	0x80334388	1320	the Inventory's slots, 44 bytes each	tome_copy
+abs	0x80588DF0	8160	equipment, 20 records by holder id	coop_rehold
+abs	0x8058AFFC	44	the room change's ticket	coop_follow
