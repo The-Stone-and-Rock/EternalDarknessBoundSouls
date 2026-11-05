@@ -7673,7 +7673,7 @@ index 0000000..64bd328
 +
 +} // namespace aurora::gfx::glow
 diff --git a/graphics/aurora/lib/gfx/gxcore_draw.cpp b/graphics/aurora/lib/gfx/gxcore_draw.cpp
-index 71136b9..8e2261d 100644
+index 71136b9..ab2da26 100644
 --- a/graphics/aurora/lib/gfx/gxcore_draw.cpp
 +++ b/graphics/aurora/lib/gfx/gxcore_draw.cpp
 @@ -1,4 +1,14 @@
@@ -8202,7 +8202,7 @@ index 71136b9..8e2261d 100644
    if (data.tev) {
      // group 2 = PS uniform (same dynamic-uniform bind group, its own offset);
      // group 3 = texture.
-@@ -591,18 +951,546 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+@@ -591,18 +951,609 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
  
  void reset_texture_cache() {
    g_textureCache.clear();
@@ -8324,6 +8324,10 @@ index 71136b9..8e2261d 100644
 +  float world[3];
 +  float lampWeight[kMaxLamps];
 +  float downWeight;
++  float lampShown[kMaxLamps];  // how much of each is drawn: a shadow only starts or stops by fading
++  float downShown;
++  float anchor[3];  // where they last were, to tell who's on the move
++  int lastMoved;
 +  float radius;
 +  int lastSeen;
 +  int lastFlat;  // the last frame the game drew them flattened
@@ -8337,6 +8341,11 @@ index 71136b9..8e2261d 100644
 +// the flattened draws alone, their shadows and all the lamps' tiles went for that frame. So someone flattened
 +// this recently still casts, for as long as a lit body is where they stand.
 +constexpr int kFlatMemory = 30;
++// Further than this in the world is walking, not a body's bounds changing with its pose. Corpses' places wander by about 12.
++constexpr float kMoveApart = 30.f;
++constexpr int kMoveMemory = 120;  // and they count as on the move for this long
++// How far a shadow's strength can change in a frame.
++constexpr float kShownStep = 0.05f;
 +
 +static void fill_shadow(gfx::ssao::Scene& scene) {
 +  auto& f = scene.shadow;
@@ -8490,13 +8499,15 @@ index 71136b9..8e2261d 100644
 +    for (int i = 0; i < 3; ++i)
 +      view[v][i] = V[i][0] * g_lamps[v].world[0] + V[i][1] * g_lamps[v].world[1] + V[i][2] * g_lamps[v].world[2] + V[i][3];
 +
-+  // The shadows all of them could show, of which the strongest get a place in the atlas.
++  // The shadows all of them could show, of which the most wanted get a place in the atlas.
 +  struct Wanted {
 +    int who;
 +    float lamp[3];
 +    float weight;
 +    float radius;
-+    bool first;
++    float* shown;  // the slot's: what's drawn of it
++    float score;
++    bool first, moving, fresh, held;
 +  };
 +  Wanted wanted[kMaxCasters * (kMaxLamps + 1)];
 +  int wantedCount = 0;
@@ -8608,7 +8619,21 @@ index 71136b9..8e2261d 100644
 +      slot->lampWeight[v] += (want - slot->lampWeight[v]) * (slot->fresh ? 1.f : 0.05f);
 +    }
 +    slot->downWeight += ((anyLamp ? 0.f : 1.f) - slot->downWeight) * (slot->fresh ? 1.f : 0.05f);
++    const bool fresh = slot->fresh;
 +    slot->fresh = false;
++    float moved2 = 0.f;
++    for (int i = 0; i < 3; ++i)
++      moved2 += (world[i] - slot->anchor[i]) * (world[i] - slot->anchor[i]);
++    if (fresh) {
++      for (int i = 0; i < 3; ++i)
++        slot->anchor[i] = world[i];
++      slot->lastMoved = g_slotClock - kMoveMemory - 1;
++    } else if (moved2 > kMoveApart * kMoveApart) {
++      for (int i = 0; i < 3; ++i)
++        slot->anchor[i] = world[i];
++      slot->lastMoved = g_slotClock;
++    }
++    const bool moving = g_slotClock - slot->lastMoved <= kMoveMemory;
 +    // Its size shrinks slowly: animation changes it each frame, and the shadow swam with it.
 +    slot->radius = std::max(who.radius, slot->radius - 1.f);
 +    // Their height, and at least a person's: the lamp's no lower than this much over them for its shadow. From a lamp about
@@ -8617,12 +8642,15 @@ index 71136b9..8e2261d 100644
 +    for (int i = 0; i < 3; ++i)
 +      tall += std::fabs(up[i]) * (who.hi[i] - who.lo[i]);
 +    const float lowest = std::max(tall, 120.f) * 1.7f;
-+    const auto emit = [&](const float* lamp, float weight) {
-+      if (weight < 0.02f || wantedCount >= static_cast<int>(sizeof wanted / sizeof wanted[0]))
++    const auto emit = [&](const float* lamp, float weight, float* shown) {
++      if ((weight < 0.02f && *shown < 0.02f) || wantedCount >= static_cast<int>(sizeof wanted / sizeof wanted[0]))
 +        return;
 +      auto& w = wanted[wantedCount++];
 +      w.who = c;
 +      w.weight = weight;
++      w.shown = shown;
++      w.moving = moving;
++      w.fresh = fresh;
 +      w.radius = slot->radius;
 +      float over = 0.f;
 +      for (int i = 0; i < 3; ++i)
@@ -8632,29 +8660,64 @@ index 71136b9..8e2261d 100644
 +        w.lamp[i] = lamp[i] + up[i] * raise;
 +    };
 +    for (int v = 0; v < g_lampCount; ++v)
-+      emit(view[v], slot->lampWeight[v]);
++      emit(view[v], slot->lampWeight[v], &slot->lampShown[v]);
 +    const float above[3] = {who.center[0] + up[0] * 900.f, who.center[1] + up[1] * 900.f, who.center[2] + up[2] * 900.f};
-+    emit(above, slot->downWeight * 0.8f);
++    emit(above, slot->downWeight * 0.8f, &slot->downShown);
 +    if (s_log)
 +      std::fprintf(stderr, "[shadow] frame %u caster %d of %d stands %.0f %.0f %.0f radius %.0f sets %d nearest lamps %d %d weights %.2f %.2f down %.2f lamps known %d\n", current_frame(), c, casterCount, world[0], world[1], world[2], slot->radius, who.printCount,
 +                   nearest[0], nearest[1], nearest[0] >= 0 ? slot->lampWeight[nearest[0]] : 0.f, nearest[1] >= 0 ? slot->lampWeight[nearest[1]] : 0.f, slot->downWeight, g_lampCount);
 +  }
-+  // Everyone's own strongest first, nearest the camera first, then anyone's second lamp: with more people than places,
-+  // the second shadows of those here went before the first of someone else, who lost theirs.
-+  bool firstOf[kMaxCasters] = {};
-+  std::sort(wanted, wanted + wantedCount, [](const Wanted& a, const Wanted& b) { return a.weight > b.weight; });
-+  for (int n = 0; n < wantedCount; ++n) {
-+    wanted[n].first = !firstOf[wanted[n].who];
-+    firstOf[wanted[n].who] = true;
++  // Who gets a place. Everyone's own strongest first, as with more people than places the second shadows of those here
++  // went before the first of someone else, who lost theirs. Then the second lamps of whoever's on the move: only they
++  // change lamps, and that's a fade only with both drawn. With no place for the second, the moment it became the stronger
++  // the shadow turned round in one frame. A shadow never starts or stops at once: one with a place keeps it until it has
++  // faded out, and the one waiting comes up from nothing, so with no place to spare a change of lamp dips and comes back.
++  {
++    float strongest[kMaxCasters] = {};
++    for (int n = 0; n < wantedCount; ++n)
++      strongest[wanted[n].who] = std::max(strongest[wanted[n].who], wanted[n].weight);
++    bool firstOf[kMaxCasters] = {};
++    for (int n = 0; n < wantedCount; ++n) {
++      Wanted& w = wanted[n];
++      w.first = w.weight >= 0.02f && w.weight == strongest[w.who] && !firstOf[w.who];
++      firstOf[w.who] = firstOf[w.who] || w.first;
++      w.held = *w.shown >= 0.02f;
++      const float* at = casters[w.who].center;
++      const float nearness = 1.f / (1.f + std::sqrt(at[0] * at[0] + at[1] * at[1] + at[2] * at[2]) / 1500.f);
++      if (w.first)
++        w.score = (2.f + nearness + (w.moving ? 1.f : 0.f)) * std::min(1.f, w.weight * 4.f);
++      else
++        w.score = w.moving ? 1.f + w.weight : w.weight;
++      // So that a place doesn't go back and forth between two that are about the same.
++      w.score += w.held ? 0.25f : 0.f;
++    }
++    std::stable_sort(wanted, wanted + wantedCount, [](const Wanted& a, const Wanted& b) { return a.score > b.score; });
++    int places = 0;
++    for (int n = 0; n < wantedCount; ++n)
++      places += wanted[n].held ? 1 : 0;
++    int kept = 0;
++    for (int n = 0; n < wantedCount; ++n) {
++      Wanted w = wanted[n];
++      const bool chosen = n < gfx::shadow::kMaxTiles && w.weight >= 0.02f;
++      if (!w.held) {
++        if (!chosen || places >= gfx::shadow::kMaxTiles)
++          continue;  // it waits for one to fade out
++        ++places;
++      }
++      const float target = chosen ? w.weight : 0.f;
++      if (w.fresh)
++        *w.shown = target;
++      else
++        *w.shown += std::clamp(target - *w.shown, -kShownStep, kShownStep);
++      if (*w.shown < 0.02f && target < 0.02f) {
++        *w.shown = 0.f;
++        continue;
++      }
++      w.weight = *w.shown;
++      wanted[kept++] = w;
++    }
++    wantedCount = kept;
 +  }
-+  std::stable_sort(wanted, wanted + wantedCount, [&](const Wanted& a, const Wanted& b) {
-+    if (a.first != b.first)
-+      return a.first;
-+    if (!a.first)
-+      return false;
-+    const auto far = [&](const Wanted& w) { const float* c = casters[w.who].center; return c[0] * c[0] + c[1] * c[1] + c[2] * c[2]; };
-+    return far(a) < far(b);
-+  });
 +  for (int n = 0; n < wantedCount && f.count < gfx::shadow::kMaxTiles; ++n) {
 +    const Wanted& w = wanted[n];
 +    const Caster& who = casters[w.who];
@@ -8749,7 +8812,7 @@ index 71136b9..8e2261d 100644
  // Resolve the current EFB region into a texture the guest-identity path can bind
  // later, keyed by the copy's destination address (63/S16). Mirrors aurora
  // lib/dolphin/gx/GXFrameBuffer.cpp copy_tex on the same substrate: map the EFB
-@@ -612,6 +1500,8 @@ const TextureCacheStats& texture_cache_stats() { return g_textureCacheStats; }
+@@ -612,6 +1563,8 @@ const TextureCacheStats& texture_cache_stats() { return g_textureCacheStats; }
  // color/Z afterwards. The bound draw's geometry is already in the pass (the
  // sink flushed the pending draw before firing this).
  void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
@@ -8758,7 +8821,7 @@ index 71136b9..8e2261d 100644
    // Mirror the copy-clear color/Z (BP 0x4F-0x51 at this copy) into the gx
    // state GXSetCopyClear would have written: begin_frame's pass-0 EFB clear
    // reads g_gxState.clearColor/clearDepth, and in gxcore mode the live gx
-@@ -635,11 +1525,25 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -635,11 +1588,25 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
    const auto fmt = is_xfb ? GX_TF_RGBA8 : static_cast<GXTexFmt>(cmd.format);
    // Dual dims: EFB source rect stays cmd.height; XFB dest height from
    // byte_size/stride (or cmd.xfb_height if gxcore latched it).
@@ -8785,7 +8848,7 @@ index 71136b9..8e2261d 100644
    });
    // U8: half_scale halves destination dims (TextureEncoder box 2:1).
    const uint32_t scaleShift = cmd.half_scale ? 1u : 0u;
-@@ -660,8 +1564,9 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -660,8 +1627,9 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
        dstHeight = xfb_h;
    }
  
@@ -8797,7 +8860,7 @@ index 71136b9..8e2261d 100644
        it->second->size.width != dstWidth || it->second->size.height != dstHeight) {
      TextureHandle handle;
      if (!is_xfb && gfx::tex_copy_conv::needs_conversion(fmt)) {
-@@ -670,7 +1575,7 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -670,7 +1638,7 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
        handle = gfx::new_render_texture(dstWidth, dstHeight, GX_TF_RGBA8,
                                         is_xfb ? "GXCore XFB" : "GXCore Copy");
      }
@@ -8806,7 +8869,7 @@ index 71136b9..8e2261d 100644
    }
    if (!it->second) {
      return;
-@@ -709,11 +1614,49 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -709,11 +1677,49 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
    // XFB YUYV into guest RAM from this readback on every display copy, so it
    // must stay armed in product runs too (cost: one EFB readback per display
    // copy, ~1-2/frame).
@@ -8857,7 +8920,7 @@ index 71136b9..8e2261d 100644
    gfx::resolve_pass(it->second, srcRect, do_clear && cmd.color_update,
                      do_clear && cmd.alpha_update,
                      do_clear && cmd.depth_update,
-@@ -723,73 +1666,693 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -723,73 +1729,693 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
                                  static_cast<float>(cmd.clear_a) / 255.f},
                      clearDepthValue, fmt, &filter);
  
@@ -9432,7 +9495,7 @@ index 71136b9..8e2261d 100644
 +        ++g_frameDrawsWide;
 +    }
 +  }
-+
+ 
 +  // GXRuntime recomp patch: the merge fast path. A draw whose fingerprints
 +  // (pipeline, constants, pixel and shared constants), textures, samplers,
 +  // viewport and scissor match the draw just submitted joins it straight
@@ -9577,7 +9640,7 @@ index 71136b9..8e2261d 100644
 +    s_last.single = single_texture();
 +    std::memcpy(&s_last.sampler, &plan.sampler, sizeof s_last.sampler);
 +  };
- 
++
 +  // The EFB's render scale, for the next plans' pixel centre correction.
 +  if (!is_offscreen()) {
 +    const auto [logicalWidth, logicalHeight] = gx::logical_fb_size();
@@ -9608,7 +9671,7 @@ index 71136b9..8e2261d 100644
      const float sx = plan.viewport[0];
      const float sy = plan.viewport[1];
      const float sz = plan.viewport[2];
-@@ -799,13 +2362,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -799,13 +2425,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const float width = sx * 2.0f;
      const float height = -sy * 2.0f;
      gx::set_logical_viewport({
@@ -9626,7 +9689,7 @@ index 71136b9..8e2261d 100644
    }
  
    // U4: apply DrawPlan scissor as a logical render-pass scissor. Multi-rect
-@@ -827,7 +2392,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -827,7 +2455,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
        [&](uint32_t address, uint32_t tsize, uint32_t format, uint32_t width,
            uint32_t height, const void* data, uint32_t available, bool has_tlut,
            uint32_t tlut_address, uint32_t tlut_format, uint32_t tlut_entries,
@@ -9635,7 +9698,7 @@ index 71136b9..8e2261d 100644
      auto efbIt = g_efbCopyTextures.find(address);
      if (efbIt != g_efbCopyTextures.end() && efbIt->second) {
        ++g_textureCacheStats.hits;
-@@ -839,23 +2404,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -839,23 +2467,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const uint32_t size = std::min(tsize, available);
      // Hash the actual source texels (+ TLUT for CI) so a content change under an
      // unchanged guest identity is a distinct cache entry — see TextureKey.
@@ -9918,7 +9981,7 @@ index 71136b9..8e2261d 100644
      // gxcore owns the decode for every format: produce tightly-packed RGBA8 and
      // upload it as a pre-decoded PC texture (no substrate re-conversion).
      std::vector<uint8_t> decoded;
-@@ -868,8 +2685,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -868,8 +2748,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      } else {
        decoded = gxc::decode_texture(format, width, height, bytes, size);
      }
@@ -9970,7 +10033,7 @@ index 71136b9..8e2261d 100644
        handle = new_static_texture_2d(
            width, height, 1, GX_TF_RGBA8_PC,
            ArrayRef<uint8_t>{decoded.data(), decoded.size()}, false,
-@@ -892,7 +2751,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -892,7 +2814,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    };
  
    BindGroupRef textureBindGroup = 0;
@@ -10069,7 +10132,7 @@ index 71136b9..8e2261d 100644
      if (plan.texmap_mask == 0u) {
        // Single-texmap fast path: primary texture + plan.sampler at binding 0/1.
        if (plan.has_texture) {
-@@ -903,7 +2853,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -903,7 +2916,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
              plan.tlut_data, plan.tlut_available);
          if (bound) {
            const auto sampler =
@@ -10078,7 +10141,7 @@ index 71136b9..8e2261d 100644
            const std::array entries{
                WGPUBindGroupEntry{.binding = 0,
                                   .textureView =
-@@ -919,6 +2869,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -919,6 +2932,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            textureBindGroup = bind_group_ref(descriptor);
          }
        }
@@ -10086,7 +10149,7 @@ index 71136b9..8e2261d 100644
      } else {
        // Multi-texmap: bind each used texmap at 2t (texture) / 2t+1 (sampler),
        // matching the WGSL declarations. Per-texmap PlanSampler from
-@@ -932,12 +2883,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -932,12 +2946,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          if ((plan.texmap_mask & (1u << t)) == 0u)
            continue;
          const gxc::PlanTexture& pt = plan.textures[t];
@@ -10103,7 +10166,7 @@ index 71136b9..8e2261d 100644
          if (!bound) {
            complete = false;
            break;
-@@ -945,14 +2899,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -945,14 +2962,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          held.push_back(bound);
          const gxc::PlanSampler& ps =
              pt.sampler.valid ? pt.sampler : plan.samplers[t];
@@ -10122,7 +10185,7 @@ index 71136b9..8e2261d 100644
        const WGPUBindGroupDescriptor descriptor{
            .label = {"GXCore Texture Bind Group", WGPU_STRLEN},
            .layout = texture_bind_group_layout(plan.texmap_mask).Get(),
-@@ -960,6 +2916,371 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -960,6 +2979,371 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            .entries = entries.data(),
        };
        textureBindGroup = bind_group_ref(descriptor);
@@ -10494,7 +10557,7 @@ index 71136b9..8e2261d 100644
      }
    }
  
-@@ -969,31 +3290,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -969,31 +3353,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    const auto idxRange = push_indices(
        reinterpret_cast<const uint8_t*>(plan.indices.data()),
        plan.indices.size() * sizeof(uint16_t), 4);
@@ -10531,7 +10594,7 @@ index 71136b9..8e2261d 100644
      });
    };
  
-@@ -1006,6 +3316,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -1006,6 +3379,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      }
    } else {
      issue_draw();
@@ -12425,7 +12488,7 @@ index 0000000..9d3c383
 +} // namespace aurora::gfx::post
 diff --git a/graphics/aurora/lib/gfx/shadow.cpp b/graphics/aurora/lib/gfx/shadow.cpp
 new file mode 100644
-index 0000000..4a98d88
+index 0000000..ee6824e
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/shadow.cpp
 @@ -0,0 +1,935 @@
@@ -12450,11 +12513,11 @@ index 0000000..4a98d88
 +using webgpu::g_queue;
 +namespace gxc = gxruntime::gxcore;
 +
-+constexpr uint32_t kTileSize = 1024, kAtlasSize = kTileSize * 3;
++constexpr uint32_t kTileSize = 1024, kAtlasAcross = 4, kAtlasRows = 3;  // room for kMaxTiles
 +constexpr auto kAtlasFormat = wgpu::TextureFormat::Depth32Float;
 +constexpr auto kMaskFormat = wgpu::TextureFormat::R8Unorm;
 +constexpr uint64_t kUniformStride = 256;
-+constexpr uint64_t kParamsSize = 1600;
++constexpr uint64_t kParamsSize = 2176;  // Params in the shader, with kMaxTiles
 +constexpr auto kVolFormat = wgpu::TextureFormat::RGBA16Float;
 +
 +// The game's vertex constants, as far as the pixel centre's correction (shader.hpp).
@@ -12484,7 +12547,7 @@ index 0000000..4a98d88
 +// far an edge spreads. atlas: where in the atlas, size. lin: a depth back to distance from the lamp.
 +struct TileData { r0: vec4f, r1: vec4f, r2: vec4f, r3: vec4f, at: vec4f, light: vec4f, atlas: vec4f, lin: vec4f, floor: vec4f };
 +struct Params {
-+  tiles: array<TileData, 8>,
++  tiles: array<TileData, 12>,  // kMaxTiles
 +  vp: vec4f,        // the scene's viewport, in the EFB
 +  depth: vec4f,     // its depth range, then the strengths: shadow, contact
 +  size: vec4f,      // x: 1 for hard edges; y, z: the EFB's size; w: tiles in use
@@ -12796,7 +12859,7 @@ index 0000000..4a98d88
 +  const wgpu::TextureDescriptor atlasDesc{
 +      .label = "Shadow atlas",
 +      .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
-+      .size = {kAtlasSize, kAtlasSize, 1},
++      .size = {kTileSize * kAtlasAcross, kTileSize * kAtlasRows, 1},
 +      .format = kAtlasFormat,
 +  };
 +  g_atlas = g_device.CreateTexture(&atlasDesc);
@@ -12982,8 +13045,8 @@ index 0000000..4a98d88
 +    p[20] = t.lamp[0], p[21] = t.lamp[1], p[22] = t.lamp[2];
 +    // How far the edge spreads, in atlas texels per unit between it and what casts it.
 +    p[23] = 0.05f * static_cast<float>(kTileSize) / (2.f * t.radius);
-+    p[24] = static_cast<float>(static_cast<uint32_t>(i % 3) * kTileSize);
-+    p[25] = static_cast<float>(static_cast<uint32_t>(i / 3) * kTileSize);
++    p[24] = static_cast<float>(static_cast<uint32_t>(i) % kAtlasAcross * kTileSize);
++    p[25] = static_cast<float>(static_cast<uint32_t>(i) / kAtlasAcross * kTileSize);
 +    p[26] = static_cast<float>(kTileSize);
 +    p[28] = a, p[29] = b, p[30] = t.weight;
 +    p[32] = t.floor[0], p[33] = t.floor[1], p[34] = t.floor[2], p[35] = t.floor[3];
@@ -13078,7 +13141,7 @@ index 0000000..4a98d88
 +
 +void start_tile(const wgpu::RenderPassEncoder& pass, const Frame& frame, int tile) {
 +  (void)frame;
-+  const uint32_t x = static_cast<uint32_t>(tile % 3) * kTileSize, y = static_cast<uint32_t>(tile / 3) * kTileSize;
++  const uint32_t x = static_cast<uint32_t>(tile) % kAtlasAcross * kTileSize, y = static_cast<uint32_t>(tile) / kAtlasAcross * kTileSize;
 +  pass.SetViewport(static_cast<float>(x), static_cast<float>(y), kTileSize, kTileSize, 0.f, 1.f);
 +  pass.SetScissorRect(x, y, kTileSize, kTileSize);
 +  pass.SetBindGroup(0, g_casterGroups[tile]);
@@ -13366,10 +13429,10 @@ index 0000000..4a98d88
 +} // namespace aurora::gfx::shadow
 diff --git a/graphics/aurora/lib/gfx/shadow.hpp b/graphics/aurora/lib/gfx/shadow.hpp
 new file mode 100644
-index 0000000..65c0b64
+index 0000000..79a42ec
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/shadow.hpp
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,99 @@
 +#pragma once
 +
 +// GXRuntime recomp patch: character shadows from the game's own lights, and contact shadows.
@@ -13395,7 +13458,9 @@ index 0000000..65c0b64
 +
 +namespace aurora::gfx::shadow {
 +
-+inline constexpr int kMaxTiles = 8;
++// One for each lamp a shadow shows from: 8 went on one shadow each in a room of 8 people, and with no room for their
++// second lamp, a shadow turned right round in one frame as the second became the stronger.
++inline constexpr int kMaxTiles = 12;
 +inline constexpr int kMaxPrints = 4;
 +inline constexpr int kMaxVolLights = 12;
 +
