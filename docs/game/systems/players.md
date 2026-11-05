@@ -54,6 +54,4 @@ Every save holds the same in both, so only the code tells them apart. `0x801F5F8
 
 **A cutscene's pack is the same kind of pack.** `0x80007FA0` makes `cinNNNN.bin` the list at `r13-26452` while the scene plays, with its actors from 36 up, so a level's list has 160 places and a scene's about 40. Table `0x80242150`, 32 bytes each: `+0` high half the `cin` file, `+8` high half the room, `+16` top byte the level folder, next byte the `.bin`.
 
-**A freeze not explained, right after a change of characters reloads the game:** `saves/reports/hang-20261104-190312`, `-192554` and `-202819`, in about 3 of 45 test runs with a form on slot 5, on Edward, Anthony and Max, around frame 1510. All three are the same: the main thread is waiting at `0x800085E8` (`0x801DFA50`, on queue `0x8032DAD0`), and the current thread is `0x80325188`. The same runs passed before and after. Whether it happens with no form on isn't known.
-
-**One freeze wasn't explained:** `saves/reports/hang-20261104-004653`, at a door in costume, in the one run with `ED_ANIM_TRACE` on, walking and attacking. The same run without it passed twice. The main thread was waiting at `0x800085E8`. Watch for it.
+**The freezes at `0x800085E8`, right after a reload or at a door in costume, were a stack overflow on the game's monitor thread:** `0x80325188` in `docs/coop-no-pause.md`.

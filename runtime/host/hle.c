@@ -4008,13 +4008,31 @@ static struct {
 static s32 g_both_script;  // the last script started, apart from zones
 #endif
 
+// The game's disc and reset monitor is a thread of its own (made at 0x800AB91C), and reads the pad too
+// (0x800AB344, 0x800AB4CC, 0x800AB7FC). Its stack is 4 KB, right after its own record. Co-op's work
+// here (a prompt's words, a room's follow) took whichever thread read first, and laying out a
+// prompt's words goes deep: over its stack and its record, whose priority the game then checked
+// and stopped at (OSCheckActiveThreads). That work waits for the game's own read.
+#define MONITOR_STACK_LOW 0x80325498u
+#define MONITOR_STACK_HIGH 0x80326498u
+
+static bool pad_read_by_monitor(CPUState* cpu) {
+    if (cpu->gpr[1] < MONITOR_STACK_LOW || cpu->gpr[1] >= MONITOR_STACK_HIGH)
+        return false;
+    static unsigned times;
+    if (times++ == 0u)
+        fprintf(stderr, "[pad] the disc and reset monitor read the pad (lr 0x%08X, r1 0x%08X): co-op's work left for the game's own read\n", cpu->lr, cpu->gpr[1]);
+    return true;
+}
+
 static void hle_PADRead(CPUState* cpu) {
 #ifdef ED_AURORA
-    if (g_tome_copy_turn) {
+    const bool monitor = pad_read_by_monitor(cpu);
+    if (g_tome_copy_turn && !monitor) {
         tome_copy_pad(cpu, hle_arg_u32(cpu, 0));
         return;
     }
-    if (coop_character_load(cpu))
+    if (!monitor && coop_character_load(cpu))
         return;  // the game loads a character's file first; this read runs after
 #endif
     u32 out = hle_arg_u32(cpu, 0);
@@ -4082,7 +4100,8 @@ static void hle_PADRead(CPUState* cpu) {
     controls_set_game_menu(hle_coop_tome_shares() || menu);  // not turn about, for its button pictures
     controls_set_cutscene(cutscene);
 #ifdef ED_AURORA
-    coop_pad_read(cpu, !menu && !cutscene);
+    if (!monitor)
+        coop_pad_read(cpu, !menu && !cutscene);
     static bool told;
     if (!told && getenv("ED_COOP_LOG") != NULL) {
         told = true;
@@ -4110,8 +4129,10 @@ static void hle_PADRead(CPUState* cpu) {
     }
 #ifdef ED_AURORA
     coop_watch(cpu, &state[0]);
-    both_record(cpu, &state[0]);
-    test_run_script(cpu);
+    if (!monitor) {
+        both_record(cpu, &state[0]);
+        test_run_script(cpu);
+    }
 #endif
     if (camera_pad_buttons(cpu, state[0].button))
         state[0].stick_x = state[0].stick_y = 0;
@@ -4183,7 +4204,9 @@ static void hle_PADRead(CPUState* cpu) {
     }
     const DolPadState p1_read = state[0];
     g_tome_copy_p1_pad = p1_read;
-    if (!g_coop_pad_p1)
+    if (monitor) {
+        // Only the pad: see pad_read_by_monitor.
+    } else if (!g_coop_pad_p1)
         coop_menu_input(cpu, menu, cutscene, &state[0]);
     else
         state[0].button &= (u16)~0x1000u;  // their Start in a close-up of player 2's opens their copy (coop_menu_input)

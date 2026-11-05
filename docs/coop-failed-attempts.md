@@ -397,3 +397,9 @@ Not done: leaving out the game's own frame, which nobody sees in a split. Its EF
 **Max's straitjacket on his moves, for free arms:** its bones do follow, but its arms are in one mesh group with its body, so nothing shows. Fitting moves can't change that, so the user had the form taken out.
 
 **The nearest bone by place, for every bone with no name in common:** on the Liche it put two cape bones on other tracks. Only when most names don't match.
+
+## A freeze that looked like waiting (2026-11-04)
+
+**Reading the main thread's wait at `0x800085E8` as the cause:** it was only waiting. The log has the cause a line above: `OSCheckActiveThreads` on a priority of `0x01020304`. Look at the bad words in the saved state: a back-chain then a return address is a stack frame. The fix is in `pad_read_by_monitor`.
+
+**Counting runs to prove a rare freeze gone:** 40 clean runs are still a 1 in 16 chance at that rate. A case that always froze, the slot 4 tour, proves more.
