@@ -6959,21 +6959,22 @@ typedef struct {
     int filed;        // its number in the chapter's list: its own, or one no character has a file for
     int strip_group;  // the mesh group with a weapon built into it, to leave out, or -1
     int held_file;    // a character's file whose standing pose the bones the wearer hasn't hold, or -1
+    int sparkles;     // a ghost: the blue sparkles around them (ghost_sparkles_step)
 } Costume;
 static Costume kCostumes[] = {
     {0, 0, 1, "Pius", 13, -1, 86, 86, -1, 86},
-    {70, 1, 1, "Ellia", 13, -1, 142, 142, 5, -1},
+    {70, 1, 1, "Ellia", 13, -1, 142, 142, 5, -1, 1},
     {70, 1, 2, "Ellia", 0, 25, 37, 114, -1, -1},       // rotten, in the last scene of Lindsey's chapter (script L06/906)
-    {85, 2, 1, "Anthony", 13, -1, 143, 143, 6, -1},
+    {85, 2, 1, "Anthony", 13, -1, 143, 143, 6, -1, 1},
     {85, 2, 2, "Anthony", 7, -1, 137, 137, -1, -1},    // rotten, the enemy in room 104 of Paul's chapter (character 132)
-    {150, 3, 1, "Karim", 13, -1, 144, 144, 14, -1},
-    {18, 4, 1, "Max", 0, -1, 140, 140, -1, -1},        // his blue spirit: script 1438 makes it, at MaxGhostMkr
-    {74, 6, 1, "Paul", 13, -1, 146, 146, 5, -1},
+    {150, 3, 1, "Karim", 13, -1, 144, 144, 14, -1, 1},
+    {18, 4, 1, "Max", 0, -1, 140, 140, -1, -1, 1},      // his blue spirit: script 1438 makes it, at MaxGhostMkr
+    {74, 6, 1, "Paul", 13, -1, 146, 146, 5, -1, 1},
     {74, 6, 2, "Paul", 7, 30, 38, 126, -1, -1},        // the Bishop, in his red robe
     {74, 6, 3, "Paul", 7, 30, 40, 127, -1, -1},        // a monk
     {74, 6, 4, "Paul", 7, 30, 37, 129, -1, -1},        // one of the men in black robes
-    {76, 7, 1, "Roberto", 13, -1, 147, 147, 14, -1},
-    {69, 9, 1, "Edward", 17, 77, 39, 113, -1, -1},     // a scene's body: 62 bones to his 72
+    {76, 7, 1, "Roberto", 13, -1, 147, 147, 14, -1, 1},
+    {69, 9, 1, "Edward", 17, 77, 39, 113, -1, -1, 1},   // a scene's body: 62 bones to his 72
 };
 #define COSTUMES ((int)(sizeof kCostumes / sizeof kCostumes[0]))
 #define COSTUME_PLACES 12
@@ -12146,9 +12147,109 @@ static void coop_p1_icon_show(CPUState* cpu) {
         fprintf(stderr, "[coop] player 1's prompt %d in player 2's close-up (element 0x%08X)\n", want, element);
 }
 
+// A ghost form's blue sparkles. The ghosts in the game's scenes, Max's in the clock room (scene 64) and
+// Edward's (scene 77), have theirs baked into the scene's file, so those can't follow anyone. This is the
+// sparkle that script 2410 places (ed184, 0x8014CF74, sprite 57), in the game's blue for an alignment, kept on
+// each ghost: one effect for each player, whose centre is moved to them at their frame. Its numbers: a sprites,
+// each up to b in size, starts within e of the centre and rises at d to d+3 for h to h+7 frames, a new one each
+// g+1 frames; f is how often it steps, i its frames in all. It goes by itself with the room and at the end of its
+// frames, and is ended when a scene starts (ghost_sparkles_scene). ED_SPARKLES=a,b,sprite,d,e,f,g,h (testing).
+#define SPARKLE_MAKE 0x8014CF74u
+#define SPARKLE_STEP 0x8018ED60u    // an effect's +332, this kind's
+#define EFFECTS_UPDATE 0x801753F4u  // each frame, and through a scene
+#define EFFECT_SIZE 336u
+#define EFFECT_FRAME 10u
+#define EFFECT_LIFE 12u             // SPARKLE_FRAMES and the player: how theirs is told from one a script made
+#define EFFECT_CENTRE 16u
+#define EFFECT_FLAGS 34u
+#define EFFECT_STEP 332u
+#define SPARKLE_FRAMES 65000u
+#define SPARKLE_BLUE 0x47C1EAFFu
+static u32 g_sparkles[2];
+static unsigned long long g_sparkles_wait[2];
+
+static bool sparkles_mine(CPUState* cpu, u32 effect, int player) {
+    return guest_ram_range_valid(cpu, effect, EFFECT_SIZE) && (mem_read16(cpu, effect + EFFECT_FLAGS) & 4u) != 0u &&
+           mem_read32(cpu, effect + EFFECT_STEP) == SPARKLE_STEP &&
+           mem_read16(cpu, effect + EFFECT_LIFE) == SPARKLE_FRAMES + (u32)player &&
+           mem_read16(cpu, effect + EFFECT_FRAME) < SPARKLE_FRAMES;
+}
+
+// Ends a player's sparkles: those in the air finish their rise and fade.
+static void sparkles_stop(CPUState* cpu, int player) {
+    if (g_sparkles[player] != 0u && sparkles_mine(cpu, g_sparkles[player], player))
+        mem_write16(cpu, g_sparkles[player] + EFFECT_FRAME, (u16)SPARKLE_FRAMES);
+    g_sparkles[player] = 0u;
+}
+
+static void ghost_sparkles_scene(CPUState* cpu) {
+    if (sda_ready(cpu) && cutscene_playing(cpu))
+        for (int player = 0; player < 2; player++)
+            sparkles_stop(cpu, player);
+}
+
+static void ghost_sparkles_step(CPUState* cpu) {
+    if (!sda_ready(cpu))
+        return;
+    static int look[8] = {12, 6, 57, 1, 64, 0, 3, 64}, read;
+    if (!read) {
+        read = 1;
+        const char* t = getenv("ED_SPARKLES");
+        if (t != NULL)
+            sscanf(t, "%d,%d,%d,%d,%d,%d,%d,%d", &look[0], &look[1], &look[2], &look[3], &look[4], &look[5], &look[6], &look[7]);
+    }
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    for (int player = 0; player < 2; player++) {
+        const Costume* worn = costume_on(player);
+        const u32 node = player == 0 ? mem_read32(cpu, cpu->gpr[13] - 21492u) : g_coop_p2;
+        const u32 object = node != 0u && (player == 0 || coop_listed(cpu, node)) && guest_ram_range_valid(cpu, node + 52u, 4u)
+                               ? mem_read32(cpu, node + 52u) : 0u;
+        if (worn == NULL || !worn->sparkles || !guest_ram_range_valid(cpu, object, 12u) || cutscene_playing(cpu)) {
+            sparkles_stop(cpu, player);
+            continue;
+        }
+        float at[3];
+        for (u32 i = 0u; i < 3u; i++)
+            at[i] = guest_read_f32(cpu, object + i * 4u);
+        if (!isfinite(at[0]) || !isfinite(at[1]) || !isfinite(at[2]) || fabsf(at[0]) > 32000.0f || fabsf(at[1]) > 32000.0f || fabsf(at[2]) > 32000.0f)
+            continue;
+        if (g_sparkles[player] != 0u && !sparkles_mine(cpu, g_sparkles[player], player))
+            g_sparkles[player] = 0u;
+        if (g_sparkles[player] == 0u) {  // made a little later than asked for (0x801DCB58): find it, or ask
+            const u32 count = mem_read32(cpu, cpu->gpr[13] - 23132u), list = mem_read32(cpu, cpu->gpr[13] - 23128u);
+            for (u32 i = 0u; i < count && i < 1024u && g_sparkles[player] == 0u; i++)
+                if (sparkles_mine(cpu, list + i * EFFECT_SIZE, player))
+                    g_sparkles[player] = list + i * EFFECT_SIZE;
+        }
+        if (g_sparkles[player] == 0u) {
+            if (frame < g_sparkles_wait[player])
+                continue;
+            g_sparkles_wait[player] = frame + 30ull;
+            // Its last four arguments are on the stack, where hle_guest_call's frame will be.
+            const u32 scratch = (cpu->gpr[1] - 0x200u) & ~15u, stack = (cpu->gpr[1] - 0x800u) & ~15u;
+            for (u32 i = 0u; i < 3u; i++)
+                guest_write_f32(cpu, scratch + i * 4u, at[i]);
+            mem_write32(cpu, scratch + 16u, SPARKLE_BLUE);
+            mem_write32(cpu, stack + 8u, (u32)look[6]);
+            mem_write32(cpu, stack + 12u, (u32)look[7]);
+            mem_write32(cpu, stack + 16u, SPARKLE_FRAMES + (u32)player);
+            mem_write32(cpu, stack + 20u, 4u);
+            const u32 args[8] = {scratch, (u32)look[0], (u32)look[1], (u32)look[2], scratch + 16u, (u32)look[3], (u32)look[4], (u32)look[5]};
+            u32 ignore = 0u;
+            hle_guest_call(cpu, SPARKLE_MAKE, args, 8, 0.0, &ignore);
+            continue;
+        }
+        // The height changes each frame, so they start all up the body, not at the feet.
+        const float height = (float)(frame * 37ull % 190ull);
+        for (u32 i = 0u; i < 3u; i++)
+            mem_write16(cpu, g_sparkles[player] + EFFECT_CENTRE + i * 2u, (u16)(s16)(at[i] + (i == 2u ? height : 0.0f)));
+    }
+}
+
 static void coop_player_turn(CPUState* cpu) {
     cheat_apply(cpu);  // Mods' Cheats, at the player's frame
     sanity_tool_step(cpu);  // Mods' Sanity Effects
+    ghost_sparkles_step(cpu);  // a ghost form's sparkles
     if (sda_ready(cpu)) {  // each player their own character's stats
         coop_own_stats(cpu, mem_read32(cpu, cpu->gpr[13] - 21492u));
         if (g_coop_p2 != 0u && g_settings.mod_coop && coop_listed(cpu, g_coop_p2)) {
@@ -16629,6 +16730,9 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* moves = hle_dispatch_entry(MOVES_WANT);
             if (moves != NULL && moves->intercept == NULL && moves->notify == NULL)
                 moves->intercept = hle_moves_want;
+            HleDispatchEntry* effects = hle_dispatch_entry(EFFECTS_UPDATE);
+            if (mem_read32(cpu, EFFECTS_UPDATE) == 0x9421FFE0u && effects != NULL && effects->intercept == NULL && effects->notify == NULL)
+                effects->notify = ghost_sparkles_scene;
             HleDispatchEntry* tracks_in = hle_dispatch_entry(MOVES_STREAM);
             if (tracks_in != NULL && tracks_in->intercept == NULL && tracks_in->notify == NULL)
                 tracks_in->intercept = hle_tracks_load;

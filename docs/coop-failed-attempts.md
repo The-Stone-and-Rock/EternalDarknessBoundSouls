@@ -409,3 +409,13 @@ Not done: leaving out the game's own frame, which nobody sees in a split. Its EF
 **Reading the main thread's wait at `0x800085E8` as the cause:** it was only waiting. The log has the cause a line above: `OSCheckActiveThreads` on a priority of `0x01020304`. Look at the bad words in the saved state: a back-chain then a return address is a stack frame. The fix is in `pad_read_by_monitor`.
 
 **Counting runs to prove a rare freeze gone:** 40 clean runs are still a 1 in 16 chance at that rate. A case that always froze, the slot 4 tour, proves more.
+
+## A ghost form's sparkles (2026-11-05)
+
+**The body's glow, `fn144(thing, 0, 100, 520)`, kept on (`+700`, `+704`, `+722`, `+724` of the object):** it works, in the alignment's blue, but the user called it a full-body "magic damage" effect and had it out.
+
+**Mist from stock sprites through `ed184`, at a size (b) of 64 or 128 with a faint colour:** sprite 76, the dust emitter's, is a hard blob at any size, and at 64 fills the room with its outline. 38 and 59 at those sizes do look like haze, but the user didn't like the moving aura and asked for sparkles alone. Max's real mist is in the scene's file, not a sprite the rest of the game has.
+
+**Sizing the sprites by the effect's `+60` and `+64`:** those are 0 and 0.26 and change nothing drawn. Size is b.
+
+**Looking for the sparkles in the pool or the effect makers during a scene:** a scene's are in its own file, and the pool stays empty (only `0x8014FD08` from `0x80051010`, 4 times, for its actors). What finds a draw's code is the caller of `GXBegin`.

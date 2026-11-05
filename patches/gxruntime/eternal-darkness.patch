@@ -7673,7 +7673,7 @@ index 0000000..64bd328
 +
 +} // namespace aurora::gfx::glow
 diff --git a/graphics/aurora/lib/gfx/gxcore_draw.cpp b/graphics/aurora/lib/gfx/gxcore_draw.cpp
-index 71136b9..ab2da26 100644
+index 71136b9..ce453e8 100644
 --- a/graphics/aurora/lib/gfx/gxcore_draw.cpp
 +++ b/graphics/aurora/lib/gfx/gxcore_draw.cpp
 @@ -1,4 +1,14 @@
@@ -8920,7 +8920,7 @@ index 71136b9..ab2da26 100644
    gfx::resolve_pass(it->second, srcRect, do_clear && cmd.color_update,
                      do_clear && cmd.alpha_update,
                      do_clear && cmd.depth_update,
-@@ -723,73 +1729,693 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -723,73 +1729,697 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
                                  static_cast<float>(cmd.clear_a) / 255.f},
                      clearDepthValue, fmt, &filter);
  
@@ -9408,7 +9408,11 @@ index 71136b9..ab2da26 100644
 +    // Also in a frame the game drew nobody flattened in, if it did a moment ago: the alpha it reads is the scene's.
 +    if (ours && (g_sh.flats > 0 || g_framesNoCharacters <= 8) && !persp && k.blend_enable != 0 && k.src_factor == 7u && k.dst_factor == 6u && k.depth_test == 0 && plan.vertex_count == 4u)
 +      return true;
-+    if (persp && scene3d && k.color_update != 0 && k.shader.lit_valid != 0 && plan.shared_constants != nullptr) {
++    // A ghost's sparkles (a 44x44 sheet, no normals, no lights on) are lit in name only, and move around them: as a set of
++    // lights they doubled the wearer's and stretched their shadow.
++    const bool ghostSparkles = plan.tex_width == 44u && plan.tex_height == 44u && k.shader.has_vertex_normal == 0 &&
++                               k.shader.litchan[0].light_mask == 0;
++    if (persp && scene3d && k.color_update != 0 && k.shader.lit_valid != 0 && plan.shared_constants != nullptr && !ghostSparkles) {
 +      const auto* lights = reinterpret_cast<const uint8_t*>(plan.shared_constants->lights);
 +      uint32_t print = 2166136261u;
 +      for (size_t b = 0; b < sizeof plan.shared_constants->lights; ++b)
@@ -9671,7 +9675,7 @@ index 71136b9..ab2da26 100644
      const float sx = plan.viewport[0];
      const float sy = plan.viewport[1];
      const float sz = plan.viewport[2];
-@@ -799,13 +2425,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -799,13 +2429,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const float width = sx * 2.0f;
      const float height = -sy * 2.0f;
      gx::set_logical_viewport({
@@ -9689,7 +9693,7 @@ index 71136b9..ab2da26 100644
    }
  
    // U4: apply DrawPlan scissor as a logical render-pass scissor. Multi-rect
-@@ -827,7 +2455,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -827,7 +2459,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
        [&](uint32_t address, uint32_t tsize, uint32_t format, uint32_t width,
            uint32_t height, const void* data, uint32_t available, bool has_tlut,
            uint32_t tlut_address, uint32_t tlut_format, uint32_t tlut_entries,
@@ -9698,7 +9702,7 @@ index 71136b9..ab2da26 100644
      auto efbIt = g_efbCopyTextures.find(address);
      if (efbIt != g_efbCopyTextures.end() && efbIt->second) {
        ++g_textureCacheStats.hits;
-@@ -839,23 +2467,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -839,23 +2471,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const uint32_t size = std::min(tsize, available);
      // Hash the actual source texels (+ TLUT for CI) so a content change under an
      // unchanged guest identity is a distinct cache entry — see TextureKey.
@@ -9981,7 +9985,7 @@ index 71136b9..ab2da26 100644
      // gxcore owns the decode for every format: produce tightly-packed RGBA8 and
      // upload it as a pre-decoded PC texture (no substrate re-conversion).
      std::vector<uint8_t> decoded;
-@@ -868,8 +2748,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -868,8 +2752,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      } else {
        decoded = gxc::decode_texture(format, width, height, bytes, size);
      }
@@ -10033,7 +10037,7 @@ index 71136b9..ab2da26 100644
        handle = new_static_texture_2d(
            width, height, 1, GX_TF_RGBA8_PC,
            ArrayRef<uint8_t>{decoded.data(), decoded.size()}, false,
-@@ -892,7 +2814,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -892,7 +2818,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    };
  
    BindGroupRef textureBindGroup = 0;
@@ -10132,7 +10136,7 @@ index 71136b9..ab2da26 100644
      if (plan.texmap_mask == 0u) {
        // Single-texmap fast path: primary texture + plan.sampler at binding 0/1.
        if (plan.has_texture) {
-@@ -903,7 +2916,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -903,7 +2920,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
              plan.tlut_data, plan.tlut_available);
          if (bound) {
            const auto sampler =
@@ -10141,7 +10145,7 @@ index 71136b9..ab2da26 100644
            const std::array entries{
                WGPUBindGroupEntry{.binding = 0,
                                   .textureView =
-@@ -919,6 +2932,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -919,6 +2936,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            textureBindGroup = bind_group_ref(descriptor);
          }
        }
@@ -10149,7 +10153,7 @@ index 71136b9..ab2da26 100644
      } else {
        // Multi-texmap: bind each used texmap at 2t (texture) / 2t+1 (sampler),
        // matching the WGSL declarations. Per-texmap PlanSampler from
-@@ -932,12 +2946,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -932,12 +2950,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          if ((plan.texmap_mask & (1u << t)) == 0u)
            continue;
          const gxc::PlanTexture& pt = plan.textures[t];
@@ -10166,7 +10170,7 @@ index 71136b9..ab2da26 100644
          if (!bound) {
            complete = false;
            break;
-@@ -945,14 +2962,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -945,14 +2966,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          held.push_back(bound);
          const gxc::PlanSampler& ps =
              pt.sampler.valid ? pt.sampler : plan.samplers[t];
@@ -10185,7 +10189,7 @@ index 71136b9..ab2da26 100644
        const WGPUBindGroupDescriptor descriptor{
            .label = {"GXCore Texture Bind Group", WGPU_STRLEN},
            .layout = texture_bind_group_layout(plan.texmap_mask).Get(),
-@@ -960,6 +2979,371 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -960,6 +2983,371 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            .entries = entries.data(),
        };
        textureBindGroup = bind_group_ref(descriptor);
@@ -10557,7 +10561,7 @@ index 71136b9..ab2da26 100644
      }
    }
  
-@@ -969,31 +3353,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -969,31 +3357,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    const auto idxRange = push_indices(
        reinterpret_cast<const uint8_t*>(plan.indices.data()),
        plan.indices.size() * sizeof(uint16_t), 4);
@@ -10594,7 +10598,7 @@ index 71136b9..ab2da26 100644
      });
    };
  
-@@ -1006,6 +3379,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -1006,6 +3383,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      }
    } else {
      issue_draw();
