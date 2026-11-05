@@ -13321,6 +13321,7 @@ static void cheat_full(CPUState* cpu, u32 node) {
 #define SANITY_ASK_EVENT 83u
 #define SANITY_END_EVENT 82u
 #define SANITY_START_EVENT 84u
+#define SANITY_ROLL 0x800697C0u     // (count, level): the game's own pick
 #define SANITY_DOOR 0x80043380u     // (effect, next room, marker, camera)
 #define SANITY_KEEP 0x8006BE04u     // (player, thing): where to come back to
 #define SANITY_SETUP 0x8006C008u    // (tracker, room, marker, camera): the room's part of it
@@ -13341,6 +13342,10 @@ typedef struct {
     s16 to, script, asks;
 } SanityDoor;
 
+typedef struct {
+    s16 room, effect;
+} SanityNamed;
+
 #include "host/sanity_doors.inc"
 
 static const SanityEffect kSanityEffects[] = {
@@ -13353,7 +13358,7 @@ static const SanityEffect kSanityEffects[] = {
     {9, "Ammo pickup", "Ammo lying about, gone when it ends. The game keeps it out of chapters 1, 3 and 4."},
     {10, "Locked in room", "All the doors lock for a while."},
     {11, "Blood bath", "Not confirmed. Not Alex's bathtub scene."},
-    {12, "Edward's ghost", "STORY: Alex and Edward's ghost. Alex's chapter. Don't keep a save made after this."},
+    {12, "Edward's ghost", "STORY: Alex and Edward's ghost, between other chapters. Don't keep a save made after this."},
     {13, "Timeline visitation", "Another era of a room. Five chapters only, or Ignore."},
     {14, "Bug crawl", "Bugs crawl over the screen."},
     {15, "To be continued", "A fake ending and sequel screen."},
@@ -13399,6 +13404,19 @@ static struct {
     int door_runs;
     unsigned long long door_next;
     bool door_passed;            // a door has looked at it
+    volatile bool doors_on;      // Random effects at doors
+    volatile bool doors_next;    // the next sanity level, from the menu
+    volatile bool doors_changed; // the sanity level to set at the next step
+    int doors_level;             // 1 below 75%, 2 below 50%, 3 below 25%
+    bool doors_played[48];
+    int after_door;              // starts itself: asked for once the room is in
+    int free_from, free_to;      // Enhanced: the door an effect sent you back from, free the next try
+    bool free_pending;
+    int sweep_doors, sweep_band; // ED_SANITY_SWEEP
+    unsigned long long sweep_next;
+    u8 sweep_seen[64];
+    int sweep_script;
+    unsigned doors_steps;
     unsigned long long door_frame;
     char result[120];
 } g_sanity = {.asked = -1, .rules_for = -1, .effect = -1};
@@ -13457,7 +13475,7 @@ static const char* sanity_why(CPUState* cpu, int number) {
     if (number == 9 && (chapter == 1u || chapter == 3u || chapter == 4u))
         return "not in chapters 1, 3, 4";
     if (number == 12)
-        return chapter == 0u ? "flag 959: not its turn" : "Alex's chapter only";
+        return chapter == 0u ? "not in Alex's chapter" : "flag 959: not its turn";
     if (number == 13)
         return "five chapters only, and once";
     if (number == 27 && chapter < 5u)
@@ -13466,6 +13484,7 @@ static const char* sanity_why(CPUState* cpu, int number) {
 }
 
 static bool sanity_tracker(CPUState* cpu, u32* thing, u32* holder);
+static bool sanity_request(CPUState* cpu, int number, bool force);
 
 static bool sanity_room_has_list(int room) {
     for (size_t i = 0; i < sizeof kSanityListRooms / sizeof kSanityListRooms[0]; i++)
@@ -13512,6 +13531,13 @@ static const SanityDoor* sanity_door_pick(CPUState* cpu, int number) {
 // door's own end of it for the one asked for: the room's part, then the word to start.
 static void sanity_door_rules(CPUState* cpu) {
     g_hle_passthrough = true;
+    if (g_sanity.after_door > 0) {
+        const int after = g_sanity.after_door;
+        g_sanity.after_door = 0;
+        if (!sanity_request(cpu, after, true))
+            sanity_log(cpu, "  %d %s refused on arriving", after, sanity_name(after));
+        return;
+    }
     const int number = (int)cpu->gpr[3];
     if (number <= 0 || number != g_sanity.effect)
         return;
@@ -13634,6 +13660,21 @@ static void sanity_room_list(CPUState* cpu) {
     sanity_log(cpu, "%s%s", text, count == 0u ? " none" : "");
 }
 
+// What 0x8006DD70 asks before an effect may start, each part, for a log line when one is turned away.
+static void sanity_log_gate(CPUState* cpu, const char* when) {
+    static const u32 kParts[] = {0x80157364u, 0x8007AA64u, 0x8004303Cu, 0x801C5260u, 0x800ACD44u, 0x800ACD4Cu};
+    u32 got[6] = {0u};
+    for (size_t i = 0; i < 6u; i++)
+        hle_guest_call(cpu, kParts[i], NULL, 0, 0.0, &got[i]);
+    const u32 node = mem_read32(cpu, cpu->gpr[13] - 21492u);
+    u32 info = 0u;
+    if (node != 0u)
+        hle_guest_call(cpu, 0x801F6300u, &node, 1, 0.0, &info);
+    const bool ok = guest_ram_range_valid(cpu, info + 158u, 2u);
+    sanity_log(cpu, "  gate %s: room change %u, 7AA64 %u, 4303C %u, C5260 %u, ACD44 %u, ACD4C %u, player state %u %u", when, got[0], got[1], got[2],
+               got[3], got[4], got[5], ok ? mem_read8(cpu, info + 158u) : 999u, ok ? mem_read8(cpu, info + 159u) : 999u);
+}
+
 static void sanity_watch(CPUState* cpu) {
     if (g_sanity.effect < 0)
         return;
@@ -13661,13 +13702,15 @@ static void sanity_watch(CPUState* cpu) {
         g_sanity.stage = stage;
         if (stage == 5u && g_sanity.door_passed && cpu->timebase / 675000ull > g_sanity.door_frame + 240ull) {
             g_sanity.door_passed = false;
-            sanity_log(cpu, "  the door didn't start %d %s: this room isn't one of its rooms", g_sanity.effect, sanity_name(g_sanity.effect));
+            sanity_log(cpu, "  the door to here didn't start %d %s", g_sanity.effect, sanity_name(g_sanity.effect));
             sanity_set_result("Door didn't start it: %s. Try Ignore", sanity_name(g_sanity.effect));
             frontend_toast(g_sanity.result);
         }
         return;
     }
     const bool ran = g_sanity.stage == 4u;
+    if (!ran)
+        sanity_log_gate(cpu, "as it dropped");
     sanity_log(cpu, "%d %s %s after %llu frames", g_sanity.effect, sanity_name(g_sanity.effect), ran ? "ended" : "dropped by the game",
                cpu->timebase / 675000ull - g_sanity.began);
     sanity_log_state(cpu, "at its end");
@@ -13752,6 +13795,280 @@ static void sanity_ask(CPUState* cpu, int number) {
     }
 }
 
+// Random effects at doors (Mods' Sanity Effects, single player): at each door on the kit's list, one
+// effect from the pool, started in the next room whatever its rules, at the sanity it asks for. The
+// sanity goes down a level once each of that level's has played, then starts over. Left out: the story's
+// (12, 30), Timeline visitation (13), saving (27), the screens that stop the game for both players in
+// co-op (15, 25, 26, 28), and what a door can't start (20, 34, 36).
+static const s8 kSanityDoorPool[] = {1, 4, 5, 6, 7, 8, 9, 10, 11, 14, 16, 17, 18, 19, 21, 22, 23, 24, 29, 31, 32, 33, 35, 38};
+#define SANITY_POOL (sizeof kSanityDoorPool / sizeof kSanityDoorPool[0])
+#define SANITY_DOOR_CHOICE 0x8004305Cu  // (next room), before the load
+#define SANITY_ROOM_LIST 0x800689D0u    // (room, which list)
+
+bool hle_sanity_doors_on(void) { return g_sanity.doors_on; }
+int hle_sanity_doors_level(void) { return g_sanity.doors_level; }
+void hle_sanity_doors_next(void) { g_sanity.doors_next = true; }
+
+void hle_sanity_doors_set(bool on) {
+    g_sanity.doors_on = on;
+    if (on) {
+        if (g_sanity.doors_level == 0)
+            g_sanity.doors_level = 1;
+        g_sanity.doors_changed = true;
+    }
+}
+
+static bool sanity_request(CPUState* cpu, int number, bool force) {
+    u32 thing = 0u, holder = 0u, id = 0u, ignored = 0u;
+    if (!sanity_tracker(cpu, &thing, &holder) || !hle_guest_call(cpu, SANITY_ID, &thing, 1, 0.0, &id))
+        return false;
+    g_sanity.holder = holder;
+    if (mem_read32(cpu, holder + 4u) != 0u)
+        return false;
+    g_sanity.ignore = force;
+    g_sanity.rules_for = number;
+    const u32 data = mem_read32(cpu, holder + 196u);
+    mem_write32(cpu, data + 56u, (u32)number);
+    const u32 args[4] = {SANITY_ASK_EVENT, 0u, id, data + 56u};
+    hle_guest_call(cpu, COOP_SEND_EVENT, args, 4, 0.0, &ignored);
+    if (mem_read32(cpu, holder + 4u) == 0u) {
+        g_sanity.rules_for = -1;
+        return false;
+    }
+    return true;
+}
+
+// The player's sanity down to the level asked for: to it when `exact`, else only if it's above.
+static void sanity_doors_hold(CPUState* cpu, bool exact) {
+    const u32 node = mem_read32(cpu, cpu->gpr[13] - 21492u);
+    if (node == 0u || g_sanity.doors_level < 1)
+        return;
+    const u32 out = (cpu->gpr[1] - 0x300u) & ~15u;
+    u32 ok = 0u;
+    const u32 args[3] = {node, 1u, out};
+    mem_write16(cpu, out, 0u);
+    hle_guest_call(cpu, 0x80034F7Cu, args, 3, 0.0, &ok);
+    const s32 most = (s16)mem_read16(cpu, out);
+    mem_write16(cpu, out, 0u);
+    hle_guest_call(cpu, 0x80034E20u, args, 3, 0.0, &ok);
+    const s32 has = (s16)mem_read16(cpu, out);
+    static const s32 kPercent[4] = {100, 74, 49, 24};  // just under the game's 75%, 50%, 25%
+    s32 want = most * kPercent[g_sanity.doors_level] / 100;
+    if (want < 1)
+        want = 1;
+    if (most <= 0 || has == want || (!exact && has < want))
+        return;
+    const u32 set_args[4] = {node, 1u, (u32)want, 0u};
+    hle_guest_call(cpu, STAT_SET, set_args, 4, 0.0, &ok);
+    if (exact)
+        sanity_log(cpu, "sanity set to %d of %d, level %d", want, most, g_sanity.doors_level);
+}
+
+static bool sanity_room_names(int room, int effect) {
+    for (size_t i = 0; i < sizeof kSanityRoomNames / sizeof kSanityRoomNames[0]; i++)
+        if (kSanityRoomNames[i].room == room && kSanityRoomNames[i].effect == effect)
+            return true;
+    return false;
+}
+
+// The meter, read and never changed: false when there's no player or no most.
+static bool sanity_meter(CPUState* cpu, s32* has, s32* most) {
+    const u32 node = mem_read32(cpu, cpu->gpr[13] - 21492u);
+    if (node == 0u)
+        return false;
+    const u32 out = (cpu->gpr[1] - 0x300u) & ~15u;
+    u32 ok = 0u;
+    const u32 args[3] = {node, 1u, out};
+    mem_write16(cpu, out, 0u);
+    hle_guest_call(cpu, 0x80034F7Cu, args, 3, 0.0, &ok);
+    *most = (s16)mem_read16(cpu, out);
+    mem_write16(cpu, out, 0u);
+    hle_guest_call(cpu, 0x80034E20u, args, 3, 0.0, &ok);
+    *has = (s16)mem_read16(cpu, out);
+    return *most > 0;
+}
+
+// Enhanced's chance of an effect in a room: none above 95% of the meter, then 20% and what's been lost,
+// to 90% at most. docs/game/systems/sanity.md.
+#define SANITY_START_PERCENT 95
+#define SANITY_BASE_CHANCE 20
+#define SANITY_MOST_CHANCE 90
+static int sanity_room_chance(int percent) {
+    if (percent > SANITY_START_PERCENT)
+        return 0;
+    const int chance = SANITY_BASE_CHANCE + 100 - percent;
+    return chance > SANITY_MOST_CHANCE ? SANITY_MOST_CHANCE : chance;
+}
+
+// The game's levels are below 75%, 50%, 25%. Above that it has none, so the mildest come first.
+static int sanity_band(int percent) { return percent < 25 ? 3 : percent < 50 ? 2 : percent < 75 ? 1 : 0; }
+
+static bool sanity_mild(int number) {
+    return number == 1 || number == 5 || number == 8 || number == 14 || number == 38;
+}
+
+// Locked in room and Walk on Ceiling only where the game has them, by its own door. The rest in any
+// room, but for what the game's rules know about the character: ammo, and a weapon for the camera.
+static bool sanity_can_come(CPUState* cpu, int number, int next, int band) {
+    const u32 table = mem_read32(cpu, cpu->gpr[13] - 25476u);
+    const int lowest = (int)mem_read8(cpu, table + (u32)number * 36u + 4u);
+    if (!(lowest <= band && lowest > 0) && !sanity_mild(number))
+        return false;
+    if (number == 22)
+        return band >= 3 && sanity_room_suits(22, next);
+    if (number == 10)
+        return sanity_room_names(next, 10);
+    const u32 chapter = mem_read32(cpu, 0x80307178u);
+    if (number == 9 && (chapter == 1u || chapter == 3u || chapter == 4u))
+        return false;
+    if (number == 7) {
+        u32 thing = 0u, holder = 0u, allowed = 0u;
+        if (!sanity_tracker(cpu, &thing, &holder))
+            return false;
+        const u32 args[3] = {7u, 3u, mem_read32(cpu, holder + 56u)};
+        return hle_guest_call(cpu, SANITY_RULES, args, 3, 0.0, &allowed) && allowed != 0u;
+    }
+    return true;
+}
+
+// One at random from those not played that can come: 0 when there are none left.
+static int sanity_doors_pick(CPUState* cpu, int next, int band) {
+    const u32 table = mem_read32(cpu, cpu->gpr[13] - 25476u);
+    if (!guest_ram_range_valid(cpu, table, 36u * 41u))
+        return 0;
+    int can[SANITY_POOL], count = 0;
+    for (size_t i = 0; i < SANITY_POOL; i++) {
+        const int number = kSanityDoorPool[i];
+        if (!g_sanity.doors_played[number] && sanity_can_come(cpu, number, next, band))
+            can[count++] = number;
+    }
+    return count > 0 ? can[(unsigned)rand() % (unsigned)count] : 0;
+}
+
+static bool sanity_door_listed(CPUState* cpu, int next) {
+    const int chapter = (int)mem_read32(cpu, 0x80307178u), room = (int)mem_read32(cpu, cpu->gpr[13] - 23276u);
+    for (size_t i = 0; i < sizeof kSanityDoors / sizeof kSanityDoors[0]; i++) {
+        const SanityDoor* d = &kSanityDoors[i];
+        if ((d->level == chapter || (chapter == 0 && d->level == 12)) && (d->from == room || d->from == -1) && d->to == next)
+            return true;
+    }
+    return false;
+}
+
+static void sanity_doors_notify(CPUState* cpu) {
+    const bool enhanced = g_settings.mod_insanity == 1;
+    if ((!g_sanity.doors_on && !enhanced) || g_settings.mod_coop || !sda_ready(cpu))
+        return;
+    const int next = (int)cpu->gpr[3], room = (int)mem_read32(cpu, cpu->gpr[13] - 23276u);
+    if (next == room || g_sanity.door != NULL)
+        return;
+    // What the game itself keeps effects from: Pius's chapter (no sanity there), these chapters, and a flag in Edward's.
+    const u32 chapter = mem_read32(cpu, 0x80307178u);
+    if (mem_read32(cpu, cpu->gpr[13] - 29244u) == 0u || chapter == 13u || chapter == 15u || chapter == 16u) {
+        sanity_log(cpu, "door %d to %d: no sanity effects in this chapter", room, next);
+        return;
+    }
+    // A door effect is under way, or on its way back through here, so it stays. One that waits for a press stays too.
+    const bool on = g_sanity.effect >= 0 && guest_ram_range_valid(cpu, g_sanity.record + 24u, 4u);
+    const u16 on_stage = on ? mem_read16(cpu, g_sanity.record + 10u) : 0u;
+    const int on_number = on ? g_sanity.effect : -1;
+    const u32 on_flags = on ? mem_read32(cpu, g_sanity.record + 24u) : 0u;
+    const bool can_end = on_stage == 5u || (on_flags & 2u) == 0u;
+    if (on && (!can_end || on_number == 20 || on_number == 25 || on_number == 26 || on_number == 28 || on_number == 15 ||
+               on_number == 27 || on_number == 34 || on_number == 36)) {
+        sanity_log(cpu, "door %d to %d: %d %s is under way, no new effect", room, next, on_number, sanity_name(on_number));
+        return;
+    }
+    if (!sanity_door_listed(cpu, next)) {
+        sanity_log(cpu, "door %d to %d: not on the kit's list, no effect", room, next);
+        return;
+    }
+    if (cutscene_playing(cpu)) {
+        sanity_log(cpu, "door %d to %d: in a scene, no effect", room, next);
+        return;
+    }
+    // The scene hold fn22, fn139 and the words set: the game turns every effect away while it's on (0x8006DD70).
+    if (mem_read32(cpu, cpu->gpr[13] - 25696u) != 0u) {
+        sanity_log(cpu, "door %d to %d: the game's scene hold is on, no effect", room, next);
+        return;
+    }
+    static const u32 kKept[] = {4u, 5u, 6u, 9u, 10u};  // the rooms the door keeps them out of (0x800435AC)
+    for (size_t i = 0; i < sizeof kKept / sizeof kKept[0]; i++) {
+        u32 at = 0u;
+        const u32 args[2] = {(u32)next, kKept[i]};
+        if (hle_guest_call(cpu, SANITY_ROOM_LIST, args, 2, 0.0, &at) && (s32)at != -1) {
+            sanity_log(cpu, "door %d to %d: the game keeps effects out of it (list %u), no effect", room, next, kKept[i]);
+            return;
+        }
+    }
+    int percent = 100, band = g_sanity.doors_level;
+    s32 has = 0, most = 0;
+    if (sanity_meter(cpu, &has, &most))
+        percent = has * 100 / most;
+    if (!g_sanity.doors_on) {  // Enhanced: the room's chance, from the meter as it is
+        if (g_sanity.free_pending && room == g_sanity.free_from && next == g_sanity.free_to) {
+            g_sanity.free_pending = false;
+            sanity_log(cpu, "door %d to %d: the same door again, so it's free", room, next);
+            return;
+        }
+        const int chance = sanity_room_chance(percent), rolled = rand() % 100;
+        if (rolled >= chance) {
+            sanity_log(cpu, "door %d to %d: sanity %d of %d (%d%%), chance %d%%, rolled %d, no effect", room, next, has, most, percent, chance, rolled);
+            return;
+        }
+        band = sanity_band(percent);
+        sanity_log(cpu, "door %d to %d: sanity %d of %d (%d%%), chance %d%%, rolled %d", room, next, has, most, percent, chance, rolled);
+    }
+    int number = sanity_doors_pick(cpu, next, band);
+    if (number == 0) {
+        if (g_sanity.doors_on && g_sanity.doors_level < 3) {
+            g_sanity.doors_level++;
+            band = g_sanity.doors_level;
+            sanity_doors_hold(cpu, true);
+        } else {  // each has played, so round again
+            memset(g_sanity.doors_played, 0, sizeof g_sanity.doors_played);
+            if (g_sanity.doors_on) {
+                g_sanity.doors_level = 1;
+                band = 1;
+                sanity_doors_hold(cpu, true);
+            }
+            sanity_log(cpu, "each has played: round again");
+        }
+        number = sanity_doors_pick(cpu, next, band);
+        if (number == 0)
+            return;
+    }
+    if (on) {  // the door's own first word for a new one (0x800430F4)
+        u32 thing = 0u, holder = 0u, id = 0u, ignored = 0u;
+        if (!sanity_tracker(cpu, &thing, &holder) || !hle_guest_call(cpu, SANITY_ID, &thing, 1, 0.0, &id))
+            return;
+        const u32 end[4] = {SANITY_END_EVENT, 0u, id, 0u};
+        hle_guest_call(cpu, COOP_SEND_EVENT, end, 4, 0.0, &ignored);
+        if (mem_read32(cpu, holder + 4u) != 0u) {
+            sanity_log(cpu, "door %d to %d: %d %s wouldn't end, no new effect", room, next, on_number, sanity_name(on_number));
+            return;
+        }
+        sanity_log(cpu, "%d %s ended by the door after %llu frames", on_number, sanity_name(on_number), cpu->timebase / 675000ull - g_sanity.began);
+        g_sanity.effect = -1;
+        g_sanity.rules_for = -1;
+    }
+    g_sanity.doors_played[number] = true;
+    const u32 table = mem_read32(cpu, cpu->gpr[13] - 25476u);
+    const bool at_door = (mem_read32(cpu, table + (u32)number * 36u + 24u) & 2u) != 0u;
+    sanity_log(cpu, "DOOR %d to %d, band %d: %d %s (%s)", room, next, band, number, sanity_name(number),
+               at_door ? "started by the door" : "starts itself on arriving");
+    snprintf(g_sanity.result, sizeof g_sanity.result, "Door to %d: %s", next, sanity_name(number));
+    if (at_door) {
+        g_sanity.free_from = room;
+        g_sanity.free_to = next;
+        g_sanity.free_pending = true;
+        if (!sanity_request(cpu, number, number != 10 && number != 22))
+            sanity_log(cpu, "  %d %s refused at the door", number, sanity_name(number));
+    } else {
+        g_sanity.after_door = number;
+    }
+}
+
 // At a pad read, as ED_RUN_SCRIPT: a script run from the player's turn breaks the game's threads.
 void sanity_door_run(CPUState* cpu) {
     if (g_sanity.door == NULL || g_settings.mod_coop || !sda_ready(cpu))
@@ -13765,6 +14082,114 @@ void sanity_door_run(CPUState* cpu) {
     g_sanity.door_next = frame + 30ull;  // it asks, then the same script again is the press
     if (--g_sanity.door_runs <= 0)
         g_sanity.door = NULL;
+}
+
+// ED_SANITY_SWEEP=N (testing): the game drives itself through doors, N at each of four places on the
+// meter, each room new where it can be, with no one at the pad. Then it quits. Sanity is set at each new
+// place, and left alone between: what happens to it after that is the game's.
+void dol_aurora_request_quit(void);
+
+static const SanityDoor* sanity_sweep_door(CPUState* cpu) {
+    const int chapter = (int)mem_read32(cpu, 0x80307178u), room = (int)mem_read32(cpu, cpu->gpr[13] - 23276u);
+    const SanityDoor* best = NULL;
+    int best_rank = 99;
+    for (size_t i = 0; i < sizeof kSanityDoors / sizeof kSanityDoors[0]; i++) {
+        const SanityDoor* d = &kSanityDoors[i];
+        if ((d->level != chapter && !(chapter == 0 && d->level == 12)) || d->from != room || d->to >= 512)
+            continue;
+        const bool seen = (g_sanity.sweep_seen[d->to / 8] >> (d->to % 8) & 1) != 0;
+        const int rank = (seen ? 2 : 0) + (d->gated ? 1 : 0);
+        if (rank < best_rank) {
+            best = d;
+            best_rank = rank;
+        }
+    }
+    return best;
+}
+
+static void sanity_sweep_step(CPUState* cpu) {
+    static int doors = -2;
+    if (doors == -2) {
+        const char* t = getenv("ED_SANITY_SWEEP");
+        doors = t != NULL ? atoi(t) : -1;
+    }
+    if (doors <= 0)
+        return;
+    // No one's at the pad, so the game's idle screen (the 10800 at 0x80021C74, whose picture stays until a
+    // button) would come after a few minutes. Its count starts again here.
+    mem_write32(cpu, cpu->gpr[13] - 23568u, 0u);
+    if (g_sanity.door != NULL)
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (g_sanity.sweep_next == 0ull)
+        g_sanity.sweep_next = frame + 240ull;
+    if (frame < g_sanity.sweep_next || mem_read32(cpu, cpu->gpr[13] - 26240u) != 2u || cutscene_playing(cpu) || game_menu_open(cpu))
+        return;
+    // A room's own scene has the scene hold on (fn22, fn139) until it ends, and every effect is turned away
+    // meanwhile. Wait for it, as a player would. With no one at the pad some never end, so then let go, as the
+    // game does (0x80042B30, fn139).
+    static unsigned long long held_since;
+    if (mem_read32(cpu, cpu->gpr[13] - 25696u) != 0u) {
+        if (held_since == 0ull)
+            held_since = frame;
+        if (frame - held_since < 1200ull)
+            return;
+        held_since = 0ull;
+        sanity_log(cpu, "SWEEP: a scene has held for 1200 frames after door script %d: letting go", g_sanity.sweep_script);
+        const u32 off = 0u;
+        u32 ok = 0u;
+        hle_guest_call(cpu, 0x80042B30u, &off, 1, 0.0, &ok);
+        mem_write32(cpu, cpu->gpr[13] - 25696u, 0u);
+        return;
+    }
+    held_since = 0ull;
+    if (g_sanity.effect >= 0 && guest_ram_range_valid(cpu, g_sanity.record + 24u, 4u)) {
+        const bool at_door = (mem_read32(cpu, g_sanity.record + 24u) & 2u) != 0u;
+        const unsigned long long ran = frame - g_sanity.began;
+        if (ran < (at_door ? 1500ull : 400ull))
+            return;  // long enough to see it
+        if (at_door && ran > 3000ull) {
+            sanity_log(cpu, "sweep: %d %s still on after %llu frames, ending it", g_sanity.effect, sanity_name(g_sanity.effect), ran);
+            hle_sanity_stop();
+            g_sanity.sweep_next = frame + 120ull;
+            return;
+        }
+    }
+    static const int kPlaces[4] = {92, 70, 45, 20};
+    if (g_sanity.sweep_doors % doors == 0) {
+        if (g_sanity.sweep_band >= 4) {
+            sanity_log(cpu, "SWEEP DONE after %d doors", g_sanity.sweep_doors);
+            doors = -1;
+            dol_aurora_request_quit();
+            return;
+        }
+        s32 has = 0, most = 0;
+        const u32 node = mem_read32(cpu, cpu->gpr[13] - 21492u);
+        if (sanity_meter(cpu, &has, &most)) {
+            s32 want = most * kPlaces[g_sanity.sweep_band] / 100;
+            want = want < 1 ? 1 : want;
+            const u32 set_args[4] = {node, 1u, (u32)want, 0u};
+            u32 ok = 0u;
+            hle_guest_call(cpu, STAT_SET, set_args, 4, 0.0, &ok);
+            sanity_log(cpu, "SWEEP: sanity set to %d of %d (%d%%)", want, most, kPlaces[g_sanity.sweep_band]);
+        }
+        g_sanity.sweep_band++;
+    }
+    const SanityDoor* door = sanity_sweep_door(cpu);
+    if (door == NULL) {
+        const int room = (int)mem_read32(cpu, cpu->gpr[13] - 23276u);
+        sanity_log(cpu, "SWEEP: no door known out of room %d: stopping", room);
+        doors = -1;
+        dol_aurora_request_quit();
+        return;
+    }
+    g_sanity.sweep_seen[door->to / 8] |= (u8)(1u << (door->to % 8));
+    g_sanity.sweep_script = door->script;
+    g_sanity.sweep_doors++;
+    g_sanity.door = door;
+    g_sanity.door_runs = door->asks + 1;
+    g_sanity.door_next = 0ull;
+    g_sanity.sweep_next = frame + 300ull;
 }
 
 static void sanity_tool_step(CPUState* cpu) {
@@ -13783,6 +14208,26 @@ static void sanity_tool_step(CPUState* cpu) {
     }
     sanity_room_list(cpu);
     sanity_watch(cpu);
+    static int doors_env = -1;
+    if (doors_env < 0) {
+        doors_env = getenv("ED_SANITY_DOORS") != NULL;  // testing: on from the start
+        if (doors_env)
+            hle_sanity_doors_set(true);
+    }
+    if (g_sanity.doors_on) {
+        if (g_sanity.doors_next) {
+            g_sanity.doors_next = false;
+            g_sanity.doors_level = g_sanity.doors_level % 3 + 1;
+            memset(g_sanity.doors_played, 0, sizeof g_sanity.doors_played);
+            g_sanity.doors_changed = true;
+        }
+        if (g_sanity.doors_changed) {
+            g_sanity.doors_changed = false;
+            sanity_doors_hold(cpu, true);
+        } else if (g_sanity.effect < 0 && ++g_sanity.doors_steps % 60u == 0u) {
+            sanity_doors_hold(cpu, false);  // an effect's return puts the old sanity back
+        }
+    }
     if (g_sanity.stop) {
         g_sanity.stop = false;
         u32 thing = 0u, holder = 0u, id = 0u;
@@ -13794,6 +14239,7 @@ static void sanity_tool_step(CPUState* cpu) {
             hle_guest_call(cpu, COOP_SEND_EVENT, args, 4, 0.0, &ignored);
         }
     }
+    sanity_sweep_step(cpu);
     const int asked = g_sanity.asked;
     if (asked < 0)
         return;
@@ -13809,15 +14255,31 @@ static void sanity_tool_step(CPUState* cpu) {
     sanity_ask(cpu, asked);
 }
 
+// The Sanity effects option at Off: the game's roll finds none (0x800697C0). What the story calls for stays.
+static void sanity_roll(CPUState* cpu) {
+    g_hle_passthrough = g_settings.mod_insanity != 2;
+    if (!g_hle_passthrough)
+        cpu->gpr[3] = 0u;
+}
+
 static void sanity_tool_install(CPUState* cpu) {
     if (strcmp(ED_GAME_ID, "GEDP01") != 0 || mem_read32(cpu, SANITY_RULES) != 0x9421FFE0u ||
         mem_read32(cpu, SANITY_ARMED) != 0x9421FFF0u || mem_read32(cpu, SANITY_BEGINS) != 0x9421FFF0u) {
         fprintf(stderr, "[sanity] the game's effects not found: Sanity Effects stays off\n");
         return;
     }
+    srand((unsigned)time(NULL));
     HleDispatchEntry* rules = hle_dispatch_entry(SANITY_RULES);
     if (rules != NULL && rules->intercept == NULL)
         rules->intercept = sanity_rules;
+    HleDispatchEntry* choice = hle_dispatch_entry(SANITY_DOOR_CHOICE);
+    if (choice != NULL && choice->notify == NULL && mem_read32(cpu, SANITY_DOOR_CHOICE) == 0x9421FFE0u)
+        choice->notify = sanity_doors_notify;
+    else
+        fprintf(stderr, "[sanity] the door's choice not found: Random effects at doors stays off\n");
+    HleDispatchEntry* roll = hle_dispatch_entry(SANITY_ROLL);
+    if (roll != NULL && roll->intercept == NULL && mem_read32(cpu, SANITY_ROLL) == 0x9421FFC0u)
+        roll->intercept = sanity_roll;
     HleDispatchEntry* door = hle_dispatch_entry(SANITY_DOOR);
     if (door != NULL && door->intercept == NULL && mem_read32(cpu, SANITY_DOOR) == 0x9421FFC0u)
         door->intercept = sanity_door_rules;

@@ -94,6 +94,10 @@ const char* hle_sanity_result(void);
 bool hle_sanity_on(void);
 void hle_sanity_play(int number, bool ignore_limits);
 void hle_sanity_stop(void);
+bool hle_sanity_doors_on(void);
+void hle_sanity_doors_set(bool on);
+int hle_sanity_doors_level(void);
+void hle_sanity_doors_next(void);
 
 // Run the guest function fn to its return, from the host, on the game thread
 // (a hook), with r3.. = args and f1, and every register as it was afterwards.

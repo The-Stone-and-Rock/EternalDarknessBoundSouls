@@ -4,6 +4,15 @@
 
 **How sure:** the numbers, flags, rooms and limits are read from the code and saves, and only what "Seen in play" says was run. "What you see" comes from [StrategyWiki](https://strategywiki.org/wiki/Eternal_Darkness:_Sanity%27s_Requiem/Sanity_effects) and the [Fandom wiki](https://eternaldarkness.fandom.com/wiki/Sanity_Effects), matched to the game's names by hand. A `?` means that match still has to be seen in play. The names, and `ED_INSANITY_FORCE=N` to force one, are on `main` (`runtime/host/hle.c`, `runtime/host/insanity.cpp`). This branch doesn't have them yet.
 
+## Where this stands: paused by the user, 2026-11-05
+
+Enhanced is built and off by default: the Sanity effects row in Mods, Challenge (Normal, Enhanced, Off), single player only. The numbers below it are a first guess, not yet played by the user with a real meter. To pick up again:
+
+- **Finish the sweep:** it has only run on slot 2. Its last run (`logs/run-20261105-011628-enhanced-slot2d`) stopped doing doors at frame 9698 on Shrink player, which stays on with no one walking. The sweep's ending it, event 82 (the menu's End the effect on now too), had no effect on it: it asked every 120 frames for over 3000 frames. So End may not work on a running door effect. Look at that first, then run saves 3 to 12.
+- **Not tested in Enhanced:** Off, Locked in Room and Walk on Ceiling in their own rooms, and whether an effect's return gives back sanity lost during it.
+- **Not built:** the co-op side, each player's own effects, and the split sanity music.
+- **Always on in single player:** every effect, the game's own too, is written to `logs/sanity-effects.log`, whatever the option says.
+
 ## Trying them: Mods, Sanity Effects
 
 In a game's menu, single player: pick an effect, choose whether to keep the game's limits, and Play this effect. Every effect, the game's own rolls too, goes to `logs/sanity-effects.log`: who asked and from where, sanity, place, doors, sounds and streams, room and mode changes, how long it ran, and each room's own list as it's first entered. `ED_SANITY_TEST=effect,steps,ignore` does the same with no menu, and `ED_SETTINGS=FILE` runs with co-op off. Code: `sanity_ask`, `sanity_door_pick`, `sanity_door_rules`, `sanity_door_run` in `hle.c`.
@@ -29,6 +38,53 @@ In a game's menu, single player: pick an effect, choose whether to keep the game
 - Waiting at a door into room 138 from room 166. It has no list, so the door passed the effect by. Room 216, the other door, has list 18, 11.
 
 **Confirmed by the user, slot 2, room 166 through the door to 216, Keep, 2026-11-04:** Bug crawl, Zombie, Phantom creatures, Head of Shakespeare, Controller not found, Shrink player, Sinking feeling, Ammo pickup, Illusions of grandeur. Logged lengths: Head 1030 frames, Illusions 1130, Controller 595, Sinking 552, Ammo 528. Each that returns plays sound 536, then a voice line (stream 281 or 282), and comes back to room 166 at the door's side (1475, 6). Zombie and Shrink player were still running when the run closed at frame 3860. Bug crawl ran 14 frames and Phantom creatures 3 by the log. Not yet run this way: every other effect, and the menu page itself.
+
+## Random effects at doors: the test for Enhanced
+
+Mods, Sanity Effects, Random effects at doors, single player. `ED_SANITY_DOORS=1` turns it on from the start. Code: `sanity_doors_notify` in `hle.c`.
+
+- **Where:** at `0x8004305C(next room)`, before the load, for a door on the kit's list (`sanity_doors.inc`, 735 doors) in any chapter. Not in a scene, and not into the rooms the door keeps effects out of (lists 4, 5, 6, 9, 10 of `0x800689D0`).
+- **Which:** one at random of 24: 1, 4, 5, 6, 7, 8, 9, 10, 11, 14, 16, 17, 18, 19, 21, 22, 23, 24, 29, 31, 32, 33, 35, 38, at or under the sanity level, each once. Walk on Ceiling only into its own 10 rooms.
+- **Left out:** the story's (12, 30), Timeline visitation (13, to be made by hand for co-op), saving (27), the screens that stop the game (15, 25, 26, 28), and what a door can't start (20, 34, 36).
+- **Sanity:** set just under 75%, 50%, 25% with the game's setter (`0x800354F8`) and held there. When a level's have all played it goes down one, and after the last it starts over. The menu's Sanity for the doors moves it on by hand.
+- **The game's rules are lifted for the one chosen,** so chapter limits and room lists don't apply. That's the test.
+- **One that starts itself goes on in the background:** Bleeding walls, Blood pool and Horror camera shake were still running after 1300 frames. It's asked for once the room is in, and ended at the next door with the door's own event 82, or nothing else could come. Door-started ones are left, as their way back also passes here.
+
+**Checked by scripted doors, slot 2, 166 to 138, 138 to 166, 166 to 216:** Bleeding walls, Blood pool, Horror camera shake, no hang. The rest is the user's run.
+
+**The user's first run, slot 2, 2026-11-04, `logs/run-20261104-235416-drive-doors`:** about 17 minutes, 61,509 frames, no hang. What the log says, and what the user saw is still to come. Seconds are frames over 60.
+
+| Effect | Door | Ran | Back to the room before |
+|---|---|---|---|
+| Bleeding walls | 166 to 138 | 27 s, ended by a door | Stays |
+| Blood pool | 295 to 217 | 63 s, ended by a door | Stays |
+| Horror camera shake | 295 to 138 | 14 s, ended by a door | Stays |
+| Locked in room | 138 to 166 | 34 s | Stays |
+| Shrink player | 166 to 216 | 11 s | Yes |
+| Blood bath | 166 to 216 | 21 s | Yes |
+| Ammo pickup | 166 to 216 | 17 s | Yes |
+| Sinking feeling | 166 to 216 | 9 s | Yes |
+| Expand player | 166 to 216 | 11 s | Yes |
+| Attack camera | 166 to 216 | 3.5 s | Stays |
+| TV shut off | 234 to 218 | 2 s | Stays |
+| Bug crawl | 234 to 218 | 7.5 s | Stays |
+| Phantom creatures | 169 to 159 | 3.7 s | Stays |
+| Footstep trail | 145 to 160 | 30 s | Stays |
+| Target marker | 145 to 160 | 0.2 s | Stays |
+
+**Found in that run:**
+
+- **It stayed at level 2.** The 15 effects at or under it took the whole run, so the eight that need level 3 weren't reached by a door.
+- **The game's own rolls go on, and get in the way.** At that sanity it rolled TV mute, Target marker and Walk on Ceiling. Walk on Ceiling then waited 13,521 frames (225 s), and the test skips doors while a door effect is on. Doors 33898 to 47419 gave nothing, and the log doesn't say why. `0x800697C0` is the place to stop them, as `main` did.
+- **The game also asks for Walk on Ceiling at some doors itself** (145 to 25, 25 to 145, 160 to 145). It ended after 4 frames each time.
+- **Rooms the game keeps effects out of (list 9):** 165, 234, 294, 295. Those doors gave nothing.
+- **Doors not on the kit's list:** 217 to 218 and 218 to 217. Some doors aren't in `doors_table` by their room.
+
+**Enhanced, driven by `ED_SANITY_SWEEP` on slot 2, 2026-11-05.** The chance is rolled and logged at each door, and 24 of the doors in `logs/run-20261105-005954-enhanced-slot2c` rolled no effect. Six effects ran: Footstep trail, Horror camera shake, Bleeding walls, Bug crawl, Sinking feeling, TV mute. The sweep isn't clean yet:
+
+- **The scene hold** (`r13-25696`, set by fn22, fn139 and the words): the game turns every effect away while it's on (`0x8006DD70`), which looks like each being dropped within 2 frames. Rooms' own scenes set it on arriving, and the sweep walked out of them, so it stayed on. Two earlier runs were read wrongly as a fault in ending Footstep trail. The sweep now waits for a scene, then lets go after 1200 frames.
+- **The skull filling the picture is the game's idle screen,** game mode 12, not a fault. `0x8013DB08(0x80113DEC, 10800)` at `0x80021C78` sets it after 10800 ticks of no input (the count is `r13-23568`), and it stays until a button. The wiki describes it as a screensaver of Pius. The sweep starts the count again each step.
+- **So only 6 of the 32 planned doors' effects ran,** and bands 2 and 3 are barely tested by Enhanced itself.
 
 ## How the game runs them
 
@@ -77,7 +133,7 @@ In a game's menu, single player: pick an effect, choose whether to keep the game
 | 9 | Ammo Pickup | 2 | Ammo lying about, gone when it ends | Off in chapters 1, 3, 4 | Repeat |
 | 10 | Locked in Room | 2 | Every door locked for a while | | Repeat |
 | 11 | Blood Bath | 2 | ? Not the same as Alex's bathtub scene below | | Look first |
-| 12 | Edwards Ghost Cine | 2 | Alex and Edward's ghost, in order | Alex's chapter, flag 959 | **Story** |
+| 12 | Edwards Ghost Cine | 2 | Alex and Edward's ghost, in order | Not in Alex's chapter: any other, once flag 959 is clear. Corrected 2026-11-05, and seen rolled by the game in chapter 2 | **Story** |
 | 13 | Timeline Visitation | 2 | Another era of the same place, in another colour | See below | Look first |
 | 14 | Bug Crawl | 2 | Bugs crawl over the screen | | Repeat |
 | 15 | To be Continued | 2 | Fake ending and sequel screen | Sets flag 837 | Repeat, co-op off |
@@ -159,6 +215,16 @@ Only while Enhanced is chosen, so Normal is untouched. Each is one place to chan
 2. **Come back sooner:** clear an effect's bit in the deck when it ends.
 3. **Lift chapter limits one at a time:** `0x8006EB6C`.
 4. **Visits to other rooms:** `fn66` and `fn71`, hooked already as `COOP_SCRIPT_GO_TO_ROOM`. Keep to a tested list of rooms. Each room's people and scripts can reach things that aren't loaded, and flags are shared with the story.
+
+## The user's plan for Enhanced (2026-11-04), not built yet
+
+- **Story events stay as in regular play,** in co-op too: full-screen cutscenes already show on one screen for both.
+- **Chance per room rises as the meter falls (2026-11-05):** the user wants effects to begin even sooner than 90%, because sanity is restored so easily that players stay near full and effects are rare. Proposed, not yet agreed: from 95% left, chance = 20% + sanity lost, at most 90%. So 95% left is 25%, 90% is 30%, 75% is 45%, 50% is 70%, 25% is 90%. Full sanity has none.
+- **Milder to harsher stays the game's own order** (each record's `+4`), which the user pointed out is how the game is already built.
+- **The meter's own workings stay.** Enhanced reads sanity over most and never sets it. The game's levels (`+21` at 75%, 50%, 25%) stay as they are, and so does what reads them: `ed62` scripts, paintings, sounds, the game's own effects.
+- **Above 75% the game has no level to go by:** its level is 0 there, and only Bleeding walls asks for level 1. So what comes above 75% has to be chosen: the mildest of the game's level 2 effects, keeping its order, eased through `0x8006EB6C` as the door test does.
+- **Risks to settle at high chances:** about half the pool sends you back to the room you left, so a low meter can keep a player from getting through a door. A fix to consider: no effect on the next try of that same door. Recover isn't available early in a chapter or game, so a low meter may have no way back up yet: check per chapter.
+- **Co-op sanity music is split by player:** only the sanity music, not other sounds. Player 1's plays on the left and player 2's on the right, each from their own meter, so one player's full sanity leaves their side without it. The music is `audio/music/insangk.adp`, `inscath.adp`, `ins_mansion.adp`, which are disc streams with their own volume (`docs/mods-feasibility.md`). Where it starts isn't traced.
 
 ## Co-op, after single player
 

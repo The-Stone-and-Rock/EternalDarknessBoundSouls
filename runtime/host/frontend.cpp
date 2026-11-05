@@ -69,6 +69,10 @@ const char* hle_sanity_result(void);
 bool hle_sanity_on(void);
 void hle_sanity_play(int number, bool ignore_limits);
 void hle_sanity_stop(void);
+bool hle_sanity_doors_on(void);
+void hle_sanity_doors_set(bool on);
+int hle_sanity_doors_level(void);
+void hle_sanity_doors_next(void);
 }
 enum { kCheatMagick = 1, kCheatFull = 2 };  // hle.h's HLE_CHEAT_MAGICK, HLE_CHEAT_FULL
 
@@ -960,9 +964,12 @@ void build_mods_rows() {
     enemies.change = [](int dir) { cycle(g_settings.mod_enemies, 2, dir); };
     g_rows.push_back(enemies);
 
-    static const char* const kInsanity[] = {"Normal", "More often", "Off"};
+    static const char* const kInsanity[] = {"Normal", "Enhanced", "Off"};
     Row insanity{"Sanity effects", kInsanity[g_settings.mod_insanity]};
-    insanity.note = "In development: no effect yet.";
+    insanity.note = g_settings.mod_insanity == 1
+                        ? "Single player. Below 95% sanity, every door can bring an effect, more often as it falls."
+                    : g_settings.mod_insanity == 2 ? "The game's random effects stop. What the story calls for stays."
+                                                   : "As the game has them.";
     insanity.change = [](int dir) { cycle(g_settings.mod_insanity, 3, dir); };
     g_rows.push_back(insanity);
 
@@ -1044,6 +1051,22 @@ void build_mods_rows() {
         g_close = true;
     };
     g_rows.push_back(stop);
+    // Every door a test: one effect at a time, sanity going down as each level's are seen.
+    Row doors{"Random effects at doors", on_off(hle_sanity_doors_on())};
+    doors.gap = true;
+    doors.toggle = true;
+    doors.enabled = sanity_can;
+    doors.note = sanity_can ? "Each door starts one at random, in any room. Your sanity drops below 75%, then 50%, then 25% as each "
+                              "level's have played, then starts over. No story, Timeline, saving or full-screen effects."
+                            : sanity_not;
+    doors.change = [](int) { hle_sanity_doors_set(!hle_sanity_doors_on()); };
+    g_rows.push_back(doors);
+    static const char* const kLevels[] = {"Full", "Below 75%", "Below 50%", "Below 25%"};
+    Row drain{"Sanity for the doors", kLevels[std::clamp(hle_sanity_doors_level(), 0, 3)]};
+    drain.enabled = sanity_can && hle_sanity_doors_on();
+    drain.note = "Press to go to the next level now. It holds there, so turn Full stats off.";
+    drain.activate = [] { hle_sanity_doors_next(); };
+    g_rows.push_back(drain);
     Row last{"Last result", hle_sanity_result()};
     last.enabled = false;
     last.note = "Every effect is written to logs/sanity-effects.log, the game's own too.";

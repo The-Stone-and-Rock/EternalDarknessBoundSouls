@@ -70,7 +70,7 @@ typedef struct {
     int mod_magick;
     int mod_sanity;
     int mod_enemies;      // 0 vanilla, 1 enhanced (harder hits, more creatures)
-    int mod_insanity;     // sanity effects: 0 the game's own, 1 more often, 2 off
+    int mod_insanity;     // sanity effects: 0 the game's own, 1 Enhanced, 2 off
     int mod_p1_character; // player 1's character: 0 the chapter's own, 1-12 Pius .. Alex (Jump to Game order)
     int mod_p2_character; // player 2's (co-op), the same way: chosen, not yet played
     int mod_p1_stats;     // player 1's health, magick and sanity: 0 the chapter character's, 1 the chosen one's

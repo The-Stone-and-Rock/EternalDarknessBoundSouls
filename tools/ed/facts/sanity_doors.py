@@ -1,5 +1,5 @@
 """Writes runtime/host/sanity_doors.inc: for Mods' Sanity Effects, the doors out of each room, from the kit's own door table, and
-which rooms have an effect list in their file (+128, the count a door reads at 0x80153A00). Run again after `ed build`:
+each room's effect list from its file (+128, the count a door reads at 0x80153A00). Run again after `ed build`:
 
     python -I tools/ed/facts/sanity_doors.py
 
@@ -13,26 +13,43 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import disc  # noqa: E402
 import gametext  # noqa: E402
+import roomfile  # noqa: E402
 
 OUT = os.path.join(disc.ROOT, 'runtime', 'host', 'sanity_doors.inc')
 
 
-def room_has_list(d, path):
+def room_list(d, path):
+    """The room's effect list: count at +128, the list 0x78 bytes and its own padded length before the cameras' eyes. Checked
+    against live memory in 12 rooms. -1 is an empty place in it (65535 in the file)."""
     b = d.read(path)
     first = struct.unpack('>I', b[4:8])[0]
     csize = struct.unpack('>I', b[12:16])[0]
-    x = gametext.bpe_expand(b, first, min(first + csize, len(b)))
-    return struct.unpack('>H', bytes(x[128:130]))[0] > 0
+    sec = struct.unpack('>I', b[16:20])[0]
+    x = bytes(gametext.bpe_expand(b, first, min(first + csize, len(b))))
+    n = struct.unpack('>H', x[128:130])[0]
+    if not n:
+        return []
+    cameras = struct.unpack('>H', x[162:164])[0]
+    hits = roomfile._find_eyes(x, cameras, sec or len(x))
+    if len(hits) != 1:
+        raise ValueError('%s: %d places for its cameras' % (path, len(hits)))
+    at = hits[0] - 0x78 - ((2 * n + 3) & ~3)
+    return list(struct.unpack('>%dH' % n, x[at:at + 2 * n]))
 
 
 def main():
     d = disc.Disc()
-    has = {}
+    lists = {}
     for path in d.glob(r'^Rooms/rmed\d+\.bpe$'):
-        has[int(re.search(r'rmed(\d+)', path).group(1))] = room_has_list(d, path)
+        lists[int(re.search(r'rmed(\d+)', path).group(1))] = room_list(d, path)
+    has = {k: bool(v) for k, v in lists.items()}
     table = json.load(open(os.path.join(disc.DB, 'facts', 'doors_table.json'), encoding='utf8'))
     rows = set()
     for r in table:
+        if r.get('source') == 'none_found' and r['level'].isdigit() and r.get('entry_in_to_room'):
+            # No region known to run it, so -1: a door into this room is allowed, but can't be picked to drive.
+            rows.add((int(r['level']), -1, 1, r['to_room'], r['script'], 0))
+            continue
         if r.get('source') != 'region' or not r.get('entry_in_to_room') or r.get('flags'):
             continue
         if not r['level'].isdigit():
@@ -55,6 +72,11 @@ def main():
         listed = sorted(k for k, v in has.items() if v)
         for i in range(0, len(listed), 16):
             f.write('    ' + ', '.join(str(x) for x in listed[i:i + 16]) + ',\n')
+        f.write('};\n\n// {room, an effect its list names}\nstatic const SanityNamed kSanityRoomNames[] = {\n')
+        for room in sorted(lists):
+            for effect in sorted(set(lists[room])):
+                if effect != 65535:
+                    f.write('    {%d, %d},\n' % (room, effect))
         f.write('};\n')
     print('%d doors, %d of %d rooms have a list: %s' % (len(rows), len(listed), len(has), OUT))
     near = [r for r in sorted(rows) if r[1] in (166, 138, 216) and r[0] == 2]
