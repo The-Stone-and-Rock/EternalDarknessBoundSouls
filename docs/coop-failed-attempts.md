@@ -396,6 +396,10 @@ Not done: leaving out the game's own frame, which nobody sees in a split. Its EF
 
 **Max's straitjacket on his moves, for free arms:** its bones do follow, but its arms are in one mesh group with its body, so nothing shows. Fitting moves can't change that, so the user had the form taken out.
 
+**A ghost's weapon points all moved to one point of the group:** a thin line by Karim's hand. Each point follows its own bones, so they spread as the arm bent. Each to its nearest point of the group made it shorter, a streak from the forearm over the hand, and all at the wrist joint left a shard, as some follow the fingers too. Putting a strip's corners on one point (`+64`, `+68`) changed nothing drawn, and the swords were back: the head and shoulders photos hid that, so look at the whole body. They go on one point of their own bone's batch.
+
+**Moving a form's floating parts to another bone by the table at `+48`:** spikes off the shoulders and a stick by Edward's hand, even with 3 points moved. Its numbers aren't bones: they go through `+44`.
+
 **The nearest bone by place, for every bone with no name in common:** on the Liche it put two cape bones on other tracks. Only when most names don't match.
 
 ## A freeze that looked like waiting (2026-11-04)

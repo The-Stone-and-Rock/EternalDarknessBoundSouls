@@ -508,7 +508,7 @@ int& chosen_character() {
     return g_characters_player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
 }
 
-// The other bodies, for whoever's page this is: 2 bits for each character in the setting, the
+// The other bodies, for whoever's page this is: 4 bits for each character in the setting, the
 // form, 0 their own. In the order of hle.c's kCostumes for each character.
 struct CharacterForm {
     int character;     // kCharacters' place
@@ -520,9 +520,13 @@ constexpr CharacterForm kForms[] = {
     {2, "Ghost form", "ghost"},
     {2, "Rotten form", "rotten"},
     {3, "Ghost form", "ghost"},
+    {3, "Rotten form", "rotten"},
     {4, "Ghost form", "ghost"},
     {5, "Spirit form", "spirit"},
     {7, "Ghost form", "ghost"},
+    {7, "Augustine", "Augustine"},
+    {7, "Monk", "monk"},
+    {7, "Black robes", "black robes"},
     {8, "Ghost form", "ghost"},
     {10, "Ghost form", "ghost"},
 };
@@ -545,18 +549,18 @@ const CharacterForm* form_row(int character, int form) {
 int form_on(int player, int character) {
     if (character < 1 || character > 12)
         return 0;
-    const int bits = player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume;
-    const int form = (bits >> ((character - 1) * 2)) & 3;
+    const long long bits = player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume;
+    const int form = static_cast<int>((bits >> ((character - 1) * 4)) & 15);
     return form <= forms_of(character) ? form : 0;
 }
 
 // The frame's character changes form, on this page's player: on through them, then back to their own.
 void form_swap(int character, int dir) {
     const int count = forms_of(character) + 1;
-    int& bits = g_characters_player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume;
+    long long& bits = g_characters_player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume;
     const int form = (form_on(g_characters_player, character) + dir + count) % count;
-    const int shift = (character - 1) * 2;
-    bits = (bits & ~(3 << shift)) | (form << shift);
+    const int shift = (character - 1) * 4;
+    bits = (bits & ~(15LL << shift)) | (static_cast<long long>(form) << shift);
 }
 
 int& chosen_stats() {

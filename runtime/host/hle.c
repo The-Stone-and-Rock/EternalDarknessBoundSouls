@@ -6923,7 +6923,7 @@ static int player_model(void) {
 // (costume_file). A body comes from a list of bodies by number: a level's U_LevelNN.bin
 // (the ghosts in Alex's last chapter, and the Liche), or a cutscene's cinNNNN.bin, which is the same
 // kind of pack (0x80007FA0 makes it the list at r13-26452 while the scene plays).
-// mod_p1_costume and mod_p2_costume hold 2 bits for each of the twelve, by their place in
+// mod_p1_costume and mod_p2_costume hold 4 bits for each of the twelve, by their place in
 // kPlayerModel: the form, 0 their own. ED_COSTUME=p1,p2 (testing): that form for them.
 // ED_COSTUME_TRY=character,form,level,cutscene or -1,body (testing): another body as that form.
 // A body's +4 and the head of each part of a character's file hold a skeleton word: a body plays
@@ -6948,9 +6948,13 @@ static Costume kCostumes[] = {
     {70, 1, 1, "Ellia", 13, -1, 142, 142, 5, -1},
     {70, 1, 2, "Ellia", 0, 25, 37, 114, -1, -1},       // rotten, in the last scene of Lindsey's chapter (script L06/906)
     {85, 2, 1, "Anthony", 13, -1, 143, 143, 6, -1},
+    {85, 2, 2, "Anthony", 7, -1, 137, 137, -1, -1},    // rotten, the enemy in room 104 of Paul's chapter (character 132)
     {150, 3, 1, "Karim", 13, -1, 144, 144, 14, -1},
     {18, 4, 1, "Max", 0, -1, 140, 140, -1, -1},        // his blue spirit: script 1438 makes it, at MaxGhostMkr
     {74, 6, 1, "Paul", 13, -1, 146, 146, 5, -1},
+    {74, 6, 2, "Paul", 7, 30, 38, 126, -1, -1},        // Augustine, in his red robe
+    {74, 6, 3, "Paul", 7, 30, 40, 127, -1, -1},        // a monk
+    {74, 6, 4, "Paul", 7, 30, 37, 129, -1, -1},        // one of the men in black robes
     {76, 7, 1, "Roberto", 13, -1, 147, 147, 14, -1},
     {69, 9, 1, "Edward", 17, 77, 39, 113, -1, -1},     // a scene's body: 62 bones to his 72
 };
@@ -6992,8 +6996,8 @@ static Costume* costume_on(int player) {
     const int model = player == 0 ? player_model() : coop_wanted_character();
     for (int place = 0; place < COSTUME_PLACES; place++)
         if (kPlayerModel[place] == model) {
-            const int bits = player == 0 ? g_settings.mod_p1_costume : g_settings.mod_p2_costume;
-            return costume_form(model, test[player] >= 0 ? test[player] : (bits >> (place * 2)) & 3);
+            const long long bits = player == 0 ? g_settings.mod_p1_costume : g_settings.mod_p2_costume;
+            return costume_form(model, test[player] >= 0 ? test[player] : (int)((bits >> (place * 4)) & 15));
         }
     return NULL;
 }
@@ -7258,6 +7262,11 @@ static const Costume* costume_object(CPUState* cpu, u32 object);
 #define COSTUME_NEAR 130.0f
 #define MOVES_STREAM 0x8012E588u
 
+static u32 body_part(CPUState* cpu, u32 body, u32 field) {
+    const u32 at = mem_read32(cpu, body + field);
+    return at < 0x80000000u ? body + at : at;
+}
+
 static u32 body_bones(CPUState* cpu, u32 body) {
     const u32 at = mem_read32(cpu, body + 36u);
     return at < 0x80000000u ? body + at : at;
@@ -7269,6 +7278,43 @@ static struct {
     int from[COSTUME_MAX_BONES];
 } g_costume_maps[COSTUME_PLACES];
 static __typeof__(&g_costume_maps[0]) g_costume_map;
+
+// Some of a form's parts are on a bone with no track from the wearer and nothing to follow: a scene's body
+// has its eyes on bones with no parent, and Anthony's rotten one a jewel in its eye on bones under the
+// hips. They stay where they were made while the rest walks off. Each becomes the head's twin: its
+// place as made and its parent (+0 to +60, +72, +76), and the head's track, so what's on it moves
+// exactly with the head. Giving those parts another bone in the mesh's own table (+48) pulled them
+// out into spikes: its numbers go through another list (+44).
+#define COSTUME_HEAD_BONE 0xAD886CCCu
+#define COSTUME_HIPS_BONE 0xB4877DD4u
+
+static void costume_loose_bones(CPUState* cpu, const Costume* c, u32 own) {
+    s32 head = -1;
+    for (u32 b = 0u; b < g_costume_map->bones && head < 0; b++)
+        if (mem_read32(cpu, own + b * 80u + 64u) == COSTUME_HEAD_BONE)
+            head = (s32)b;
+    if (head < 0 || g_costume_map->from[head] < 0)
+        return;
+    const u32 from = own + (u32)head * 80u;
+    u32 twins = 0u;
+    for (u32 b = 1u; b < g_costume_map->bones; b++) {
+        if (g_costume_map->from[b] >= 0)
+            continue;
+        const u32 parent = mem_read16(cpu, own + b * 80u + 76u);
+        const bool none = parent >= g_costume_map->bones;
+        if (!none && mem_read32(cpu, own + parent * 80u + 64u) != COSTUME_HIPS_BONE)
+            continue;
+        const u32 to = own + b * 80u;
+        for (u32 at = 0u; at < 64u; at += 4u)
+            mem_write32(cpu, to + at, mem_read32(cpu, from + at));
+        mem_write32(cpu, to + 72u, mem_read32(cpu, from + 72u));
+        mem_write32(cpu, to + 76u, mem_read32(cpu, from + 76u));
+        g_costume_map->from[b] = g_costume_map->from[head];
+        twins++;
+    }
+    if (twins != 0u)
+        fprintf(stderr, "[player] %s's other body: %u loose bones now move with the head\n", c->name, twins);
+}
 
 // Which of the wearer's bones each of the body's is: by name, or where few names match, by place. The
 // body's bones then take those names, as what a character holds finds its bone by name.
@@ -7332,6 +7378,8 @@ static void costume_bone_map(CPUState* cpu, const Costume* c, u32 body, u32 plai
         for (u32 i = 0u; i < g_costume_map->bones; i++)
             if (g_costume_map->from[i] >= 0)
                 mem_write32(cpu, own + i * 80u + 64u, mem_read32(cpu, theirs + (u32)g_costume_map->from[i] * 80u + 64u));
+        if (c->held_file < 0)
+            costume_loose_bones(cpu, c, own);
         fprintf(stderr, "[player] %s's moves fitted to their other body: of its %u bones, %u by name and %u by place in their %u\n", c->name, g_costume_map->bones, named, placed,
                 g_costume_map->plain_bones);
     }
@@ -8081,70 +8129,165 @@ static void story_player_model(CPUState* cpu) {
 
 static bool g_coop_spawning;  // coop_spawn is making player 2
 
-// What a form's body has that the wearer's hasn't, in one mesh group, left out: all of its points in
-// one place, so its triangles draw nothing. A body's points are 6 bytes each from its +80, its groups
-// 276 bytes each from its +40 (+8 how many points, +10 the first). Everything else is as it was: what's
-// equipped is another object, held by a bone.
-static u32 body_part(CPUState* cpu, u32 body, u32 field) {
-    const u32 at = mem_read32(cpu, body + field);
-    return at < 0x80000000u ? body + at : at;
-}
+// A ghost's weapon is part of its mesh, left out here so what's equipped is what shows. A body's points
+// are 6 bytes each from its +80, and its mesh groups 276 bytes each from its +40 (+8 how many points,
+// +10 the first). Its +48 says which bone each batch of a group's points follows, 6 bytes each (the bone,
+// how many, the first of the group's), ending at +76. The weapon's points are those of its group
+// the wearer's body hasn't, and nearly all follow one bone, one of the hand's. They go on one point of
+// that batch that stays, so they move as one in any pose and draw nothing. Strays on other bones go on
+// the nearest that stays of their own batch. Some of a weapon is where a point of the wearer's body is
+// too: it's told by the strips at +64 of corners at +68 (+2 the point), whole pieces joined by them
+// of which a quarter or more is the weapon's. Those tables only say what's joined: changing them draws
+// nothing different. Points put anywhere but on their own bone's drew a line as the arm bent.
+#define COSTUME_WEAPON_HAND 0x69E347A7u
+#define COSTUME_FINGERS_REACH 480.0f  // in the points' units
 
 static void costume_strip(CPUState* cpu, const Costume* c, u32 body, u32 plain) {
     if (c->strip_group < 0 || !guest_ram_range_valid(cpu, body, 96u) || !guest_ram_range_valid(cpu, plain, 96u))
         return;
-    const u32 groups = body_part(cpu, body, 40u);
     const u32 points = body_part(cpu, body, 80u), theirs = body_part(cpu, plain, 80u);
     const u32 total = (body_part(cpu, body, 52u) - points) / 6u, their_count = (body_part(cpu, plain, 52u) - theirs) / 6u;
-    if (total > 0x10000u || !guest_ram_range_valid(cpu, points, total * 6u) || !guest_ram_range_valid(cpu, theirs, their_count * 6u))
+    const u32 groups = body_part(cpu, body, 40u);
+    const u32 group = groups + (u32)c->strip_group * 276u;
+    const u32 count = mem_read16(cpu, group + 8u), first = mem_read16(cpu, group + 10u);
+    const u32 corners = body_part(cpu, body, 68u), strips = body_part(cpu, body, 64u), strips_end = body_part(cpu, body, 36u);
+    const u32 batches = body_part(cpu, body, 48u), batches_end = body_part(cpu, body, 76u);
+    if (total > 0x10000u || first + count > total || !guest_ram_range_valid(cpu, points, total * 6u) || !guest_ram_range_valid(cpu, theirs, their_count * 6u) ||
+        strips_end <= strips || !guest_ram_range_valid(cpu, strips, strips_end - strips) || !guest_ram_range_valid(cpu, corners, strips - corners) ||
+        batches_end <= batches || !guest_ram_range_valid(cpu, batches, batches_end - batches))
         return;
     u8* own = cpu->ram + (points - GC_RAM_BASE);
     const u8* plain_points = cpu->ram + (theirs - GC_RAM_BASE);
-    static u8 extra[0x10000];
-    u32 left_out = 0u;
-    for (u32 g = 0u; g < 32u; g++) {
-        const u32 count = mem_read16(cpu, groups + g * 276u + 8u), first = mem_read16(cpu, groups + g * 276u + 10u);
-        if (count == 0u || first + count > total)
-            continue;
-        for (u32 i = first; i < first + count; i++) {
-            bool found = false;
-            for (u32 k = 0u; k < their_count && !found; k++)
-                found = memcmp(own + i * 6u, plain_points + k * 6u, 6u) == 0;
-            extra[i] = !found;
-        }
-        // The weapon's group: all in one place. Another group has a stray point of it at most, and
-        // that goes to the nearest of the group's own, so the triangles it joins draw nothing either.
-        int all_to = -1;
-        for (u32 i = first; i < first + count && all_to < 0; i++)
-            if (!extra[i])
-                all_to = (int)i;
-        if (all_to < 0)
-            continue;
-        for (u32 i = first; i < first + count; i++) {
-            if (!extra[i])
-                continue;
-            int to = all_to;
-            if ((int)g != c->strip_group) {
-                s64 best = -1;
-                for (u32 k = first; k < first + count; k++) {
-                    if (extra[k])
-                        continue;
-                    s64 apart = 0;
-                    for (u32 axis = 0u; axis < 3u; axis++) {
-                        const s64 d = (s64)(s16)((own[i * 6u + axis * 2u] << 8) | own[i * 6u + axis * 2u + 1u]) -
-                                      (s64)(s16)((own[k * 6u + axis * 2u] << 8) | own[k * 6u + axis * 2u + 1u]);
-                        apart += d * d;
-                    }
-                    if (best < 0 || apart < best) {
-                        best = apart;
-                        to = (int)k;
-                    }
-                }
-            }
-            memmove(own + i * 6u, own + (u32)to * 6u, 6u);
-            left_out++;
+    static u8 weapon[0x10000];
+    memset(weapon, 0, sizeof weapon);
+    for (u32 i = first; i < first + count; i++) {
+        bool found = false;
+        for (u32 k = 0u; k < their_count && !found; k++)
+            found = memcmp(own + i * 6u, plain_points + k * 6u, 6u) == 0;
+        weapon[i] = !found;
+    }
+    // The pieces.
+    static s32 piece[0x10000];
+    static u16 in_group[0x10000], of_weapon[0x10000];
+    for (u32 i = 0u; i < 0x10000u; i++)
+        piece[i] = (s32)i;
+#define PIECE_OF(x, out)                         \
+    do {                                         \
+        s32 at_ = (s32)(x);                      \
+        while (piece[at_] != at_) {              \
+            piece[at_] = piece[piece[at_]];      \
+            at_ = piece[at_];                    \
+        }                                        \
+        (out) = at_;                             \
+    } while (0)
+    for (u32 at = strips; at + 4u <= strips_end; at += 4u) {
+        const u32 n = mem_read8(cpu, at + 1u), start = mem_read16(cpu, at + 2u);
+        if (corners + (start + n) * 4u > strips)
+            break;
+        s32 root;
+        PIECE_OF(mem_read16(cpu, corners + start * 4u + 2u), root);
+        for (u32 i = 1u; i < n; i++) {
+            s32 other;
+            PIECE_OF(mem_read16(cpu, corners + (start + i) * 4u + 2u), other);
+            piece[other] = root;
         }
     }
+    memset(in_group, 0, sizeof in_group);
+    memset(of_weapon, 0, sizeof of_weapon);
+    for (u32 i = first; i < first + count; i++) {
+        s32 root;
+        PIECE_OF(i, root);
+        in_group[root]++;
+        of_weapon[root] += weapon[i];
+    }
+    static u8 goes[0x10000];
+    memset(goes, 0, sizeof goes);
+    for (u32 i = first; i < first + count; i++) {
+        s32 root;
+        PIECE_OF(i, root);
+        goes[i] = weapon[i] || (of_weapon[root] != 0u && of_weapon[root] * 4u >= in_group[root]);
+    }
+    // The wrist, in the points' units (16 to one of the game's): a bone's +12 is a 3 by 4 matrix from the
+    // body to the bone, so its place is the rotation turned back on its translation.
+    float wrist[3] = {0.0f, 0.0f, 0.0f};
+    bool have_wrist = false;
+    const u32 bones = body_part(cpu, body, 36u);
+    for (u32 b = 0u; b < mem_read16(cpu, body + 8u) && !have_wrist; b++) {
+        const u32 bone = bones + b * 80u;
+        if (mem_read32(cpu, bone + 64u) != COSTUME_WEAPON_HAND)
+            continue;
+        for (u32 axis = 0u; axis < 3u; axis++) {
+            for (u32 row = 0u; row < 3u; row++)
+                wrist[axis] -= guest_read_f32(cpu, bone + 12u + row * 16u + axis * 4u) * guest_read_f32(cpu, bone + 12u + row * 16u + 12u);
+            wrist[axis] *= 16.0f;
+        }
+        have_wrist = true;
+    }
+    // Each batch of the group.
+    u32 left_out = 0u;
+    s32 walked = -1;
+    u32 walked_first = 0u;
+    for (u32 at = batches; at + 6u <= batches_end; at += 6u) {
+        const u32 n = mem_read16(cpu, at + 2u), start = mem_read16(cpu, at + 4u);
+        if (start == 0u) {  // the next group with points
+            do {
+                walked++;
+            } while (walked < 32 && (mem_read16(cpu, groups + (u32)walked * 276u + 8u) == 0u || mem_read16(cpu, groups + (u32)walked * 276u + 8u) == 0xFFFFu));
+            if (walked >= 32)
+                break;
+            walked_first = mem_read16(cpu, groups + (u32)walked * 276u + 10u);
+        }
+        if (walked != c->strip_group || n == 0u || walked_first + start + n > first + count)
+            continue;
+        const u32 from = walked_first + start;
+        u32 weapon_here = 0u;
+        for (u32 i = from; i < from + n; i++)
+            weapon_here += goes[i];
+        if (weapon_here == 0u)
+            continue;
+        // In the batch with most of it, what's joined to the weapon at all goes too, and what's out of
+        // the fingers' reach of the wrist: the last of a hilt, some of it where a point of theirs is.
+        if (weapon_here >= 16u)
+            for (u32 i = from; i < from + n; i++) {
+                s32 root;
+                PIECE_OF(i, root);
+                float apart = 0.0f;
+                for (u32 axis = 0u; axis < 3u; axis++) {
+                    const float d = (float)(s16)((own[i * 6u + axis * 2u] << 8) | own[i * 6u + axis * 2u + 1u]) - wrist[axis];
+                    apart += d * d;
+                }
+                if (!goes[i] && (of_weapon[root] != 0u || (have_wrist && apart > COSTUME_FINGERS_REACH * COSTUME_FINGERS_REACH))) {
+                    goes[i] = 1u;
+                    weapon_here++;
+                }
+            }
+        // The one that stays nearest the wrist, so anything joined to it stays inside the hand.
+        float best = -1.0f;
+        s32 stays = -1;
+        for (u32 k = from; k < from + n; k++) {
+            if (goes[k])
+                continue;
+            float apart = 0.0f;
+            for (u32 axis = 0u; axis < 3u; axis++) {
+                const float d = (float)(s16)((own[k * 6u + axis * 2u] << 8) | own[k * 6u + axis * 2u + 1u]) - wrist[axis];
+                apart += d * d;
+            }
+            if (best < 0.0f || apart < best) {
+                best = apart;
+                stays = (s32)k;
+            }
+        }
+        if (stays < 0)
+            stays = (s32)from;  // all of it goes: all on the first
+        u8 one[6];
+        memcpy(one, own + (u32)stays * 6u, 6u);
+        for (u32 i = from; i < from + n; i++)
+            if (goes[i]) {
+                memcpy(own + i * 6u, one, 6u);
+                left_out++;
+            }
+    }
+#undef PIECE_OF
     if (left_out != 0u)
         fprintf(stderr, "[player] %s's other body: %u points of a weapon left out\n", c->name, left_out);
 }
@@ -8185,8 +8328,10 @@ static void costume_file(CPUState* cpu, int model, int player) {
     if (worn != NULL && mem_read32(cpu, list) > (u32)worn->filed && mem_read32(cpu, list + 8u + (u32)worn->filed * 8u) != 0u) {
         const u32 costume = list + 8u + (u32)worn->filed * 8u;
         costume_strip(cpu, worn, mem_read32(cpu, costume), kept[place].plain[0]);
-        if (mem_read32(cpu, mem_read32(cpu, costume) + 4u) != mem_read32(cpu, kept[place].plain[0] + 4u))
+        if (mem_read32(cpu, mem_read32(cpu, costume) + 4u) != mem_read32(cpu, kept[place].plain[0] + 4u)) {
+            g_costume_maps[place].body = 0u;  // it may be read in again, at the same place
             costume_bone_map(cpu, worn, mem_read32(cpu, costume), kept[place].plain[0]);
+        }
         mem_write32(cpu, entry, mem_read32(cpu, costume));
         mem_write32(cpu, entry + 4u, mem_read32(cpu, costume + 4u));
     } else if (kept[place].list == list) {

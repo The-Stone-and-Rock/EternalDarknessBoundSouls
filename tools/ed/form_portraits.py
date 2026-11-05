@@ -19,9 +19,13 @@ FORMS = {
     'Ellia-1': (2, 1, 195, 110),
     'Ellia-2': (2, 2, 195, 110),
     'Anthony-1': (3, 1, 215, 120),
+    'Anthony-2': (3, 2, 215, 120),
     'Karim-1': (4, 1, 215, 120),
     'Max-1': (5, 1, 200, 130),
     'Paul-1': (7, 1, 205, 120),
+    'Paul-2': (7, 2, 205, 120),
+    'Paul-3': (7, 3, 205, 120),
+    'Paul-4': (7, 4, 205, 120),
     'Roberto-1': (8, 1, 205, 120),
     'Edward-1': (10, 1, 215, 120),
 }
@@ -32,7 +36,7 @@ OUT = (126, 89)
 
 def take(name, character, form, height, distance):
     text = open(os.path.join(ROOT, 'settings.ini'), encoding='utf-8', errors='replace').read()
-    for key, value in (('mod_coop', 0), ('mod_p1_character', character), ('mod_p1_costume', form << ((character - 1) * 2)), ('mod_p1_stats', 1)):
+    for key, value in (('mod_coop', 0), ('mod_p1_character', character), ('mod_p1_costume', form << ((character - 1) * 4)), ('mod_p1_stats', 1)):
         text = re.sub(r'(?m)^%s = .*$' % key, '%s = %s' % (key, value), text)
     out = os.path.join(ROOT, 'build', 'portraits')
     os.makedirs(out, exist_ok=True)

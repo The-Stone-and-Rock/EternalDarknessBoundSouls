@@ -242,9 +242,9 @@ void settings_load(void) {
         else if (strcmp(key, "mod_p2_stats") == 0)
             g_settings.mod_p2_stats = clamp_int(n, 0, 1);
         else if (strcmp(key, "mod_p1_costume") == 0)
-            g_settings.mod_p1_costume = clamp_int(n, 0, 0xFFFFFF);
+            g_settings.mod_p1_costume = strtoll(value, NULL, 10);
         else if (strcmp(key, "mod_p2_costume") == 0)
-            g_settings.mod_p2_costume = clamp_int(n, 0, 0xFFFFFF);
+            g_settings.mod_p2_costume = strtoll(value, NULL, 10);
         else if (strcmp(key, "mod_skip_intro") == 0)
             g_settings.mod_skip_intro = clamp_int(n, 0, 1);
         else if (strcmp(key, "mod_title_video") == 0)
@@ -324,8 +324,8 @@ void settings_save(void) {
     fprintf(f, "mod_p2_character = %d\n", g_settings.mod_p2_character);
     fprintf(f, "mod_p1_stats = %d\n", g_settings.mod_p1_stats);
     fprintf(f, "mod_p2_stats = %d\n", g_settings.mod_p2_stats);
-    fprintf(f, "mod_p1_costume = %d\n", g_settings.mod_p1_costume);
-    fprintf(f, "mod_p2_costume = %d\n", g_settings.mod_p2_costume);
+    fprintf(f, "mod_p1_costume = %lld\n", g_settings.mod_p1_costume);
+    fprintf(f, "mod_p2_costume = %lld\n", g_settings.mod_p2_costume);
     fprintf(f, "mod_skip_intro = %d\n", g_settings.mod_skip_intro);
     fprintf(f, "mod_title_video = %d\n", g_settings.mod_title_video);
     fprintf(f, "controls_custom = %s\n", g_settings.controls_custom);
