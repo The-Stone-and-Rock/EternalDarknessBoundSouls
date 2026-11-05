@@ -6031,6 +6031,20 @@ static void room_lights_update(CPUState* cpu) {
 #endif
 }
 
+// A scene in the game plays on the whole picture, with no black bars. 0x801E7954(on) draws them, two rects of height 75,
+// and nothing else: r13-21900, which scripts set through fn40, is read for more than this, so it stays as the game has it,
+// and so does what asks whether a scene plays (cutscene_playing). Only the world's two draws of them are passed over
+// (0x80008524, 0x80050B98). The third, at 0x800EB91C, isn't a scene's: it always asks for them. ED_SCENE_BARS=1 shows them, to compare.
+#define SCENE_BARS 0x801E7954u
+#define SCENE_BARS_WORLD 0x80008528u
+#define SCENE_BARS_WORLD2 0x80050B9Cu
+static void scene_bars(CPUState* cpu) {
+    static int show = -1;
+    if (show < 0)
+        show = getenv("ED_SCENE_BARS") != NULL;
+    g_hle_passthrough = show != 0 || (cpu->lr != SCENE_BARS_WORLD && cpu->lr != SCENE_BARS_WORLD2);
+}
+
 // The Health, Sanity and Magick help that opens the Tome by itself (scripts 480, 694, 821) never comes: its "done" flags
 // are on, as the game itself has them from later chapters (0x800076xx). The Tome's opening (0x80102A8C) and a first hit
 // (0x80061FFC) each look at only these. r13-26528: the count, then the bits, flag >> 5 words, bit flag & 31.
@@ -16450,6 +16464,14 @@ static void find_coop(CPUState* cpu) {
         busy_ask->intercept = coop_busy_ask;
     else
         fprintf(stderr, "[coop] the busy asking not found: player 2's close-ups stop player 1\n");
+    // The scenes' black bars (stwu r1,-48(r1), and the world's call of it).
+    HleDispatchEntry* bars = hle_dispatch_entry(SCENE_BARS);
+    if (mem_read32(cpu, SCENE_BARS) == 0x9421FFD0u && mem_read32(cpu, SCENE_BARS_WORLD - 8u) == 0x806DAA74u && bars != NULL &&
+        bars->intercept == NULL && bars->notify == NULL) {
+        bars->intercept = scene_bars;
+    } else {
+        fprintf(stderr, "[hle] the scenes' bars not found: they stay\n");
+    }
     // The words' hold (stwu r1,-16(r1), and the window's call of it at 0x80024368).
     HleDispatchEntry* words_hold = hle_dispatch_entry(WORDS_HOLD);
     if (mem_read32(cpu, WORDS_HOLD) == 0x9421FFF0u && mem_read32(cpu, WORDS_HOLD_OPENS - 4u) == 0x4801E725u && words_hold != NULL &&
