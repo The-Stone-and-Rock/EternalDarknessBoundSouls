@@ -25566,10 +25566,10 @@ index 2c0e5ff..be88d3e 100644
      if (ax != NULL)
          ax->log = enabled;
 diff --git a/src/core/cpu.c b/src/core/cpu.c
-index 2f13110..c56ac85 100644
+index 2f13110..90aec22 100644
 --- a/src/core/cpu.c
 +++ b/src/core/cpu.c
-@@ -17,6 +17,13 @@ bool cpu_init(CPUState* cpu) {
+@@ -17,6 +17,14 @@ bool cpu_init(CPUState* cpu) {
      memset(cpu, 0, sizeof(*cpu));
  
      cpu->ram_size = GC_MAIN_RAM_SIZE;
@@ -25579,11 +25579,12 @@ index 2f13110..c56ac85 100644
 +    // code's fast path stays at 24 MB. (A quick state from before, of 24 MB,
 +    // is refused: its MEM1 is another size.) 8 MB past that: the co-op Tome's
 +    // memory, so the room's data stays for the world behind it.
-+    cpu->ram_size += 16u * 1024u * 1024u;
++    // 8 MB past that: the meshes' pools, 4 times the game's (detail_pools_install).
++    cpu->ram_size += 24u * 1024u * 1024u;
      cpu->ram = (u8*)calloc(1, cpu->ram_size);
      if (!cpu->ram) {
          fprintf(stderr, "error: failed to allocate %u bytes for RAM\n", cpu->ram_size);
-@@ -168,7 +175,12 @@ static u32 exception_msr(u32 old_msr, u32 exception) {
+@@ -168,7 +176,12 @@ static u32 exception_msr(u32 old_msr, u32 exception) {
      return next;
  }
  
@@ -25596,7 +25597,7 @@ index 2f13110..c56ac85 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host || avail < 8) {
-@@ -180,6 +192,79 @@ u64 mem_read64(CPUState* cpu, u32 addr) {
+@@ -180,6 +193,79 @@ u64 mem_read64(CPUState* cpu, u32 addr) {
      return read_be64(host);
  }
  
@@ -25676,7 +25677,7 @@ index 2f13110..c56ac85 100644
  void mem_write64(CPUState* cpu, u32 addr, u64 value) {
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
-@@ -191,11 +276,15 @@ void mem_write64(CPUState* cpu, u32 addr, u64 value) {
+@@ -191,11 +277,15 @@ void mem_write64(CPUState* cpu, u32 addr, u64 value) {
          fprintf(stderr, "warn: write64 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -25692,7 +25693,7 @@ index 2f13110..c56ac85 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host || avail < 4) {
-@@ -218,11 +307,15 @@ void mem_write32(CPUState* cpu, u32 addr, u32 value) {
+@@ -218,11 +308,15 @@ void mem_write32(CPUState* cpu, u32 addr, u32 value) {
          fprintf(stderr, "warn: write32 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -25708,7 +25709,7 @@ index 2f13110..c56ac85 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host || avail < 2) {
-@@ -245,11 +338,15 @@ void mem_write16(CPUState* cpu, u32 addr, u16 value) {
+@@ -245,11 +339,15 @@ void mem_write16(CPUState* cpu, u32 addr, u16 value) {
          fprintf(stderr, "warn: write16 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -25724,7 +25725,7 @@ index 2f13110..c56ac85 100644
      u32 avail;
      u8* host = resolve_addr(cpu, addr, &avail);
      if (!host) {
-@@ -272,6 +369,8 @@ void mem_write8(CPUState* cpu, u32 addr, u8 value) {
+@@ -272,6 +370,8 @@ void mem_write8(CPUState* cpu, u32 addr, u8 value) {
          fprintf(stderr, "warn: write8 to unmapped 0x%08X\n", addr);
          return;
      }
@@ -25733,7 +25734,7 @@ index 2f13110..c56ac85 100644
      clear_matching_reservation(cpu, addr);
      *host = value;
  }
-@@ -562,18 +661,33 @@ static bool psq_access_is_valid(CPUState* cpu, u8 type, u32 ea, u32 cia) {
+@@ -562,18 +662,33 @@ static bool psq_access_is_valid(CPUState* cpu, u8 type, u32 ea, u32 cia) {
      return true;
  }
  
@@ -25771,7 +25772,7 @@ index 2f13110..c56ac85 100644
      default:
          return 0.0;
      }
-@@ -585,7 +699,7 @@ static s64 psq_quantize_int(f64 value, s64 min_value, s64 max_value, s32 scale)
+@@ -585,7 +700,7 @@ static s64 psq_quantize_int(f64 value, s64 min_value, s64 max_value, s32 scale)
      if (isinf(value))
          return value < 0.0 ? min_value : max_value;
  

@@ -5171,6 +5171,8 @@ void hle_frame_boundary(void) {
                 snprintf(title, sizeof title, "Eternal Darkness \u2014 %.0f fps",
                          (double)frames / dt);
                 VISetWindowTitle(title);
+                if (getenv("ED_DETAIL_LOG") != NULL)
+                    fprintf(stderr, "[fps] %.1f game frames a second\n", (double)frames / dt);
                 mark = now;
                 frames = 0;
             }
@@ -6163,28 +6165,49 @@ static bool g_fade_running;
 
 static void hle_camera_fade(CPUState* cpu) {
     float eye[3], target[3];
-    if (g_fade_running || !camera_view(eye, target)) {
+    if (g_fade_running) {
         g_hle_passthrough = true;
         return;
     }
-    u32 saved[6];
-    for (u32 i = 0; i < 3u; i++) {
-        saved[i] = mem_read32(cpu, g_fade_eye + i * 4u);
-        saved[3 + i] = mem_read32(cpu, g_fade_target + i * 4u);
-        guest_write_f32(cpu, g_fade_eye + i * 4u, eye[i]);
-        guest_write_f32(cpu, g_fade_target + i * 4u, target[i]);
+    const bool view = camera_view(eye, target);
+    // The share lowers detail when a frame's time (r13-23928, r13-23932) is over 15 ms. On the GameCube that's the frame's
+    // work. Here the clock only moves by the retrace, so those read 0, or 16.7 for a frame of nothing wrong, which took
+    // whoever wasn't near the camera down to half their mesh. The share sees 0; the other readers of the words see theirs.
+    const bool times = sda_ready(cpu) && getenv("ED_DETAIL_TIME") == NULL;
+    const u32 clock = cpu->gpr[13] - 23932u;
+    u32 time[2] = {0u, 0u};
+    if (!view && !times) {
+        g_hle_passthrough = true;
+        return;
     }
+    if (times)
+        for (u32 i = 0; i < 2u; i++) {
+            time[i] = mem_read32(cpu, clock + i * 4u);
+            mem_write32(cpu, clock + i * 4u, 0u);
+        }
+    u32 saved[6];
+    if (view)
+        for (u32 i = 0; i < 3u; i++) {
+            saved[i] = mem_read32(cpu, g_fade_eye + i * 4u);
+            saved[3 + i] = mem_read32(cpu, g_fade_target + i * 4u);
+            guest_write_f32(cpu, g_fade_eye + i * 4u, eye[i]);
+            guest_write_f32(cpu, g_fade_target + i * 4u, target[i]);
+        }
     const u32 args[] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5]};
     g_fade_running = true;
     const bool ok = hle_guest_call(cpu, g_fade_fn, args, 3, cpu->fpr[1], NULL);
     g_fade_running = false;
-    for (u32 i = 0; i < 3u; i++) {
-        mem_write32(cpu, g_fade_eye + i * 4u, saved[i]);
-        mem_write32(cpu, g_fade_target + i * 4u, saved[3 + i]);
-    }
+    if (view)
+        for (u32 i = 0; i < 3u; i++) {
+            mem_write32(cpu, g_fade_eye + i * 4u, saved[i]);
+            mem_write32(cpu, g_fade_target + i * 4u, saved[3 + i]);
+        }
+    if (times)
+        for (u32 i = 0; i < 2u; i++)
+            mem_write32(cpu, clock + i * 4u, time[i]);
     if (!ok)
         fprintf(stderr, "[camera] the fade did not return\n");
-    if (g_collide_log > 0) {
+    if (view && g_collide_log > 0) {
         static unsigned n;
         const u32 player = mem_read32(cpu, cpu->gpr[13] + (u32)(s32)g_camera_player_offset);
         if (n++ % 30u == 0u)
@@ -6198,6 +6221,7 @@ static void hle_camera_fade(CPUState* cpu) {
 
 // The fade function (PAL, USA) and its controllers, from its own code:
 // lis r5,hi; lis r4,hi; ...; addi r0,r5,target; ...; addi r4,r4,eye.
+static void detail_monitor_install(CPUState* cpu);
 static void find_camera_fade(CPUState* cpu) {
     const bool pal = strcmp(ED_GAME_ID, "GEDP01") == 0;
     const u32 fn = pal ? 0x8011CA04u : 0x801237F0u;
@@ -6523,6 +6547,7 @@ static void find_camera(CPUState* cpu) {
             find_player(cpu);
             find_camera_perspective(cpu, from - 0x40u);
             find_camera_fade(cpu);
+            detail_monitor_install(cpu);
             find_show_player(cpu);
             find_bone_matrix(cpu);
             find_player_modes(cpu);
@@ -6916,11 +6941,12 @@ static void coop_park(CPUState* cpu, u32 player, bool park) {
 static const s16 kPlayerModel[12] = {0, 70, 85, 150, 18, 73, 74, 76, 75, 69, 81, 9};
 static const s16 kPlayerType[12] = {1, 49, 46, 27, 44, 55, 47, 54, 45, 53, 48, 26};
 static int g_chapter_model = -1;  // the playable the chapter asked for
+static int character_chosen(int choice, long long bits);
 
 // Mods' Player 2 character (co-op), -1 for player 1's.
 static int coop_p2_choice(void) {
     const int choice = g_settings.mod_p2_character;
-    return g_settings.mod_coop && choice >= 1 && choice <= 12 ? kPlayerModel[choice - 1] : -1;
+    return g_settings.mod_coop && choice >= 1 && choice <= 12 ? character_chosen(choice, g_settings.mod_p2_costume) : -1;
 }
 
 static int player_model(void) {
@@ -6931,8 +6957,7 @@ static int player_model(void) {
     }
     if (test >= 0)
         return test;
-    const int choice = g_settings.mod_p1_character;
-    return choice >= 1 && choice <= 12 ? kPlayerModel[choice - 1] : -1;
+    return character_chosen(g_settings.mod_p1_character, g_settings.mod_p1_costume);
 }
 
 // A character's other bodies, their forms. Only the body: their file's moves, name and stats stay,
@@ -6960,6 +6985,7 @@ typedef struct {
     int strip_group;  // the mesh group with a weapon built into it, to leave out, or -1
     int held_file;    // a character's file whose standing pose the bones the wearer hasn't hold, or -1
     int sparkles;     // a ghost: the blue sparkles around them (ghost_sparkles_step)
+    int listed;       // not 0: the character screen it's on, when that isn't its wearer's (character_chosen)
 } Costume;
 static Costume kCostumes[] = {
     {0, 0, 1, "Pius", 13, -1, 86, 86, -1, 86},
@@ -6975,10 +7001,25 @@ static Costume kCostumes[] = {
     {74, 6, 4, "Paul", 7, 30, 37, 129, -1, -1},        // one of the men in black robes
     {76, 7, 1, "Roberto", 13, -1, 147, 147, 14, -1, 1},
     {69, 9, 1, "Edward", 17, 77, 39, 113, -1, -1, 1},   // a scene's body: 62 bones to his 72
+    // Chandra: forms worn by Alex, on Alex's moves, and listed on Karim's screen. From the scenes of his chapter.
+    {9, 11, 2, "Chandra", 4, 14, 36, 115, -1, -1, 0, 4},
+    {9, 11, 3, "Chandra's ghost", 0, 15, 38, 116, -1, -1, 1, 4},
+    {9, 11, 4, "Mutated Chandra", 0, 15, 37, 130, -1, -1, 1, 4},
 };
 #define COSTUMES ((int)(sizeof kCostumes / sizeof kCostumes[0]))
 #define COSTUME_PLACES 12
 static u32 g_costume_plain[COSTUME_PLACES];  // each wearer's own body, as it was in the chapter's list (costume_file)
+
+// Who a choice on the character screens is made as: that character, or the wearer of the form chosen there.
+static int character_chosen(int choice, long long bits) {
+    if (choice < 1 || choice > 12)
+        return -1;
+    const int form = (int)((bits >> ((choice - 1) * 4)) & 15);
+    for (int i = 0; i < COSTUMES; i++)
+        if (kCostumes[i].listed == choice && kCostumes[i].form == form)
+            return kCostumes[i].wearer;
+    return kPlayerModel[choice - 1];
+}
 
 static Costume* costume_form(int model, int form) {
     static bool tried;
@@ -7012,12 +7053,17 @@ static Costume* costume_on(int player) {
     if (player == 1 && !g_settings.mod_coop)
         return NULL;
     const int model = player == 0 ? player_model() : coop_wanted_character();
-    for (int place = 0; place < COSTUME_PLACES; place++)
-        if (kPlayerModel[place] == model) {
-            const long long bits = player == 0 ? g_settings.mod_p1_costume : g_settings.mod_p2_costume;
-            return costume_form(model, test[player] >= 0 ? test[player] : (int)((bits >> (place * 4)) & 15));
-        }
-    return NULL;
+    const long long bits = player == 0 ? g_settings.mod_p1_costume : g_settings.mod_p2_costume;
+    const int choice = player == 0 ? g_settings.mod_p1_character : g_settings.mod_p2_character;
+    // The form is kept with the screen it was chosen on.
+    int place = character_chosen(choice, bits) == model ? choice - 1 : -1;
+    for (int i = 0; i < COSTUME_PLACES && place < 0; i++)
+        if (kPlayerModel[i] == model)
+            place = i;
+    if (place < 0)
+        return NULL;
+    Costume* c = costume_form(model, test[player] >= 0 ? test[player] : (int)((bits >> (place * 4)) & 15));
+    return c != NULL && test[player] < 0 && c->listed != 0 && c->listed != place + 1 ? NULL : c;
 }
 
 static int player_type(int model) {
@@ -7444,30 +7490,68 @@ static void costume_bone_map(CPUState* cpu, const Costume* c, u32 body, u32 plai
             g_costume_map->from[0] = 0;
             taken[0] = true;
         }
-        for (u32 i = 1u; i < g_costume_map->bones && named * 2u < g_costume_map->bones; i++) {
-            if (g_costume_map->from[i] >= 0)
-                continue;
-            const u32 parent = mem_read16(cpu, own + i * 80u + 76u);
-            if (parent >= g_costume_map->bones || g_costume_map->from[parent] < 0)
-                continue;
-            float best = COSTUME_NEAR * COSTUME_NEAR;
-            for (u32 k = 1u; k < g_costume_map->plain_bones; k++) {
-                if (taken[k] || (int)mem_read16(cpu, theirs + k * 80u + 76u) != g_costume_map->from[parent])
+        // By place: first by each matrix's t, as the forms have always been fitted (rotten Ellia's 59). That's the place turned
+        // into the bone's frame, so where a body's bones are turned otherwise than the wearer's, the same place is far
+        // apart by it: Chandra's arms, turned down from Alex's, fitted 17 of 61. Where so few fit, it goes again by where
+        // each bone is, -R^T t, and she fits 57. A body turned as its wearer is fits the same either way.
+        bool by_place[COSTUME_MAX_BONES] = {false};
+        for (u32 pass = 0u; pass < 2u && named * 2u < g_costume_map->bones; pass++) {
+            if (pass == 1u) {
+                if ((named + placed) * 2u >= g_costume_map->bones)
+                    break;
+                for (u32 i = 1u; i < g_costume_map->bones; i++)
+                    if (by_place[i]) {
+                        taken[g_costume_map->from[i]] = false;
+                        g_costume_map->from[i] = -1;
+                        by_place[i] = false;
+                    }
+                placed = 0u;
+            }
+            for (u32 i = 1u; i < g_costume_map->bones; i++) {
+                if (g_costume_map->from[i] >= 0)
                     continue;
-                float apart = 0.0f;
-                for (u32 axis = 0u; axis < 3u; axis++) {
-                    const u32 at = 24u + axis * 16u;
-                    const float d = guest_read_f32(cpu, own + i * 80u + at) - guest_read_f32(cpu, theirs + k * 80u + at);
-                    apart += d * d;
+                const u32 parent = mem_read16(cpu, own + i * 80u + 76u);
+                if (parent >= g_costume_map->bones || g_costume_map->from[parent] < 0)
+                    continue;
+                float best = COSTUME_NEAR * COSTUME_NEAR;
+                for (u32 k = 1u; k < g_costume_map->plain_bones; k++) {
+                    if (taken[k] || (int)mem_read16(cpu, theirs + k * 80u + 76u) != g_costume_map->from[parent])
+                        continue;
+                    float apart = 0.0f;
+                    for (u32 axis = 0u; axis < 3u; axis++) {
+                        float d = 0.0f;
+                        if (pass == 0u)
+                            d = guest_read_f32(cpu, own + i * 80u + 24u + axis * 16u) - guest_read_f32(cpu, theirs + k * 80u + 24u + axis * 16u);
+                        else
+                            for (u32 r = 0u; r < 3u; r++)
+                                d += guest_read_f32(cpu, theirs + k * 80u + 12u + r * 16u + axis * 4u) * guest_read_f32(cpu, theirs + k * 80u + 24u + r * 16u) -
+                                     guest_read_f32(cpu, own + i * 80u + 12u + r * 16u + axis * 4u) * guest_read_f32(cpu, own + i * 80u + 24u + r * 16u);
+                        apart += d * d;
+                    }
+                    if (apart < best) {
+                        best = apart;
+                        g_costume_map->from[i] = (int)k;
+                    }
                 }
-                if (apart < best) {
-                    best = apart;
-                    g_costume_map->from[i] = (int)k;
+                if (g_costume_map->from[i] >= 0) {
+                    taken[g_costume_map->from[i]] = true;
+                    by_place[i] = true;
+                    placed++;
                 }
             }
-            if (g_costume_map->from[i] >= 0) {
-                taken[g_costume_map->from[i]] = true;
-                placed++;
+        }
+        // ED_BONE_DUMP: both skeletons, each bone's name, parent and place as made (world = -R^T t from the matrix at +12).
+        for (u32 side = 0u; side < 2u && getenv("ED_BONE_DUMP") != NULL; side++) {
+            const u32 table = side == 0u ? own : theirs, n = side == 0u ? g_costume_map->bones : g_costume_map->plain_bones;
+            for (u32 i = 0u; i < n; i++) {
+                float world[3] = {0.0f, 0.0f, 0.0f};
+                for (u32 a = 0u; a < 3u; a++)
+                    for (u32 r = 0u; r < 3u; r++)
+                        world[a] -= guest_read_f32(cpu, table + i * 80u + 12u + r * 16u + a * 4u) * guest_read_f32(cpu, table + i * 80u + 24u + r * 16u);
+                fprintf(stderr, "[bones] %s %u name %08X parent %u at %.1f %.1f %.1f near %.1f %.1f %.1f from %d\n", side == 0u ? "form" : "wearer", i,
+                        mem_read32(cpu, table + i * 80u + 64u), mem_read16(cpu, table + i * 80u + 76u), world[0], world[1], world[2],
+                        guest_read_f32(cpu, table + i * 80u + 24u), guest_read_f32(cpu, table + i * 80u + 40u), guest_read_f32(cpu, table + i * 80u + 56u),
+                        side == 0u ? g_costume_map->from[i] : -2);
             }
         }
         for (u32 i = 0u; i < g_costume_map->bones; i++)
@@ -10735,6 +10819,252 @@ static int both_motion(CPUState* cpu, u32 node) {
     return motion != 0u && guest_ram_range_valid(cpu, motion, 4u) ? (s32)mem_read32(cpu, motion) : -1;
 }
 
+// ED_DETAIL_LOG (tools/ed/run.sh turns it on): how much of its mesh each character has, and who lowered it. The game
+// shares detail out once a tick (0x8011CA04) and lowers a character for one of three reasons: at or behind the camera
+// it measures from, to the character's lowest (0x8011C91C); frames running long (r13-23928, r13-23932 over 15); and over
+// its limits (0x8011C7F8: 650016 memory, 40000 points), the furthest first, and then off the list altogether.
+// Everything that turns a share into a count of vertices goes through 0x80129DDC(vertices, share), so its callers are
+// what asks for the lower detail.
+#define DETAIL_SHARE_LIST 0x804F2E80u
+#define DETAIL_SHARE_SIZE 36u
+#define DETAIL_SHARE_MAX 64
+static struct {
+    u32 object[DETAIL_SHARE_MAX];
+    float placed[DETAIL_SHARE_MAX], timed[DETAIL_SHARE_MAX];
+    int first, count, loops, drops, memory, points;
+    float p1, p2, lowest;
+    u32 shown;
+    unsigned tick;
+    struct {
+        u32 lr;
+        float low;
+        unsigned calls, lower;
+    } caller[16];
+} g_detail = {.p1 = -1.0f, .p2 = -1.0f, .lowest = -1.0f};
+
+static void detail_snapshot(CPUState* cpu, u32 list, int n, float* into) {
+    for (int i = 0; i < n && i < DETAIL_SHARE_MAX; i++) {
+        into[i] = guest_read_f32(cpu, list + (u32)i * DETAIL_SHARE_SIZE + 24u);
+        g_detail.object[i] = mem_read32(cpu, list + (u32)i * DETAIL_SHARE_SIZE + 28u);
+    }
+}
+
+// Entered at each of the share's measures of its totals: which one says what the share has just done.
+static void detail_note_totals(CPUState* cpu) {
+    const int n = (int)cpu->gpr[4];
+    if (cpu->lr == 0x8011CD0Cu) {
+        g_detail.first = n;
+        g_detail.loops = g_detail.drops = 0;
+        detail_snapshot(cpu, cpu->gpr[3], n, g_detail.placed);
+    } else if (cpu->lr == 0x8011D044u) {
+        detail_snapshot(cpu, cpu->gpr[3], n, g_detail.timed);
+    } else if (cpu->lr == 0x8011D180u) {
+        g_detail.loops++;
+    } else if (cpu->lr == 0x8011D1DCu) {
+        g_detail.drops++;
+    }
+    g_detail.count = n;
+}
+
+static void detail_note_count(CPUState* cpu) {
+    const float share = (float)cpu->fpr[1];
+    for (int i = 0; i < 16; i++) {
+        if (g_detail.caller[i].lr == 0u) {
+            g_detail.caller[i].lr = cpu->lr;
+            g_detail.caller[i].low = share;
+        }
+        if (g_detail.caller[i].lr != cpu->lr)
+            continue;
+        g_detail.caller[i].calls++;
+        if (share < g_detail.caller[i].low)
+            g_detail.caller[i].low = share;
+        if (share < 0.995f)
+            g_detail.caller[i].lower++;
+        break;
+    }
+}
+
+// Entered at the call after the share (0x800084CC), every tick.
+static void detail_after_share(CPUState* cpu) {
+    if (!sda_ready(cpu))
+        return;
+    const u32 them = coop_player(cpu);
+    const u32 p1 = them != 0u && guest_ram_range_valid(cpu, them + 52u, 4u) ? mem_read32(cpu, them + 52u) : 0u;
+    const u32 p2 = g_coop_p2 != 0u && guest_ram_range_valid(cpu, g_coop_p2 + 52u, 4u) ? mem_read32(cpu, g_coop_p2 + 52u) : 0u;
+    g_detail.p1 = guest_ram_range_valid(cpu, p1 + 684u, 4u) ? guest_read_f32(cpu, p1 + 684u) : -1.0f;
+    g_detail.p2 = guest_ram_range_valid(cpu, p2 + 684u, 4u) ? guest_read_f32(cpu, p2 + 684u) : -1.0f;
+    float lowest = 1.0f;
+    u32 shape = (u32)g_detail.count * 131u + (u32)g_detail.first;
+    for (int i = 0; i < g_detail.first && i < DETAIL_SHARE_MAX; i++) {
+        const float share = guest_read_f32(cpu, g_detail.object[i] + 684u);
+        if (share < lowest)
+            lowest = share;
+        shape = shape * 31u + (u32)(share * 100.0f);
+    }
+    g_detail.lowest = lowest;
+    g_detail.tick++;
+    if (shape == g_detail.shown && g_detail.tick % 60u != 0u)
+        return;
+    g_detail.shown = shape;
+    const u32 sda = cpu->gpr[13];
+    fprintf(stderr, "[detail] frame %llu cam %d/%d of %d kept %d mem %d pts %d time %.1f %.1f pressure %.2f loops %d drops %d :",
+            cpu->timebase / 675000ull, g_settings.camera, g_settings.mod_coop ? g_settings.mod_p2_camera : -1, g_detail.first,
+            g_detail.count, g_detail.memory != 0 ? g_detail.memory : (s32)mem_read32(cpu, sda - 23952u), g_detail.points != 0 ? g_detail.points : (s32)mem_read32(cpu, sda - 23936u),
+            guest_read_f32(cpu, sda - 23928u), guest_read_f32(cpu, sda - 23932u), guest_read_f32(cpu, sda - 23948u), g_detail.loops, g_detail.drops);
+    for (int i = 0; i < g_detail.first && i < DETAIL_SHARE_MAX; i++) {
+        const u32 object = g_detail.object[i];
+        const u32 at = DETAIL_SHARE_LIST + (u32)i * DETAIL_SHARE_SIZE;
+        const float share = guest_read_f32(cpu, object + 684u);
+        const u32 mesh = mem_read32(cpu, object + 60u);
+        // Why: b behind the camera, t frames running long, m over the limits, d off the list, . full.
+        const char why = i >= g_detail.count ? 'd' : share >= 0.995f ? '.' : g_detail.placed[i] < 0.995f ? 'b' :
+                         g_detail.timed[i] < 0.995f ? 't' : 'm';
+        fprintf(stderr, " %s%d/%d=%.2f%c%s", object == p1 ? "P1:" : object == p2 ? "P2:" : "", (s32)mem_read32(cpu, at + 16u),
+                guest_ram_range_valid(cpu, mesh + 30u, 2u) ? (int)mem_read16(cpu, mesh + 30u) : 0, share, why,
+                mem_read32(cpu, at + 20u) != 0u ? "+" : "");
+    }
+    fprintf(stderr, "\n");
+    if (g_detail.tick % 60u == 0u) {
+        for (int i = 0; i < 16 && g_detail.caller[i].lr != 0u; i++) {
+            if (g_detail.caller[i].lower != 0u)
+                fprintf(stderr, "[detail] caller 0x%08X asked below full %u of %u, lowest %.2f\n", g_detail.caller[i].lr,
+                        g_detail.caller[i].lower, g_detail.caller[i].calls, g_detail.caller[i].low);
+            g_detail.caller[i].lower = g_detail.caller[i].calls = 0u;
+            g_detail.caller[i].low = 1.0f;
+        }
+    }
+}
+
+// The meshes' memory. The game gives each frame's characters three fixed pools, a pair of each as frames take turns, and
+// shares detail out so as to fit: 0x80335B40, 240000 bytes for 40000 points; 0x803AAE40, 650016 bytes; 0x804E8480, 1024 lists.
+// Past them (0x80119898 returns 0) a character isn't drawn at all. Here they're DETAIL_POOL_TIMES as big, in the host's memory
+// past the Tome's, and the share is told its totals over that, so it still stops at what fits. The old first pool stays as
+// it is: its accessors (0x80119868...) lend it to other things out of the frame. ED_DETAIL_POOLS=0 leaves the game's.
+#define DETAIL_POOL_TIMES 4u
+#define DETAIL_POOL_POINTS 0x82800000u
+#define DETAIL_POOL_POINTS_SIZE (240000u * DETAIL_POOL_TIMES)
+#define DETAIL_POOL_MEMORY (DETAIL_POOL_POINTS + 2u * DETAIL_POOL_POINTS_SIZE)
+#define DETAIL_POOL_MEMORY_SIZE (650016u * DETAIL_POOL_TIMES)
+#define DETAIL_POOL_LISTS (DETAIL_POOL_MEMORY + 2u * DETAIL_POOL_MEMORY_SIZE)
+#define DETAIL_POOL_LISTS_COUNT (1024u * DETAIL_POOL_TIMES)
+#define DETAIL_POOL_END (DETAIL_POOL_LISTS + 2u * DETAIL_POOL_LISTS_COUNT * 16u)
+
+// 0x801197E8, the frame's start.
+static void detail_pools_start(CPUState* cpu) {
+    const u32 sda = cpu->gpr[13];
+    const u32 turn = mem_read32(cpu, sda - 21824u);
+    mem_write32(cpu, sda - 23988u, DETAIL_POOL_POINTS + turn * DETAIL_POOL_POINTS_SIZE);
+    mem_write32(cpu, sda - 23980u, DETAIL_POOL_MEMORY + turn * DETAIL_POOL_MEMORY_SIZE);
+    mem_write32(cpu, sda - 23984u, DETAIL_POOL_MEMORY_SIZE);
+    mem_write32(cpu, sda - 23972u, DETAIL_POOL_LISTS + turn * DETAIL_POOL_LISTS_COUNT * 16u);
+    mem_write32(cpu, sda - 23968u, DETAIL_POOL_LISTS_COUNT);
+    mem_write32(cpu, sda - 23996u + turn * 4u, 0u);
+    mem_write32(cpu, sda - 23964u + turn * 4u, 0u);
+    mem_write32(cpu, sda - 23956u, 0u);
+    mem_write32(cpu, sda - 23976u, 0u);
+}
+
+// 0x80119898(thing, points, f1 share), the first pool's bump allocator: its end is written into the game's code.
+static void detail_pools_take(CPUState* cpu) {
+    const u32 sda = cpu->gpr[13];
+    const u32 turn = mem_read32(cpu, sda - 21824u);
+    const u32 points = (cpu->gpr[4] + 31u) & ~31u;
+    const u32 at = mem_read32(cpu, sda - 23988u);
+    const u32 next = at + points * 6u;
+    mem_write32(cpu, sda - 23988u, next);
+    mem_write32(cpu, sda - 23996u + turn * 4u, mem_read32(cpu, sda - 23996u + turn * 4u) + points);
+    const u32 taken = mem_read32(cpu, sda - 23976u);
+    if (taken < 64u) {  // its record of them, 64 each, read by nothing we've found
+        mem_write32(cpu, 0x804F0480u + taken * 4u, cpu->gpr[3]);
+        mem_write32(cpu, 0x804F0580u + taken * 4u, points);
+        guest_write_f32(cpu, 0x804F0680u + taken * 4u, (float)cpu->fpr[1]);
+    }
+    mem_write32(cpu, sda - 23976u, taken + 1u);
+    cpu->gpr[3] = next > DETAIL_POOL_POINTS + (turn + 1u) * DETAIL_POOL_POINTS_SIZE ? 0u : at;
+}
+
+// 0x80119944(object): is there room for one more of these on the next frame? With 40000 in it as well.
+static void detail_pools_room(CPUState* cpu) {
+    const u32 sda = cpu->gpr[13];
+    const u32 mesh = mem_read32(cpu, cpu->gpr[3] + 60u);
+    const u32 points = ((u32)mem_read16(cpu, mesh + 30u) * 2u + 31u) & ~31u;
+    const s32 a = (s32)mem_read32(cpu, sda - 23904u), b = (s32)mem_read32(cpu, sda - 23900u), c = (s32)mem_read32(cpu, sda - 23896u);
+    cpu->gpr[3] = 0u;
+    if (mem_read16(cpu, mesh + 8u) > 3u ? c + a > 19 : a + b + c > 51)
+        return;
+    const u32 turn = mem_read32(cpu, sda - 21824u) ^ 1u;
+    if ((s32)mem_read32(cpu, sda - 23996u + turn * 4u) + (s32)points < (s32)(40000u * DETAIL_POOL_TIMES))
+        cpu->gpr[3] = 1u;
+}
+
+// 0x8011C7F8(list, count, &memory, &points): the share's measure of itself, against limits written into its code.
+static void detail_pools_totals(CPUState* cpu) {
+    static bool running;
+    if (running) {
+        g_hle_passthrough = true;
+        return;
+    }
+    detail_note_totals(cpu);
+    const u32 memory = cpu->gpr[5], points = cpu->gpr[6];
+    const u32 args[] = {cpu->gpr[3], cpu->gpr[4], memory, points};
+    running = true;
+    const bool ok = hle_guest_call(cpu, 0x8011C7F8u, args, 4, cpu->fpr[1], NULL);
+    running = false;
+    if (!ok)
+        fprintf(stderr, "[detail] the share's totals did not return\n");
+    g_detail.memory = (s32)mem_read32(cpu, memory);
+    g_detail.points = (s32)mem_read32(cpu, points);
+    mem_write32(cpu, memory, (u32)((g_detail.memory + (s32)DETAIL_POOL_TIMES - 1) / (s32)DETAIL_POOL_TIMES));
+    mem_write32(cpu, points, (u32)((g_detail.points + (s32)DETAIL_POOL_TIMES - 1) / (s32)DETAIL_POOL_TIMES));
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+static bool detail_pools_install(CPUState* cpu) {
+    const char* off = getenv("ED_DETAIL_POOLS");
+    if ((off != NULL && strcmp(off, "0") == 0) || cpu->ram_size < DETAIL_POOL_END - GC_RAM_BASE)
+        return false;
+    if (mem_read32(cpu, 0x801197E8u) != 0x812DAAC0u || mem_read32(cpu, 0x80119898u) != 0x9421FFF0u ||
+        mem_read32(cpu, 0x8011989Cu) != 0x3804001Fu || mem_read32(cpu, 0x80119944u) != 0x80A3003Cu || mem_read32(cpu, 0x8011C7F8u) != 0x9421FFD0u) {
+        fprintf(stderr, "[detail] the game's pools not found: it keeps its own\n");
+        return false;
+    }
+    const struct {
+        u32 at;
+        HleHandler fn;
+    } hooks[] = {{0x801197E8u, detail_pools_start}, {0x80119898u, detail_pools_take}, {0x80119944u, detail_pools_room}, {0x8011C7F8u, detail_pools_totals}};
+    for (size_t i = 0; i < sizeof hooks / sizeof hooks[0]; i++) {
+        HleDispatchEntry* entry = hle_dispatch_entry(hooks[i].at);
+        if (entry == NULL || entry->intercept != NULL || entry->notify != NULL) {
+            fprintf(stderr, "[detail] 0x%08X is taken: the game keeps its pools\n", hooks[i].at);
+            return false;
+        }
+    }
+    for (size_t i = 0; i < sizeof hooks / sizeof hooks[0]; i++)
+        hle_dispatch_entry(hooks[i].at)->intercept = hooks[i].fn;
+    fprintf(stderr, "[detail] the meshes' pools are %u times the game's\n", DETAIL_POOL_TIMES);
+    return true;
+}
+
+static void detail_monitor_install(CPUState* cpu) {
+    const bool pools = detail_pools_install(cpu);
+    if (getenv("ED_DETAIL_LOG") == NULL)
+        return;
+    const struct {
+        u32 at;
+        HleHandler fn;
+    } hooks[] = {{0x8011C7F8u, pools ? NULL : detail_note_totals}, {0x80129DDCu, detail_note_count}, {0x8017C128u, detail_after_share}};
+    for (size_t i = 0; i < sizeof hooks / sizeof hooks[0]; i++) {
+        HleDispatchEntry* entry = hle_dispatch_entry(hooks[i].at);
+        if (hooks[i].fn == NULL)
+            continue;
+        if (entry != NULL && entry->intercept == NULL && entry->notify == NULL)
+            entry->notify = hooks[i].fn;
+        else
+            fprintf(stderr, "[detail] can't watch 0x%08X\n", hooks[i].at);
+    }
+}
+
 static void both_record(CPUState* cpu, const DolPadState* p1) {
     static FILE* f;
     static int on = -1;
@@ -10748,7 +11078,7 @@ static void both_record(CPUState* cpu, const DolPadState* p1) {
                        "p1ex\tp1ey\tp1ez\tp1tx\tp1ty\tp1tz\tp2ex\tp2ey\tp2ez\tp2tx\tp2ty\tp2tz\t"
                        "busy\thold\tfocus\tfocus2\twindow\tscript\tmode\tmode2\t"
                        "screen\towner\tshares\tcopy\tcopyp1\tlent\tcutscene\tmenu\t"
-                       "ticket\tfade\tp1anim\tp2anim\tcamidx\tcamhash\tp1carry\tp2carry\n");
+                       "ticket\tfade\tp1anim\tp2anim\tcamidx\tcamhash\tp1carry\tp2carry\tp1lod\tp2lod\tlodlow\n");
     }
     if (!on || !sda_ready(cpu))
         return;
@@ -10815,6 +11145,7 @@ static void both_record(CPUState* cpu, const DolPadState* p1) {
         const u32 list = node != 0u && guest_ram_range_valid(cpu, node + 48u, 4u) ? mem_read32(cpu, node + 48u) : 0u;
         fprintf(f, "\t%d", guest_ram_range_valid(cpu, list + 8u, 4u) ? (s32)mem_read32(cpu, list + 8u) : -1);
     }
+    fprintf(f, "\t%.2f\t%.2f\t%.2f", g_detail.p1, g_detail.p2, g_detail.lowest);
     fprintf(f, "\n");
     fflush(f);  // a freeze keeps every row up to it
 }
@@ -12578,20 +12909,50 @@ static void coop_position_copy(CPUState* cpu) {
     // What a player holds (its holder, object +372, is them) too: out of
     // player 1's view, player 2's sword was left where they had been.
     const u32 p2 = g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + 52u) : 0u;
-    if (cpu->lr == COOP_DETAIL_CALL && g_settings.mod_coop && p2 != 0u && sda_ready(cpu)) {
+    if (cpu->lr == COOP_DETAIL_CALL && sda_ready(cpu)) {
         const u32 player = coop_player(cpu);
         const u32 p1 = player != 0u ? mem_read32(cpu, player + 52u) : 0u;
         const u32 holder = guest_ram_range_valid(cpu, from + 372u, 4u) ? mem_read32(cpu, from + 372u) : 0u;
-        if (from == p2 || from == p1 || (holder != 0u && (holder == p2 || holder == p1))) {
+        if (g_settings.mod_coop && p2 != 0u && (from == p2 || from == p1 || (holder != 0u && (holder == p2 || holder == p1)))) {
+            // The share's own camera: on the third-person one its controllers hold that (hle_camera_fade), and a place in
+            // front of the game's camera was behind it, which took both players to 0.3 of their mesh.
+            const u32 eyes = g_fade_eye != 0u ? g_fade_eye : COOP_CAMERA, looks = g_fade_eye != 0u ? g_fade_target : COOP_CAMERA + 12u;
             for (u32 i = 0; i < 3u; i++) {  // a tenth of the way from the eye to what it looks at
-                const float eye = guest_read_f32(cpu, COOP_CAMERA + i * 4u);
-                const float look = guest_read_f32(cpu, COOP_CAMERA + 12u + i * 4u);
+                const float eye = guest_read_f32(cpu, eyes + i * 4u);
+                const float look = guest_read_f32(cpu, looks + i * 4u);
                 const float v = eye + (look - eye) * 0.1f;
                 memcpy(&at[i], &v, 4u);
             }
             static unsigned n;
             if (getenv("ED_COOP_LOD_LOG") != NULL && n++ % 60u == 0u)
                 fprintf(stderr, "[coop] %s's detail by the camera\n", from == p1 || holder == p1 ? "player 1" : "player 2");
+        } else if (getenv("ED_DETAIL_BEHIND") == NULL) {
+            // Everyone else: the share gives one behind its camera the least, and that camera is one player's. In the other
+            // player's half they were close up at 0.3 of their mesh. Their distance stays their own, as what's near has more done.
+            const u32 eyes = g_fade_eye != 0u ? g_fade_eye : COOP_CAMERA, looks = g_fade_eye != 0u ? g_fade_target : COOP_CAMERA + 12u;
+            float eye[3], ahead[3], to[3], along = 0.0f, far = 0.0f, length = 0.0f;
+            for (u32 i = 0; i < 3u; i++) {
+                float place;
+                memcpy(&place, &at[i], 4u);
+                eye[i] = guest_read_f32(cpu, eyes + i * 4u);
+                ahead[i] = guest_read_f32(cpu, looks + i * 4u) - eye[i];
+                to[i] = place - eye[i];
+                length += ahead[i] * ahead[i];
+                far += to[i] * to[i];
+            }
+            length = sqrtf(length);
+            far = sqrtf(far);
+            if (length > 0.001f) {
+                for (u32 i = 0; i < 3u; i++) {
+                    ahead[i] /= length;
+                    along += ahead[i] * to[i];
+                }
+                if (along < 0.0f)
+                    for (u32 i = 0; i < 3u; i++) {
+                        const float v = eye[i] + ahead[i] * far;
+                        memcpy(&at[i], &v, 4u);
+                    }
+            }
         }
     }
     for (u32 i = 0; i < 3u; i++)

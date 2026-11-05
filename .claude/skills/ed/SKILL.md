@@ -41,7 +41,7 @@ Never name a camera, item, room, door or transition from memory: `ed room N`, `e
 
 **The game has two player pairs, current and main. Move both:** `ed who`, `ed system players`.
 
-**A body twists on another's moves: each plays its own file's.** `ed system players`, Bodies, before touching any model. `ED_BORROW_CHAPTER=N` lists a level's bodies, and `tools/ed/facts/checks/moves_of.py N` a file's moves.
+**A body twists on another's moves: each plays its own file's.** `ed system players`, Bodies, before touching any model. `ED_BORROW_CHAPTER=N` lists a level's bodies, and `tools/ed/facts/checks/moves_of.py N` a file's moves. `ED_BONE_DUMP=1` prints a form's and its wearer's skeletons, each bone's name, parent and place, and what it was fitted to.
 
 ## Seeing both players
 

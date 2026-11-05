@@ -427,8 +427,8 @@ static bool check_region(const QsSection* s, const QsRegion* r,
     u32 size = 0, page = 0;
     memcpy(&size, s->data, 4);
     memcpy(&page, s->data + 4, 4);
-    // A state from before the co-op Tome's memory (32 MB) loads: what it lacks is zeroes.
-    if (size != r->size && !(strncmp(r->tag, "MEM1", 4) == 0 && size == 32u * 1024u * 1024u && r->size > size)) {
+    // A state from before the co-op Tome's memory (32 MB) or the meshes' pools (40 MB) loads: what it lacks is zeroes.
+    if (size != r->size && !(strncmp(r->tag, "MEM1", 4) == 0 && (size == 32u * 1024u * 1024u || size == 40u * 1024u * 1024u) && r->size > size)) {
         *why = "memory size differs from this build";
         return false;
     }

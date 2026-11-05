@@ -50,6 +50,22 @@ The old way of finding them, from `AURORA_SHADOW_LOG` and `ed lamps`, and now on
 | coop-apart | 100 | (-54,199,941) 134,96,188; (-1001,-584,522) 79,137,255; (-13,-1019,635) 118,59,132 |
 
 
+## Character detail (how much of its mesh each character is drawn with)
+
+An object's `+684` is the share of its mesh the draw uses (`0x8012F454`, through `0x80129DDC(vertices, share)`, which never goes under 100 points). Once a tick the game's share (`0x8011CA04`) sets it for every character, and lowers it for three reasons:
+
+| Why | Where in the share | What the host does (`hle.c`) | Switch to see the game's own |
+|---|---|---|---|
+| More than 300 behind the camera it measures from: the character's lowest (`0x8011C91C`: 0.3, 0.41 or 0.9) | `0x8011CBC4` | Placed in front of that camera, at their own distance (`coop_position_copy`). The players and what they hold, in co-op: a tenth of the way to what the camera looks at | `ED_DETAIL_BEHIND=1` (not the players) |
+| A frame's time over 15 ms (r13-23928, r13-23932): those past 500 away less, past 2500 the lowest | `0x8011CD0C` to `0x8011D02C` | The share sees 0 (`hle_camera_fade`). The recomp's clock moves by the retrace, so these read 0 or 16.7, a normal frame | `ED_DETAIL_TIME=1` |
+| Over its limits, 650016 memory and 40000 points (`0x8011C7F8`): the furthest lowered, then off the list (not drawn) | `0x8011D058` to `0x8011D1F0` | The meshes' three pools are 4 times as big, at `0x82800000` (`detail_pools_*`), and the share told its totals over 4 | `ED_DETAIL_POOLS=0` |
+
+The pools are the first one's 240000 bytes (6 a point, `0x80119898`, its end written in the code), `0x803AAE40`'s 650016 and `0x804E8480`'s 1024 lists of 16, a pair of each as frames take turns (r13-21824). The host's memory is 48 MB for it (`.deps/GXRuntime/src/core/cpu.c`); a quick state of 32 or 40 MB still loads. The first pool's accessors (`0x80119868`, `0x80119874`, `0x8011988C`) still give the old one: 22 places borrow it out of the frame.
+
+`0x8011BCD4`, called from `0x8011ABA0` and `0x8011ABC0` in a second pass of each character, asks for the lowest share every time. It's the game's own and was left alone.
+
+**Measuring:** `tools/ed/run.sh` turns on `ED_DETAIL_LOG`: a `[detail]` line each second and at each change, with every character in the share as `kind/points=share` and why (`.` full, `b` behind, `t` time, `m` limits, `d` off the list), `P1:` and `P2:` marked, the totals, the clock and the pressure (r13-23948). `[detail] caller` lines name each caller of `0x80129DDC` that asked for less than full. `[fps]` is the game's frames a second. `both.tsv` has `p1lod`, `p2lod` and `lodlow`. `build/fxtest/detail_matrix.sh TAG SAVE "P1" "P2"` runs every pair of cameras and solo on each, with both players walking, and `build/fxtest/detail_sum.py` sums a run.
+
 ## Measuring
 
 - `ED_RUN_PROBE=1 sh tools/ed/run.sh SAVE NAME`, then `ed flicker RUN`: each player's shadows and picture, for every view of every moment drawn, from inside the renderer, so no capture and no window in front. The `shadows` lines are the mask; the `picture` lines are after shadows and haze, before post. One line's fields, with the camera and each tile: `logs/run-*/probe.txt`.

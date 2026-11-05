@@ -419,3 +419,29 @@ Not done: leaving out the game's own frame, which nobody sees in a split. Its EF
 **Sizing the sprites by the effect's `+60` and `+64`:** those are 0 and 0.26 and change nothing drawn. Size is b.
 
 **Looking for the sparkles in the pool or the effect makers during a scene:** a scene's are in its own file, and the pool stays empty (only `0x8014FD08` from `0x80051010`, 4 times, for its actors). What finds a draw's code is the caller of `GXBegin`.
+
+## Chandra's forms on Alex's moves (2026-11-05)
+
+Not in the game: both attempts are out, saved in `Screenshots for Claude/chandra/` as `chandra-attempt.patch` and `chandra-second-attempt.patch`. The second kept the first's bone names, joint rewriting and hair handling, with her rows worn by Alex and listed on Karim's screen. Look from the front, in co-op too, before saying anything of a form is right: pictures from behind hid all of it.
+
+**A separate route for her moves (`moves_from` on rows worn by Karim, a list of Alex's bones written into the host, stand-ins for moves Alex's file lacks, `moves_repair` and `hle_moves_want` changed):** no other form has any of this, each distortion was chased inside it, and `keep.md` already said a form plays its wearer's. Made as Alex, she needs none of it. Saved: `Screenshots for Claude/chandra/chandra-attempt.patch`.
+
+**Giving her bones Alex's rotation as made (the matrix at +12):** tore the mesh apart. A mesh's points are relative to its bones.
+
+**Turning each key by the two bodies' rest poses (conj(C parent), key, C bone, with C = Alex's matrix times hers turned over):** coherent, and at rest her exact pose, but it collapsed her arms into her torso. The 55 degrees between her upper arms and Alex's is how each is posed as made, not a difference in their bones: a bone's own frame lines up, so the same key points the limb the same way. Measuring the rest pose's angle says nothing of a twist.
+
+**Alex's places in her keys:** a key's first list has the joint's place on its parent, 16 to 1. Alex's chest is 34.1 up the spine to Chandra's 26.9, and her head 8.5 to 12, which pulled her neck and shoulders out of her mesh. `costume_own_places` writes her own, keeping only the rotations. The root and hips keep Alex's.
+
+**Alex's hair chain on hers:** it flared out behind the neck on the ghosts, so those 3 bones follow the head.
+
+**Co-op bodies at low detail on player 1's third-person camera, fixed 2026-11-05:** an object's `+684` is how much of its mesh the draw uses (`0x8012F454`). Both players read 0.3 on `camera = 2` in co-op, and 1.0 on `camera = 0` and solo on either. The share keeps full detail for what's in front of the camera it measures from. `coop_position_copy` put the players in front of the game's camera (`COOP_CAMERA`), but on the third-person camera `hle_camera_fade` has the share measuring from that one. It now uses the share's own controllers, and reads 1.0 on both. Alex's pale head from the side went with it.
+
+**Plain Chandra as a row worn by Alex, 2026-11-05 afternoon:** `{9, 11, 2, "Chandra", 4, 14, 36, 115, -1, -1, 0, 4}`, listed on Karim's screen, with none of the earlier attempts' bone names, joint places or hair handling. Of her body's 61 bones, 2 fit Alex's by name and 17 by place, and her hair and fingers were drawn out into great slabs on every camera, in co-op and solo (`Screenshots for Claude/detail/plain-chandra-broken.jpg`). Her ghost (cin0015.bin's 38) and mutated body (37) as plain rows looked right. **Fixed the same day, and she's in:** fitting by place compared each matrix's `t`, which is the bone's place turned into its own frame, and her arms are turned down from Alex's, so the same places were over 130 apart by it. Where fewer than half fit that way, it now goes again by where each bone is (`-R^T t`), and she fits 57 of 61. Every other form fits as before (rotten Ellia's 59 by the old way). `ED_BONE_DUMP=1` prints both skeletons. Making each left-over bone its parent's twin, tried first, would have held her whole arms still as made. Nobody else's body changed with her loaded: Alex, Karim and the room's creatures were whole and at full detail on all 9 pairs of cameras.
+
+**Hiding the share's point total (`0x8011C7F8`'s fourth argument, 40000 or over lowers everyone's detail):** on `camera = 2` the players stayed at 0.3, so this wasn't it, and it came out. The limit is real and close, though: 39936 was seen on the tour, with no player below 1.0 in 1200 samples, one every 120 player turns.
+
+**The share's other two reasons, found 2026-11-05 afternoon:** with the players right, everyone else still went down: 0.65 on the original camera and 0.3 on the others, for frames read as running long (the recomp's clock, 16.7 for a normal frame) and for being behind player 1's camera. Both are fixed, and the limits lifted, as `docs/game/systems/graphics.md` says under Character detail.
+
+**Hiding the detail share's totals (`0x8011C7F8`) as a test:** at 650016 and 40000 or over the share (`0x8011CA04`) clears the `+20` of every character in its list, as read in the code. Hidden, faces didn't change and Alex stopped being drawn, though `both.tsv` has her in the room. That test ran on `camera = 0`, where bodies were already right, so it says nothing of the third-person camera. Don't take it as ruling the limit out.
+
+**`ed test` under `mod_coop = 0`:** a kit test uses `settings.ini`. With co-op off the run has no player 2, and `ed check` gave 4052 findings on nothing (`logs/run-20261105-045255-test-both-walk`). See that `[coop] player 2` is in the log before believing a run.
