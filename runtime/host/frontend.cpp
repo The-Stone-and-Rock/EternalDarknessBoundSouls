@@ -61,6 +61,14 @@ bool camera_last_view(float eye[3], float target[3]);
 void audio_set_muted(bool muted);
 void hle_cheat_set(int which, bool on);  // hle.h: HLE_CHEAT_*
 bool hle_cheat_on(int which);
+int hle_sanity_count(void);
+int hle_sanity_number(int i);
+const char* hle_sanity_name(int i);
+const char* hle_sanity_what(int i);
+const char* hle_sanity_result(void);
+bool hle_sanity_on(void);
+void hle_sanity_play(int number, bool ignore_limits);
+void hle_sanity_stop(void);
 }
 enum { kCheatMagick = 1, kCheatFull = 2 };  // hle.h's HLE_CHEAT_MAGICK, HLE_CHEAT_FULL
 
@@ -1001,6 +1009,46 @@ void build_mods_rows() {
     g_rows.push_back(magick);
     g_rows.push_back(cheat_row("Full stats", "Health, sanity and magick kept at their most, for each player.", kCheatFull));
 
+    // Sanity Effects: any of the game's effects on a save (hle.c sanity_ask), to
+    // see each one, with a log of how it went.
+    static int sanity_effect = 0;
+    static bool sanity_ignore = false;
+    const bool sanity_can = g_in_game && !g_settings.mod_coop;
+    const char* const sanity_not = g_settings.mod_coop ? "Single player for now: turn co-op off." : "In a game, from its menu.";
+    Row effect{"Effect", std::to_string(hle_sanity_number(sanity_effect)) + ": " + hle_sanity_name(sanity_effect)};
+    effect.section = "V \u00b7 Sanity Effects";
+    effect.note = hle_sanity_what(sanity_effect);
+    effect.change = [](int dir) { cycle(sanity_effect, hle_sanity_count(), dir); };
+    g_rows.push_back(effect);
+    Row limits{"The game's limits", sanity_ignore ? "Ignore" : "Keep"};
+    limits.toggle = true;
+    limits.note = "Keep: sanity counts as lowest, the game's other rules stay, so a door may not start it. Ignore: starts "
+                  "it at any door. It may break: use a save you don't mind losing, and don't save after.";
+    limits.change = [](int) { sanity_ignore = !sanity_ignore; };
+    g_rows.push_back(limits);
+    Row play{"Play this effect"};
+    play.enabled = sanity_can;
+    play.note = sanity_can ? "Closes the menu and starts it the game's way: most take you through a nearby door, "
+                             "and a few wait for you (a press of Start, the Tome)."
+                           : sanity_not;
+    play.activate = [] {
+        hle_sanity_play(hle_sanity_number(sanity_effect), sanity_ignore);
+        g_close = true;
+    };
+    g_rows.push_back(play);
+    Row stop{"End the effect on now"};
+    stop.enabled = sanity_can && hle_sanity_on();
+    stop.note = "If one is stuck or waiting.";
+    stop.activate = [] {
+        hle_sanity_stop();
+        g_close = true;
+    };
+    g_rows.push_back(stop);
+    Row last{"Last result", hle_sanity_result()};
+    last.enabled = false;
+    last.note = "Every effect is written to logs/sanity-effects.log, the game's own too.";
+    g_rows.push_back(last);
+
     Row back{"Back"};
     back.gap = true;
     back.page = 1;
@@ -1028,6 +1076,7 @@ void build_mods() {
     g_rows.push_back(page("Challenge", 2));
     g_rows.push_back(page("Characters", 3));
     g_rows.push_back(page("Cheats", 4));
+    g_rows.push_back(page("Sanity Effects", 5));
     // Only on the launcher: it is how Start game starts.
     if (!g_in_game) {
         Row skip{"Skip intro", on_off(g_settings.mod_skip_intro)};
@@ -1090,7 +1139,8 @@ const char* mods_page_name() {
     case 1: return "Co-op";
     case 2: return "Challenge";
     case 3: return "Characters";
-    default: return "Cheats";
+    case 4: return "Cheats";
+    default: return "Sanity Effects";
     }
 }
 

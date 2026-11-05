@@ -18,6 +18,7 @@ The goal: the game believes it was built for two players, using what the game al
 | Whoever triggers a room or scene gets it; the other follows | The user's rule | `coop_follow`, `48b6c88` | Treat one player walking in second: there's no such thing |
 | Player 2's prompts, and their close-ups in their half | Works | `coop_close_up_prompt`, `coop_prompt_player1s`, `coop_scan_player1` | |
 | Player 2's own bars, weapons and hold | Works | `coop_rehold`, `0832701` | |
+| Mods, Sanity Effects: any effect on a save, single player, with `logs/sanity-effects.log` | Built 2026-11-04. Nine effects through a door confirmed by the user, the menu page not yet tried | `sanity_ask`, `sanity_door_run` in `hle.c`, `docs/game/systems/sanity.md` | Start a door effect where you stand: it needs the door's own steps |
 
 **The camera is the part that isn't settled:** it works sometimes. Its fixed cameras are in the disc's rooms (`ed room N`), and `ed check` flags any eye that isn't one of them. See `ed system camera`.
 

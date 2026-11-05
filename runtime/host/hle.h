@@ -85,6 +85,16 @@ enum { HLE_CHEAT_MAGICK = 1, HLE_CHEAT_FULL = 2, HLE_CHEATS };
 void hle_cheat_set(int which, bool on);
 bool hle_cheat_on(int which);
 
+// Mods' Sanity Effects: any of the game's effects on a save (docs/game/systems/sanity.md).
+int hle_sanity_count(void);
+int hle_sanity_number(int i);
+const char* hle_sanity_name(int i);
+const char* hle_sanity_what(int i);
+const char* hle_sanity_result(void);
+bool hle_sanity_on(void);
+void hle_sanity_play(int number, bool ignore_limits);
+void hle_sanity_stop(void);
+
 // Run the guest function fn to its return, from the host, on the game thread
 // (a hook), with r3.. = args and f1, and every register as it was afterwards.
 // False when it did not return within its budget (main.c).
