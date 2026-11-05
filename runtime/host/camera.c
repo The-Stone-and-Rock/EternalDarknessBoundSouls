@@ -61,7 +61,13 @@ static Vec3 flatten(Vec3 a, Vec3 k) { return sub(a, scale(k, dot(a, k))); }
 /* The world's up in the view the game draws with (x right, y up, -z ahead),
  * for photo mode's level camera (camera_view_up). */
 static float g_world_up_in_view[3] = {0.0f, 1.0f, 0.0f};
+static Vec3 g_last_view_eye, g_last_view_target;
+static bool g_last_view_seen;
+
 static void note_view_up(Vec3 eye, Vec3 target, Vec3 k) {
+    g_last_view_eye = eye;
+    g_last_view_target = target;
+    g_last_view_seen = true;
     const Vec3 f = sub(target, eye);
     if (length(f) <= 0.0f || length(k) <= 0.0f)
         return;
@@ -145,6 +151,15 @@ static int g_aim_frames, g_aim_settled;
 // Aiming in first person only the player's arms (and what they hold) are
 // drawn, once camera_skin_begin has found their arms.
 static bool g_fp_arms;
+
+// The view note_view_up last saw, whichever camera it is (photo mode's portraits).
+bool camera_last_view(float eye[3], float target[3]) {
+    if (!g_last_view_seen)
+        return false;
+    eye[0] = g_last_view_eye.x, eye[1] = g_last_view_eye.y, eye[2] = g_last_view_eye.z;
+    target[0] = g_last_view_target.x, target[1] = g_last_view_target.y, target[2] = g_last_view_target.z;
+    return true;
+}
 
 bool camera_view(float eye[3], float target[3]) {
     if (!g_view_active)

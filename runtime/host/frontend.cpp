@@ -56,6 +56,8 @@ void quickstate_request_load(const char* path);
 const char* quickstate_boot_path(void);
 void hle_set_skip_intro(bool on);
 bool hle_start_up_hidden(void);
+bool hle_player_place(float place[3], unsigned* frame);
+bool camera_last_view(float eye[3], float target[3]);
 void audio_set_muted(bool muted);
 void hle_cheat_set(int which, bool on);  // hle.h: HLE_CHEAT_*
 bool hle_cheat_on(int which);
@@ -506,9 +508,55 @@ int& chosen_character() {
     return g_characters_player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
 }
 
-// Pius's other body, for whoever's page this is (hle.c costume_on).
-int& chosen_costume() {
-    return g_characters_player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume;
+// The other bodies, for whoever's page this is: 2 bits for each character in the setting, the
+// form, 0 their own. In the order of hle.c's kCostumes for each character.
+struct CharacterForm {
+    int character;     // kCharacters' place
+    const char* name;  // on the details panel
+    const char* word;  // after their name on the Mods row
+};
+constexpr CharacterForm kForms[] = {
+    {1, "Skeletal form", "skeletal"},
+    {2, "Ghost form", "ghost"},
+    {2, "Rotten form", "rotten"},
+    {3, "Ghost form", "ghost"},
+    {4, "Ghost form", "ghost"},
+    {5, "Spirit form", "spirit"},
+    {7, "Ghost form", "ghost"},
+    {8, "Ghost form", "ghost"},
+    {10, "Ghost form", "ghost"},
+};
+
+int forms_of(int character) {
+    int n = 0;
+    for (const CharacterForm& f : kForms)
+        n += f.character == character;
+    return n;
+}
+
+const CharacterForm* form_row(int character, int form) {
+    for (const CharacterForm& f : kForms)
+        if (f.character == character && --form == 0)
+            return &f;
+    return nullptr;
+}
+
+// A character's chosen form on a player's page: 0 their own body.
+int form_on(int player, int character) {
+    if (character < 1 || character > 12)
+        return 0;
+    const int bits = player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume;
+    const int form = (bits >> ((character - 1) * 2)) & 3;
+    return form <= forms_of(character) ? form : 0;
+}
+
+// The frame's character changes form, on this page's player: on through them, then back to their own.
+void form_swap(int character, int dir) {
+    const int count = forms_of(character) + 1;
+    int& bits = g_characters_player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume;
+    const int form = (form_on(g_characters_player, character) + dir + count) % count;
+    const int shift = (character - 1) * 2;
+    bits = (bits & ~(3 << shift)) | (form << shift);
 }
 
 int& chosen_stats() {
@@ -548,11 +596,12 @@ const CharacterInfo kCharacterInfo[13] = {
 std::string character_details_rml(int i) {
     const CharacterInfo& c = kCharacterInfo[i];
     std::string out = "<div class=\"bio\"><div class=\"bio-name\">" + escape(kCharacters[i]) +
-                      "</div><div class=\"bio-year\">" + escape(c.year) +
-                      (i == 1 ? std::string(" &#183; ") + (chosen_costume() != 0 ? "Skeletal form" : "His own form") +
-                                    " (RB or C to change)"
-                              : std::string()) +
-                      "</div><div class=\"bio-about\">" +
+                      "</div><div class=\"bio-year\">" + escape(c.year) + "</div>" +
+                      (forms_of(i) > 0 ? std::string("<div class=\"bio-form\"><span class=\"bio-form-name\">") +
+                                             (form_on(g_characters_player, i) != 0 ? form_row(i, form_on(g_characters_player, i))->name : i == 2 ? "Her own form" : "His own form") +
+                                             "</span><span class=\"bio-form-keys\">LB / RB or C: " + std::to_string(forms_of(i) + 1) + " forms</span></div>"
+                                       : std::string()) +
+                      "<div class=\"bio-about\">" +
                       escape(c.about) + "</div><div class=\"meters\">";
     // Bars on one scale (150, the most any has), in the game's own colours.
     const struct {
@@ -766,7 +815,11 @@ void build_characters() {
         r.tile = true;
         r.chosen = chosen_character() == i;
         struct stat st;
-        if (stat((res_dir() + "/ui/" + portrait_file(i)).c_str(), &st) == 0)
+        // A form's own picture when there is one (portraits/Karim-1.png, made by tools/ed/form_portraits.py).
+        const std::string form_picture = std::string("portraits/") + kCharacters[i] + "-" + std::to_string(form_on(g_characters_player, i)) + ".png";
+        if (form_on(g_characters_player, i) != 0 && stat((res_dir() + "/ui/" + form_picture).c_str(), &st) == 0)
+            r.value_rml = "<img src=\"" + form_picture + "\"/>";
+        else if (stat((res_dir() + "/ui/" + portrait_file(i)).c_str(), &st) == 0)
             r.value_rml = "<img src=\"" + portrait_file(i) + "\"/>";
         r.activate = [i, leave] {
             chosen_character() = i;
@@ -890,8 +943,8 @@ void build_mods_rows() {
     auto character_row = [](int player) {
         const int chosen = player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
         Row r{player == 1 ? "Player 2 character" : "Player 1 character", kCharacters[chosen]};
-        if (chosen == 1 && (player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume) != 0)
-            r.value += ", skeletal";
+        if (form_on(player, chosen) != 0)
+            r.value += std::string(", ") + form_row(chosen, form_on(player, chosen))->word;
         if ((player == 1 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats) == 1)
             r.value += " (own stats)";
         r.page = 1;
@@ -2219,8 +2272,9 @@ void render() {
     g_doc->GetElementById("hint")->SetInnerRML(
         g_screen == Screen::InGame    ? "Up/Down choose &#183; Left/Right change &#183; A select &#183; B resume"
         : g_screen == Screen::Problem ? "Up/Down choose &#183; A select"
-        : g_screen == Screen::Characters ? (g_selected == 0 ? "Arrows choose &#183; A select &#183; RB or C costume &#183; B back"
-                                                            : "Arrows choose &#183; A select &#183; B back")
+        : g_screen == Screen::Characters ? (g_selected < kRosterCount && forms_of(g_selected + 1) > 0
+                                               ? "Arrows choose &#183; A select &#183; LB, RB or C form &#183; B back"
+                                               : "Arrows choose &#183; A select &#183; B back")
         : slot_list                   ? "Up/Down choose &#183; LB/RB page &#183; A select &#183; B back"
                                       : "Up/Down choose &#183; Left/Right change &#183; A select &#183; B back");
     g_doc->SetClass("spread", spread);
@@ -2556,9 +2610,10 @@ bool run_menu() {
                                pressed[kUp] ? -1 : pressed[kDown] ? 1 : 0);
                 dirty = true;
             }
-            // Pius's frame: his other form, the body only.
-            if (pressed[kCostume] && g_selected == 0) {
-                chosen_costume() = chosen_costume() != 0 ? 0 : 1;
+            // A frame with another form: LB or RB (or C) swaps it, the body only.
+            if ((pressed[kCostume] || pressed[kPageLeft] || pressed[kPageRight]) && g_selected < kRosterCount &&
+                forms_of(g_selected + 1) > 0) {
+                form_swap(g_selected + 1, pressed[kPageLeft] ? -1 : +1);
                 settings_save();
                 dirty = true;
             }
@@ -3301,7 +3356,22 @@ struct Test {
 };
 Test g_test;
 
+// ED_PHOTO_PORTRAIT=frame,height,distance,file (tools/ed/form_portraits.py): photo mode at that
+// frame of the game, the camera on the line from the game's camera to player 1's head (that high
+// over where they stand), that far from it, one photo to that file, and the game closes.
+struct Portrait {
+    bool on = false;
+    unsigned frame = 0;
+    float height = 0.f, distance = 0.f;
+    char file[512] = {0};
+    int step = 0;
+    Uint64 at = 0;
+};
+Portrait g_portrait;
+
 enum class Exit { Leave, Step, Quit };
+
+void portrait_aim();
 
 constexpr int kKeys[] = {SDL_SCANCODE_RETURN, SDL_SCANCODE_H,      SDL_SCANCODE_P,        SDL_SCANCODE_1,
                          SDL_SCANCODE_2,      SDL_SCANCODE_3,      SDL_SCANCODE_4,        SDL_SCANCODE_5,
@@ -3393,6 +3463,25 @@ Exit run() {
         } else if (back_since != 0) {
             hide = true;
             back_since = 0;
+        }
+
+        if (g_portrait.on) {
+            mx = mz = my = lx = ly = zoom = 0.f;
+            const Uint64 ticks = SDL_GetTicks();
+            if (g_portrait.step == 0) {
+                portrait_aim();
+                g_legend = false;
+                g_portrait.at = ticks;
+                g_portrait.step = 1;
+            } else if (g_portrait.step == 1 && ticks - g_portrait.at > 500) {
+                g_last_saved = g_portrait.file;
+                aurora_photo_save(g_last_saved.c_str());
+                g_saving = true;
+                g_portrait.step = 2;
+            } else if (g_portrait.step == 2 && aurora_photo_saved() != g_saved) {
+                std::fprintf(stderr, "[photo] portrait %s\n", g_portrait.file);
+                return Exit::Quit;
+            }
         }
 
         // The test script.
@@ -3537,11 +3626,36 @@ Exit run() {
     }
 }
 
+void portrait_aim() {
+    float place[3], eye[3], target[3];
+    unsigned at = 0;
+    if (!hle_player_place(place, &at) || !camera_last_view(eye, target))
+        return;
+    const V3 ahead = unit3(V3{target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]});
+    const V3 right = unit3(cross3(ahead, V3{0.f, 0.f, 1.f}));
+    const V3 up = cross3(right, ahead);
+    const V3 to{place[0] - eye[0], place[1] - eye[1], place[2] + g_portrait.height - eye[2]};
+    const V3 head{dot3(to, right), dot3(to, up), -dot3(to, ahead)};
+    const V3 along = unit3(head);
+    const V3 from = add3(head, mul3(along, -g_portrait.distance));
+    for (int i = 0; i < 3; i++)
+        g_pos[i] = from[i];
+    const Frame fr = level_frame();
+    g_elevation = std::asin(std::clamp(dot3(along, fr.up), -1.f, 1.f));
+    const V3 level = unit3(add3(along, mul3(fr.up, -dot3(along, fr.up))));
+    g_heading = std::atan2(-dot3(level, fr.r0), dot3(level, fr.h0));
+    g_roll = 0.f;
+    g_zoom = 1.f;
+}
+
 // At each frame boundary: enter (once held), run, step or leave.
 void frame(bool start) {
     static bool checked = false;
     if (!checked) {
         checked = true;
+        if (const char* t = std::getenv("ED_PHOTO_PORTRAIT");
+            t != nullptr && std::sscanf(t, "%u,%f,%f,%511[^\n]", &g_portrait.frame, &g_portrait.height, &g_portrait.distance, g_portrait.file) == 4)
+            g_portrait.on = true;
         if (const char* t = std::getenv("ED_PHOTO_TEST"); t != nullptr && std::atoi(t) > 0) {
             g_test.on = true;
             g_test.enter_at = SDL_GetTicks() + static_cast<Uint64>(std::atoi(t)) * 1000u;
@@ -3550,6 +3664,12 @@ void frame(bool start) {
     if (g_test.on && g_test.enter_at != 0 && SDL_GetTicks() >= g_test.enter_at) {
         g_test.enter_at = 0;
         start = true;
+    }
+    if (g_portrait.on && g_portrait.step == 0 && g_state == State::Off) {
+        float place[3];
+        unsigned at = 0;
+        if (hle_player_place(place, &at) && at >= g_portrait.frame)
+            start = true;
     }
     if (start && g_state == State::Off) {
         begin();

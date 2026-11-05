@@ -404,6 +404,27 @@ body.roster .gap {
 	margin-bottom: 0.8vh;
 }
 
+/* A character with other forms: which one, and the buttons, standing out from the rest. */
+.bio-form {
+	margin-bottom: 0.9vh;
+	padding: 0.6vh 1vh;
+	background-color: #7a161633;
+	border-width: 0 0 0 4dp;
+	border-color: #7a1616;
+}
+
+.bio-form-name {
+	display: block;
+	font-size: 2.6vh;
+	color: #7a1616;
+}
+
+.bio-form-keys {
+	display: block;
+	font-size: 1.9vh;
+	color: #3a2412;
+}
+
 .bio-about {
 	font-size: 1.9vh;
 	height: 11vh;

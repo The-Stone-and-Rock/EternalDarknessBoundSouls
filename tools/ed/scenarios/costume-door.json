@@ -1,6 +1,6 @@
 {
  "name": "costume-door",
- "proves": "Player 1 as Pius in his other body: still model 0 with his own stats, walks and attacks on the body's own moves, goes through a door by the game's script, and nothing freezes. Player 2 follows. The door's motion isn't its own: that file has none.",
+ "proves": "Player 1 as Pius in his other body: still model 0 with his own stats, walks and attacks on his own moves fitted to the body's bones, goes through a door by the game's script, and nothing freezes. Player 2 follows.",
  "save": "saves/slot7.state",
  "env": {
   "ED_COSTUME": "1,0",
@@ -18,7 +18,7 @@
   },
   {
    "check": "log",
-   "pattern": "part 0 of /Chars/char0086.cpk"
+   "pattern": "Pius's moves fitted to their other body"
   },
   {
    "check": "moved",

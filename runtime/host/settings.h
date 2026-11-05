@@ -75,7 +75,7 @@ typedef struct {
     int mod_p2_character; // player 2's (co-op), the same way: chosen, not yet played
     int mod_p1_stats;     // player 1's health, magick and sanity: 0 the chapter character's, 1 the chosen one's
     int mod_p2_stats;     // player 2's, the same way
-    int mod_p1_costume;   // Pius's other body for player 1: 0 his own, 1 the skeletal one. Name, moves and stats stay his
+    int mod_p1_costume;   // player 1's forms: 2 bits for each of the twelve characters, 0 their own body (hle.c kCostumes). Name, moves and stats stay theirs
     int mod_p2_costume;   // player 2's, the same way
     int mod_skip_intro;   // 1: the launcher's Main menu passes over the opening movie to the title
     int mod_title_video;  // 1: the title menu over res/video/title.mpg (titlevideo.cpp)

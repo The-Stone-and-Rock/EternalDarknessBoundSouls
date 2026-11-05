@@ -242,9 +242,9 @@ void settings_load(void) {
         else if (strcmp(key, "mod_p2_stats") == 0)
             g_settings.mod_p2_stats = clamp_int(n, 0, 1);
         else if (strcmp(key, "mod_p1_costume") == 0)
-            g_settings.mod_p1_costume = clamp_int(n, 0, 1);
+            g_settings.mod_p1_costume = clamp_int(n, 0, 0xFFFFFF);
         else if (strcmp(key, "mod_p2_costume") == 0)
-            g_settings.mod_p2_costume = clamp_int(n, 0, 1);
+            g_settings.mod_p2_costume = clamp_int(n, 0, 0xFFFFFF);
         else if (strcmp(key, "mod_skip_intro") == 0)
             g_settings.mod_skip_intro = clamp_int(n, 0, 1);
         else if (strcmp(key, "mod_title_video") == 0)

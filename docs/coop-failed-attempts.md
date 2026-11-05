@@ -385,3 +385,15 @@ Not done: leaving out the game's own frame, which nobody sees in a split. Its EF
 **Not a fault:** room 147's lamps differ between saves. A character only holds the lamps nearest them. The characters' places worked out from the camera match `both.tsv`, so the camera's right.
 
 **`ed test` on the final build:** 17 of 20 in one run. `lever-p1` (player 1 walked 13, wanted 20) and `lever-p2` (script 1794 "frame 131..", which already varied by run) passed when run again, and `shadow-steady` passed once its threshold was set above the 0.13 moments differ from frames by. Not established: that `lever-p1` isn't affected by the new timing. It failed once and passed once.
+
+## Other forms for characters (2026-11-04)
+
+**Giving each ghost its own file's moves, as the Liche had:** `costume_moves` laid them over the wearer's. The user saw the bodies distorted, and they couldn't hold what's equipped. The bones of most ghosts are already their character's, so nothing needs laying over: read the skeleton word.
+
+**Choosing a body by size and bone count:** `cin0077.bin` body 36 was Alex, 37 the Liche, `cin0002.bin` body 39 the Liche too, `cin0024.bin` body 38 an enemy, 37 Edwin and 36 the Liche. Bone counts agree by chance. Look at the scene that shows it, and at pictures, and the user knows them.
+
+**Fitting a move's tracks each frame, or at `0x8012E504`:** a move's data is in a cache, and the record's first word stays when it's taken: some of what was fitted was freed memory, filled with `0x06060606`, or half read, and the walk stayed twisted though the first standing pose looked right. Fit it where it comes in, on the return of `0x8012E588`.
+
+**Max's straitjacket on his moves, for free arms:** its bones do follow, but its arms are in one mesh group with its body, so nothing shows. Fitting moves can't change that, so the user had the form taken out.
+
+**The nearest bone by place, for every bone with no name in common:** on the Liche it put two cape bones on other tracks. Only when most names don't match.
