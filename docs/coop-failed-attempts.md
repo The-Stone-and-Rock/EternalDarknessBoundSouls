@@ -398,6 +398,8 @@ Not done: leaving out the game's own frame, which nobody sees in a split. Its EF
 
 **A ghost's weapon points all moved to one point of the group:** a thin line by Karim's hand. Each point follows its own bones, so they spread as the arm bent. Each to its nearest point of the group made it shorter, a streak from the forearm over the hand, and all at the wrist joint left a shard, as some follow the fingers too. Putting a strip's corners on one point (`+64`, `+68`) changed nothing drawn, and the swords were back: the head and shoulders photos hid that, so look at the whole body. They go on one point of their own bone's batch.
 
+**Telling a weapon's pieces by a corner's `+2`:** the wedges and shards at Karim's and Roberto's hands, 2026-11-04. That's a place in the texture list, so the pieces it made were wrong, and what was joined to the hand looked like the weapon. A corner's point is its `+0`, through the table at `+176`. See `ed system players`.
+
 **Moving a form's floating parts to another bone by the table at `+48`:** spikes off the shoulders and a stick by Edward's hand, even with 3 points moved. Its numbers aren't bones: they go through `+44`.
 
 **The nearest bone by place, for every bone with no name in common:** on the Liche it put two cape bones on other tracks. Only when most names don't match.

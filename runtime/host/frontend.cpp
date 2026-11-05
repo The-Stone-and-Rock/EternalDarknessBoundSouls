@@ -524,7 +524,7 @@ constexpr CharacterForm kForms[] = {
     {4, "Ghost form", "ghost"},
     {5, "Spirit form", "spirit"},
     {7, "Ghost form", "ghost"},
-    {7, "Augustine", "Augustine"},
+    {7, "The Bishop", "the Bishop"},
     {7, "Monk", "monk"},
     {7, "Black robes", "black robes"},
     {8, "Ghost form", "ghost"},
@@ -563,6 +563,12 @@ void form_swap(int character, int dir) {
     bits = (bits & ~(15LL << shift)) | (static_cast<long long>(form) << shift);
 }
 
+// What a form's called on the character screens.
+const char* form_name(int player, int character) {
+    const int form = form_on(player, character);
+    return form != 0 ? form_row(character, form)->name : "Original Form";
+}
+
 int& chosen_stats() {
     return g_characters_player == 1 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats;
 }
@@ -595,16 +601,27 @@ const CharacterInfo kCharacterInfo[13] = {
     {"2000 A.D.", "Alexandra Roivas, who returns to her grandfather's Rhode Island mansion to solve his murder.", 100, 125, 125},
 };
 
+// A character with other forms, written as a heading in the Tome: its ornament above and below, the form in
+// red ink, a mark for each form with this one's lit, and the buttons that change it.
+std::string form_panel_rml(int i) {
+    // On the keyboard, Q and E are its LB and RB.
+    const bool keys = controls::glyph_set() == "kb";
+    const std::string set = "glyphs/ink/" + controls::glyph_set();
+    std::string marks;
+    for (int form = 0; form <= forms_of(i); form++)
+        marks += std::string("<img class=\"form-mark") + (form == form_on(g_characters_player, i) ? " on" : "") + "\" src=\"tome/mark.png\"/>";
+    return "<div class=\"bio-form\"><div class=\"bio-form-rule\"></div><div class=\"bio-form-name\">&#8249; " + std::string(form_name(g_characters_player, i)) +
+           " &#8250;</div><div class=\"bio-form-marks\">" + marks + "</div><div class=\"bio-form-keys\">Change form <img class=\"glyph\" src=\"" + set +
+           (keys ? "/q.png" : "/lb.png") + "\"/><img class=\"glyph\" src=\"" + set + (keys ? "/e.png" : "/rb.png") + "\"/> or <img class=\"glyph\" src=\"glyphs/ink/kb/c.png\"/></div><div class=\"bio-form-rule\"></div></div>";
+}
+
 // Character select's panel beside the frames: the highlighted character's
 // name, when they lived, who they are and their meters.
 std::string character_details_rml(int i) {
     const CharacterInfo& c = kCharacterInfo[i];
     std::string out = "<div class=\"bio\"><div class=\"bio-name\">" + escape(kCharacters[i]) +
                       "</div><div class=\"bio-year\">" + escape(c.year) + "</div>" +
-                      (forms_of(i) > 0 ? std::string("<div class=\"bio-form\"><span class=\"bio-form-name\">") +
-                                             (form_on(g_characters_player, i) != 0 ? form_row(i, form_on(g_characters_player, i))->name : i == 2 ? "Her own form" : "His own form") +
-                                             "</span><span class=\"bio-form-keys\">LB / RB or C: " + std::to_string(forms_of(i) + 1) + " forms</span></div>"
-                                       : std::string()) +
+                      (forms_of(i) > 0 ? form_panel_rml(i) : std::string()) +
                       "<div class=\"bio-about\">" +
                       escape(c.about) + "</div><div class=\"meters\">";
     // Bars on one scale (150, the most any has), in the game's own colours.
@@ -2234,6 +2251,8 @@ void render() {
             rml[0] += "<div class=\"tile" + std::string(static_cast<int>(i) == g_selected ? " selected" : "") +
                       (r.chosen ? " chosen" : "") + "\" id=\"row" + std::to_string(i) +
                       "\"><div class=\"portrait\">" + r.value_rml + "</div><div class=\"name\">" + escape(r.label) +
+                      "</div><div class=\"tile-form\">" +
+                      (forms_of(static_cast<int>(i) + 1) > 0 ? std::string("&#8249; ") + form_name(g_characters_player, static_cast<int>(i) + 1) + " &#8250;" : std::string("&nbsp;")) +
                       "</div></div>";
             continue;
         }
@@ -2277,7 +2296,7 @@ void render() {
         g_screen == Screen::InGame    ? "Up/Down choose &#183; Left/Right change &#183; A select &#183; B resume"
         : g_screen == Screen::Problem ? "Up/Down choose &#183; A select"
         : g_screen == Screen::Characters ? (g_selected < kRosterCount && forms_of(g_selected + 1) > 0
-                                               ? "Arrows choose &#183; A select &#183; LB, RB or C form &#183; B back"
+                                               ? "Arrows choose &#183; A select &#183; LB, RB or C change form &#183; B back"
                                                : "Arrows choose &#183; A select &#183; B back")
         : slot_list                   ? "Up/Down choose &#183; LB/RB page &#183; A select &#183; B back"
                                       : "Up/Down choose &#183; Left/Right change &#183; A select &#183; B back");
