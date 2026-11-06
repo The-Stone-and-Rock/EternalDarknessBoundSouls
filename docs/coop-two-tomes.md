@@ -56,6 +56,8 @@ The game was built for one Tome and one set of Inventory items.
 | Other Tome's items go after an equip | It held the old slots | Copy the new slots across |
 | Black half after B in a Tome | Tome's B reached the world's prompt, and its script closed the menu | Fixed on `mods` |
 
+**The world's turns kept the Tome's camera (fixed 2026-11-05):** `kTwSwitches` swapped the camera stack's depth (`r13-21700`) between the world and the Tome but not which record is on (`r13-26864`). Closing a Tome popped nothing, the game's camera stayed on the Tome's record 8, and player 1's view stood still until a room change, in every chapter, from 2026-11-02 (`bac33e8`). A save made then, reloaded for a change of characters, showed player 1 black. Both are now in the list. `docs/game/systems/camera.md`.
+
 ## Still unsolved
 
 1. **Only the Mace listed.** After player 1 visits Journal, Magick or Map and closes the Tome, the

@@ -161,6 +161,20 @@ def check(rows, min_frames=30):
         if b['ms'] - a['ms'] > 2500:
             out.append({'rule': 'STALL', 'from': a['frame'], 'to': b['frame'], 'text': 'no frame for %.1f s (room %d, script %d, Tome %d/%d)' % (
                 (b['ms'] - a['ms']) / 1000, a['room'], a['script'], a['shares'], a['copy'])})
+    # The game's camera left on the Tome's own (record 8) with the Tome shut: player 1's view stands still until a room
+    # change, and a save made then comes back on an empty record (black). The game pushes the room's camera when the Tome
+    # opens and pops it as it closes; in co-op the world's turns lost the index (kTwSwitches in hle.c).
+    start = None
+    for r in rows + [None]:
+        on = r is not None and 'camidx' in r and str(r['camidx']) == '8' and not r['menu'] and not r['cutscene'] and r['room'] >= 0
+        if on and start is None:
+            start = r
+        elif not on and start is not None:
+            if last['frame'] - start['frame'] >= 120:
+                out.append({'rule': 'CAMERA', 'who': 'p1', 'from': start['frame'], 'to': last['frame'], 'text':
+                            "the game's camera stayed on the Tome's (record 8) with no Tome up for %d frames, room %d" % (last['frame'] - start['frame'], start['room'])})
+            start = None
+        last = r
     out += check_cameras(rows)
     order = {'FROZEN': 0, 'STALL': 1, 'SENT': 2, 'FELL': 3, 'CAMERA': 4, 'BOUNCE': 5, 'STUCK?': 6}
     out.sort(key=lambda f: (order.get(f['rule'], 9), f.get('from', 0)))
