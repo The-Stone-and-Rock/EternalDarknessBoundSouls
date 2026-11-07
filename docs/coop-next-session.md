@@ -63,6 +63,8 @@ Not run: player 2's finish (slot13's player 2 holds no weapon) and the 14 other 
 
 **Launcher and character page (2026-11-06, uncommitted):** the launcher has Choose Character and Co-op under Load game (the Mods pages of sections 3 and 1, whose Back now returns to the launcher: `g_mods_page_return`); the Mods list shows Characters only in a game. Choosing a frame on the character page stays on the page (the gold frame moves); B goes back. The character rows show the frame's own name (The Maid, Chandra · Spirit), not whose form it is, which read as the name not changing. Not yet tried by hand: choosing a frame and B back to the launcher.
 
+**New game: the carry-over question (2026-11-06):** with a finished game on the card, a new game asks over the memory card screen whether to carry the alignments over. `skip_card_inserted` (made for Jump to Game) pressed A all through the screen's step, so it answered Yes for the player. Now the card screen still passes, but while the question's notice is up (r13-25148 == 0x8001FC54, `card_carry_over_up`) no A is pressed and the screen is drawn as the game draws it (logs/run-20261106-224511-jtg-carry-new). Jump to Game is unchanged (control at 1872).
+
 Line endings: `runtime/host/hle.c` and the docs are LF again, as in git, since the round-7 commit. The earlier rounds' diffs in `build/fix/` were made against a CRLF copy and need `--ignore-whitespace` or a conversion to apply.
 
 Round 5 (2026-11-06, agents) is in `build/fix/merged5-hle.c` (md5 d337e680beed550fc33730c897f4a98c), which is now `runtime/host/hle.c`, built as `var-m5.exe`, with the prompts change in `.deps/GXRuntime` (patch regenerated). Each fix passed an independent checker; patches in `build/fix/<key>/`, reports in the session's r5-fixes.txt:

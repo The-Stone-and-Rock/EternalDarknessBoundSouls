@@ -3754,8 +3754,20 @@ static void hle_card_frame(CPUState* cpu) {
 #define CARD_SCREEN_LOOK 0x8001CCC8u
 static unsigned long long g_card_screen_drawn;  // the frame the screen's step last ran
 
+// A new game with a finished game on the card asks over the same screen, its cards behind: "You have previously
+// completed ... Would you like to carry this information over to your new game?" Yes / No. Its notice's handler
+// (r13-25148, set by 0x800AEE30) is 0x8001FC54 while it's up (0x8001C748, the card's check, at the screen's start).
+// It's the player's to answer: no A pressed for them, and the screen drawn as the game draws it.
+#define CARD_NOTICE_HANDLER 25148u
+#define CARD_CARRY_OVER 0x8001FC54u
+static bool card_carry_over_up(CPUState* cpu) {
+    return sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - CARD_NOTICE_HANDLER) == CARD_CARRY_OVER;
+}
+
 static void notify_card_screen(CPUState* cpu) {
     g_card_screen_drawn = cpu->timebase / 675000ull;
+    if (card_carry_over_up(cpu))
+        return;
     if (sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 26240u) == 0u &&
         mem_read32(cpu, cpu->gpr[13] - 26188u) == 0u && mem_read32(cpu, SAVE_LIST_FLAG) != 1u)
         cpu->gpr[3] = 0u;
@@ -3765,7 +3777,8 @@ static void skip_card_inserted(CPUState* cpu, DolPadState* pad) {
     static unsigned reads;
     const unsigned long long frame = cpu->timebase / 675000ull;
     const bool up = g_card_screen_drawn != 0u && frame - g_card_screen_drawn <= 2u && sda_ready(cpu) &&
-                    mem_read32(cpu, cpu->gpr[13] - 26188u) == 0u && mem_read32(cpu, SAVE_LIST_FLAG) != 1u;
+                    mem_read32(cpu, cpu->gpr[13] - 26188u) == 0u && mem_read32(cpu, SAVE_LIST_FLAG) != 1u &&
+                    !card_carry_over_up(cpu);
     if (!up) {
         reads = 0u;
         return;
