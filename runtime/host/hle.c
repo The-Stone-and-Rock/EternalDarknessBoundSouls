@@ -11320,6 +11320,8 @@ static void coop_copies_follow(CPUState* cpu);
 static void coop_restore_held(CPUState* cpu);
 static void coop_rehold(CPUState* cpu);
 static void coop_give_held(CPUState* cpu);
+static void coop_take_held(CPUState* cpu);
+static void coop_note_taken(CPUState* cpu);
 
 // The player's look for threats round them (0x800CBE7C(node): the threat
 // search, 0x80032174, every 16th frame), and where it keeps what it found
@@ -16818,6 +16820,7 @@ static void coop_player_turn(CPUState* cpu) {
     coop_state(cpu, &g_coop_state[0], false);
     coop_restore_held(cpu);
     coop_give_held(cpu);
+    coop_take_held(cpu);
     coop_rehold(cpu);
     coop_kinds(cpu, false);  // out first: a copy is given a kind of its own only with them out
     coop_copies_follow(cpu);
@@ -18777,6 +18780,20 @@ static u32 coop_p2_count(CPUState* cpu, u32 thing) {
 static u32 g_coop_box_kept;
 #define COOP_THING_GONE 0x801DCB58u
 
+// ED_ITEM_TRACE=1 (testing): each taking of a thing from a list (0x801F965C), destroying (0x801DCB58), and letting go
+// from equipment (0x80150FA0, 0x800C9DD4), with who called, the chapter and frame: how the game takes the dream's
+// Shotgun from player 1.
+static void item_trace(CPUState* cpu, const char* what) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_ITEM_TRACE") != NULL;
+    if (!on)
+        return;
+    fprintf(stderr, "[item] %s r3 0x%08X r4 0x%08X r5 0x%08X lr 0x%08X chapter %u frame %llu\n", what, cpu->gpr[3],
+            cpu->gpr[4], cpu->gpr[5], cpu->lr, mem_read32(cpu, 0x80307178u), (unsigned long long)(cpu->timebase / 675000ull));
+}
+static void notify_item_let_go(CPUState* cpu) { item_trace(cpu, cpu->pc == 0x80150FA0u ? "equipment let go" : "let go callback"); }
+
 static void coop_reload_lists(CPUState* cpu, bool find) {
     static bool asking;
     g_hle_passthrough = true;
@@ -18900,6 +18917,7 @@ static void coop_p2_load_one(CPUState* cpu) { coop_p2_load(cpu, COOP_LOAD_ONE); 
 static void coop_p2_load_all(CPUState* cpu) { coop_p2_load(cpu, COOP_LOAD_ALL); }
 
 static void coop_thing_gone(CPUState* cpu) {
+    item_trace(cpu, "thing gone");
     g_hle_passthrough = true;
     if (g_coop_box_kept != 0u && cpu->gpr[3] == 2u && cpu->gpr[4] == g_coop_box_kept &&
         (cpu->lr == 0x8007A148u || cpu->lr == 0x8007A2E0u)) {
@@ -19062,7 +19080,11 @@ static void coop_count_set_traced(CPUState* cpu) {
 static void coop_reload_z_traced(CPUState* cpu) { coop_reload_trace(cpu, true); }
 
 static void coop_reload_find(CPUState* cpu) { coop_reload_lists(cpu, true); }
-static void coop_reload_take(CPUState* cpu) { coop_reload_lists(cpu, false); }
+static void coop_reload_take(CPUState* cpu) {
+    item_trace(cpu, "off a list");
+    coop_note_taken(cpu);
+    coop_reload_lists(cpu, false);
+}
 
 static void cheat_full(CPUState* cpu, u32 node) {
     if (!guest_ram_range_valid(cpu, node, 56u))
@@ -20757,11 +20779,91 @@ static void coop_rehold(CPUState* cpu) {
     fprintf(stderr, "[coop] player 2 held %u with nothing in their hand: their copy put there again\n", id);
 }
 
+// The dream's Shotgun is taken from player 1 by room 69's arrival script as the mansion starts (L00/397, run by the
+// dream's last script 1920's fn66(69, ..., 397, 0)): ed96() the weapon in hand, ed147() its ammo, ed51(player, weapon,
+// 0) lets go of it (0x800C9FD4), fn93 on each takes it off the list and destroys it (0x801F965C at lr 0x8016CD80, then
+// 0x801DCB58(2, node); traced with ED_ITEM_TRACE, logs/run-20261107-142252-jtg-dream-end, frame 3471). Player 2's copy
+// is in no list, so it stayed in their hand and equipment. A thing fn93 takes, of which player 2 has a copy, goes from
+// them the same way at their turn's end: let go of from their equipment (0x80150FA0(equipment, id), whose let-go asks
+// for the thing by id: the copy, through g_coop_copies and hle_find_by_id), their moves made again (0x8007A788, as the
+// Tome does after a change), and the copy destroyed (0x801DCB58(2, node)).
+#define TAKE_ITEM_RETURN 0x8016CD80u
+#define EQUIP_LET_GO 0x80150FA0u
+static u32 g_coop_taken[4];  // ids fn93 took, for player 2's copies
+
+static void coop_note_taken(CPUState* cpu) {
+    if (cpu->lr != TAKE_ITEM_RETURN || !g_settings.mod_coop || !guest_ram_range_valid(cpu, cpu->gpr[4], 20u))
+        return;
+    const u32 id = mem_read32(cpu, cpu->gpr[4] + 16u);
+    for (int i = 0; i < 4; i++)
+        if (g_coop_taken[i] == 0u || g_coop_taken[i] == id) {
+            g_coop_taken[i] = id;
+            return;
+        }
+}
+
+static void coop_take_held(CPUState* cpu) {
+    if (g_coop_tome_p2 || g_coop_p2 == 0u)
+        return;
+    for (int t = 0; t < 4; t++) {
+        const u32 id = g_coop_taken[t];
+        if (id == 0u)
+            continue;
+        g_coop_taken[t] = 0u;
+        coop_copies_reset();
+        int at = -1;
+        for (int i = 0; i < 32 && at < 0; i++)
+            if (g_coop_copies[i].node != 0u && g_coop_copies[i].id == id)
+                at = i;
+        if (at < 0)
+            continue;  // no copy of theirs (the shells: their count is their own, of player 1's box)
+        const u32 copy = g_coop_copies[at].node, copy_id = mem_read32(cpu, copy + 16u);
+        const u32 p2 = mem_read32(cpu, g_coop_p2 + 52u), object = mem_read32(cpu, copy + 52u);
+        u32 own = 0u, ignore = 0u;
+        const u32 find[2] = {mem_read32(cpu, g_coop_p2 + 16u), 0u};
+        unsigned let_go = 0u;
+        u32 count = 0u;
+        coop_tome_player(cpu, true);
+        if (hle_guest_call(cpu, EQUIP_FIND, find, 2, 0.0, &own) && own != 0u) {
+            count = mem_read32(cpu, own + EQUIP_ENTRIES);
+            for (u32 tries = 0u; tries < 4u; tries++) {
+                const u32 now = mem_read32(cpu, own + EQUIP_ENTRIES);
+                u32 named = 0u;
+                for (u32 e = 0u; e < now && e < 32u && named == 0u; e++) {
+                    const u32 entry = mem_read32(cpu, own + 4u + e * 12u);
+                    if (entry == id || entry == copy_id)
+                        named = entry;
+                }
+                if (named == 0u)
+                    break;
+                g_coop_copies[at].id = named;  // its let-go asks for this id: the copy answers
+                const u32 args[2] = {own, named};
+                hle_guest_call(cpu, EQUIP_LET_GO, args, 2, 0.0, &ignore);
+                let_go++;
+                if (mem_read32(cpu, own + EQUIP_ENTRIES) >= now)
+                    break;  // not taken off: no loop
+            }
+            if (let_go != 0u)
+                hle_guest_call(cpu, EQUIP_MOVES, &g_coop_p2, 1, 0.0, &ignore);
+        }
+        coop_tome_player(cpu, false);
+        if (guest_ram_range_valid(cpu, object, 376u) && mem_read32(cpu, object + 372u) == p2)
+            mem_write32(cpu, object + 372u, 0u);
+        g_coop_copies[at].id = g_coop_copies[at].node = 0u;
+        const u32 gone[2] = {2u, copy};
+        hle_guest_call(cpu, COOP_THING_GONE, gone, 2, 0.0, &ignore);
+        fprintf(stderr, "[coop] %u taken from player 1 (fn93): player 2's copy (id %u) let go of (%u) and gone, their equipment %u -> %u (frame %llu)\n",
+                id, copy_id, let_go, count, own != 0u ? mem_read32(cpu, own + EQUIP_ENTRIES) : 0u,
+                (unsigned long long)(cpu->timebase / 675000ull));
+    }
+}
+
 // A script's spawn with effect 3 (ed3(..., 3)) puts what it made straight in the controlled character's hand: the
 // new game's dream (L00/1911) gives the Shotgun so, 0x80150D9C(equipment, id, ...) at 0x8000EABC. That is player 1's
 // alone, and player 2 began the dream with nothing in theirs. They get a copy of their own in their hand, as their
 // Tome puts a thing there (0x800C994C(equipment, id) with them the player, the copy made by hle_find_by_id, then
 // their moves for it, 0x8007A788), at the end of their next turn, as coop_rehold does.
+
 #define SPAWN_EQUIP_RETURN 0x8000EAC0u
 static struct {
     u32 id, hands[2];  // what player 1 was given in hand (id 0: none), and its two words, for player 2
@@ -22878,6 +22980,11 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* take = hle_dispatch_entry(EQUIP_TAKE);
             if (take != NULL && take->intercept == NULL && take->notify == NULL)
                 take->intercept = coop_equip_take;
+            for (int i = 0; getenv("ED_ITEM_TRACE") != NULL && i < 2; i++) {
+                HleDispatchEntry* e = hle_dispatch_entry(i == 0 ? 0x80150FA0u : 0x800C9DD4u);
+                if (e != NULL && e->notify == NULL)
+                    e->notify = notify_item_let_go;
+            }
             HleDispatchEntry* listed = hle_dispatch_entry(EQUIP_ADD);
             if (listed != NULL && listed->intercept == NULL && listed->notify == NULL)
                 listed->notify = notify_spawn_equip;
