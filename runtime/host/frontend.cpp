@@ -316,6 +316,7 @@ struct Row {
     int page = 0;                // 1: the right-hand column of a spread
     bool toggle = false;         // On/Off: drawn as a switch
     int slider = -1;             // 0-100: drawn as a bar, with value beside it
+    bool experimental = false;   // "(Experimental, expect glitches)" after its name
 };
 
 Rml::ElementDocument* g_doc = nullptr;
@@ -436,6 +437,20 @@ int newest_slot() {
         }
     }
     return best;
+}
+
+int play_row(int slot);
+
+// The launcher row a page was opened from (-1: none): back on the launcher, the cursor is on it again, not on
+// Continue (the user's choice, 2026-11-07). Set in activate_selected, put back in build_rows.
+int g_launcher_row = -1;
+
+// The launcher's row the cursor starts on: Main menu (the user's choice, 2026-11-07), after the disc row and Continue
+// when they are there; the disc row while no playable disc is chosen.
+int launcher_main_row() {
+    if (g_disc_on_main && !disc_playable())
+        return 0;
+    return (g_disc_on_main ? 1 : 0) + (newest_slot() != 0 ? 1 : 0);
 }
 
 // Start this program again from the launcher (another disc, or no boot state
@@ -1245,11 +1260,15 @@ void build_mods() {
         };
         return r;
     };
-    g_rows.push_back(page("Co-op", 1));
+    auto experimental = [](Row r) {
+        r.experimental = true;
+        return r;
+    };
+    g_rows.push_back(experimental(page("Co-op", 1)));
     g_rows.push_back(page("Challenge", 2));
     if (g_in_game)  // on the launcher it's Choose Character, under Load game
-        g_rows.push_back(page("Characters", 3));
-    g_rows.push_back(page("Cheats", 4));
+        g_rows.push_back(experimental(page("Characters", 3)));
+    g_rows.push_back(experimental(page("Cheats", 4)));
     g_rows.push_back(page("Sanity Effects", 5));
     // Only on the launcher: it is how Start game starts.
     if (!g_in_game) {
@@ -1342,11 +1361,12 @@ void build_launcher() {
 
     if (newest != 0) {
         Row load{"Load game"};
+        load.experimental = true;
         load.enabled = disc_playable();
         load.note = "Your save slots: load, duplicate or delete one.";
         load.activate = [] {
             g_screen = Screen::Play;
-            g_selected = 0;
+            g_selected = play_row(newest_slot());  // the save made last
         };
         g_rows.push_back(load);
     }
@@ -1355,6 +1375,7 @@ void build_launcher() {
     auto mods_page = [](const char* label, int section, const char* note) {
         Row r{label};
         r.note = note;
+        r.experimental = true;
         r.activate = [section] {
             g_options_return = Screen::Launcher;
             g_mods_return = Screen::Launcher;
@@ -2003,7 +2024,8 @@ void build_options_rows() {
 
     static const char* const kCameraNotes[] = {"", "", "The right stick turns it.", "The right stick looks around."};
     Row camera{"Camera", camera_mode_name(g_settings.camera)};
-    camera.section = "V \u00b7 Game";
+    camera.experimental = true;
+    camera.section = "I \u00b7 Display";  // Display's page (it was Game's, V)
     camera.page = 1;
     camera.note = kCameraNotes[g_settings.camera];
     camera.change = [](int dir) {
@@ -2150,6 +2172,7 @@ void build_options() {
     g_rows.push_back(page("Display", 1));
     g_rows.push_back(page("Sound", 2));
     Row graphics{"Graphics"};
+    graphics.experimental = true;
     graphics.activate = [] {
         g_options_row = g_selected;
         g_screen = Screen::Graphics;
@@ -2166,13 +2189,8 @@ void build_options() {
         g_selected = 0;
     };
     g_rows.push_back(controls);
-    g_rows.push_back(page("Game", 5));
-    Row mods = mods_row(Screen::Options);
-    mods.activate = [inner = mods.activate] {
-        g_options_row = g_selected;
-        inner();
-    };
-    g_rows.push_back(mods);
+    // Camera, Game text and FPS counter are on Display (their rows come under its heading in build_options_rows), and
+    // Mods is on the launcher and the in-game menu: neither is here (the user's choice, 2026-11-07).
 
     if (g_options_return == Screen::Launcher && !g_disc_on_main) {
         Row disc = disc_row();
@@ -2339,8 +2357,8 @@ void build_in_game() {
     states.gap = true;
     states.activate = [] {
         g_screen = Screen::States;
-        // At the first empty slot, for a run of saves: all used, the first.
-        g_selected = std::max(free_slot() - 1, 0);
+        // At the save made last (the user's choice, 2026-11-07); none yet, the first.
+        g_selected = std::max(newest_slot() - 1, 0);
     };
     g_rows.push_back(states);
 
@@ -2381,7 +2399,8 @@ void build_in_game() {
         }
         g_screen = Screen::Launcher;
         g_options_return = Screen::Launcher;
-        g_selected = g_disc_on_main && disc_playable() ? 1 : 0;
+        g_selected = launcher_main_row();
+        g_launcher_row = -1;  // from a game: Main menu, as at start
     };
     g_rows.push_back(launcher);
 
@@ -2581,12 +2600,22 @@ void render() {
         const bool is_back = r.label == "Back";
         if (is_back)
             out += " back";
+        if (r.experimental)
+            out += " tagged";
         out += "\" id=\"row" + std::to_string(i) + "\"><span class=\"label\">" + escape(r.label) + "</span>";
+        if (r.experimental)
+            out += "<span class=\"tag\">(Experimental, expect glitches)</span>";
         // On the settings pages, a row that opens another page says so.
         const bool opens = settings_page && !is_back && r.enabled && r.activate && !r.change;
         const std::string control = row_control(r, slot_list, opens);
+        // What the value is, so a settings page lines its column up (menu.rcss, body.settings).
+        const char* kind = r.toggle && (r.value == "On" || r.value == "Off")       ? " toggle"
+                           : r.slider >= 0                                          ? " level"
+                           : !slot_list && r.change && (r.enabled || r.browse)      ? " choice"
+                           : opens && r.value.empty() && r.value_rml.empty()        ? " opens"
+                                                                                    : " plain";
         if (!control.empty())
-            out += "<span class=\"leader\"></span><span class=\"value\">" + control + "</span>";
+            out += "<span class=\"leader\"></span><span class=\"value" + std::string(kind) + "\">" + control + "</span>";
         out += "</div>";
     }
     if (in_roster)
@@ -2610,6 +2639,9 @@ void render() {
     g_doc->SetClass("pause", g_screen == Screen::InGame);
     g_doc->SetClass("centered", centered);
     g_doc->SetClass("dense", g_screen == Screen::Controls || g_screen == Screen::Mapping);
+    // The settings pages (not Button Mapping's, which shows buttons): one column for every row's value.
+    g_doc->SetClass("settings", settings_page && g_screen != Screen::Mapping &&
+                                    !(g_screen == Screen::ModsPage && g_mods_section == 3));
     // Character select: one wide page, every frame at once.
     g_doc->SetClass("roster", g_screen == Screen::Characters);
     // Choose Character: the two players' cards on one wide page.
@@ -2645,6 +2677,12 @@ void build_rows() {
     case Screen::ModsPage: build_mods_page(); break;
     case Screen::Characters: build_characters(); break;
     }
+    // Back on the launcher from a page it opened: at the row that opened it.
+    static Screen built = Screen::Launcher;
+    if (g_screen == Screen::Launcher && built != Screen::Launcher && g_launcher_row >= 0 &&
+        g_launcher_row < static_cast<int>(g_rows.size()))
+        g_selected = g_launcher_row;
+    built = g_screen;
     if (g_selected >= static_cast<int>(g_rows.size()))
         g_selected = 0;
     render();
@@ -2665,6 +2703,8 @@ void activate_selected() {
     Row& r = g_rows[g_selected];
     if (!r.enabled)
         return;
+    if (g_screen == Screen::Launcher)
+        g_launcher_row = g_selected;
     if (r.activate)
         r.activate();
     else if (r.change)
@@ -3082,7 +3122,7 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
     g_disc_on_main = !(g_settings.disc[0] != '\0' && disc_playable() &&
                        g_discs[g_disc].path == g_settings.disc);
     g_screen = Screen::Launcher;
-    g_selected = g_disc_on_main && disc_playable() ? 1 : 0;
+    g_selected = launcher_main_row();
     // ED_MENU_OPEN=options, graphics, display, sound, image, shadows, lighting, effects, game,
     // controls, mapping, mods, coop, challenge, characters-page, cheats, characters, load,
     // states, slotN or deleteN[,row] (testing): the launcher opens on that page, at that

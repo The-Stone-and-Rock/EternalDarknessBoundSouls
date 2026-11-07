@@ -113,6 +113,30 @@ body.spread .menu {
 	border-radius: 8dp;
 }
 
+/* After a row's name: "(Experimental, expect glitches)", smaller, in the Tome's red. */
+.tag {
+	font-size: 1.6vh;
+	color: #8a2a1a;
+	margin-left: 1vh;
+	white-space: nowrap;
+}
+
+/* The settings pages: every value in one column at the right, its arrows on the column's edges and the value
+   centred between them, a switch or a level in its middle, and a page's arrow at its right end. */
+body.settings .value {
+	min-width: 30vh;
+	justify-content: center;
+}
+
+body.settings .value.opens {
+	justify-content: flex-end;
+}
+
+body.settings .value.choice .pick {
+	flex: 1 0 auto;
+	min-width: 0;
+}
+
 .leader {
 	flex: 1;
 	min-width: 2vh;
@@ -656,6 +680,31 @@ body.launcher .row {
 body.launcher .row.big {
 	font-size: 36dp;
 	padding: 2dp 2dp;
+}
+
+/* The launcher's rows a little closer, for the tags under three of them: the same letters, all still on the
+   parchment. */
+body.launcher .row {
+	line-height: 26dp;
+}
+
+body.launcher .row.big {
+	line-height: 38dp;
+}
+
+body.launcher .menu .gap {
+	height: 12dp;
+}
+
+/* A tagged row on the centred launcher: its name centred as the others', the tag in small letters under it. */
+body.launcher .row.tagged {
+	flex-direction: column;
+}
+
+body.launcher .tag {
+	font-size: 13dp;
+	line-height: 13dp;
+	margin: -4dp 0 0 0;
 }
 
 body.launcher .row .leader {
