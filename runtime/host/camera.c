@@ -1544,6 +1544,7 @@ bool hle_coop_player2_position(CPUState* cpu, float out[3]);  // hle.c
 bool hle_coop_player2_held(void);
 bool hle_coop_screen(void);                                    // hle.c
 bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* zoom);  // hle.c
+bool hle_coop_dream_shift(CPUState* cpu, float shift[3]);                              // hle.c
 bool hle_coop_player1_copy_up(void);                             // hle.c: their Tome's in a copy, the real world plays on
 bool hle_game_menu_open(CPUState* cpu);                         // hle.c
 bool hle_coop_tome_shares(void);                                // hle.c
@@ -1721,6 +1722,22 @@ void camera_split_update(CPUState* cpu) {
         const bool own = hle_coop_player2_camera(own_eye, own_target, own_up, &zoom2);
         eye2 = own ? v3(own_eye[0], own_eye[1], own_eye[2]) : eye;
         focus = own ? v3(own_target[0], own_target[1], own_target[2]) : target;
+        // The new game's dream's opening shots of player 1: the same on player 2 (hle.c).
+        float shift[3];
+        if (hle_coop_dream_shift(cpu, shift)) {
+            eye2 = add(eye2, v3(shift[0], shift[1], shift[2]));
+            focus = add(focus, v3(shift[0], shift[1], shift[2]));
+            // Moved, the eye can pass a wall (player 2 walking off as the turn ends in the room's corner): kept in
+            // front of the first wall between it and what it looks at, as the third-person camera below is.
+            const Vec3 out = sub(eye2, focus);
+            const float full = length(out);
+            if (g_collide != NULL && full > P2_CLEAR + 1.0f) {
+                const Vec3 d = scale(out, 1.0f / full);
+                const float reach = P2_CLEAR + line_reach(cpu, add(focus, scale(d, P2_CLEAR)), eye2, full - P2_CLEAR);
+                if (reach < full)
+                    eye2 = add(focus, scale(d, fmaxf(reach - TP_MARGIN, P2_CLEAR)));
+            }
+        }
     } else if (first) {
         // Through their eyes: a little ahead of the head (clear of the face
         // and hair, which both views draw), looking away from where the

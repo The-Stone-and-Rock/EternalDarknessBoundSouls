@@ -3719,6 +3719,15 @@ static bool cutscene_playing(CPUState* cpu) {
            guest_read_f32(cpu, g_letterbox_height) > 0.0f;
 }
 
+// The new game's opening dream is chapter 16 (L00/1911's ed87(0, 16, 0); the chapter is the word 0x80307178, `ed fn
+// ed87`), and only that script sets it. It isn't play as the rest of the game is: in co-op neither player opens a Tome
+// there (the user's rule, 2026-11-07). A Start in a scene or menu (a scene's skip) is left alone.
+#define CHAPTER_NOW 0x80307178u
+#define CHAPTER_DREAM 16u
+static bool coop_dream_no_tome(CPUState* cpu, bool menu, bool cutscene) {
+    return g_settings.mod_coop && !menu && !cutscene && mem_read32(cpu, CHAPTER_NOW) == CHAPTER_DREAM;
+}
+
 // Load Game goes straight to the saves: the memory card screen (Slot A or B)
 // is passed over. Its stage is 6 at 0x8061FE28 (5 on the title menu and the
 // save list), its loop waiting at 0x80170118 (the menu thread's saved pc at
@@ -4214,6 +4223,8 @@ static void hle_PADRead(CPUState* cpu) {
         state[0].error = 0;
     mash_to_gameplay_apply(cpu, &state[0].button, &state[0].stick_x,
                            &state[0].analog_a);
+    if (coop_dream_no_tome(cpu, menu, cutscene))
+        state[0].button &= (u16)~0x1000u;  // player 1's Start: no Tome in the dream
 #ifdef ED_AURORA
     if (g_coop_press_b) {
         state[0].button |= 0x0200u;  // PAD_BUTTON_B
@@ -11308,6 +11319,7 @@ static void coop_state(CPUState* cpu, CoopPlayerState* s, bool save) {
 static void coop_copies_follow(CPUState* cpu);
 static void coop_restore_held(CPUState* cpu);
 static void coop_rehold(CPUState* cpu);
+static void coop_give_held(CPUState* cpu);
 
 // The player's look for threats round them (0x800CBE7C(node): the threat
 // search, 0x80032174, every 16th frame), and where it keeps what it found
@@ -13466,6 +13478,59 @@ bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* 
         up[i] = g_coop_own_view[6 + i];
     }
     return isfinite(eye[0]) && isfinite(target[0]);
+}
+
+// The new game's dream opens with player 1 held in its first shots (L00/1911: state 1's DreamCam03, a close-up of them
+// at DreamMkr01, then state 2's DreamCam01 turning round them, held by fn139 till state 3's DreamCam02 lets go), and
+// player 2's half showed those same shots of player 1. The user asked for the same angle on player 2 (2026-11-07):
+// through those two shots their half is moved by where player 2 stands from player 1 (camera.c). DreamCam02, after,
+// follows each player as it is.
+#define DREAM_CAM01 533721086u
+#define DREAM_CAM03 533598205u
+// As the shots end, the game eases player 2's target from player 1's place to theirs (state 3's fn2(20): a twentieth
+// of the way a frame); the move goes out at the same rate, so their half doesn't jump.
+static bool coop_dream_shot(CPUState* cpu, float shift[3]) {
+    if (!coop_busy(cpu))
+        return false;
+    const s32 index = (s32)mem_read32(cpu, cpu->gpr[13] - CAMERA_INDEX);
+    if (index < 0 || index >= 12)
+        return false;
+    const u32 entry = mem_read32(cpu, 0x80603178u + (u32)index * 136u + 124u);
+    if (!guest_ram_range_valid(cpu, entry, 56u))
+        return false;
+    const u32 hash = mem_read32(cpu, entry + 52u);
+    if (hash != DREAM_CAM01 && hash != DREAM_CAM03)
+        return false;
+    const u32 p1 = mem_read32(cpu, cpu->gpr[13] - 26524u), p2 = mem_read32(cpu, g_coop_p2 + 52u);
+    if (p1 == p2 || !guest_ram_range_valid(cpu, p1, 12u) || !guest_ram_range_valid(cpu, p2, 12u))
+        return false;
+    for (u32 i = 0; i < 3u; i++)
+        shift[i] = guest_read_f32(cpu, p2 + i * 4u) - guest_read_f32(cpu, p1 + i * 4u);
+    return isfinite(shift[0]) && isfinite(shift[1]) && isfinite(shift[2]);
+}
+
+bool hle_coop_dream_shift(CPUState* cpu, float shift[3]) {
+    static float kept[3], weight;
+    static unsigned long long at;
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || mem_read32(cpu, CHAPTER_NOW) != CHAPTER_DREAM) {
+        weight = 0.0f;
+        return false;
+    }
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    float now[3];
+    if (coop_dream_shot(cpu, now)) {
+        memcpy(kept, now, sizeof kept);
+        weight = 1.0f;
+    } else if (weight < 0.01f) {
+        weight = 0.0f;
+        return false;
+    } else if (frame > at) {
+        weight *= powf(0.95f, (float)(frame - at < 60ull ? frame - at : 60ull));
+    }
+    at = frame;
+    for (u32 i = 0; i < 3u; i++)
+        shift[i] = kept[i] * weight;
+    return true;
 }
 
 // Brought to player 1's room, player 2 may stand in a way back (the stairs just
@@ -16752,6 +16817,7 @@ static void coop_player_turn(CPUState* cpu) {
     coop_bytes(cpu, COOP_CAMERA, camera, sizeof camera, false);
     coop_state(cpu, &g_coop_state[0], false);
     coop_restore_held(cpu);
+    coop_give_held(cpu);
     coop_rehold(cpu);
     coop_kinds(cpu, false);  // out first: a copy is given a kind of its own only with them out
     coop_copies_follow(cpu);
@@ -20691,6 +20757,48 @@ static void coop_rehold(CPUState* cpu) {
     fprintf(stderr, "[coop] player 2 held %u with nothing in their hand: their copy put there again\n", id);
 }
 
+// A script's spawn with effect 3 (ed3(..., 3)) puts what it made straight in the controlled character's hand: the
+// new game's dream (L00/1911) gives the Shotgun so, 0x80150D9C(equipment, id, ...) at 0x8000EABC. That is player 1's
+// alone, and player 2 began the dream with nothing in theirs. They get a copy of their own in their hand, as their
+// Tome puts a thing there (0x800C994C(equipment, id) with them the player, the copy made by hle_find_by_id, then
+// their moves for it, 0x8007A788), at the end of their next turn, as coop_rehold does.
+#define SPAWN_EQUIP_RETURN 0x8000EAC0u
+static struct {
+    u32 id, hands[2];  // what player 1 was given in hand (id 0: none), and its two words, for player 2
+} g_coop_give_held;
+static void notify_spawn_equip(CPUState* cpu) {
+    if (cpu->lr != SPAWN_EQUIP_RETURN || !g_settings.mod_coop || g_coop_turn || g_coop_tome_p2)
+        return;
+    g_coop_give_held.id = cpu->gpr[4];
+    g_coop_give_held.hands[0] = cpu->gpr[5];
+    g_coop_give_held.hands[1] = cpu->gpr[6];
+    fprintf(stderr, "[coop] a script put %u in player 1's hand: player 2's copy at their turn\n", g_coop_give_held.id);
+}
+
+static void coop_give_held(CPUState* cpu) {
+    const u32 id = g_coop_give_held.id;
+    if (id == 0u || g_coop_tome_p2 || g_coop_p2 == 0u)
+        return;
+    g_coop_give_held.id = 0u;
+    coop_tome_player(cpu, true);
+    u32 own = 0u, ignore = 0u;
+    const u32 find[2] = {mem_read32(cpu, g_coop_p2 + 16u), 0u};
+    const bool held = hle_guest_call(cpu, EQUIP_FIND, find, 2, 0.0, &own) && own != 0u;
+    if (held) {
+        // Listed as the spawn lists player 1's, then held (which lists it again: the record as listed is kept).
+        const u32 add[5] = {own, id, g_coop_give_held.hands[0], g_coop_give_held.hands[1], 0u};
+        hle_guest_call(cpu, EQUIP_ADD, add, 5, 0.0, &ignore);
+        u8 record[408];
+        coop_bytes(cpu, own, record, sizeof record, true);
+        const u32 hold[2] = {own, id};
+        hle_guest_call(cpu, EQUIP_HOLD, hold, 2, 0.0, &ignore);
+        coop_bytes(cpu, own, record, sizeof record, false);
+        hle_guest_call(cpu, EQUIP_MOVES, &g_coop_p2, 1, 0.0, &ignore);
+    }
+    coop_tome_player(cpu, false);
+    fprintf(stderr, "[coop] player 2 given %u in hand as player 1 was: %s\n", id, held ? "their copy" : "no equipment of theirs");
+}
+
 // ED_COPY_WATCH=1 (testing): the readying and letting go of a copy's
 // animation buffers (0x8011F460, 0x8011FC8C), and who called.
 static void notify_copy_watch(CPUState* cpu) {
@@ -21372,6 +21480,8 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     }
     DolPadState p2;
     controls_read_player2(&p2);
+    if (coop_dream_no_tome(cpu, menu, cutscene))
+        p2.button &= (u16)~0x1000u;  // player 2's Start: no Tome in the dream
     if (hle_coop_tome_shares() && owner == 1) {
         p2.button |= g_tw_taps;
         g_tw_taps = 0u;
@@ -22768,6 +22878,9 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* take = hle_dispatch_entry(EQUIP_TAKE);
             if (take != NULL && take->intercept == NULL && take->notify == NULL)
                 take->intercept = coop_equip_take;
+            HleDispatchEntry* listed = hle_dispatch_entry(EQUIP_ADD);
+            if (listed != NULL && listed->intercept == NULL && listed->notify == NULL)
+                listed->notify = notify_spawn_equip;
             HleDispatchEntry* step = hle_dispatch_entry(CAMERA_STEP);
             if (step != NULL && step->intercept == NULL && step->notify == NULL)
                 step->intercept = coop_game_camera;
