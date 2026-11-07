@@ -14706,6 +14706,11 @@ static bool coop_look_shows(u32 lr) { return lr == COOP_LOOK_SHOWS || lr == COOP
 static bool g_coop_show_kept;
 static void coop_show_asked(CPUState* cpu) {
     g_hle_passthrough = true;
+    if (getenv("ED_SHOW_TRACE") != NULL && sda_ready(cpu))  // testing: each show or hide asked
+        fprintf(stderr, "[show] %s(%u) lr 0x%08X player %s kept %d words 26276 %u 26272 %u frame %llu%c",
+                coop_look_hides(cpu->lr) || coop_look_shows(cpu->lr) ? "main" : "now", cpu->gpr[3], cpu->lr,
+                mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 ? "2" : "1", (int)g_coop_show_kept,
+                mem_read32(cpu, cpu->gpr[13] - 26276u), mem_read32(cpu, cpu->gpr[13] - 26272u), (unsigned long long)(cpu->timebase / 675000ull), 10);
     if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || cutscene_playing(cpu))
         return;
     if (cpu->gpr[3] != 0u) {
@@ -14713,6 +14718,11 @@ static void coop_show_asked(CPUState* cpu) {
             return;
         g_coop_show_kept = false;
         g_coop_unseen_out_of = -1;
+        // And the game's own show goes on too: a hide asked from a script (fn111, 0x80043C34) can reach the game in part
+        // before it's kept here. Its main word (0x80043C88 then 0x80043D70, r13-25688) hid player 1 from both views at
+        // the fireplace (L05/188 state 1), and the show swallowed here left them unseen after its wrong tile (the user,
+        // 2026-11-07; logs/run-20261107-*-p1-wrong-show). Showing what's shown is nothing.
+        return;
     } else {
         const bool theirs = (g_coop_use.active && g_coop_use.p2) || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2;
         if (!theirs && !g_coop_p1_look && !coop_look_hides(cpu->lr))
@@ -14756,6 +14766,8 @@ static void coop_show_asked(CPUState* cpu) {
 
 // 0x80043C88 from anywhere but a look's opening and end (fn207, a script's own) stays the game's.
 static void coop_show_main_asked(CPUState* cpu) {
+    if (getenv("ED_SHOW_TRACE") != NULL && sda_ready(cpu) && !coop_look_hides(cpu->lr) && !coop_look_shows(cpu->lr))
+        fprintf(stderr, "[show] main game's(%u) lr 0x%08X frame %llu%c", cpu->gpr[3], cpu->lr, (unsigned long long)(cpu->timebase / 675000ull), 10);
     if (coop_look_hides(cpu->lr) || coop_look_shows(cpu->lr)) {
         coop_show_asked(cpu);
         return;
