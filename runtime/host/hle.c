@@ -15794,6 +15794,25 @@ static bool coop_interface_ran(u32 lr) {
             return true;
     return false;
 }
+// The fireplace's wrong tile (0x80080D70, from the interface's tick on the pad's A) hits the game's current player with
+// 10 (event 39, 0x8008108C) at their place: the id from 0x801F62B8 (0x80080EBC, the one hit) and the node from 0x801F62B0
+// (0x80080EC4, where). Stepped from player 1's pad, that was player 1, whoever chose (125 -> 115,
+// logs/run-20261107-125442-fire-solve3). In player 2's close-up the interface is theirs (coop_interface_ran), so they are.
+#define COOP_PLAYER_NODE_FN 0x801F62B0u
+#define COOP_PLAYER_ID_FN 0x801F62B8u
+#define COOP_WRONG_TILE_ID 0x80080EC0u
+#define COOP_WRONG_TILE_NODE 0x80080EC8u
+static void coop_interface_player(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if ((cpu->lr != COOP_WRONG_TILE_ID && cpu->lr != COOP_WRONG_TILE_NODE) || !g_coop_screen || !g_coop_cameras.lent || g_coop_p2 == 0u ||
+        !guest_ram_range_valid(cpu, g_coop_p2 + 16u, 4u))
+        return;
+    cpu->gpr[3] = cpu->lr == COOP_WRONG_TILE_ID ? mem_read32(cpu, g_coop_p2 + 16u) : g_coop_p2;
+    if (getenv("ED_COOP_LOG") != NULL && cpu->lr == COOP_WRONG_TILE_ID)
+        fprintf(stderr, "[coop] the wrong tile's flare is player 2's: they chose it\n");
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
 static bool g_coop_p1_scan;  // their zones' look is running, with their prompts in (coop_scan_player1)
 static bool coop_prompt_player1s(CPUState* cpu, u32 fn, int count) {
     static bool running;
@@ -22276,6 +22295,15 @@ static void find_coop(CPUState* cpu) {
             fprintf(stderr, "[coop] a thing's end not found: a box player 2 empties goes for player 1 too\n");
     } else {
         fprintf(stderr, "[coop] reloading's ammo look not found: player 2 reloads from their own list only\n");
+    }
+    for (int i = 0; i < 2; i++) {
+        const u32 fn = i == 0 ? COOP_PLAYER_NODE_FN : COOP_PLAYER_ID_FN;
+        HleDispatchEntry* e = hle_dispatch_entry(fn);
+        if (e != NULL && e->intercept == NULL && e->notify == NULL && mem_read32(cpu, fn) == (i == 0 ? 0x806DAC0Cu : 0x806DAC08u))
+            e->intercept = coop_interface_player;
+        else
+            fprintf(stderr, "[coop] the current player's %s (0x%08X) not found: a puzzle's wrong tile in player 2's close-up hits player 1\n",
+                    i == 0 ? "node" : "id", fn);
     }
     HleDispatchEntry* reload_test = hle_dispatch_entry(COOP_RELOAD_TEST);
     if (mem_read32(cpu, COOP_RELOAD_TEST) == 0x9421FFE0u && reload_test != NULL && reload_test->intercept == NULL &&
