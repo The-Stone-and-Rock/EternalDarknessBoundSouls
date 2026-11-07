@@ -117,6 +117,14 @@ MENU="$MENU;$((T+PICK)),$((T+PICK+6)),0x0100"
 Q=$((T+QAT))
 if [ "$CH" != 1 ]; then MENU="$MENU;$Q,$((Q+6)),0x0100"; Q=$((Q+QGAP)); fi
 [ "${JTG_ETERNAL:-1}" = 0 ] || MENU="$MENU;$Q,$((Q+6)),0x0100"
+# JTG_NEWGAME=1: a NEW game instead (A on the title's Start Game, which is lit), and Start pressed every
+# JTG_SKIP_EVERY frames (default 100) from 250 after the title to JTG_SKIP_UNTIL (default 2600) to end each opening
+# scene. Give JTG_BASE: control's frame is the scenes' and the card's to decide (chapter is ignored).
+if [ "${JTG_NEWGAME:-0}" = 1 ]; then
+    MENU="$T,$((T+6)),0x0100"
+    f=$((T+250))
+    while [ $f -le "${JTG_SKIP_UNTIL:-2600}" ]; do MENU="$MENU;$f,$((f+6)),0x1000"; f=$((f+${JTG_SKIP_EVERY:-100})); done
+fi
 
 case "$CH" in 1) BASE=${JTG_BASE:-$((1900+LATER))} ;; 7) BASE=${JTG_BASE:-$((1600+LATER))} ;; *) BASE=${JTG_BASE:-$((2300+LATER))} ;; esac
 # Relative lists -> absolute: the first field of each item gets BASE added (and the second too for presses).

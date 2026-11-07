@@ -13428,6 +13428,23 @@ static void coop_run_script(CPUState* cpu) {
         g_hle_tail_call = false;
         return;
     }
+    // A camera's end script (fn11) fired by player 2's camera, in their turn with them the player, for a scene that
+    // isn't theirs: each player's camera follows the scene's path and fires it as it arrives. Run first in player 2's
+    // turn, the new game's dream (L00/1911) did its state 3 there, the scene's end (fn22(0), fn139(0)) letting go of
+    // player 2, who wasn't held, and went on to state 4; player 1's camera arrived two frames later and ran state 4, so
+    // player 1 stood held (busy 0x22, hold 1) for good and the dream's zombies went only for player 2
+    // (logs/run-20261106-222556-jtg-newgame-coop, frames 1977 and 1979). Left to player 1's camera, as in solo.
+    if (cpu->lr == ARRIVAL_END_RAN && (s32)cpu->gpr[3] > 0 && g_coop_turn && g_coop_p2 != 0u && sda_ready(cpu) &&
+        mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u) && !coop_p2_scene_on() &&
+        !g_coop_screen && !(g_coop_use.active && g_coop_use.p2) && !g_coop_entered_p2) {
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] script %d from player 2's camera arriving, not their scene: left to player 1's camera (frame %llu)\n",
+                    (s32)cpu->gpr[3], (unsigned long long)(cpu->timebase / 675000ull));
+        cpu->gpr[3] = 0u;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
     if (g_coop_p2 != 0u && sda_ready(cpu) && !(g_coop_use.active && g_coop_use.p2) &&
         mem_read32(cpu, cpu->gpr[13] - 21496u) != mem_read32(cpu, g_coop_p2 + 16u)) {
         g_coop_p1_ran_script = (s32)cpu->gpr[3];
