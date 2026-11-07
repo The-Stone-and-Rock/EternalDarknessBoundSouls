@@ -19,6 +19,7 @@ in build/ed-db/unpacked/ (derived from the disc: never committed).
 """
 import concurrent.futures
 import glob
+import math
 import os
 import struct
 import sys
@@ -115,6 +116,57 @@ def bones_of(x, lst, model):
     return [struct.unpack('>I', x[bl + i * 80 + 64:bl + i * 80 + 68])[0] for i in range(n)]
 
 
+def bone_turns(x, lst, model, with_world=False):
+    """Each bone's turn from its parent as made (a quaternion x, y, z, w, as the game's rotation keys: s16 / 16384).
+    A bone's +12 matrix takes the model into the bone (its rows are the bone's axes); its turn from the parent is
+    R(bone) R(parent)^T, the root's R(bone). The rows are made unit first (some dummy bones are scaled)."""
+    count, magic = struct.unpack('>II', x[lst:lst + 8])
+    if magic != 0x6B5 or model >= count:
+        return None
+    off = struct.unpack('>I', x[lst + 8 + model * 8:lst + 12 + model * 8])[0]
+    a = lst + off
+    n = struct.unpack('>H', x[a + 8:a + 10])[0]
+    bl = a + struct.unpack('>I', x[a + 36:a + 40])[0]
+    rows, parents = [], []
+    for i in range(n):
+        m = struct.unpack('>12f', x[bl + i * 80 + 12:bl + i * 80 + 60])
+        R = []
+        for r in range(3):
+            v = [m[r * 4 + c] for c in range(3)]
+            s = math.sqrt(sum(c * c for c in v)) or 1.0
+            R.append([c / s for c in v])
+        rows.append(R)
+        parents.append(struct.unpack('>H', x[bl + i * 80 + 76:bl + i * 80 + 78])[0])
+    out = []
+    for i in range(n):
+        R = rows[i]
+        if parents[i] < n:
+            P = rows[parents[i]]
+            R = [[sum(R[r][k] * P[c][k] for k in range(3)) for c in range(3)] for r in range(3)]
+        out.append(quat(R))
+    if with_world:
+        return out, [quat(rows[i]) for i in range(n)], parents
+    return out
+
+
+def quat(R):
+    t = R[0][0] + R[1][1] + R[2][2]
+    if t > 0:
+        s = math.sqrt(t + 1.0) * 2
+        q = [(R[2][1] - R[1][2]) / s, (R[0][2] - R[2][0]) / s, (R[1][0] - R[0][1]) / s, 0.25 * s]
+    elif R[0][0] > R[1][1] and R[0][0] > R[2][2]:
+        s = math.sqrt(1.0 + R[0][0] - R[1][1] - R[2][2]) * 2
+        q = [0.25 * s, (R[0][1] + R[1][0]) / s, (R[0][2] + R[2][0]) / s, (R[2][1] - R[1][2]) / s]
+    elif R[1][1] > R[2][2]:
+        s = math.sqrt(1.0 + R[1][1] - R[0][0] - R[2][2]) * 2
+        q = [(R[0][1] + R[1][0]) / s, 0.25 * s, (R[1][2] + R[2][1]) / s, (R[0][2] - R[2][0]) / s]
+    else:
+        s = math.sqrt(1.0 + R[2][2] - R[0][0] - R[1][1]) * 2
+        q = [(R[0][2] + R[2][0]) / s, (R[1][2] + R[2][1]) / s, 0.25 * s, (R[1][0] - R[0][1]) / s]
+    n = math.sqrt(sum(c * c for c in q)) or 1.0
+    return [max(-32767, min(32767, int(round(c / n * 16384)))) for c in q]
+
+
 def script_levels():
     out = {}
     for path in glob.glob(os.path.join(DB, 'scripts', 'L*', '*.lua')):
@@ -164,12 +216,13 @@ def main(argv):
         c = next(c for c in range(12) if models[c] == m)
         sources[m] = ('Levels/Level%02d/U_Level%02d.bin' % (c, c), True)
     raws = unpacked(sorted({s[0] for s in sources.values()}))
-    skel = {}
+    skel, turns, worlds, parents_of = {}, {}, {}, {}
     print('\nskeletons (bone count, from):')
     for m, (name, is_pack) in sorted(sources.items()):
         x = raws[name]
         b = bones_of(x, body_list(x, is_pack), m)
         skel[m] = b
+        turns[m], worlds[m], parents_of[m] = bone_turns(x, body_list(x, is_pack), m, True) if b else (None, None, None)
         tracks = sorted({t for part in moves.get(m, {}).values() for i, t in part.items() if i == FINISH})
         print('  %3d %-8s %s bones, %s; move 65 has %s tracks (a bone each and the root)' % (
             m, NAMES.get(m, ''), len(b) if b else 'NO', name, tracks or '-'))
@@ -185,6 +238,43 @@ def main(argv):
                 print('};')
         print('static const struct { int model; u32 count; const u32* names; } kFinSkeletons[] = {')
         print('    ' + ', '.join('{%d, %d, kFinBones%d}' % (m, len(skel[m]), m) for m in sorted(skel) if skel[m]) + '};')
+    if '--turns' in argv:
+        # Each bone's turn from its parent as made (bone_turns), for wpn_bind: a name match whose turns differ a lot
+        # (Ellia's side braid against Alex's ponytail, 54-61 degrees) isn't played from the home's track.
+        print('\n// --- C tables (tools/ed/facts/weapon_homes.py --turns) ---')
+        for m in sorted(turns):
+            if turns[m]:
+                print('static const s16 kFinTurns%d[%d][4] = {' % (m, len(turns[m])))
+                for i in range(0, len(turns[m]), 6):
+                    print('    ' + ', '.join('{%d, %d, %d, %d}' % tuple(q) for q in turns[m][i:i + 6]) + ',')
+                print('};')
+        # Each bone's place as made, turned (the +12 matrix's rows made unit, as a quaternion) and its parent: what a
+        # reload's move from the gun's home is turned by to sit on another's bones (fin_fit).
+        for m in sorted(turns):
+            if turns[m]:
+                print('static const s16 kFinWorld%d[%d][4] = {' % (m, len(worlds[m])))
+                for i in range(0, len(worlds[m]), 6):
+                    print('    ' + ', '.join('{%d, %d, %d, %d}' % tuple(q) for q in worlds[m][i:i + 6]) + ',')
+                print('};')
+                print('static const u16 kFinParent%d[%d] = {%s};' % (m, len(parents_of[m]), ', '.join(str(v) for v in parents_of[m])))
+        print('static const struct { int model; u32 count; const s16 (*turns)[4]; const s16 (*world)[4]; const u16* parent; } kFinTurnsOf[] = {')
+        print('    ' + ', '.join('{%d, %d, kFinTurns%d, kFinWorld%d, kFinParent%d}' % (m, len(turns[m]), m, m, m) for m in sorted(turns) if turns[m]) + '};')
+        # The name matches whose turns differ by more than 45 degrees, for each pair the user plays (a check).
+        def angle(a, b):
+            d = abs(sum(a[k] * b[k] for k in range(4))) / (16384.0 * 16384.0)
+            return math.degrees(2 * math.acos(min(1.0, d)))
+        for holder, home in ((70, 9), (70, 18), (85, 75), (74, 75), (0, 18), (75, 150)):
+            if not (skel.get(holder) and skel.get(home)):
+                continue
+            far = []
+            for j, name in enumerate(skel[holder]):
+                if name in skel[home]:
+                    k = skel[home].index(name)
+                    a = angle(turns[holder][j], turns[home][k])
+                    if a > 45:
+                        far.append('%d->%d %.0f' % (j, k, a))
+            print('// %s with %s\'s moves: name matches turned over 45 degrees: %s' % (
+                NAMES.get(holder), NAMES.get(home), ', '.join(far) or 'none'))
 
 
 if __name__ == '__main__':

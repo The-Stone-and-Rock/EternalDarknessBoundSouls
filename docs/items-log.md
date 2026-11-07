@@ -51,6 +51,7 @@ Finisher, slot13 (Pius's chapter, room 342, 2026-11-06): player 1 held item 96 (
 - An item whose Use runs script 2243 (`0x8C3`) and casts spell `0x40011041`, in slot 1.
 - Item ids a script asked for in Paul's chapter: 678 and 733. The save had them, but the log gives no names.
 - Items 733 and 831: Karim's door script 132 (ch4 room 338) and Anthony's script 892 send the chapter's character to room 5 unless they carry one of them (round-1 finisher agent's reading, 2026-11-05).
+- Dual Flintlocks in hand (the user's slot 1, ch5 room 258, 2026-11-07, `ed carried`): two carried things, both IN HAND, the Flintlock Pistol (type 149, mask 2) and the Dual Flintlocks (type 229, mask 1). Each gun has its own record and its own clip of 1 (player 2's copies 0x807098E0 left, 0x807098FC right). The RELOAD prompt looks at the right one; B loads the right one if it isn't full, then the left one (logs/run-20261107-111233-s1-p2fix).
 
 ## Player 2's Tome tabs
 

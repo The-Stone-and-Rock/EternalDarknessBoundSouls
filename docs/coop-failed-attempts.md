@@ -595,3 +595,42 @@ What was found and built (`coop_reload_lists`, `coop_reload_test`, all behind `E
 Why it's off: script 2221 (the Flintlock's reload) only sends event 198 (ed129), which puts the character in state 90 (0x80079C58: move 10, then the load). For player 2 state 90 never ended, from B through `coop_use_start` and from Z alike, with Pius and with Peter's body (part 63 played): logs/run-20261107-013647-reload-trace4 (Pius, B), logs/run-20261107-014013-reload-peter (Peter, Z), logs/run-20261107-014203-reload-peter2 (Peter, B). Next: what ends state 90 for player 1 (the move's end, an event from their behaviour, or the load's call), and why player 2's behaviour, ticked outside their turn (`coop_events`' early branch), doesn't reach it. `ED_ANIM_TRACE=1` with `ED_COOP_P2_RELOAD=1 ED_RELOAD_TRACE=1` on `saves/reload-p2.state` and `ED_SETTINGS` with mod_p2_character = 9 (Peter).
 
 Solved: on event 6 (the move's end) state 90 posts 204 to the controlled character (0x80053C34: r13-25656's controller, 0x8019BA14), player 1 outside player 2's turn (logs/run-20261107-*-reload-ev204). `coop_send_event` sends it to player 2. Then the round came off player 1's box: the loads (0x8007A09C, 0x8007A1DC) run from the move's frame and use 0x801F62B0, "the player". Swapping `coop_kinds` around player 2's events didn't keep their count (their count of this box went back to 5 each time: logs/run-20261107-021220-reload-counts6, -counts7); a table of their own per box kind (`g_coop_boxes`) with player 2 made the player for the load (`coop_be_player2`) does, and shows their count in their half.
+
+### Player 2's box count in a host table (2026-11-07, replaced the same day)
+
+`g_coop_boxes[16]` (kind address → player 2's count, starting from player 1's count) kept player 2's rounds per box kind. A save state doesn't keep it, so after a load it started again at player 1's count. In the user's slot 1 that was 1, while `coop_kinds` (which save states keep) had their 5, so their reload loaded from the wrong count (logs/run-20261107-110724-s1-p2clip: "theirs 1 -> 0"). Code:
+
+```c
+static u16* coop_box_count(CPUState* cpu, u32 kind, bool make) {
+    for (int i = 0; i < COOP_BOXES; i++)
+        if (g_coop_boxes[i].used && g_coop_boxes[i].kind == kind)
+            return &g_coop_boxes[i].count;
+    ...  // else a new entry with mem_read16(cpu, kind + THING_KIND_COUNT): player 1's
+}
+```
+
+Now a kind with a mark keeps player 2's count in `coop_kinds`' own entry (`coop_kind(mark)`), the one their turn and Tome use. The table stays only for kinds without a mark.
+
+### Plain Ellia's hair with Alex's gun moves (2026-11-07, both tries reverted)
+
+With Alex's part 63 fitted by bone name (57 of her 77 bones), plain Ellia's hair stands out in spikes (logs/run-20261107-114349-p2ellia-plain1; off, logs/run-20261107-114403-p2ellia-plain0, it's her bob). The Maid (67 of 73) and rotten Ellia (59 of 62) fit better and weren't seen to break.
+
+1. The unmatched bones as modelled (no track) instead of held at the first key of the move playing: still spikes (logs/run-20261107-114639-p2ellia-modelled). The two bones on her head (49, 71, parent 21) aren't the cause on their own.
+2. Each matched bone's second list (where it sits) from her own move, the home's first list (its turning) kept, in `wpn_bind`/`wpn_fit`. Her hair came back right (logs/run-20261107-114839-p2ellia-ownplace), but it applied to every borrowed weapon and broke Anthony's shot with Peter's moves: he leaned back stiffly after firing (logs/run-20261107-115004-v-anthony, shot 38). The second list carries pose, not just proportions. Code (reverted):
+
+```c
+// wpn_bind, a bone by name:
+const u32 keys = j > 0u && now != 0u && j < now_n && mem_read16(cpu, now + j * 16u + 8u) != 0u ? mem_read32(cpu, now + j * 16u + 12u) : 0u;
+if (guest_ram_range_valid(cpu, keys, 12u)) { /* held[j][1] = its first key; own_place[j] = true */ }
+// wpn_fit: for own_place bones, list 1 = that key held for the whole move (two keys, first and last time)
+```
+
+Dropping the home's second list altogether (zeros) makes the mesh fly apart (logs/run-20261107-114732-p2ellia-rot).
+
+### Max's reload on Ellia with far-turned bones left out (2026-11-07, replaced the same day)
+
+Swapping the Flintlock's own reload (Max's move 10) onto Ellia, with name matches turned more than 45 degrees from Max's left out and everything under them held: 36 of her bones were left out, all of her arms under her shoulders (55 degrees off Max's), so she reloaded with her arms frozen at her sides (logs/run-20261107-121659-r-ellia). Replaced by turning each key to her body (`fin_fit`'s `g_fin[k].fix`: L' = C(parent)^T L C(bone), C = R(home) R(holder)^T of the +12 matrices), logs/run-20261107-122607-rt-ellia.
+
+### Turning a reload's keys by the difference in each bone's place as made (2026-11-07, off the same day)
+
+`L' = C(parent)^T L C(bone)`, `C = R(home) R(holder)^T` (`g_fin[k].fix`, now only with ED_RELOAD_TURN=1). It keeps each bone as far from the holder's own pose as made as the home's is from his. Ellia's arms are made out to the sides and Max's are not, so with Max's reload she stretched her arms wide and moved her hands up and down: "that is not the animation at all" (the user; logs/run-20261107-122607-rt-ellia, -123051-len-ellia). The same bone has to be posed as the home poses it: the home's turns as they are, with the holder's own lengths (`g_fin[k].length`), logs/run-20261107-123406-len2-ellia.
