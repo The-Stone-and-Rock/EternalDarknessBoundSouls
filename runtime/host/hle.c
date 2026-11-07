@@ -14662,6 +14662,7 @@ static bool continue_coop_use(CPUState* cpu) {
 // As for the script a window closed in their close-up runs (0x80024220; a
 // thing found's, 0x80024434).
 #define PROMPT_USE_RAN 0x8000704Cu
+static bool coop_interface_ran(u32 lr);  // an interface's script runs (below, by coop_prompt_player1s)
 #define WINDOW_CLOSE_RAN 0x800242E4u
 #define FOUND_CLOSE_RAN 0x800244C0u
 // As for the script a close-up's end runs (0x80025194), which makes its look ready again
@@ -14917,7 +14918,10 @@ static void coop_run_script(CPUState* cpu) {
     }
     // A camera's arriving is one too (ARRIVAL_END_RAN): run as player 1's, from their word, the close-up's
     // find came again, for player 1, with the notice on player 2's half.
-    if (!g_coop_screen || g_coop_use.active || (cpu->lr != PROMPT_USE_RAN && cpu->lr != WINDOW_CLOSE_RAN && cpu->lr != FOUND_CLOSE_RAN && cpu->lr != CLOSE_UP_END_RAN && cpu->lr != ARRIVAL_END_RAN) ||
+    // An interface's in their close-up too (coop_interface_ran): its close or selection runs the look's script.
+    if (!g_coop_screen || g_coop_use.active ||
+        (cpu->lr != PROMPT_USE_RAN && cpu->lr != WINDOW_CLOSE_RAN && cpu->lr != FOUND_CLOSE_RAN && cpu->lr != CLOSE_UP_END_RAN &&
+         cpu->lr != ARRIVAL_END_RAN && !coop_interface_ran(cpu->lr)) ||
         (s32)cpu->gpr[3] <= 0)
         return;
     const u32 ran = cpu->lr;
@@ -15773,11 +15777,31 @@ static void coop_prompt_choose(CPUState* cpu) {
 }
 
 #define COOP_PROMPT_SET 0x80117404u
+// The interfaces (ed56(n) opens one, ed68(n) closes it: the fireplace's sliding tiles, the safe, the clock's hands, a
+// rune to scribe; docs/game/research/verbs.md "The interfaces"): their ticks and bindings, 0x8007A968..0x80083700. One
+// opened in player 2's close-up (L05/188's ed56(3)) is theirs: its prompts (MOVE, EXIT, SELECT: 25, 57, from 0x800812A0)
+// went to player 1's half, and the script it runs as it closes or selects ran as player 1's, so its hold(1) and
+// player_on(1) were player 1's and player 2 stood held and unseen in their own view for good (the user, 2026-11-07,
+// logs/run-20261107-124846-fire-p2b). Each bl 0x801642D4 in it, by its return (build/ed-db/disasm.txt):
+#define COOP_INTERFACE_CODE 0x8007A968u
+#define COOP_INTERFACE_END 0x80083700u
+static bool coop_interface_ran(u32 lr) {
+    static const u32 kRan[] = {0x8007DB5Cu, 0x8007E40Cu, 0x8007E71Cu, 0x8007EAE4u, 0x8007EB7Cu, 0x8007F1E8u, 0x8007F208u, 0x8007F228u,
+                               0x8007F23Cu, 0x8007FEF8u, 0x8007FF0Cu, 0x8007FF20u, 0x8007FFF0u, 0x80080004u, 0x80080018u, 0x800802C4u,
+                               0x800802E4u, 0x800805B4u, 0x80080A58u, 0x80080A74u, 0x80080E1Cu, 0x80081230u, 0x80081364u};
+    for (size_t i = 0; i < sizeof kRan / sizeof kRan[0]; i++)
+        if (kRan[i] == lr)
+            return true;
+    return false;
+}
 static bool g_coop_p1_scan;  // their zones' look is running, with their prompts in (coop_scan_player1)
 static bool coop_prompt_player1s(CPUState* cpu, u32 fn, int count) {
     static bool running;
     if (running || g_coop_p1_scan || !g_coop_screen || !g_coop_cameras.lent || g_coop_use.active || !sda_ready(cpu) ||
         mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2)
+        return false;
+    // An interface's own asks (its MOVE, EXIT, SELECT) are the close-up's, which is player 2's.
+    if (cpu->lr >= COOP_INTERFACE_CODE && cpu->lr < COOP_INTERFACE_END)
         return false;
     // The close-up's own asks (script -2: its DETAIL, RETURN, PICK UP) are the close-up's, which is player 2's. Its steps run
     // from the game's pad, as player 1's, and the RETURN after player 2's words went into player 1's prompts: their B did nothing.
