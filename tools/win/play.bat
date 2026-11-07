@@ -1,5 +1,5 @@
 @echo off
-rem Eternal Darkness Recomp (Windows, 64-bit): the ready-made game folder.
+rem Eternal Darkness: Bound Souls (Windows, 64-bit): the ready-made game folder.
 rem Put your own image of the European disc (GEDP01, .iso or .gcm) in the dump
 rem folder, then run this. The first start reads the game's program from the
 rem disc into generated\main.dol; the graphics, sound and music always come

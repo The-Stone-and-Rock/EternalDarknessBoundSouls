@@ -10,6 +10,8 @@ set "P=%~2"
 if "%P%"=="" set "P=%USERPROFILE%\src\winpkg"
 rem The newest x64 CRT redist on this PC (VS Build Tools 18, MSVC 14.50).
 set "CRT=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Redist\MSVC\14.50.35710\x64\Microsoft.VC145.CRT"
+rem Or VS 2022 Build Tools' (MSVC 14.44, VC143), as on the co-op PC.
+if not exist "%CRT%" set "CRT=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Redist\MSVC\14.44.35112\x64\Microsoft.VC143.CRT"
 if exist "%P%" rmdir /s /q "%P%"
 mkdir "%P%\bin"
 mkdir "%P%\lic"

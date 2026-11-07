@@ -10,7 +10,7 @@
 # main.dol from it.
 #
 #   tools/win/make-win-package.sh build/release/win-stage
-#     -> build/release/EternalDarkness-windows-x64-<time>-<commit>.zip
+#     -> build/release/EternalDarknessBoundSouls-windows-x64-[<VERSION>-]<time>-<commit>.zip
 set -e
 SRC=$(cd "$(dirname "$0")/../.." && pwd)
 HERE="$SRC/tools/win"
@@ -24,7 +24,7 @@ STAMP=$(date +%Y%m%d%H%M)
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-P="$work/EternalDarknessRecomp"
+P="$work/EternalDarknessBoundSouls"
 mkdir -p "$P/dump"
 
 # The game, its DLLs and the Visual C++ runtime; the menus and fonts as they
@@ -60,7 +60,17 @@ found=$(find "$P" \( -iname '*.dol' -o -iname '*.iso' -o -iname '*.gcm' -o -inam
 [ -z "$found" ] || { echo "make-win-package.sh: game or player files in the package:" >&2; echo "$found" >&2; exit 2; }
 
 mkdir -p "$OUTDIR"
-zip_path="$OUTDIR/EternalDarkness-windows-x64-$STAMP-$COMMIT.zip"
+zip_path="$OUTDIR/EternalDarknessBoundSouls-windows-x64-${VERSION:+$VERSION-}$STAMP-$COMMIT.zip"
 rm -f "$zip_path"
-(cd "$work" && COPYFILE_DISABLE=1 zip -q -r -X "$zip_path" EternalDarknessRecomp)
+# zip on a Mac; on the Windows PC (no zip there) Python's zipfile makes the same archive.
+if command -v zip > /dev/null; then
+    (cd "$work" && COPYFILE_DISABLE=1 zip -q -r -X "$zip_path" EternalDarknessBoundSouls)
+else
+    (cd "$work" && python -I -c 'import os, sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+    for root, dirs, files in os.walk("EternalDarknessBoundSouls"):
+        dirs.sort()
+        for f in sorted(files):
+            z.write(os.path.join(root, f))' "$(cygpath -w "$zip_path" 2>/dev/null || echo "$zip_path")")
+fi
 echo "$zip_path ($(du -h "$zip_path" | cut -f1))"
