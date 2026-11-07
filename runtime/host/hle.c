@@ -7353,7 +7353,9 @@ static struct {
 static struct {
     int model, part;  // what is in the slot, -1 nothing
     u32 ready, sets;
-} g_p2_moves[P2_MOVES_SLOTS + 3] = {{-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}};
+    int home;  // whose file the part loaded is from (wpn_serve: another's, for the weapon held), -2 not known (a state's)
+} g_p2_moves[P2_MOVES_SLOTS + 5] = {{-1, -1, 0u, 0u, -1}, {-1, -1, 0u, 0u, -1}, {-1, -1, 0u, 0u, -1}, {-1, -1, 0u, 0u, -1}, {-1, -1, 0u, 0u, -1},
+                                    {-1, -1, 0u, 0u, -1}, {-1, -1, 0u, 0u, -1}, {-1, -1, 0u, 0u, -1}, {-1, -1, 0u, 0u, -1}};
 // A file's moves for a form's held pose, past the four and past the first body (slot 4 would be on SCRATCH_BODY).
 #define COSTUME_MOVES_SLOT 5
 // The held weapon's home character's part, for their finishing move (fin_swap): past the Tome's memory (SCRATCH_TOME,
@@ -7361,8 +7363,14 @@ static struct {
 // (p2_moves_clear) as the level data unpacks: none goes there.
 #define FIN_MOVES_SLOT 6
 #define SCRATCH_FINISH 0x82400000u
+// Player 1's two slots for a weapon held that isn't their kind (wpn_serve): player 2's are their own two. Past the
+// finish's lists (FIN_SCRATCH) and before the meshes' pools (DETAIL_POOL_POINTS, 0x82800000); no level data goes there.
+#define WPN_P1_SLOT 7
+#define SCRATCH_WPN_P1 0x82600000u
 static u32 moves_slot_table(int k) {
-    return k == FIN_MOVES_SLOT ? SCRATCH_FINISH : SCRATCH_RAM + (u32)k * P2_MOVES_SLOT;
+    return k == FIN_MOVES_SLOT ? SCRATCH_FINISH
+           : k >= WPN_P1_SLOT  ? SCRATCH_WPN_P1 + (u32)(k - WPN_P1_SLOT) * P2_MOVES_SLOT
+                               : SCRATCH_RAM + (u32)k * P2_MOVES_SLOT;
 }
 // Track lists too long for where they streamed in (costume_tracks), past that file's part.
 #define SCRATCH_TRACKS 0x81D90000u
@@ -7573,15 +7581,20 @@ static int moves_part(CPUState* cpu, int model, u32 list, u32 count, int part) {
     return instead >= 0 && moves_listed(cpu, list, count, instead) >= 0 ? instead : part;
 }
 
+static void wpn_forget(int k);
+
 static void p2_moves_clear(void) {
-    for (int k = 0; k < P2_MOVES_SLOTS + 2; k++)
-        g_p2_moves[k].model = g_p2_moves[k].part = -1;
+    for (int k = 0; k < P2_MOVES_SLOTS + 2; k++) {
+        g_p2_moves[k].model = g_p2_moves[k].part = g_p2_moves[k].home = -1;
+        wpn_forget(k);
+    }
 }
 
 static bool p2_moves_load(CPUState* cpu, int k, int model, int part) {
     const u32 table = moves_slot_table(k);
     const u32 at = table + 0x400u;
     const u32 end = table + P2_MOVES_SLOT;
+    wpn_forget(k);  // the slot's part is about to change: none of its moves is fitted to a holder now
     // What was in it lets go of its animations first.
     if (g_p2_moves[k].model >= 0) {
         const u32 n = mem_read16(cpu, g_p2_moves[k].ready + 20u);
@@ -7593,7 +7606,7 @@ static bool p2_moves_load(CPUState* cpu, int k, int model, int part) {
                 hle_guest_call(cpu, MOVES_FREE, &entry, 1, 0.0, &ignore);
             }
         }
-        g_p2_moves[k].model = g_p2_moves[k].part = -1;
+        g_p2_moves[k].model = g_p2_moves[k].part = g_p2_moves[k].home = -1;
     }
     char path[32];
     snprintf(path, sizeof path, "/Chars/char%04d.cpk", model);
@@ -7640,6 +7653,7 @@ static bool p2_moves_load(CPUState* cpu, int k, int model, int part) {
     g_p2_moves[k].part = part;
     g_p2_moves[k].ready = ready;
     g_p2_moves[k].sets = sets;
+    g_p2_moves[k].home = model;
     fprintf(stderr, "[coop] player 2's moves: part %d of %s (%u bytes, %u sets, part %d played)\n", part, path, size, n,
             played);
     return true;
@@ -7658,7 +7672,7 @@ static u32 g_coop_turn_p1;
 // tracks had no keys made ready, and the key search (0x8011FD64) walked
 // memory for ever (0x8011FDA8).
 static bool moves_slot_playing(CPUState* cpu, u32 object, int k) {
-    const u32 base = SCRATCH_RAM + (u32)k * P2_MOVES_SLOT;
+    const u32 base = moves_slot_table(k);
     const u32 anim = mem_read32(cpu, object + 64u);
     if (!guest_ram_range_valid(cpu, anim + 2176u, 2u))
         return false;
@@ -7672,6 +7686,9 @@ static bool moves_slot_playing(CPUState* cpu, u32 object, int k) {
         return false;
     return mem_read32(cpu, set + 4u) - base < P2_MOVES_SLOT;
 }
+
+static int wpn_part(CPUState* cpu, u32 node, int model, int part, int* home);
+static int wpn_serve(CPUState* cpu, u32 object, int model, int part, int first, int home, int want, bool p2);
 
 static void hle_moves_want(CPUState* cpu) {
     g_hle_passthrough = true;
@@ -7699,6 +7716,20 @@ static void hle_moves_want(CPUState* cpu) {
         fprintf(stderr, "[moves] %s (character %d, object 0x%08X) asks part %d (lr 0x%08X)\n",
                 p2 ? "player 2" : model == (s16)mem_read16(cpu, COOP_PLAYABLE_SLOT + 4u) ? "player 1" : "another",
                 model, object, part, cpu->lr);
+    // A weapon held that isn't their kind: its home character's part, fitted to their body (wpn_serve), from host
+    // slots of the player's own (player 2's two, player 1's WPN_P1_SLOT two). Anything else as before.
+    {
+        const u32 node = p2 ? (g_coop_p2 != 0u && mem_read32(cpu, g_coop_p2 + 52u) == object ? g_coop_p2 : 0u)
+                            : (p1 != 0u && mem_read32(cpu, p1 + 52u) == object ? p1 : 0u);
+        int home = -1;
+        const int want = node != 0u ? wpn_part(cpu, node, model, part, &home) : -1;
+        const int served = want >= 0 ? wpn_serve(cpu, object, model, part, p2 ? 0 : WPN_P1_SLOT, home, want, p2) : -1;
+        if (served >= 0) {
+            g_hle_passthrough = false;
+            hle_set_u32(cpu, (u32)served);
+            return;
+        }
+    }
     if (!p2 && model == (s16)mem_read16(cpu, COOP_PLAYABLE_SLOT + 4u)) {
         // Player 1, from the playable's file (its list kept at 0x80582360).
         const u32 header = 0x80582360u;
@@ -7717,7 +7748,7 @@ static void hle_moves_want(CPUState* cpu) {
     const int first = p2 ? 0 : P2_MOVES_OTHERS;
     int k = -1;
     for (int i = first; i < first + 2 && k < 0; i++)
-        if (g_p2_moves[i].model == model && g_p2_moves[i].part == part)
+        if (g_p2_moves[i].model == model && g_p2_moves[i].part == part && g_p2_moves[i].home == model)
             k = i;
     if (k < 0) {
         // Into the slot of theirs they are not playing from.
@@ -8248,6 +8279,468 @@ static void fin_fit(CPUState* cpu, int k) {
     mem_write32(cpu, record, list_at);
 }
 
+// Any character, any weapon. A weapon's moves are a seven of parts (InvU +54, the place in it from health and sanity),
+// and each character's file has only the sevens of their own chapter's weapons: Pius's has no pistol's (63), so with the
+// Flintlock he asked 63 and played his sword's 14 (moves_part), swinging it; Peter's 63 is his revolver's, so he aimed
+// Karim's Chakrams. A weapon held that isn't one of the holder's chapter's (kWeaponIn), whose part their file lacks or
+// has for another kind of weapon (moves_same_kind), plays its home character's part: loaded from the home's file into one
+// of the player's own host slots (player 2's two, player 1's WPN_P1_SLOT two), each move of it fitted to the holder's
+// body bone by bone by name as it streams in (wpn_fit), as the finisher's one move is (fin_swap, fin_fit, left as they
+// are). Moves the home's part lacks play table[15] as the game does. Lindsey's and Michael's own blade's part for a sword
+// (moves_instead) is kept. ED_WEAPON_MOVES=0: off, as before.
+// Each weapon and the playables of the levels that place or give it (tools/ed/facts/weapon_homes.py's levels), the home
+// first.
+static const struct { u16 item, model; } kWeaponIn[] = {
+    {59, 75},  {62, 74},  {63, 69},  {64, 9},   {65, 85},  {66, 75},  {81, 150}, {82, 150}, {83, 150}, {84, 150}, {89, 85},  {89, 74},
+    {90, 73},  {91, 70},  {93, 74},  {93, 76},  {95, 18},  {96, 0},   {97, 73},  {100, 73}, {101, 18}, {102, 76}, {103, 85}, {104, 70},
+    {105, 85}, {105, 74}, {105, 75}, {106, 74}, {109, 150}, {133, 81}, {137, 81}, {138, 81}, {140, 75}, {142, 75}, {149, 18}, {155, 69},
+    {157, 69}, {168, 9},  {169, 81}, {170, 9},  {185, 69}, {222, 85}, {229, 18}, {233, 74}, {235, 150}, {240, 73}, {243, 70}};
+#define WPN_SCRATCH 0x82510000u  // the fitted track lists: per slot, per set of the part (to SCRATCH_WPN_P1)
+#define WPN_PER_LIST 0x1000u
+#define WPN_LISTS 60u
+#define WPN_PER_SLOT (WPN_LISTS * WPN_PER_LIST)
+#define WPN_KEYS 0x600u  // in a list's room: the tracks, then the held keys from here
+#define WPN_ASK 0x80118D98u  // (object, part, force): the game's own ask for a part (0x80131CF8 forces it)
+
+static bool wpn_on(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char* e = getenv("ED_WEAPON_MOVES");
+        on = e == NULL || atoi(e) != 0;
+    }
+    return on != 0;
+}
+
+static bool moves_file_has(CPUState* cpu, int model, int part) {
+    u32 start = 0u, length = 0u, count = 0u;
+    const u8* list = moves_file(cpu, model, &start, &length, &count);
+    for (u32 i = 0; list != NULL && i < count; i++)
+        if ((int)((u32)list[i * 16u + 8u] << 8 | list[i * 16u + 9u]) == part)
+            return true;
+    return false;
+}
+
+// Two files' part of a number is the same kind of weapon when what each adds to the bare hands is mostly shared: Alex's,
+// Max's and Peter's 63 are pistols; Karim's 63 (the Chakrams) adds nothing.
+static bool moves_same_kind(CPUState* cpu, int a, int b, int part) {
+    MovesSet x, y;
+    if (!moves_added(cpu, a, part, &x) || !moves_added(cpu, b, part, &y))
+        return false;
+    int both = 0, either = 0;
+    for (u32 w = 0; w < MOVES_NUMBERS / 32u; w++) {
+        both += moves_count(x.bits[w] & y.bits[w]);
+        either += moves_count(x.bits[w] | y.bits[w]);
+    }
+    return 2 * both >= either;
+}
+
+static const u32* wpn_skeleton(int model, u32* count) {
+    for (size_t i = 0; i < sizeof kFinSkeletons / sizeof kFinSkeletons[0]; i++)
+        if (kFinSkeletons[i].model == model) {
+            *count = kFinSkeletons[i].count;
+            return kFinSkeletons[i].names;
+        }
+    *count = 0u;
+    return NULL;
+}
+
+// Each slot's binding: whose body its moves are fitted to, and how (as g_fin's).
+static struct {
+    u32 object, body, table;  // table 0: not bound
+    int home, holder, want;
+    u32 bones, home_bones;
+    int from[COSTUME_MAX_BONES];
+    u32 held_n[COSTUME_MAX_BONES][2];
+    u8 held[COSTUME_MAX_BONES][2][12];
+} g_wpn[4];
+
+static int wpn_index(int k) {
+    return k == 0 || k == 1 ? k : k == WPN_P1_SLOT || k == WPN_P1_SLOT + 1 ? 2 + (k - WPN_P1_SLOT) : -1;
+}
+
+static int wpn_slot(int w) {
+    return w < 2 ? w : WPN_P1_SLOT + (w - 2);
+}
+
+static void wpn_forget(int k) {
+    const int w = wpn_index(k);
+    if (w >= 0)
+        memset(&g_wpn[w], 0, sizeof g_wpn[w]);
+}
+
+static int wpn_copy_item(CPUState* cpu, u32 thing);
+
+// The part to play for a part asked by a player's object (InvU's for the weapon in their hand), from its home's file
+// (*home), or -1: as before (-2: no weapon held whose ask it is, so nothing to judge by).
+static int wpn_part(CPUState* cpu, u32 node, int model, int part, int* home_out) {
+    *home_out = -1;
+    if (!wpn_on() || part < 7 || part > 0xFFFF || !guest_ram_range_valid(cpu, node + 52u, 4u))
+        return -2;
+    u32 hand = 0u, thing = 0u, info = 0u;
+    const u32 a[2] = {node, 1u};
+    if (!hle_guest_call(cpu, 0x80046170u, a, 2, 0.0, &hand))
+        return -2;
+    const u32 b[2] = {node, hand};
+    if (!hle_guest_call(cpu, 0x80046254u, b, 2, 0.0, &thing) || thing == 0u)
+        return -2;
+    if (!hle_guest_call(cpu, 0x801F6398u, &thing, 1, 0.0, &info) || !guest_ram_range_valid(cpu, info, 16u))
+        return -2;
+    const u32 inv = mem_read32(cpu, info + 4u);
+    if (!guest_ram_range_valid(cpu, inv, 68u))
+        return -2;
+    // Player 2's copy (coop_weapon_copy) has type -1: its original's type.
+    const u32 item = (s32)mem_read32(cpu, info + 12u) >= 0 ? mem_read32(cpu, info + 12u) : (u32)wpn_copy_item(cpu, thing);
+    bool its = false;
+    for (u32 i = 0; i < 7u && !its; i++)
+        its = (int)mem_read16(cpu, inv + 54u + i * 2u) == part;
+    if (!its)
+        return -2;  // not the held weapon's ask
+    int home = -1;
+    bool theirs = false;
+    for (size_t i = 0; i < sizeof kWeaponIn / sizeof kWeaponIn[0]; i++)
+        if (kWeaponIn[i].item == item) {
+            if (home < 0)
+                home = kWeaponIn[i].model;
+            theirs = theirs || kWeaponIn[i].model == model;
+        }
+    u32 home_bones = 0u;
+    if (getenv("ED_WPN_LOG") != NULL)
+        fprintf(stderr, "[wpn] %d asks part %d holding item %u (InvU 0x%08X, seven %u): home %d%s\n", model, part, item, inv,
+                mem_read16(cpu, inv + 54u), home, theirs ? ", theirs" : "");
+    if (home < 0 || theirs || home == model || wpn_skeleton(home, &home_bones) == NULL)
+        return -1;
+    if (moves_file_has(cpu, model, part)) {
+        if (moves_same_kind(cpu, model, home, part))
+            return -1;  // theirs is that kind's
+    } else if (!moves_file_has(cpu, model, 14 + part % 7)) {
+        const int instead = moves_instead(cpu, model, part);
+        if (instead >= 0 && moves_file_has(cpu, model, instead))
+            return -1;  // their own part with that weapon's moves (moves_part), as before
+    }
+    const int want = moves_file_has(cpu, home, part) ? part : (int)mem_read16(cpu, inv + 54u);
+    if (want < 7 || !moves_file_has(cpu, home, want))
+        return -1;
+    *home_out = home;
+    return want;
+}
+
+// The slot's moves fitted to the holder's body: each of their bones gets the home's track of its name (a form's, its
+// wearer's name), the root the home's root; a bone the home hasn't holds the first key of the move playing as they took
+// it up. Each part's bone count (+36, where the root is, 0x801226C0) becomes theirs, as a form's does; anything of the
+// part already streamed is let go, so it streams again and is fitted.
+static bool wpn_bind(CPUState* cpu, int k, u32 object, int holder, int home, int want, bool p2) {
+    const char* who = p2 ? "player 2" : "player 1";
+    const int w = wpn_index(k);
+    u32 home_bones = 0u;
+    const u32* names = wpn_skeleton(home, &home_bones);
+    const u32 body = mem_read32(cpu, object + 60u);
+    const u32 nb = guest_ram_range_valid(cpu, body, 40u) ? mem_read16(cpu, body + 8u) : 0u;
+    const u32 own = nb != 0u ? body_bones(cpu, body) : 0u;
+    if (w < 0 || names == NULL || nb == 0u || nb + 1u >= COSTUME_MAX_BONES || (nb + 1u) * 16u > WPN_KEYS ||
+        !guest_ram_range_valid(cpu, own, nb * 80u) || !guest_ram_range_valid(cpu, g_p2_moves[k].ready + 20u, 2u)) {
+        fprintf(stderr, "[player] %s (%s) holds %s's weapon: their body's bones not found, not played\n", who, fin_name(holder), fin_name(home));
+        return false;
+    }
+    const Costume* c = costume_to_fit(cpu, object);
+    const u32 plain = c != NULL ? body_bones(cpu, g_costume_plain[c->place]) : 0u;
+    // The move they play now: its tracks are by this body's bones, for those the home hasn't.
+    u32 now = 0u, now_n = 0u, now_record = 0u;
+    const u32 anim = mem_read32(cpu, object + 64u);
+    if (guest_ram_range_valid(cpu, anim + 2176u, 2u) && mem_read16(cpu, anim + 2176u) < 8u) {
+        const u32 set = mem_read32(cpu, anim + mem_read16(cpu, anim + 2176u) * 272u + 184u);
+        now_record = guest_ram_range_valid(cpu, set, 8u) ? mem_read32(cpu, set + 4u) : 0u;
+        if (guest_ram_range_valid(cpu, now_record, 8u)) {
+            now = mem_read32(cpu, now_record);
+            now_n = c != NULL ? nb : mem_read16(cpu, now_record + 4u);
+            if (!guest_ram_range_valid(cpu, now, now_n * 16u))
+                now = 0u;
+        }
+    }
+    memset(&g_wpn[w], 0, sizeof g_wpn[w]);
+    g_wpn[w].object = object;
+    g_wpn[w].body = body;
+    g_wpn[w].home = home;
+    g_wpn[w].holder = holder;
+    g_wpn[w].want = want;
+    g_wpn[w].bones = nb;
+    g_wpn[w].home_bones = home_bones;
+    u32 matched = 0u, held = 0u;
+    for (u32 j = 0u; j < nb; j++) {
+        const u32 name = c != NULL && g_costume_map->from[j] >= 0 ? mem_read32(cpu, plain + (u32)g_costume_map->from[j] * 80u + 64u)
+                                                                  : mem_read32(cpu, own + j * 80u + 64u);
+        g_wpn[w].from[j] = -1;
+        for (u32 h = 0u; h < home_bones && g_wpn[w].from[j] < 0; h++)
+            if (names[h] == name)
+                g_wpn[w].from[j] = (int)h;
+        if (g_wpn[w].from[j] >= 0) {
+            matched++;
+            continue;
+        }
+        for (u32 list = 0u; list < 2u && now != 0u && j < now_n; list++) {
+            const u32 n = mem_read16(cpu, now + j * 16u + list * 8u), keys = mem_read32(cpu, now + j * 16u + list * 8u + 4u);
+            if (n == 0u || !guest_ram_range_valid(cpu, keys, 12u))
+                continue;
+            for (u32 b = 0u; b < 12u; b++)
+                g_wpn[w].held[j][list][b] = (u8)mem_read8(cpu, keys + b);
+            g_wpn[w].held_n[j][list] = 1u;
+        }
+        held += g_wpn[w].held_n[j][0] != 0u || g_wpn[w].held_n[j][1] != 0u;
+    }
+    const u32 table = moves_slot_table(k);
+    const u32 sets = g_p2_moves[k].sets, n = mem_read16(cpu, g_p2_moves[k].ready + 20u);
+    u32 parts = 0u, last = 0u;
+    for (u32 i = 0u; i < n && guest_ram_range_valid(cpu, sets + i * 16u, 16u); i++) {
+        const u32 part_at = mem_read32(cpu, sets + i * 16u + 8u), record = mem_read32(cpu, sets + i * 16u + 4u);
+        if (part_at != last && part_at - table < P2_MOVES_SLOT && guest_ram_range_valid(cpu, part_at, 40u) &&
+            mem_read16(cpu, part_at + 36u) == home_bones) {
+            mem_write16(cpu, part_at + 36u, (u16)nb);
+            parts++;
+        }
+        last = part_at;
+        u32 entry = 0u, ignore = 0u;
+        if (record != now_record && hle_guest_call(cpu, MOVES_ENTRY, &record, 1, 0.0, &entry) && entry != 0u) {
+            mem_write8(cpu, entry + 22u, 0u);
+            hle_guest_call(cpu, MOVES_FREE, &entry, 1, 0.0, &ignore);
+        }
+    }
+    g_wpn[w].table = table;
+    // The holder's own moves for that place the home's part hasn't: those play table[15], as the game's do.
+    char missing[160] = "";
+    MovesSet mine, theirs;
+    const int own_part = moves_file_has(cpu, holder, g_p2_moves[k].part)      ? g_p2_moves[k].part
+                         : moves_file_has(cpu, holder, 14 + g_p2_moves[k].part % 7) ? 14 + g_p2_moves[k].part % 7
+                                                                                  : g_p2_moves[k].part % 7;
+    if (moves_of(cpu, holder, own_part, &mine) && moves_of(cpu, home, want, &theirs))
+        for (u32 id = 0u; id < MOVES_NUMBERS && strlen(missing) + 6u < sizeof missing; id++)
+            if ((mine.bits[id / 32u] >> (id % 32u) & 1u) != 0u && (theirs.bits[id / 32u] >> (id % 32u) & 1u) == 0u)
+                snprintf(missing + strlen(missing), sizeof missing - strlen(missing), " %u", id);
+    fprintf(stderr,
+            "[player] %s (%s%s%s) holds %s's weapon: %s's part %d in slot %d (asked %d), %u of %u bones by name, %u held, from %u; "
+            "%u part(s) set to %u bones; of their part %d's moves not in it (table[15]):%s (frame %llu)\n",
+            who, fin_name(holder), c != NULL ? " in " : "", c != NULL ? c->name : "", fin_name(home), fin_name(home), want, k,
+            g_p2_moves[k].part, matched, nb, held, home_bones, parts, nb, own_part, missing[0] != '\0' ? missing : " none",
+            (unsigned long long)(cpu->timebase / 675000ull));
+    return true;
+}
+
+// A part asked for, served from the player's own two host slots (first, first + 1) with the home's part: 1 ready, 0 not
+// yet (asked again, as the game's own answer), -1 not served (as before).
+static int wpn_serve(CPUState* cpu, u32 object, int model, int part, int first, int home, int want, bool p2) {
+    if (cpu->ram_size < SCRATCH_WPN_P1 + 2u * P2_MOVES_SLOT - GC_RAM_BASE || !guest_ram_range_valid(cpu, object + 726u, 2u))
+        return -1;
+    const u32 body = mem_read32(cpu, object + 60u);
+    int k = -1;
+    for (int i = first; i < first + 2 && k < 0; i++) {
+        const int w = wpn_index(i);
+        if (w >= 0 && g_p2_moves[i].model == model && g_p2_moves[i].part == part && g_p2_moves[i].home == home &&
+            g_wpn[w].table == moves_slot_table(i) && g_wpn[w].object == object && g_wpn[w].body == body)
+            k = i;
+    }
+    if (k < 0) {
+        // Into the slot of theirs they are not playing from, and not over the move still playing.
+        k = mem_read32(cpu, object + 648u) == moves_slot_table(first) ? first + 1 : first;
+        if (moves_slot_playing(cpu, object, k)) {
+            static int told[2] = {-1, -1};
+            if (told[p2] != part)
+                fprintf(stderr, "[player] player %d's weapon moves: part %d waits, slot %d's move still plays\n", p2 ? 2 : 1, part, k);
+            told[p2] = part;
+            return 0;
+        }
+        if (!p2_moves_load(cpu, k, home, want))
+            return -1;
+        g_p2_moves[k].model = model;
+        g_p2_moves[k].part = part;
+        g_p2_moves[k].home = home;
+        if (!wpn_bind(cpu, k, object, model, home, want, p2)) {
+            // Not fitted, so not played: the slot holds nothing anyone plays.
+            g_p2_moves[k].model = g_p2_moves[k].part = g_p2_moves[k].home = -1;
+            return -1;
+        }
+    }
+    mem_write32(cpu, object + 644u, g_p2_moves[k].ready);
+    mem_write32(cpu, object + 648u, moves_slot_table(k));
+    mem_write32(cpu, object + 652u, g_p2_moves[k].sets);
+    mem_write16(cpu, object + 726u, 170u);
+    return 1;
+}
+
+// Which binding a move just streaming in is from (its record in a bound slot, for its holder), or -1.
+static int wpn_streams(u32 object, u32 record) {
+    for (int w = 0; w < 4; w++)
+        if (g_wpn[w].table != 0u && g_wpn[w].object == object && record - g_wpn[w].table < P2_MOVES_SLOT)
+            return w;
+    return -1;
+}
+
+// The home's move, just streamed in (its tracks by the home's bones, then the root): a list by the holder's bones, one
+// for each set of the part (fin_fit's, at a place of its own).
+static void wpn_fit(CPUState* cpu, int w, u32 record) {
+    const int k = wpn_slot(w);
+    const u32 sets = g_p2_moves[k].sets;
+    const u32 n = guest_ram_range_valid(cpu, g_p2_moves[k].ready + 20u, 2u) ? mem_read16(cpu, g_p2_moves[k].ready + 20u) : 0u;
+    u32 index = WPN_LISTS;
+    for (u32 i = 0u; i < n && i < WPN_LISTS && index == WPN_LISTS; i++)
+        if (guest_ram_range_valid(cpu, sets + i * 16u, 16u) && mem_read32(cpu, sets + i * 16u + 4u) == record)
+            index = i;
+    const u32 tracks = mem_read32(cpu, record), count = mem_read16(cpu, record + 4u);
+    const u32 hb = g_wpn[w].home_bones, nb = g_wpn[w].bones;
+    if (index == WPN_LISTS || count < hb || count > COSTUME_MAX_BONES || !guest_ram_range_valid(cpu, tracks, count * 16u)) {
+        static u32 told;
+        if (told != record)
+            fprintf(stderr, "[player] %s's move (record 0x%08X, %u tracks, set %u) not fitted to %s\n", fin_name(g_wpn[w].home), record, count,
+                    index, fin_name(g_wpn[w].holder));
+        told = record;
+        return;
+    }
+    u32 old[COSTUME_MAX_BONES * 4u];
+    for (u32 i = 0u; i < count * 4u; i++)
+        old[i] = mem_read32(cpu, tracks + i * 4u);
+    u32 first = 0u, last = 0u, longest = 0u;
+    for (u32 i = 0u; i < count; i++)
+        for (u32 list = 0u; list < 2u; list++) {
+            const u32 keys_n = old[i * 4u + list * 2u] >> 16, keys = old[i * 4u + list * 2u + 1u];
+            if (keys_n > longest && guest_ram_range_valid(cpu, keys, keys_n * 12u)) {
+                longest = keys_n;
+                first = mem_read32(cpu, keys);
+                last = mem_read32(cpu, keys + (keys_n - 1u) * 12u);
+            }
+        }
+    const u32 base = WPN_SCRATCH + (u32)w * WPN_PER_SLOT + index * WPN_PER_LIST, list_at = base;
+    u32 keys_at = base + WPN_KEYS;
+    const u32 places = nb + 1u > count ? nb + 1u : count;
+    if (places * 16u > WPN_KEYS)
+        return;
+    for (u32 j = 0u; j < places; j++) {
+        const int from = j < nb ? g_wpn[w].from[j] : j == nb && count > hb ? (int)hb : -1;
+        for (u32 x = 0u; x < 4u; x++)
+            mem_write32(cpu, list_at + j * 16u + x * 4u, from >= 0 ? old[(u32)from * 4u + x] : 0u);
+        if (from >= 0 || j >= nb || longest == 0u)
+            continue;
+        for (u32 list = 0u; list < 2u; list++) {
+            if (g_wpn[w].held_n[j][list] == 0u || keys_at + 24u > base + WPN_PER_LIST)
+                continue;
+            for (u32 key = 0u; key < 2u; key++) {
+                for (u32 b = 0u; b < 12u; b++)
+                    mem_write8(cpu, keys_at + key * 12u + b, g_wpn[w].held[j][list][b]);
+                const u32 word = mem_read32(cpu, keys_at + key * 12u);
+                mem_write32(cpu, keys_at + key * 12u, ((key == 0u ? first : last) & ~3u) | (word & 3u));
+            }
+            mem_write16(cpu, list_at + j * 16u + list * 8u, 2u);
+            mem_write32(cpu, list_at + j * 16u + list * 8u + 4u, keys_at);
+            keys_at += 24u;
+        }
+    }
+    mem_write32(cpu, record, list_at);
+}
+
+// Twice a second or so for each player: the moves their object plays from are the ones the weapon in their hand wants
+// (its home's fitted to this body, or their own). A state loaded, a form put on, or a weapon taken up that the game
+// didn't ask a part for: their part is asked for again as the game's equip does (0x80118D98(object, part, 1)), a few
+// times at most for the same wish.
+static void wpn_check(CPUState* cpu, u32 node, bool p2) {
+    static unsigned calls[2];
+    if (!wpn_on() || node == 0u || ++calls[p2] % 16u != 0u || !guest_ram_range_valid(cpu, node + 52u, 4u) || !sda_ready(cpu) ||
+        cutscene_playing(cpu) || game_menu_open(cpu))
+        return;  // in a scene or a menu: after it
+    const u32 object = mem_read32(cpu, node + 52u);
+    if (!guest_ram_range_valid(cpu, object + 580u, 152u) || cpu->ram_size < SCRATCH_WPN_P1 + 2u * P2_MOVES_SLOT - GC_RAM_BASE)
+        return;
+    const int model = (s32)mem_read32(cpu, object + 580u), part = (s32)mem_read32(cpu, object + 660u);
+    if (!coop_playable(model) || part < 7)
+        return;
+    for (int i = 0; i < 2; i++)
+        if (g_fin[i].swapped && g_fin[i].object == object)
+            return;  // in the finisher's move
+    const u32 table = mem_read32(cpu, object + 648u), body = mem_read32(cpu, object + 60u);
+    const int first = p2 ? 0 : WPN_P1_SLOT;
+    int k = -1;
+    for (int i = first; i < first + 2; i++)
+        if (table == moves_slot_table(i))
+            k = i;
+    if (p2 && k < 0)
+        return;  // not their own slots: moves_repair's
+    int have = model;
+    bool bound = true;
+    if (k >= 0) {
+        const int w = wpn_index(k);
+        have = g_p2_moves[k].model == model ? g_p2_moves[k].home : -2;
+        bound = have == model || (g_wpn[w].table == table && g_wpn[w].object == object && g_wpn[w].body == body);
+    }
+    int home = -1;
+    const int want = wpn_part(cpu, node, model, part, &home);
+    if (want == -2)
+        return;  // the part isn't the held weapon's (a weapon just taken up: the game asks its part)
+    const int wanted = want >= 0 ? home : model;
+    static int log = -1;  // ED_WPN_LOG=1 (testing): each look
+    if (log < 0)
+        log = getenv("ED_WPN_LOG") != NULL;
+    if (log)
+        fprintf(stderr, "[wpn] player %d (%d) part %d table 0x%08X slot %d: has %d's, wants %d's (part %d)%s\n", p2 ? 2 : 1, model, part, table, k,
+                have, wanted, want, bound ? "" : ", not fitted to this body");
+    static struct {
+        u32 object, body;
+        int part, wanted, tries;
+    } tried[2];
+    if (have == wanted && bound) {
+        tried[p2].object = 0u;  // as wished: a later wish (another load of the same state) is tried afresh
+        return;
+    }
+    if (tried[p2].object != object || tried[p2].body != body || tried[p2].part != part || tried[p2].wanted != wanted) {
+        tried[p2].object = object, tried[p2].body = body, tried[p2].part = part, tried[p2].wanted = wanted;
+        tried[p2].tries = 0;
+    }
+    if (tried[p2].tries >= 4)
+        return;
+    tried[p2].tries++;
+    fprintf(stderr, "[player] player %d (%s) plays part %d from %s's file%s, the weapon held wants %s's: asked again (frame %llu)\n", p2 ? 2 : 1,
+            fin_name(model), part, have >= 0 ? fin_name(have) : "an unknown", bound ? "" : " not fitted to this body", fin_name(wanted),
+            (unsigned long long)(cpu->timebase / 675000ull));
+    const u32 args[3] = {object, (u32)part, 1u};
+    u32 ignore = 0u;
+    hle_guest_call(cpu, WPN_ASK, args, 3, 0.0, &ignore);
+}
+
+static u32 coop_next(CPUState* cpu, u32 node);
+
+// ED_WPN_EQUIP=FRAME,HANDLE,HANDS[;FRAME,HANDLE,HANDS...] (testing): player 1 equips a carried thing at that frame, as
+// the Tome's EQUIP does (0x800C9FD4(holder id, handle, 0, hands, 0)), for a weapon no save has in hand (the Chakrams: 2).
+static void wpn_test_equip(CPUState* cpu, u32 player) {
+    static int count = -1, next;
+    static unsigned long long ats[4];
+    static u32 handles[4], handss[4];
+    if (count < 0) {
+        count = 0;
+        for (const char* e = getenv("ED_WPN_EQUIP"); e != NULL && count < 4; e = strchr(e, ';') != NULL ? strchr(e, ';') + 1 : NULL)
+            if (sscanf(e, "%llu,%u,%u", &ats[count], &handles[count], &handss[count]) == 3)
+                count++;
+    }
+    if (next >= count || cpu->timebase / 675000ull < ats[next] || player == 0u)
+        return;
+    u32 handle = handles[next];
+    const u32 hands = handss[next];
+    next++;
+    // HANDLE over 255: an item type, found on their carried list (node +48: +4 next, +8 the id) by its record's +12.
+    if (handle > 255u) {
+        const u32 type = handle - 256u;
+        handle = 0u;
+        for (u32 e = mem_read32(cpu, player + 48u), n = 0u; handle == 0u && n < 64u && guest_ram_range_valid(cpu, e, 12u); e = mem_read32(cpu, e + 4u), n++) {
+            const u32 id = mem_read32(cpu, e + 8u);
+            for (u32 node = 0u, i = 0u; i < 1024u && (node = coop_next(cpu, node)) != 0u; i++)
+                if (mem_read32(cpu, node + 16u) == id) {
+                    const u32 record = mem_read32(cpu, node + 44u);
+                    if (guest_ram_range_valid(cpu, record, 16u) && mem_read32(cpu, record + 12u) == type)
+                        handle = id;
+                    break;
+                }
+        }
+    }
+    const u32 args[5] = {mem_read32(cpu, player + 16u), handle, 0u, hands, 0u};
+    u32 result = 0u;
+    const bool ok = hle_guest_call(cpu, 0x800C9FD4u, args, 5, 0.0, &result);
+    fprintf(stderr, "[wpn] player 1 equips %u (hands %u): %s, %u (frame %llu)\n", handle, hands, ok ? "done" : "stopped", result,
+            (unsigned long long)(cpu->timebase / 675000ull));
+}
+
 // A move's tracks, just streamed in and made addresses (0x8012E588, whose result is the cache's
 // entry): the other body's bones get theirs, and the root the place after its last.
 // A bone the wearer hasn't stays as it was modelled, and the Liche's cape was modelled flying out. Its
@@ -8261,6 +8754,8 @@ static struct {
     u32 object, result, held_record;
     bool holding;
     int fin;  // 1 + the player whose finishing move (fin_swap) this is, 0 none
+    int wpn;  // 1 + the binding (wpn_streams) whose held weapon's move this is, 0 none
+    u32 wpn_record;
 } g_tracks_load;
 
 static struct {
@@ -8278,6 +8773,15 @@ static void hle_tracks_load(CPUState* cpu) {
     if (fin >= 0) {
         g_tracks_load.caller = cpu->lr;
         g_tracks_load.fin = fin + 1;
+        cpu->lr = HLE_TRACKS_RETURN;
+        return;
+    }
+    // A held weapon's home's move: fitted to the holder's body as it is (a form's too), so not again by the form's map.
+    const int wpn = g_tracks_load.caller == 0u && cpu->ram_size >= SCRATCH_WPN_P1 - GC_RAM_BASE ? wpn_streams(cpu->gpr[3], cpu->gpr[4]) : -1;
+    if (wpn >= 0) {
+        g_tracks_load.caller = cpu->lr;
+        g_tracks_load.wpn = wpn + 1;
+        g_tracks_load.wpn_record = cpu->gpr[4];
         cpu->lr = HLE_TRACKS_RETURN;
         return;
     }
@@ -8325,6 +8829,14 @@ static bool continue_tracks_load(CPUState* cpu) {
         cpu->lr = cpu->pc = g_tracks_load.caller;
         g_tracks_load.caller = 0u;
         g_tracks_load.fin = 0;
+        return true;
+    }
+    if (g_tracks_load.wpn != 0) {
+        if (guest_ram_range_valid(cpu, g_tracks_load.wpn_record, 8u))
+            wpn_fit(cpu, g_tracks_load.wpn - 1, g_tracks_load.wpn_record);
+        cpu->lr = cpu->pc = g_tracks_load.caller;
+        g_tracks_load.caller = 0u;
+        g_tracks_load.wpn = 0;
         return true;
     }
     if (g_tracks_load.holding) {
@@ -9861,6 +10373,12 @@ static void coop_kinds(CPUState* cpu, bool p2) {
         for (int i = 0; i < g_coop_kinds_in_count; i++) {
             const u32 kind = g_coop_kinds_in[i].kind, count = mem_read16(cpu, kind + THING_KIND_COUNT);
             CoopKind* own = coop_kind(mem_read32(cpu, kind + THING_KIND_MARK), false);
+            static unsigned long long told_kinds;
+            const unsigned long long fnow = cpu->timebase / 675000ull;
+            if (i == 0 && fnow >= told_kinds + 60ull)
+                told_kinds = fnow;
+            if (getenv("ED_RELOAD_TRACE") != NULL && told_kinds == fnow)
+                fprintf(stderr, "[reload] kind 0x%08X: player 1 %u, player 2 %u (frame %llu)%c", kind, g_coop_kinds_in[i].p1, count, fnow, 10);
             if (g_coop_kinds_in[i].own != 0u)
                 mem_write16(cpu, g_coop_kinds_in[i].own + THING_KIND_COUNT, (u16)count);
             else if (own != NULL)
@@ -9961,7 +10479,63 @@ void hle_coop_kinds_load(const void* in) {
     g_coop_kinds_in_count = g_coop_kinds_depth = 0;
 }
 
+// The sprint's breath (r13-29528, and the part it keeps at -29532), each player's own. The move handler 0x800BE0F0
+// takes 1 off it each call while running and slows the runner under 160; it puts it back at 190 whenever the one it
+// runs for isn't running. Shared, the player not sprinting put it back every frame, so the other never tired. Kept
+// beside each CoopPlayerState (not in it: save states keep their size); none kept yet reads as rested, 190.
+#define COOP_BREATH 29528u
+#define COOP_BREATH_PART 29532u
+#define COOP_BREATH_FULL 0x433E0000u  // 190.0f
+static struct {
+    const CoopPlayerState* s;
+    u32 words[2];
+} g_coop_breath[8];
+
+static void coop_breath(CPUState* cpu, const CoopPlayerState* s, bool save) {
+    int slot = -1;
+    for (int i = 0; i < 8 && slot < 0; i++)
+        if (g_coop_breath[i].s == s)
+            slot = i;
+    if (slot < 0 && save)
+        for (int i = 0; i < 8 && slot < 0; i++)
+            if (g_coop_breath[i].s == NULL)
+                slot = i;
+    const u32 at[2] = {cpu->gpr[13] - COOP_BREATH, cpu->gpr[13] - COOP_BREATH_PART};
+    if (save) {
+        if (slot < 0)
+            return;
+        g_coop_breath[slot].s = s;
+        for (int i = 0; i < 2; i++)
+            g_coop_breath[slot].words[i] = mem_read32(cpu, at[i]);
+        // ED_BREATH_LOG=1 (testing): each player's breath, twice a second.
+        static unsigned long long told;
+        const unsigned long long frame = cpu->timebase / 675000ull;
+        if (getenv("ED_BREATH_LOG") != NULL && frame >= told + 30ull && s == &g_coop_state[1]) {
+            told = frame;
+            float mine = 0.f;
+            const u32 w = g_coop_breath[slot].words[0];
+            memcpy(&mine, &w, 4);
+            fprintf(stderr, "[breath] player 2 %.1f at frame %llu\n", mine, frame);
+        }
+        if (getenv("ED_BREATH_LOG") != NULL && s == &g_coop_state[0] && frame % 30ull == 0ull) {
+            float mine = 0.f;
+            const u32 w = g_coop_breath[slot].words[0];
+            memcpy(&mine, &w, 4);
+            fprintf(stderr, "[breath] player 1 %.1f at frame %llu\n", mine, frame);
+        }
+        return;
+    }
+    if (slot < 0) {
+        mem_write32(cpu, at[0], COOP_BREATH_FULL);  // rested; the part is the handler's own, left as it is
+        return;
+    }
+    for (int i = 0; i < 2; i++)
+        mem_write32(cpu, at[i], g_coop_breath[slot].words[i]);
+}
+
 static void coop_state(CPUState* cpu, CoopPlayerState* s, bool save) {
+    if (sda_ready(cpu))
+        coop_breath(cpu, s, save);
     const u32 aim = mem_read32(cpu, COOP_INPUT + 176u + 3u * 32u + 12u);  // channel 3's context
     coop_bytes(cpu, COOP_INPUT, s->input, COOP_INPUT_SIZE, save);
     coop_bytes(cpu, COOP_CONTROL, s->control, COOP_CONTROL_SIZE, save);
@@ -10458,6 +11032,24 @@ static void coop_controlled_id(CPUState* cpu) {
         !sda_ready(cpu)) {
         g_hle_passthrough = true;
         return;
+    }
+    // A broken thing (its template's bit 0, 0x801507F0: the Broken Blue Urn, Broken Green Urn, Broken Short Sword) is
+    // mended by the game's own branch for a controlled caster ("That which is broken, shall be fixed": 0x801C6E24
+    // marks it mended and shows it, REPAIRED_ITEM, given back through 0x80024528 as a find, hle_coop_found). The other
+    // branch only puts runes on it. So for those the game's own answer stands; weapons go on as below.
+    if (cpu->lr == COOP_ENCHANT_ASKS) {
+        const u32 id = mem_read32(cpu, cpu->gpr[31] + 188u);
+        const u32 node = coop_enchant_node(cpu, id);
+        u32 record = 0u, flags = 0u;
+        if (node != 0u && hle_guest_call(cpu, COOP_NODE_RECORD, &node, 1, 0.0, &record) && record != 0u &&
+            hle_guest_call(cpu, 0x801507F0u, &record, 1, 0.0, &flags) && (flags & 1u) != 0u) {
+            cpu->lr = COOP_ENCHANT_ASKS;
+            if (getenv("ED_COOP_CAST_LOG") != NULL)
+                fprintf(stderr, "[coop] an enchant mends a broken thing (id %u): the game's own way\n", id);
+            g_hle_passthrough = true;
+            return;
+        }
+        cpu->lr = COOP_ENCHANT_ASKS;
     }
     if (cpu->lr == COOP_ENCHANT_ASKS) {
         const u32 none = 0u;
@@ -13675,6 +14267,13 @@ static void words_rename(u8* words, const char* from, const char* to) {
 
 // What one player finds, told in the other's half: "Pius has found a Magickal Rune". From the
 // words the find shows (r3, its element), which name the chapter's character whoever found it.
+// The screen's character a player's words are named by (0 to 11), -1 the chapter's: player 2's Default is made as
+// player 1's character (coop_p2_choice), so it's named as player 1's, not the chapter's.
+static int coop_name_choice(bool p2) {
+    const int choice = p2 && g_settings.mod_p2_character != 0 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
+    return choice - 1;
+}
+
 static void coop_found_notice(CPUState* cpu, bool p2) {
     if (!guest_ram_range_valid(cpu, cpu->gpr[3] + WORDS_AT, 200u))
         return;
@@ -13702,7 +14301,7 @@ static void coop_found_notice(CPUState* cpu, bool p2) {
             item += strlen(kFound[i]);
     }
     const char* const as_worded = item == NULL ? strstr(words, " has ") : NULL;
-    int who = (p2 ? g_settings.mod_p2_character : g_settings.mod_p1_character) - 1;
+    int who = coop_name_choice(p2);
     for (int i = 0; who < 0 && i < 12; i++)
         if (kPlayerModel[i] == g_chapter_model)
             who = i;
@@ -13768,8 +14367,14 @@ static void hle_words_layout(CPUState* cpu) {
             chapter = i;
     const bool p2 = g_settings.mod_coop && g_coop_p2 != 0u &&
                     (g_coop_tome_p2 || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 || coop_close_up_p2s());  // in their close-up too
-    const int choice = (p2 ? g_settings.mod_p2_character : g_settings.mod_p1_character) - 1;
+    const int choice = coop_name_choice(p2);
     if (chapter < 0 || choice < 0 || choice >= 12 || choice == chapter)
+        return;
+    // A full cinematic's words are the story's, its actors from its own pack (r13-26452's list, not the level's:
+    // Anthony's end scene, cin0013): "Anthony" there is Anthony, not player 1's Michael.
+    const u32 bodies = mem_read32(cpu, cpu->gpr[13] - 26452u);
+    if (cutscene_playing(cpu) && guest_ram_range_valid(cpu, bodies, 8u) &&
+        !(mem_read32(cpu, bodies + 4u) == 0x6B5u && mem_read32(cpu, bodies) > 112u))
         return;
     u8* const words = cpu->ram + (cpu->gpr[3] + WORDS_AT - GC_RAM_BASE);
     for (int k = 0; k < 2; k++)
@@ -14892,6 +15497,27 @@ void hle_coop_prompt_load(const void* in) {
 
 // Player 2's element: made when their prompt changes, let go of when it goes
 // (one on a screen since gone, with the area, is left alone).
+// FINISH HIM is the one prompt the game styles after making it (asked with flag 2, 0x800C03F8): each frame its chooser
+// (0x80117854..0x80117930) writes the element's words again as its icon above the words, light yellow,
+// '\i6\s0.3\n\n\s0.6\c%c%c%c%c%s' (0x80252D74) with the words of 0x801DB864(screen, 0, id, 1). The prompts
+// made here for player 2 (and player 1's in player 2's close-up) were only made, so theirs was the bare words, with no
+// icon. Styled the same once, as it's made (the game's own pulse of the yellow is left out).
+#define PROMPT_FINISH 23
+#define PROMPT_WORDS 0x801DB864u
+#define PROMPT_FORMAT 0x801DA8CCu
+#define PROMPT_FINISH_LOOK 0x80252D74u
+
+static void coop_prompt_style(CPUState* cpu, u32 screen, u32 element, s32 id) {
+    if (id != PROMPT_FINISH || mem_read32(cpu, PROMPT_FINISH_LOOK) != 0x5C69365Cu)  // its first bytes: the icon code
+        return;
+    const u32 ask[4] = {screen, 0u, (u32)id, 1u};
+    u32 words = 0u, ignore = 0u;
+    if (!hle_guest_call(cpu, PROMPT_WORDS, ask, 4, 0.0, &words) || !guest_ram_range_valid(cpu, words, 4u))
+        return;
+    const u32 look[7] = {element, PROMPT_FINISH_LOOK, 240u, 240u, 240u, 255u, words};
+    hle_guest_call(cpu, PROMPT_FORMAT, look, 7, 0.0, &ignore);
+}
+
 static void coop_prompt_show(CPUState* cpu, bool shown) {
     const u32 screen = mem_read32(cpu, cpu->gpr[13] - PROMPT_SCREEN);
     const s32 want = shown && screen != 0u ? g_coop_prompt : -1;
@@ -14913,6 +15539,7 @@ static void coop_prompt_show(CPUState* cpu, bool shown) {
     const u32 make[6] = {screen, 0u, (u32)want, 0u, 1u, PROMPT_STYLE};
     if (!hle_guest_call(cpu, PROMPT_MAKE, make, 6, 0.0, &element) || !guest_ram_range_valid(cpu, element, 0x100u))
         return;
+    coop_prompt_style(cpu, screen, element, want);
     mem_write16(cpu, element + 8u, (u16)(s16)COOP_PROMPT_AT);
     g_coop_prompt_shown.element = element;
     g_coop_prompt_shown.screen = screen;
@@ -14958,6 +15585,7 @@ static void coop_p1_icon_show(CPUState* cpu) {
     const u32 make[6] = {screen, 0u, (u32)want, 0u, 1u, PROMPT_STYLE};
     if (!hle_guest_call(cpu, PROMPT_MAKE, make, 6, 0.0, &element) || !guest_ram_range_valid(cpu, element, 0x100u))
         return;
+    coop_prompt_style(cpu, screen, element, want);
     mem_write16(cpu, element + 8u, (u16)(mem_read16(cpu, element + 8u) + COOP_PROMPT_P1_AWAY));
     g_coop_p1_icon.element = element;
     g_coop_p1_icon.screen = screen;
@@ -15503,7 +16131,22 @@ static void fin_trace_install(void) {
     }
 }
 
+static bool g_coop_events_own;  // player 2's words are in (coop_events, below)
+#define COOP_RELOAD_STATE 90u   // a reload's (event 198, 0x80079C58: move 10, then 6 at its end)
+#define COOP_RELOAD_GOES_ON 204u
 static void coop_send_event(CPUState* cpu) {
+    // Player 2's reload: in state 90 their move's end (event 6) posts 204 to "the controlled" (0x80053C34: r13-25656's
+    // controller, 0x8019BA14), which outside their turn is player 1: 204 went to player 1 and player 2 stood in state 90
+    // for good (logs/run-20261107-*-reload-ev204). Answered in player 2's own words (coop_events), it's theirs.
+    if (cpu->gpr[3] == COOP_RELOAD_GOES_ON && g_coop_events_own && g_coop_p2 != 0u && sda_ready(cpu) &&
+        mem_read32(cpu, g_coop_p2 + COOP_NODE_NOW) == COOP_RELOAD_STATE) {
+        const u32 theirs = mem_read32(cpu, g_coop_p2 + 16u);
+        if (cpu->gpr[4] != theirs || cpu->gpr[5] != theirs) {
+            if (getenv("ED_COOP_LOG") != NULL)
+                fprintf(stderr, "[coop] player 2's reload goes on: 204 sent to them, not %u\n", cpu->gpr[5]);
+            cpu->gpr[4] = cpu->gpr[5] = theirs;
+        }
+    }
     const u32 event = cpu->gpr[3], from = cpu->gpr[4], to = cpu->gpr[5];
     if (event == COOP_FINISH_ASK && coop_finish_taken(cpu, from, to)) {
         static unsigned long long told;
@@ -16019,7 +16662,7 @@ static bool g_coop_seen_p2;
 // their next turn, and player 1's back after.
 #define COOP_OWN_BUSY_BITS 8u          // r13-24048's bits each player keeps (2, 4 and 32 are the holds')
 static CoopPlayerState g_coop_events_p1;  // player 1's words, while player 2's are in for an answer
-static bool g_coop_events_own;            // player 2's words are in (coop_events)
+// g_coop_events_own:            // player 2's words are in (coop_events; declared above coop_send_event)
 static bool g_coop_events_call;           // the call made here, at its start
 static u32 g_coop_p2_busy_bits;           // player 2's bits of r13-24048
 static bool coop_events_log(void) {
@@ -16134,12 +16777,21 @@ static void coop_events_window(CPUState* cpu, const u8* in_was, const u8* pad_wa
 
 static void coop_events(CPUState* cpu) {
     const u32 node = cpu->gpr[3], message = cpu->gpr[5];
+    if (getenv("ED_RELOAD_TRACE") != NULL && g_coop_p2 != 0u && guest_ram_range_valid(cpu, message, 4u)) {
+        const u32 ev = mem_read32(cpu, message);
+        if ((ev == 6u || ev == 7u || ev == 198u || ev == 204u) && (node == g_coop_p2 || ev == 198u || ev == 204u))
+            fprintf(stderr, "[reload] event %u to node 0x%08X (player 2 0x%08X) state %u, turn %d, lr 0x%08X, frame %llu"
+                    "%c", ev, node, g_coop_p2, cpu->gpr[4], (int)g_coop_turn, cpu->lr, (unsigned long long)(cpu->timebase / 675000ull), 10);
+    }
     const bool again = g_coop_events_call;  // the call made below, at its start
     g_coop_events_call = false;
     if (!g_coop_seen_p2 && !again)  // not again for the call made here
         coop_seen_shared(cpu);
-    if (!again && !g_coop_events_own && !g_coop_turn && g_coop_p2_state && g_settings.mod_coop && g_coop_p2 != 0u && node == g_coop_p2 &&
-        sda_ready(cpu) && !coop_p2_input_in_game(cpu)) {
+    // An enemy seeing player 2 (event 58) isn't answered here: it goes on below to coop_as_player2, as before this
+    // branch was added, so their sanity is hit as player 1's is (the view cone, docs/coop-enemy-sanity.md).
+    const bool seen = guest_ram_range_valid(cpu, message, 4u) && mem_read32(cpu, message) == COOP_SEEN_EVENT;
+    if (!again && !seen && !g_coop_seen_p2 && !g_coop_events_own && !g_coop_turn && g_coop_p2_state && g_settings.mod_coop &&
+        g_coop_p2 != 0u && node == g_coop_p2 && sda_ready(cpu) && !coop_p2_input_in_game(cpu)) {
         u32 args[8], result = 0u;
         for (int i = 0; i < 8; i++)
             args[i] = cpu->gpr[3 + i];
@@ -16163,7 +16815,13 @@ static void coop_events(CPUState* cpu) {
         g_coop_events_call = true;
         static u8 p1s[PROMPT_SLOTS_SIZE];
         const bool asks = event == 3u && coop_p2_asks_in(cpu, p1s);
+        // Their own counts, as in their turn: what their events fire, load or use (a reload's round) is theirs.
+        const bool counts = true;
+        if (counts)
+            coop_kinds(cpu, true);
         hle_guest_call(cpu, COOP_EVENTS, args, 8, cpu->fpr[1], &result);
+        if (counts)
+            coop_kinds(cpu, false);
         if (asks)
             coop_p2_asks_out(cpu, p1s);
         g_coop_events_call = false;
@@ -17110,6 +17768,352 @@ static void coop_script_item(CPUState* cpu) {
     g_hle_passthrough = false;
     g_hle_tail_call = false;
 }
+
+// Player 2's reload: the game looks for ammo in the reloader's own carried list (0x801F9B18(node, weapon), node +48),
+// and player 2's is empty, as everything is on player 1's (hle_coop_found). So they had no RELOAD prompt
+// (0x800C05F0's look, bl at 0x800C0668) and Z did nothing (0x800C2CA4, bl at 0x800C2CF4). Either list answers, but only
+// for reloading's own asks: the prompt, the Z, and the two loads (0x8007A09C, 0x8007A1DC). A box used up in a load is
+// taken off its list (0x801F965C(node, box), then destroyed): off player 1's, where it is, or it would stay listed.
+#define COOP_AMMO_FIND 0x801F9B18u
+#define COOP_ITEM_REMOVE 0x801F965Cu
+
+// Every one of the look's 11 callers asks it of a held weapon (the prompt, Z, the two loads, the reload moves at
+// 0x800598E0, 0x80079AB8 and 0x80079EE8, 0x80046690, 0x8000D084, and the last shot at 0x800BCFA4, which marks the
+// weapon +16 0x20 "ammo carried" or 0x80 "none": player 2's last shot marked theirs 0x80, so no RELOAD after it, logs/
+// run-20261107-013218-reload-trace1), so for player 2 each is answered from either list. Tome Mode (0x8010466C) too.
+// Not Z's (0x800C2CA4, bl at 0x800C2CF4): it starts the weapon's script (2221 for the Flintlock) from player 2's turn,
+// whose later steps (ed129's state 90 is ended by the script's next event) then went to player 1, and player 2 stood in
+// state 90 for good (logs/run-20261107-014013-reload-peter). Their RELOAD prompt's B runs that script as theirs
+// (coop_use_start), so that's their way to reload.
+static bool coop_reload_ask(u32 lr) {
+    (void)lr;  // Z's too, now that state 90's 204 is theirs (coop_send_event)
+    return true;
+}
+
+static bool coop_reload_remove(u32 lr) {
+    return lr == 0x8007A13Cu || lr == 0x8007A2D4u;
+}
+
+// Player 2's body has the held weapon's own moves (the slot their object plays from, object +648, holds the part asked
+// for). Without them (Pius with a pistol: his sword's part, with no reload move) a reload began held them in state 90
+// for good (logs/run-20261107-013647-reload-trace4), so they are given no reload until their moves are the weapon's.
+// The slot's part asked for is in the body's file (moves_file), or another was played instead (moves_part: Pius with a
+// pistol asks 63, which his file hasn't, and plays his sword's 14). Not playing from one of the host's slots: yes.
+static bool coop_p2_weapon_moves(CPUState* cpu) {
+    const u32 object = mem_read32(cpu, g_coop_p2 + 52u);
+    const u32 table = guest_ram_range_valid(cpu, object + 648u, 4u) ? mem_read32(cpu, object + 648u) : 0u;
+    for (int k = 0; k < 2; k++) {
+        if (table != moves_slot_table(k) || g_p2_moves[k].model < 0)
+            continue;
+        if (g_p2_moves[k].home != g_p2_moves[k].model)
+            return g_p2_moves[k].home >= 0;  // the held weapon's home's part (wpn_serve)
+        u32 start = 0u, length = 0u, count = 0u;
+        const u8* list = moves_file(cpu, g_p2_moves[k].model, &start, &length, &count);
+        for (u32 i = 0; list != NULL && i < count; i++)
+            if ((int)((u32)list[i * 16u + 8u] << 8 | list[i * 16u + 9u]) == g_p2_moves[k].part)
+                return true;
+        return list == NULL;  // a file not read: as before this check
+    }
+    return true;
+}
+
+// Player 1's node while player 2 is the one asking (as coop_has_tome finds it).
+static bool g_coop_p2_loading;  // player 2's reload's load is running (coop_p2_load, below)
+static bool asking_box;  // coop_p2_load's own look for the box: answered as the game does
+static u32 g_coop_load_p1;  // player 1's node, kept from before player 2 is the player for their load
+static u32 coop_reload_other(CPUState* cpu) {
+    if (g_coop_p2_loading && g_coop_load_p1 != 0u && g_coop_load_p1 != g_coop_p2)
+        return g_coop_load_p1;
+    const u32 other = (g_coop_turn || g_coop_tome_cast)    ? g_coop_turn_p1
+                      : g_coop_use.active && g_coop_use.p2 ? g_coop_use.was[1]
+                                                           : coop_player(cpu);
+    return other != g_coop_p2 && guest_ram_range_valid(cpu, other, CARRY_LIST + 4u) ? other : 0u;
+}
+
+// Off unless ED_COOP_P2_RELOAD=1 (testing), 2026-11-07: with it player 2 gets RELOAD and its B starts the reload, but
+// they then stand in the reload's state 90 for good, Peter's body too (logs/run-20261107-014203-reload-peter2): the
+// state's end isn't reached for player 2. Until it is, no reload for them, as before (docs/coop-failed-attempts.md).
+static bool coop_p2_reload_on(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_COOP_P2_RELOAD") == NULL || atoi(getenv("ED_COOP_P2_RELOAD")) != 0;  // on; =0 turns it off
+    return on != 0;
+}
+
+// Player 2's count of a thing's kind (a box's rounds): each player's own, as the Chakrams' (coop_kinds). With theirs in
+// (their turn, their reload's state) the kind's own count; else theirs kept by the kind's mark, or player 1's for a kind
+// new to them.
+// Player 2's own rounds in each box kind (a box is one thing on player 1's list, with a count each): by the kind's
+// record address, their count starting as player 1's when they first load from it. Kept in save states as the rest of
+// the host's isn't: a quick load starts them again from player 1's.
+#define COOP_BOXES 16
+static struct {
+    u32 kind;
+    u16 count, used;
+} g_coop_boxes[COOP_BOXES];
+static u16* coop_box_count(CPUState* cpu, u32 kind, bool make) {
+    for (int i = 0; i < COOP_BOXES; i++)
+        if (g_coop_boxes[i].used && g_coop_boxes[i].kind == kind)
+            return &g_coop_boxes[i].count;
+    for (int i = 0; make && i < COOP_BOXES; i++)
+        if (!g_coop_boxes[i].used) {
+            g_coop_boxes[i].used = 1u;
+            g_coop_boxes[i].kind = kind;
+            g_coop_boxes[i].count = mem_read16(cpu, kind + THING_KIND_COUNT);
+            return &g_coop_boxes[i].count;
+        }
+    return NULL;
+}
+static u32 coop_thing_kind(CPUState* cpu, u32 thing) {
+    const u32 record = guest_ram_range_valid(cpu, thing + 44u, 4u) ? mem_read32(cpu, thing + 44u) : 0u;
+    const u32 kind = guest_ram_range_valid(cpu, record + 4u, 4u) ? mem_read32(cpu, record + THING_KIND_RECORD) : 0u;
+    return guest_ram_range_valid(cpu, kind, THING_KIND_SIZE) ? kind : 0u;
+}
+static u32 coop_p2_count(CPUState* cpu, u32 thing) {
+    const u32 kind = coop_thing_kind(cpu, thing);
+    if (kind == 0u)
+        return 0u;
+    if (g_coop_p2_loading)
+        return mem_read16(cpu, kind + THING_KIND_COUNT);  // theirs is in (coop_p2_load)
+    const u16* mine = coop_box_count(cpu, kind, false);
+    return mine != NULL ? *mine : mem_read16(cpu, kind + THING_KIND_COUNT);
+}
+
+// A box player 2 used up: the box is player 1's too (one thing, a count each), so it isn't taken off the list or
+// destroyed (0x801DCB58(2, box) after the removal, at 0x8007A148 and 0x8007A2E0); their count of it is 0.
+static u32 g_coop_box_kept;
+#define COOP_THING_GONE 0x801DCB58u
+
+static void coop_reload_lists(CPUState* cpu, bool find) {
+    static bool asking;
+    g_hle_passthrough = true;
+    if (!coop_p2_reload_on() || asking || asking_box || g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu) ||
+        (cpu->gpr[3] != g_coop_p2 && !g_coop_p2_loading) ||
+        !(find ? coop_reload_ask(cpu->lr) : coop_reload_remove(cpu->lr)) || !coop_listed(cpu, g_coop_p2) ||
+        (find && !g_coop_p2_loading && !coop_p2_weapon_moves(cpu)))
+        return;
+    const u32 other = cpu->gpr[3] == g_coop_p2 ? coop_reload_other(cpu) : g_coop_p2;
+    if (other == 0u)
+        return;
+    if (!find) {
+        // Their own count of the box goes to 0 (it's in, coop_p2_load); the box stays for player 1.
+        const u32 box = cpu->gpr[4];
+        const u32 kind = coop_thing_kind(cpu, box);
+        if (kind != 0u && g_coop_p2_loading)
+            mem_write16(cpu, kind + THING_KIND_COUNT, 0u);
+        g_coop_box_kept = box;
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] player 2 used up their rounds of a box: it stays player 1's\n");
+        cpu->gpr[3] = 1u;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
+    u32 args[2] = {cpu->gpr[3], cpu->gpr[4]};
+    u32 answer = 0u;
+    asking = true;
+    hle_guest_call(cpu, COOP_AMMO_FIND, args, 2, 0.0, &answer);
+    if (answer == 0u) {
+        args[0] = other;
+        hle_guest_call(cpu, COOP_AMMO_FIND, args, 2, 0.0, &answer);
+        static int log_left = 40;
+        if (answer != 0u && getenv("ED_COOP_LOG") != NULL && log_left-- > 0)
+            fprintf(stderr, "[coop] player 2's reload: ammo found in player 1's list (lr 0x%08X)\n", cpu->lr);
+    }
+    if (getenv("ED_RELOAD_TRACE") != NULL && cpu->lr != 0x800C066Cu && cpu->lr != 0x0BADF010u)
+        fprintf(stderr, "[reload] load's ammo look: lr 0x%08X box 0x%08X, their count %u, turn %d, counts in %d, events own %d, state %u%c",
+                cpu->lr, answer, answer ? coop_p2_count(cpu, answer) : 0u, (int)g_coop_turn, g_coop_kinds_depth, (int)g_coop_events_own,
+                mem_read32(cpu, g_coop_p2 + COOP_NODE_NOW), 10);
+    // None left of their own count: none for them.
+    if (answer != 0u && coop_p2_count(cpu, answer) == 0u)
+        answer = 0u;
+    asking = false;
+    cpu->gpr[3] = answer;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+// Player 2's reload's load (0x8007A09C, 0x8007A1DC: from the reload move's frame, outside any turn of theirs) takes from
+// the player's (0x801F62B0: player 1's) carried list and counts: the round came off player 1's box (logs/run-20261107-
+// 020532..021*-reload-cset: kind 0x807073C0 5 -> 4 at lr 0x8007A318 with no counts of theirs in). A load for player 2's
+// own weapon (its kind is one of theirs, coop_own_kind) runs with their counts in, and a box they use up stays.
+#define COOP_LOAD_ONE 0x8007A09Cu
+#define COOP_LOAD_ALL 0x8007A1DCu
+
+static bool coop_p2_weapon_record(CPUState* cpu, u32 record) {
+    return g_coop_p2 != 0u && guest_ram_range_valid(cpu, record + 4u, 4u) && coop_own_kind(mem_read32(cpu, record + THING_KIND_RECORD));
+}
+
+static void coop_p2_load(CPUState* cpu, u32 fn) {
+    static bool running;
+    g_hle_passthrough = true;
+    if (running || !coop_p2_reload_on() || !g_settings.mod_coop || !sda_ready(cpu) || !coop_p2_weapon_record(cpu, cpu->gpr[4]))
+        return;
+    u32 args[8], result = 0u;
+    for (int i = 0; i < 8; i++)
+        args[i] = cpu->gpr[3 + i];
+    running = true;
+    g_coop_p2_loading = true;
+    // The box the load will take from (player 1's list), with player 2's count of it in.
+    const u32 player = coop_player(cpu) != g_coop_p2 ? coop_player(cpu) : coop_reload_other(cpu);
+    u32 box = 0u;
+    const u32 look[2] = {player, args[1]};
+    asking_box = true;
+    if (player != 0u)
+        hle_guest_call(cpu, COOP_AMMO_FIND, look, 2, 0.0, &box);
+    asking_box = false;
+    const u32 kind = box != 0u ? coop_thing_kind(cpu, box) : 0u;
+    u16* mine = kind != 0u ? coop_box_count(cpu, kind, true) : NULL;
+    const u16 theirs_was = mine != NULL ? *mine : 0u, p1 = kind != 0u ? mem_read16(cpu, kind + THING_KIND_COUNT) : 0u;
+    if (mine != NULL)
+        mem_write16(cpu, kind + THING_KIND_COUNT, *mine);
+    // Player 2 is the player for it (0x801F62B0): their list (the box from player 1's, coop_reload_lists), and their
+    // count shown in their own half (their copy of the count, coop_bar_copy), not player 1's.
+    u32 was[5];
+    g_coop_load_p1 = player;
+    coop_be_player2(cpu, true, was);
+    hle_guest_call(cpu, fn, args, 8, cpu->fpr[1], &result);
+    coop_be_player2(cpu, false, was);
+    g_coop_load_p1 = 0u;
+    if (mine != NULL) {
+        *mine = mem_read16(cpu, kind + THING_KIND_COUNT);
+        mem_write16(cpu, kind + THING_KIND_COUNT, p1);
+    }
+    g_coop_p2_loading = false;
+    if (getenv("ED_RELOAD_TRACE") != NULL)
+        fprintf(stderr, "[reload] player 2's load: box kind 0x%08X, theirs %u -> %u, player 1's %u%c", kind, theirs_was,
+                mine != NULL ? *mine : 0u, p1, 10);
+    running = false;
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] player 2's load, from their own count\n");
+    cpu->gpr[3] = result;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+static void coop_p2_load_one(CPUState* cpu) { coop_p2_load(cpu, COOP_LOAD_ONE); }
+static void coop_p2_load_all(CPUState* cpu) { coop_p2_load(cpu, COOP_LOAD_ALL); }
+
+static void coop_thing_gone(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (g_coop_box_kept != 0u && cpu->gpr[3] == 2u && cpu->gpr[4] == g_coop_box_kept &&
+        (cpu->lr == 0x8007A148u || cpu->lr == 0x8007A2E0u)) {
+        g_coop_box_kept = 0u;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
+    if (cpu->lr == 0x8007A148u || cpu->lr == 0x8007A2E0u)
+        g_coop_box_kept = 0u;
+}
+
+// ED_RELOAD_TRACE=1 (testing): each step of the RELOAD prompt's test (0x800C05F0(node, mode, out)) and of Z's reload
+// (0x800C2CA4(node, hand)) for player 2, twice a second: the mode's gate (0x800465E4), the hand (0x80046170), what's
+// in it (0x80046254), its record's flags (0x80150BE8, bit 0x20 needed), the ammo look in their list and player 1's.
+#define COOP_RELOAD_TEST 0x800C05F0u
+#define COOP_RELOAD_Z 0x800C2CA4u
+static void coop_reload_trace(CPUState* cpu, bool z) {
+    g_hle_passthrough = true;
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_RELOAD_TRACE") != NULL;
+    static unsigned long long told[2];
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (!on || g_coop_p2 == 0u || cpu->gpr[3] != g_coop_p2 || frame < told[z] + 30ull)
+        return;
+    told[z] = frame;
+    const u32 node = cpu->gpr[3], r4 = cpu->gpr[4], lr = cpu->lr;
+    u32 r[8];
+    for (int i = 0; i < 8; i++)
+        r[i] = cpu->gpr[3 + i];
+    u32 gate = 0u, hand = z ? r4 : 0u, thing = 0u, record = 0u, flags = 0u, mine = 0u, theirs = 0u;
+    if (!z)
+        hle_guest_call(cpu, 0x800465E4u, &r4, 1, 0.0, &gate);
+    if (!z) {
+        const u32 a[2] = {node, 1u};
+        hle_guest_call(cpu, 0x80046170u, a, 2, 0.0, &hand);
+    }
+    const u32 b[2] = {node, hand};
+    hle_guest_call(cpu, 0x80046254u, b, 2, 0.0, &thing);
+    if (thing != 0u) {
+        hle_guest_call(cpu, COOP_NODE_RECORD, &thing, 1, 0.0, &record);
+        if (record != 0u)
+            hle_guest_call(cpu, 0x80150BE8u, &record, 1, 0.0, &flags);
+    }
+    const u32 other = coop_reload_other(cpu);
+    if (record != 0u) {
+        const u32 c[2] = {node, record}, d[2] = {other, record};
+        hle_guest_call(cpu, COOP_AMMO_FIND, c, 2, 0.0, &mine);
+        if (other != 0u)
+            hle_guest_call(cpu, COOP_AMMO_FIND, d, 2, 0.0, &theirs);
+    }
+    for (int i = 0; i < 8; i++)
+        cpu->gpr[3 + i] = r[i];
+    cpu->lr = lr;
+    {
+        const u32 obj = mem_read32(cpu, node + 52u);
+        const u32 table = guest_ram_range_valid(cpu, obj + 648u, 4u) ? mem_read32(cpu, obj + 648u) : 0u;
+        fprintf(stderr, "[reload] player 2's object 0x%08X: +644 0x%08X table 0x%08X move 10 0x%08X, 113 0x%08X, 158 0x%08X, +726 %u, state %u\n",
+                obj, mem_read32(cpu, obj + 644u), table, guest_ram_range_valid(cpu, table + 640u, 4u) ? mem_read32(cpu, table + 40u) : 0u,
+                guest_ram_range_valid(cpu, table + 640u, 4u) ? mem_read32(cpu, table + 452u) : 0u,
+                guest_ram_range_valid(cpu, table + 640u, 4u) ? mem_read32(cpu, table + 632u) : 0u, mem_read16(cpu, obj + 726u),
+                mem_read32(cpu, node + COOP_NODE_NOW));
+    }
+    fprintf(stderr,
+            "[reload] player 2's %s: mode %u gate %u, hand %u, holds 0x%08X, record 0x%08X flags 0x%X (0x20 %s), ammo in theirs 0x%08X, "
+            "in player 1's 0x%08X (node 0x%08X), turn %d, frame %llu\n",
+            z ? "Z" : "prompt test", r4, gate, hand, thing, record, flags, (flags & 0x20u) ? "on" : "off", mine, theirs, other,
+            (int)g_coop_turn, frame);
+}
+// Player 2's RELOAD prompt test (0x800C05F0(node, mode, out)) wants their held weapon's +16 bit 0x20 ("empty, ammo
+// carried"), which the game sets as the last shot is fired or a Mode is chosen (0x800BCFA4, 0x80150A2C), and 0x80 when
+// none is carried. Ammo picked up after that (by either player) never changed it: before the test, an empty weapon of
+// player 2's with ammo in either list is marked as the game marks it (0x80 off, 0x20 on), then the game's test runs.
+static void coop_reload_test(CPUState* cpu) {
+    if (coop_p2_reload_on() && g_coop_p2 != 0u && g_settings.mod_coop && sda_ready(cpu) && cpu->gpr[3] == g_coop_p2 &&
+        coop_listed(cpu, g_coop_p2) && coop_p2_weapon_moves(cpu)) {
+        u32 r[8];
+        for (int i = 0; i < 8; i++)
+            r[i] = cpu->gpr[3 + i];
+        const u32 lr = cpu->lr, node = cpu->gpr[3];
+        u32 hand = 0u, thing = 0u, record = 0u, count = 0u, ammo = 0u;
+        const u32 a[2] = {node, 1u};
+        hle_guest_call(cpu, 0x80046170u, a, 2, 0.0, &hand);
+        const u32 b[2] = {node, hand};
+        hle_guest_call(cpu, 0x80046254u, b, 2, 0.0, &thing);
+        if (thing != 0u)
+            hle_guest_call(cpu, COOP_NODE_RECORD, &thing, 1, 0.0, &record);
+        if (guest_ram_range_valid(cpu, record, 20u) && (mem_read32(cpu, record + 16u) & 0x20u) == 0u) {
+            hle_guest_call(cpu, 0x801508FCu, &record, 1, 0.0, &count);
+            if ((count & 0xFFFFu) == 0u) {
+                const u32 c[2] = {node, record};  // either list answers (coop_reload_lists)
+                hle_guest_call(cpu, COOP_AMMO_FIND, c, 2, 0.0, &ammo);
+                if (ammo != 0u) {
+                    mem_write32(cpu, record + 16u, (mem_read32(cpu, record + 16u) & ~0x80u) | 0x20u);
+                    if (getenv("ED_COOP_LOG") != NULL)
+                        fprintf(stderr, "[coop] player 2's empty weapon: ammo is carried, RELOAD can be offered\n");
+                }
+            }
+        }
+        for (int i = 0; i < 8; i++)
+            cpu->gpr[3 + i] = r[i];
+        cpu->lr = lr;
+    }
+    coop_reload_trace(cpu, false);
+}
+// ED_RELOAD_TRACE: each count set (0x80150990(record, count)) with whose counts are in.
+static void coop_count_set_traced(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const u32 rec = cpu->gpr[3];
+    const u32 kind = guest_ram_range_valid(cpu, rec + 4u, 4u) ? mem_read32(cpu, rec + 4u) : 0u;
+    fprintf(stderr, "[reload] count set: record 0x%08X kind 0x%08X %u -> %u, lr 0x%08X, turn %d, counts in %d, events own %d, use %d, frame %llu%c",
+            rec, kind, guest_ram_range_valid(cpu, kind, THING_KIND_SIZE) ? mem_read16(cpu, kind + THING_KIND_COUNT) : 0u, cpu->gpr[4] & 0xFFFFu,
+            cpu->lr, (int)g_coop_turn, g_coop_kinds_depth, (int)g_coop_events_own, (int)g_coop_use.active,
+            (unsigned long long)(cpu->timebase / 675000ull), 10);
+}
+static void coop_reload_z_traced(CPUState* cpu) { coop_reload_trace(cpu, true); }
+
+static void coop_reload_find(CPUState* cpu) { coop_reload_lists(cpu, true); }
+static void coop_reload_take(CPUState* cpu) { coop_reload_lists(cpu, false); }
 
 static void cheat_full(CPUState* cpu, u32 node) {
     if (!guest_ram_range_valid(cpu, node, 56u))
@@ -18559,6 +19563,20 @@ static void coop_copies_reset(void) {
     }
 }
 
+// A copy of player 2's: its original's item type (the original's record, node +44, +12), or -1 (wpn_part).
+static int wpn_copy_item(CPUState* cpu, u32 thing) {
+    u32 id = 0u;
+    for (int i = 0; i < 32 && id == 0u; i++)
+        if (g_coop_copies[i].node == thing && thing != 0u)
+            id = g_coop_copies[i].id;
+    for (u32 node = 0u, i = 0u; id != 0u && i < 1024u && (node = coop_next(cpu, node)) != 0u; i++)
+        if (node != thing && mem_read32(cpu, node + 16u) == id) {
+            const u32 record = mem_read32(cpu, node + 44u);
+            return guest_ram_range_valid(cpu, record, 16u) ? (s32)mem_read32(cpu, record + 12u) : -1;
+        }
+    return -1;
+}
+
 static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make) {
     coop_copies_reset();
     // A copy asked for by its own id (equipment saved while it was so
@@ -19985,12 +21003,25 @@ static void characters_reload(CPUState* cpu, u32 player) {
     if (++settled < 60u)
         return;
     const s32 p1 = actor_model(cpu, player);
+    // A body the game itself put a player in, not a playable character's (Summon Trapper's possession: Paul's
+    // chapter, player 1 as model 28 was reloaded "as a change of characters", the switch-player screen, and both
+    // stood): the game's own, not a choice to make again. A form keeps its wearer's model, so it isn't this.
+    if (p1 >= 0 && !coop_playable(p1)) {
+        static s32 told = -1;
+        if (told != p1)
+            fprintf(stderr, "[player] player 1 is in the game's own body for them (model %d): no reload for it\n", p1);
+        told = p1;
+        return;
+    }
     const s32 want1 = player_model() >= 0 ? player_model() : g_chapter_model;
     const int want2 = coop_wanted_character();
     bool p2_wrong = false;
     if (g_settings.mod_coop && g_coop_found) {
+        const s32 p2 = g_coop_p2 != 0u && coop_listed(cpu, g_coop_p2) ? actor_model(cpu, g_coop_p2) : -1;
+        if (p2 >= 0 && !coop_playable(p2))
+            return;  // player 2 in the game's own body for them, as player 1 above
         if (g_coop_p2 != 0u && coop_listed(cpu, g_coop_p2))
-            p2_wrong = actor_model(cpu, g_coop_p2) != (want2 >= 0 ? want2 : p1);
+            p2_wrong = p2 != (want2 >= 0 ? want2 : p1);
         else
             p2_wrong = want2 >= 0 && !coop_character_loaded(cpu, want2);
     }
@@ -20074,6 +21105,8 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         return;
     characters_reload(cpu, player);
     costume_moves(cpu, player);
+    wpn_test_equip(cpu, player);
+    wpn_check(cpu, player, false);
     costume_size(cpu, player);
     const u32 standing = mem_read32(cpu, player + 52u);
     if (guest_ram_range_valid(cpu, standing, 12u)) {
@@ -20097,6 +21130,8 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         moves_repair(cpu, g_coop_p2, true);
         moves_repair(cpu, player, false);
         costume_moves(cpu, g_coop_p2);
+        if (!g_coop_tome_p2)
+            wpn_check(cpu, g_coop_p2, true);
         costume_size(cpu, g_coop_p2);
         coop_door_proxy(cpu);
         coop_follow(cpu, player);
@@ -20362,6 +21397,50 @@ static void find_coop(CPUState* cpu) {
         item_asked->intercept = coop_script_item;
     } else {
         fprintf(stderr, "[coop] a script's asking for items not found: each player's own list answers\n");
+    }
+    // Reloading's ammo look and a used box's removal, of both players' lists (coop_reload_lists).
+    HleDispatchEntry* ammo_find = hle_dispatch_entry(COOP_AMMO_FIND);
+    HleDispatchEntry* item_remove = hle_dispatch_entry(COOP_ITEM_REMOVE);
+    if (mem_read32(cpu, COOP_AMMO_FIND) == 0x9421FFE0u && mem_read32(cpu, COOP_AMMO_FIND + 24u) == 0x80630030u &&
+        mem_read32(cpu, COOP_ITEM_REMOVE) == 0x9421FFF0u && mem_read32(cpu, COOP_ITEM_REMOVE + 32u) == 0x80630030u &&
+        ammo_find != NULL && ammo_find->intercept == NULL && ammo_find->notify == NULL && item_remove != NULL &&
+        item_remove->intercept == NULL && item_remove->notify == NULL) {
+        ammo_find->intercept = coop_reload_find;
+        item_remove->intercept = coop_reload_take;
+        HleDispatchEntry* load_one = hle_dispatch_entry(COOP_LOAD_ONE);
+        HleDispatchEntry* load_all = hle_dispatch_entry(COOP_LOAD_ALL);
+        if (load_one != NULL && load_one->intercept == NULL && load_one->notify == NULL && load_all != NULL &&
+            load_all->intercept == NULL && load_all->notify == NULL && mem_read32(cpu, COOP_LOAD_ONE + 16u) == 0x7C9F2378u &&
+            mem_read32(cpu, COOP_LOAD_ALL + 16u) == 0x7C9F2378u) {
+            load_one->intercept = coop_p2_load_one;
+            load_all->intercept = coop_p2_load_all;
+        } else {
+            fprintf(stderr, "[coop] the reload's loads not found: player 2's rounds come off player 1's count\n");
+        }
+        HleDispatchEntry* gone = hle_dispatch_entry(COOP_THING_GONE);
+        if (gone != NULL && gone->intercept == NULL && gone->notify == NULL && mem_read32(cpu, COOP_THING_GONE) == 0x9421FFF0u)
+            gone->intercept = coop_thing_gone;
+        else
+            fprintf(stderr, "[coop] a thing's end not found: a box player 2 empties goes for player 1 too\n");
+    } else {
+        fprintf(stderr, "[coop] reloading's ammo look not found: player 2 reloads from their own list only\n");
+    }
+    HleDispatchEntry* reload_test = hle_dispatch_entry(COOP_RELOAD_TEST);
+    if (mem_read32(cpu, COOP_RELOAD_TEST) == 0x9421FFE0u && reload_test != NULL && reload_test->intercept == NULL &&
+        reload_test->notify == NULL)
+        reload_test->intercept = coop_reload_test;
+    else
+        fprintf(stderr, "[coop] the RELOAD prompt's test not found: player 2's after ammo is picked up waits for a shot\n");
+    if (getenv("ED_RELOAD_TRACE") != NULL) {
+        HleDispatchEntry* test = reload_test;
+        HleDispatchEntry* z = hle_dispatch_entry(COOP_RELOAD_Z);
+        if (z != NULL && z->intercept == NULL && z->notify == NULL)
+            z->intercept = coop_reload_z_traced;
+        HleDispatchEntry* cs = hle_dispatch_entry(0x80150990u);
+        if (cs != NULL && cs->intercept == NULL && cs->notify == NULL)
+            cs->intercept = coop_count_set_traced;
+        fprintf(stderr, "[reload] tracing player 2's reload (%s, %s)\n", test != NULL ? "test" : "no test",
+                z != NULL ? "Z" : "no Z");
     }
     // The layout of the game's words, for the player's own name in them.
     HleDispatchEntry* words_layout = hle_dispatch_entry(WORDS_LAYOUT);
@@ -20894,7 +21973,7 @@ typedef struct {
         u32 ready, sets;
     } moves[2];
     s32 chapter_model;
-    u8 p2_state, parked, p2_is_player, pad;
+    u8 p2_state, parked, p2_is_player, pad;  // pad: bit k, moves slot k holds another's part (wpn_serve)
 } HleCoopState;
 
 size_t hle_coop_state_size(void) {
@@ -20913,6 +21992,8 @@ void hle_coop_state_save(void* out) {
         s.moves[k].part = g_p2_moves[k].part;
         s.moves[k].ready = g_p2_moves[k].ready;
         s.moves[k].sets = g_p2_moves[k].sets;
+        if (g_p2_moves[k].model >= 0 && g_p2_moves[k].home != g_p2_moves[k].model)
+            s.pad |= (u8)(1u << k);
     }
     s.chapter_model = g_chapter_model;
     s.p2_state = g_coop_p2_state;
@@ -20993,6 +22074,10 @@ void hle_coop_state_load(const void* in) {
     // The finish slot (fin_swap) is in RAM the state brings back: what it held is not known, so it's loaded again.
     g_p2_moves[FIN_MOVES_SLOT].model = g_p2_moves[FIN_MOVES_SLOT].part = -1;
     memset(g_fin, 0, sizeof g_fin);
+    // A held weapon's slots and how they were fitted: loaded and fitted again (wpn_check).
+    for (int k = WPN_P1_SLOT; k < WPN_P1_SLOT + 2; k++)
+        g_p2_moves[k].model = g_p2_moves[k].part = g_p2_moves[k].home = -1;
+    memset(g_wpn, 0, sizeof g_wpn);
     g_coop_p1_icon.element = 0u;
     g_coop_p1_icon.id = -1;
     g_coop_show_kept = false;
@@ -21025,6 +22110,7 @@ void hle_coop_state_load(const void* in) {
         g_p2_moves[k].part = s.moves[k].part;
         g_p2_moves[k].ready = s.moves[k].ready;
         g_p2_moves[k].sets = s.moves[k].sets;
+        g_p2_moves[k].home = (s.pad >> k & 1u) != 0u ? -2 : s.moves[k].model;
     }
     g_chapter_model = s.chapter_model;
     g_coop_p2_state = s.p2_state != 0u;

@@ -186,7 +186,7 @@ const Cell kCells[] = {
     {3, 0, controls::kCreep, controls::kFaceButton, nullptr, nullptr, false},
     {4, 0, controls::kAttack, controls::kFaceButton, nullptr, nullptr, false},
     {5, 0, controls::kAction, controls::kFaceButton, nullptr, nullptr, false},
-    {6, 1, controls::kAction, controls::kFaceButton, nullptr, nullptr, true},
+    {6, 1, controls::kAction, controls::kFaceButton, nullptr, nullptr, false},  // FINISH HIM's icon (\i6): bright, as the other prompts' are
     {15, 1, controls::kReload, controls::kShoulderButton, nullptr, nullptr, false},
     {1, 1, -1, 0, "stick_l", nullptr, false},
     {2, 1, -1, 0, "stick_l_left", "kb/a.png", false},

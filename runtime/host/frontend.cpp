@@ -1950,15 +1950,23 @@ void build_options_rows() {
         }
     };
 
-    graphics_rows("III \u00b7 Image", {enhancement::kHdTextures, enhancement::kSmaa, enhancement::kSharpen});
+    graphics_rows("III \u00b7 Image", {enhancement::kHdTextures, enhancement::kSharpen});
 
-    // Anti-aliasing and texture filtering: the renderer's from its start
-    // (main.c), so a change waits for the next one.
-    Row aa{"Anti-aliasing", on_off(g_settings.anti_aliasing)};
-    aa.toggle = true;
-    aa.note = "4x MSAA. A change waits for the next start.";
-    aa.change = [](int) {
-        g_settings.anti_aliasing = !g_settings.anti_aliasing;
+    // Anti-aliasing, one choice: SMAA (a pass over the picture, at once) and 4x MSAA (the renderer's from its start,
+    // main.c, so it waits for the next one) were two rows that read as the same thing. The same two settings as
+    // before (smaa, anti_aliasing).
+    static const char* const kAntiAliasing[] = {"Off", "SMAA", "4x MSAA", "4x MSAA + SMAA"};
+    const int aa_mode = (g_settings.smaa ? 1 : 0) | (g_settings.anti_aliasing ? 2 : 0);
+    Row aa{"Anti-aliasing", kAntiAliasing[aa_mode]};
+    aa.note = (g_settings.anti_aliasing != 0) != (g_running_anti_aliasing != 0)
+                  ? "MSAA changes from the next start."
+                  : "SMAA smooths the whole picture at once. MSAA smooths edges more cleanly, from the next start.";
+    aa.change = [](int dir) {
+        int mode = (g_settings.smaa ? 1 : 0) | (g_settings.anti_aliasing ? 2 : 0);
+        cycle(mode, 4, dir);
+        g_settings.smaa = (mode & 1) != 0;
+        g_settings.anti_aliasing = (mode & 2) != 0 ? 1 : 0;
+        settings_apply_graphics();
         settings_save();
     };
     g_rows.push_back(aa);
