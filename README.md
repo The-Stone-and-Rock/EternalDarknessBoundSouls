@@ -1,84 +1,167 @@
-# Eternal Darkness Recomp
+# Eternal Darkness: Bound Souls
 
-[![stars](https://img.shields.io/github/stars/griches/EternalDarknessRecomp?style=flat)](https://github.com/griches/EternalDarknessRecomp/stargazers)
-[![release](https://img.shields.io/github/v/release/griches/EternalDarknessRecomp)](https://github.com/griches/EternalDarknessRecomp/releases/latest)
 [![licence](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
+![players](https://img.shields.io/badge/players-1%20or%202-8e1b12)
+![status](https://img.shields.io/badge/co--op-experimental-orange)
 
-**Eternal Darkness: Sanity's Requiem** (GameCube, 2002) as a native game for the Mac,
-Windows and Linux / Steam Deck, built from **your own disc**. Nothing from the game
-is in this repository. The PlayStation 5 version is
-[PS5_EternalDarkness](https://github.com/griches/PS5_EternalDarkness).
-Version 0.9.6.
+**Eternal Darkness: Sanity's Requiem** (GameCube, 2002), rebuilt as a native PC game, and played **together**.
 
-> **European disc only.** You need your own image (`.iso` or `.gcm`) of the
-> **European GameCube disc, `GEDP01`**. The USA disc (`GEDE01`) is not supported:
-> the launcher does not offer it and the installers turn it away.
+*Bound Souls* is a split-screen co-op fork of
+**[Eternal Darkness Recomp](https://github.com/griches/eternaldarknessrecomp) by griches**, the native
+recompilation of the game this project is built on. Everything that makes the game run on a modern PC is his work;
+Bound Souls adds a second player, a cast of 34 playable bodies and a set of mods on top.
 
-## What you need
+> **You need your own European disc (`GEDP01`)** as an `.iso` or `.gcm`. Nothing from the game is in this
+> repository. The USA disc (`GEDE01`) is not supported.
 
-- Your own image of the European disc: an `.iso` or `.gcm` file.
-- For the HD textures, a program that opens `.7z` files: 7-Zip on Windows, Keka
-  or The Unarchiver on a Mac, Ark on a Steam Deck's desktop.
+---
 
-## Set it up
+## The dream
 
-### 1. The game
+Eternal Darkness was always a story about many souls bound to one fate: twelve people across two thousand years,
+each pulled into the same war against the Ancients. **Bound Souls asks: what if two of them faced it side by side?**
 
-- **Mac** (Apple silicon, macOS 13 or later)
-  1. Download `EternalDarkness-mac-....zip` from the
-     [latest release](https://github.com/griches/EternalDarknessRecomp/releases/latest),
-     unzip it and move **Eternal Darkness.app** to Applications.
-  2. The first time, right-click the app, choose **Open**, then **Open** again
-     (it is not notarised).
-  3. Drop your disc image on its window. It translates the disc and builds the
-     game from it (a minute or two), then starts. Later starts are instant.
-- **Windows** (64-bit)
-  1. Download `EternalDarkness-windows-x64-....zip` from the
-     [latest release](https://github.com/griches/EternalDarknessRecomp/releases/latest)
-     and unzip it somewhere you can write to, such as Documents or a Games
-     folder (not Program Files). You get a folder called `EternalDarknessRecomp`.
-  2. Put your disc image in its `dump` folder.
-  3. Double-click `play.bat`. If Windows says it protected your PC, click
-     **More info**, then **Run anyway**. The game's program comes ready-made;
-     its graphics, sound and music come from your disc.
-- **Steam Deck / Linux** (x86-64)
-  1. Download `EternalDarkness-linux-x86_64-....tar.gz` from the
-     [latest release](https://github.com/griches/EternalDarknessRecomp/releases/latest)
-     and unpack it somewhere such as `~/Games` (on a Deck, Ark does it in
-     Desktop Mode). You get a folder called `EternalDarknessRecomp`.
-  2. Put your disc image in that folder.
-  3. Run `play.sh`. On a Deck: Desktop Mode, Steam > Add a Non-Steam Game >
-     Browse > `play.sh`, then play it from Game Mode. The first start
-     translates your disc and builds the game from it (a few minutes, about
-     4 on a Deck; a window shows the time left); after that it starts
-     straight away.
+The goal is a real co-op game, not two players sharing one character's camera. Two players in the same world, each
+with their **own half of the screen, their own Tome, their own spells, weapons, sanity and health**, walking
+through the same rooms, fighting the same horrors, and losing their minds in their own ways. Any of the game's
+characters can stand beside any other, in any chapter: Pius and Alex in the Roivas mansion, Karim and Chandra in the
+Forbidden City, Edward's spirit guiding his granddaughter in person.
 
-### 2. The HD textures (recommended)
+Nothing is rebuilt from scratch. Co-op works by letting the game's own code run for each player in turn, so every
+examine, pickup, puzzle, door and scene is the game's own, just played by two.
 
-Two downloads, both DDS:
+**Legend:** 🧪 = *Experimental, expect glitches.* These are the same rows the menus tag
+"(Experimental, expect glitches)". Co-op is new, and the game was only ever meant for one player: please report
+what breaks.
+
+## At a glance
+
+| | |
+| --- | --- |
+| **Players** | 1, or 2 on one screen (side by side, or above and below) |
+| **Playable characters** | **12**: Pius, Ellia, Anthony, Karim, Max, Lindsey, Paul, Roberto, Peter, Edward, Michael and Alex |
+| **Other forms** | **22** more: spirits, corpses, the Liche, Chandra and her forms, the Bishop, the Custodian and more (**34 in all**) |
+| **Tomes** | One for each player, open at the same time |
+| **Save slots** | 100 save states, besides the game's own memory-card saves |
+| **Sanity effects** | All 35 of the game's, on demand or at doors |
+
+---
+
+## Features
+
+### Two-player co-op 🧪
+
+*Launcher > Co-op, or Mods > Co-op.*
+
+- 🧪 **Split-screen co-op**: a second player joins on the same screen, side by side or above and below, each
+  with their own view of the world. Co-op plays at 60 frames a second.
+- 🧪 **Player 2's own controls**: their own controller or keyboard, controller type, layout and button mapping.
+- 🧪 **Each player's own camera**: the game's Original fixed cameras, Third person or First person, chosen for
+  each player.
+- 🧪 **Two Tomes at once**: each player opens their own Tome in their own half while the world keeps going for
+  the other.
+- 🧪 **Each player's own magick**: both cast at the same time, each with their own quick spells, spells they've
+  made, magick bar and enchanting.
+- 🧪 **Player 2's own health, sanity, weapons and ammo**, with their bars on their side of the screen, and their
+  own reloads.
+- 🧪 **Player 2 can do everything**: examine, pick up and use items, ring bells, talk, pull levers and solve
+  puzzles, with their own prompts and close-ups in their half.
+- 🧪 **Nobody waits**: when one player picks something up, reads or examines, the other keeps playing. A find
+  shows only to whoever made it; the other gets a notice.
+- 🧪 **Doors and scenes belong to whoever triggers them**, and the other player follows along.
+- 🧪 **Creatures hunt both players**, and each player loses sanity as a horror comes into their own view.
+- 🧪 **The opening nightmare in co-op**: the same opening shots for each player, a shotgun for both, and no Tome
+  for either until the nightmare ends.
+- 🧪 **Co-op saves**: player 2 is kept as their own character with what they carried.
+
+### Characters 🧪
+
+*Launcher > Choose Character, or in a game, Mods > Characters.*
+
+- 🧪 **Any character for either player, in any chapter.** The game's own words use the name of the character
+  you chose, and you can keep their stats or take the chapter's. A change mid-game reloads right where you stand.
+- 🧪 **22 other forms from the story**, each with its own frame and portrait: Pius the **Liche**; Ellia's
+  **spirit** and **corpse**; Anthony's **spirit**, **cursed** and **corpse** forms; Karim's **spirit**;
+  **Chandra**, her **spirit** and **Mutilated Chandra**; Max's, Paul's, Roberto's and Edward's **spirits**; **the
+  Bishop**, **the Custodian** and the **Black Robes**; and **the Maid**, her **spirit**, **the Servant**, **the
+  Footman** and **Inspector Legrasse**. Ghost forms trail blue sparkles.
+- 🧪 **Any weapon, its own moves**: every character uses any weapon with its original owner's attacks, reload and
+  finishing move, and each player gets their own finisher close-up.
+- 🧪 **A character select screen**: every character and form in a scrolling gallery with portraits, names, their
+  story and stats, and a card for each player.
+
+### Mods
+
+*Launcher > Mods, or Mods in the pause menu.*
+
+- **Sanity Effects**: pick any of the game's 35 sanity effects and play it on your save, or have random effects
+  strike at doors (single player).
+- 🧪 **Challenge: Enhanced sanity effects**: once sanity drops below 95%, any door can bring an effect, more often
+  as it falls. *Off* turns the game's random effects off.
+- 🧪 **Cheats**: *All magick* (every rune, circle and spell) and *Full stats* (health, sanity and magick kept full,
+  for each player).
+- **Skip intro**: Main menu goes straight to the title menu, Jump to Game straight into the chapter.
+- **Title video**: your own video behind the title menu, with the game's music and words on top.
+
+### Graphics 🧪
+
+*Options > Graphics. All new in Bound Souls, on top of what the original recomp already offers.*
+
+- 🧪 **Character shadows from each room's own lamps**, easing between lights, *Light* or *Dark*, *Soft* or *Hard*,
+  plus contact shadows where characters meet the floor and walls (**Shadows**).
+- 🧪 **Per-pixel lighting, skin scattering and full-size ambient occlusion** (**Lighting**).
+- 🧪 **Haze around lamps and spells, light shafts, and spells that glow** (**Effects**).
+- 🧪 **SMAA, 4x MSAA or both, and sharpening** (**Image**).
+- 🧪 **Scenes fill the whole screen**, with no black bars, solo and co-op.
+
+### Menus and comfort
+
+- **A redesigned launcher and menus** on the Tome's parchment, with switches, sliders and arrows, Graphics split
+  into short pages, and every menu remembering where you were.
+- 🧪 **100 save state slots**, ten to a page, with Load, Duplicate and Delete. F1 to F10 save, F11 loads the newest.
+  The cursor starts on the save you made last.
+- **Skip any cutscene with Start**, even the first time you see it.
+- **No forced Tome help pages**: the Health, Sanity and Magick help no longer pops the Tome open and pauses play.
+- **Switch button prompts in Nintendo's colours** with a Switch controller.
+
+---
+
+## What's next
+
+The road to a game that feels like it was always made for two:
+
+- **Each player's own sanity effects**: when the game calls for one, each player gets their own, tied to their own
+  sanity, so the two can see different horrors at the same moment.
+- **Shared discoveries**: whoever finds the last piece of a spell gets the Tome's discovery page, and the other gets
+  the spell with a notice like *"Pius found Enchant Spell"*. Runes and pages reach both players.
+- **Player 2's own menu** for items and spells, alongside their Tome.
+- **Using an item without holding the other player** (the Bronze Necklace still pauses player 2).
+- **Chapters that cross into each other**: rooms that lead into another chapter, for sanity effects and a
+  **randomizer**.
+- **Spawn an enemy** from the Cheats page.
+- **The character select, alive**: a turning model of each character on hover, and **Charlemagne** as a playable
+  form.
+- **Effects that face each player's own camera** (torch flames and sparkles face player 1's for now).
+- **True 120 frames a second in co-op** (60 for now; 120 already works solo).
+- **Every chapter checked for both players**: every examine, pickup and scene, chapter by chapter.
+
+Ideas and bug reports are welcome in the Issues.
+
+---
+
+## Getting started
+
+Packaged downloads for Bound Souls aren't up yet. Until they are, build it from source (below). The original
+recomp's [releases](https://github.com/griches/eternaldarknessrecomp/releases) are single player only.
+
+### HD textures (recommended)
 
 | Download | What it is | Size |
 | --- | --- | --- |
 | **[Eternal Darkness HD Texture Pack](https://drive.google.com/file/d/1KGEr7dF2onTdzUFNp7Lia3p0D0I2-TaZ/view)** by Zombie | The game's textures redrawn at four times the detail | 2.9&nbsp;GB&nbsp;`.7z` |
-| **[PAL supplement](https://drive.google.com/file/d/1BuoE0uL4K3xn5KfH8KYYtC6fk-6QiiiA/view)** by Eternal Darkness Recomp | What the pack misses on the European disc: the Jump to Game, Options and Language screens and the title menu's words, and highlights without hard edges | 13.2&nbsp;MB&nbsp;`.zip` |
+| **[PAL supplement](https://drive.google.com/file/d/1BuoE0uL4K3xn5KfH8KYYtC6fk-6QiiiA/view)** by Eternal Darkness Recomp | What the pack misses on the European disc | 13.2&nbsp;MB&nbsp;`.zip` |
 
-1. Unpack both. Each one gives you a folder.
-2. Put both folders in a folder called `textures` (make it if it isn't there):
-   - Mac app: `~/Library/Application Support/Eternal Darkness/textures`
-     (in Finder, **Go > Go to Folder** and paste the path)
-   - Steam Deck, Linux and Windows: `textures` in the game's folder, next to
-     `res`
-
-Leave both folders as they are: the supplement replaces some of the pack's
-textures on purpose, and a folder with *supplement* in its name always wins.
-DDS stays compressed on the graphics card, a quarter of the memory PNG takes.
-
-The pack is the work of **Zombie**, shared on the
-[Dolphin forums](https://forums.dolphin-emu.org/Thread-eternal-darkness-hd).
-
-### 3. Check the folder
-
-When you're done, `textures` looks like this:
+Unpack both and put both folders in a folder called `textures` next to `res` in the game's folder:
 
 ```
 textures/
@@ -86,65 +169,26 @@ textures/
 └── Eternal Darkness HD Texture Pack PAL supplement/
 ```
 
-`GED DDS 1.0` is Zombie's pack; the folders' names don't matter.
+Leave both as they are: the supplement replaces some of the pack's textures on purpose. **Options > Graphics >
+Image > HD textures** says how many it found. The pack is the work of **Zombie**, shared on the
+[Dolphin forums](https://forums.dolphin-emu.org/Thread-eternal-darkness-hd).
 
-### 4. Play
+### Playing
 
-Start the game and choose **New game** in the launcher. The defaults are
-already the best picture: your screen's own resolution, widescreen, HD textures
-on and sharp baked shadows. In **Options > Game**, **HD textures** should say
-**On**, and its note gives the number of textures it found.
-
-### If something's wrong
-
-- **The Mac says the app can't be opened**: right-click it and choose **Open**
-  (step 2 above).
-- **The disc isn't accepted**: only the European disc (`GEDP01`) works, as an
-  `.iso` or `.gcm`.
-- **HD textures says No pack**: the pack isn't inside `textures`. Check the
-  folder against the one above, then start the game again: it looks for the
-  pack as it starts.
-- **Anything else**: send the files in `saves/reports/` with a few words on what
-  you were doing.
-
-### Updating
-
-Put the new build in place of the old one (on a Mac, the new app in
-Applications). Saves, settings and textures stay where they are: in the game's
-folder, or the Mac app's
-`~/Library/Application Support/Eternal Darkness`.
-
-## What is better than on the GameCube
-
-- **Sharp picture at any resolution**: drawn at your screen's own resolution, up
-  to 4K, or a fixed 720p, 1080p, 1440p or 4K, with full colour (no 6-bit banding).
-- **Widescreen**: the game's own 16:9 mode (more of the room at the sides, not
-  stretched) with the HUD and prompts at the screen's edges; 4:3 too.
-- **Smoother on a fast screen**: on a 90, 120 Hz or faster screen, frames in
-  between the game's 60 (Options > Frame rate).
-- **Fast-forward the cutscenes**: while a movie or a scene in the black bars
-  plays, hold RB (Tab on the keyboard) to run it at up to four times speed.
-- **Camera options** (Options > Game > Camera): the game's own fixed cameras,
-  *Third person (beta)* (behind the character you play, turned with the right stick, up and down
-  for closer or further, and kept inside the room by the game's own collision)
-  or *First person (beta)* (through their eyes, looking around with the right stick). Both hold still while you aim.
-- **New baked shadows** (below): the rooms' light and shadow redrawn sharp.
-- **Character shadows cast from the game's own lights, contact shadows, volumetric lighting, skin scattering, glowing spells, per-pixel lighting, full-size ambient occlusion, SMAA, sharpening and light shafts**, each under **Options > Graphics**.
-- **Crisp game text**: the game's lettering redrawn in two styles, *Sharp* or
-  *Tome* (old typefaces), or *Original* as on the disc.
-- **HD texture packs** in Dolphin's format.
-- **Modern controls**, remapping, and button prompts that match your controller
-  (Xbox, PlayStation or Switch icons), the game's own prompts included.
-- **Save anywhere**: the pause menu has 100 save slots that hold the whole moment,
-  besides the game's own memory-card saves (cards in slots A and B both work).
-- **A launcher**: Continue, New game or any save slot straight from the start,
-  and Options for everything here.
-- **Problem reports**: if the game stops responding, stops or crashes, it says
-  so on screen and writes a report to `saves/reports/` to send.
+- The launcher opens on **Main menu**. **Continue** loads your newest save state, **Load game** any of them, and
+  **Choose Character** and **Co-op** set up the players.
+- For co-op, plug in two controllers (or one and the keyboard), turn on **Split-screen co-op**, and pick each
+  player's character.
+- In the game, the View/Back button or **Esc** opens the pause menu: save states, Options, Mods, and the way back
+  to the title or the launcher.
+- If something goes wrong, the game says so on screen and writes a report to `saves/reports/`. Please attach it
+  to an issue with a few words on what you were doing.
 
 ## Controls
 
-A controller works as it is; the keyboard works too. Two layouts and your own:
+A controller works as it is, and the keyboard too. *Options > Controls* switches layout (Modern, Original or
+Custom), sets hold or toggle, deadzone and vibration, and remaps any action. Player 2 has their own under
+*Co-op > Player 2 controls*.
 
 | Action | Modern (default) | Original (GameCube positions) | Keyboard |
 | --- | --- | --- | --- |
@@ -157,140 +201,53 @@ A controller works as it is; the keyboard works too. Two layouts and your own:
 | Reload | <img src="res/ui/glyphs/ink/xbox/west.png" width="30" alt="X"> | <img src="res/ui/glyphs/ink/xbox/rb.png" width="30" alt="RB"> | <img src="res/ui/glyphs/ink/kb/q.png" width="30" alt="Q"> |
 | Quickcast | <img src="res/ui/glyphs/ink/xbox/north.png" width="30" alt="Y"> | <img src="res/ui/glyphs/ink/xbox/north.png" width="30" alt="Y"> | <img src="res/ui/glyphs/ink/kb/i.png" width="30" alt="I"> |
 | Spells | <img src="docs/glyphs/dpad.png" width="30" alt="D-pad"> | <img src="docs/glyphs/dpad.png" width="30" alt="D-pad"> | <img src="res/ui/glyphs/ink/kb/arrows.png" width="30" alt="Arrow keys"> |
-| Game's pause menu | <img src="res/ui/glyphs/ink/xbox/start.png" width="30" alt="Menu"> | <img src="res/ui/glyphs/ink/xbox/start.png" width="30" alt="Menu"> | <img src="res/ui/glyphs/ink/kb/enter.png" width="30" alt="Enter"> |
-| Fast-forward a cutscene (hold) | <img src="res/ui/glyphs/ink/xbox/rb.png" width="30" alt="RB"> | <img src="res/ui/glyphs/ink/xbox/rb.png" width="30" alt="RB"> | <img src="res/ui/glyphs/ink/kb/tab.png" width="30" alt="Tab"> |
-| This port's menu (saves, options) | <img src="res/ui/glyphs/ink/xbox/back.png" width="30" alt="View"> | <img src="res/ui/glyphs/ink/xbox/back.png" width="30" alt="View"> | <img src="res/ui/glyphs/ink/kb/escape.png" width="30" alt="Esc"> |
+| Tome / skip a cutscene | <img src="res/ui/glyphs/ink/xbox/start.png" width="30" alt="Menu"> | <img src="res/ui/glyphs/ink/xbox/start.png" width="30" alt="Menu"> | <img src="res/ui/glyphs/ink/kb/enter.png" width="30" alt="Enter"> |
+| Pause menu (saves, options) | <img src="res/ui/glyphs/ink/xbox/back.png" width="30" alt="View"> | <img src="res/ui/glyphs/ink/xbox/back.png" width="30" alt="View"> | <img src="res/ui/glyphs/ink/kb/escape.png" width="30" alt="Esc"> |
 
-PlayStation and Switch controllers use the same buttons in the same places, and
-the game shows your controller's own icons.
-
-In the game's own menus LB and RB page left and right (the GameCube's L and R).
-**Options > Controls** switches layout, makes Sprint, Creep and Target hold or
-toggle, sets the stick deadzone and vibration, and **Button mapping** rebinds any
-action to a button, trigger or key (that layout is *Custom*).
-
-## The new baked shadows
-
-Eternal Darkness lights its rooms with pre-drawn light maps: the window light on
-the floors, the shadows under the furniture, the glow of the lamps. On the disc
-they are small and compressed, so at today's resolutions their edges break up
-into blocks and smears. With **Options > Game > Baked shadows: Sharp** (the
-default) each room's light maps are rebuilt four times larger as the room loads:
-the compression blocks are evened out and edges are doubled along their own
-direction, so light and shadow keep clean edges; the small maps on the walls are
-smoothed instead. **Original** shows them as on the disc. The change shows as soon
-as you switch.
-
-## Playing
-
-- The launcher's **Play** offers Continue (your newest save slot), New game or
-  any slot. **Options** holds the display, sound, controls and game settings.
-- In the game, the menu button (above) or **Esc** opens this port's pause menu:
-  100 save slots, Options, Return to title screen, Return to launcher, Quit.
-- Saves: `saves/` (the pause menu's slots) and `ed-GEDP01-slot-a.dolcard` (the
-  game's memory card; a `...-slot-b.dolcard` beside it is slot B).
-- If something goes wrong, send the files in `saves/reports/` with a few words on
-  what you were doing.
-
-## How it works
-
-The game's PowerPC code is translated to C by
-[DolRecomp](https://github.com/ExpansionPak/DolRecomp) and compiled for your
-machine; it runs on [GXRuntime](https://github.com/aharonahdoot/GXRuntime), which
-supplies the GameCube's CPU state, devices and SDK services, and draws through its
-gxcore renderer (the GameCube's GX graphics, after Dolphin's) on Aurora and Dawn
-(Metal, Direct3D 12 or Vulkan). `generated/` (code translated from your disc) and
-`dump/` (your disc image) stay on your machine.
+PlayStation and Switch controllers use the same buttons in the same places, with their own icons.
 
 ## Building from source
 
-All platforms start the same way:
-
 ```sh
-tools/setup-deps.sh                           # pinned DolRecomp + GXRuntime, plus our patches
-python3 tools/generate.py /path/to/disc.iso   # ISO or CISO; writes generated/
+tools/setup-deps.sh                           # pinned DolRecomp + GXRuntime, plus this project's patches
+python3 tools/generate.py /path/to/disc.iso   # translates your disc's code into generated/
 cp /path/to/disc.iso dump/GEDP01.iso          # the European disc
 ```
 
-- **Mac**: `cmake -S . -B build-mac -G Ninja && ninja -C build-mac EternalDarkness`,
-  then `./play.sh`. `tools/mac/make-mac-app.sh` builds a self-contained
-  `Eternal Darkness.app` (beta) that asks for your disc and builds the game
-  from it on first start (`tools/mac/README.txt`).
-- **Windows**: configure with clang-cl and Ninja (`build-win`), build
-  `EternalDarkness`, copy the DLLs from the build tree next to the exe, then
-  `play.bat`. For the release folder, `tools/win/stage-win-build.bat` on the
-  PC gathers the build, then `tools/win/make-win-package.sh` on a Mac zips it.
-  **After a change that touches rendering** (anything in `.deps/GXRuntime`),
-  rebuild from a Visual Studio 2022 tools prompt (`vcvars64.bat`, the tools
-  `build-win` was configured with): with a newer Visual Studio installed, its
-  headers are picked up otherwise and the C++ fails with `STL1000`. Then save
-  the change with `git -C .deps/GXRuntime diff > patches/gxruntime/eternal-darkness.patch`:
-  `.deps` is not in git, so a fresh setup has only what the patch holds.
-- **Linux / Steam Deck**: build with clang and Ninja (`build-linux`);
-  `tools/deck/make-deck-package.sh` makes a folder that builds the game from
-  your disc on first start (`tools/deck/README.txt`).
+- **Windows**: configure with clang-cl and Ninja (`build-win`) from a Visual Studio 2022 tools prompt
+  (`vcvars64.bat`), build `EternalDarkness`, copy the DLLs from the build tree next to the exe, then run
+  `play.bat`. After a change in `.deps/GXRuntime`, save it with
+  `git -C .deps/GXRuntime diff > patches/gxruntime/eternal-darkness.patch` (`.deps` isn't in git).
+- **Mac**: `cmake -S . -B build-mac -G Ninja && ninja -C build-mac EternalDarkness`, then `./play.sh`.
+- **Linux / Steam Deck**: clang and Ninja (`build-linux`).
 
-`./play.sh` opens the launcher. The first time, pick the disc (images in
-`dump/` or the project folder; this build runs the disc it was generated from);
-after that it lives in Options and the menu leads with Play. Play offers
-Continue (the newest save slot), New game, or any used slot, so a save loads
-without going through the game first. In the game, Esc or the controller's Back/Select button pauses into a
-menu with 100 save slots (`saves/`), the same options, and a way back to the
-launcher. Menus work with the keyboard (arrows, Enter, Esc), a controller
-(d-pad or stick, A, B) or the mouse.
+`generated/` (code translated from your disc) and `dump/` (your disc image) stay on your machine.
 
-Options (kept in `settings.ini`): aspect ratio (4:3 or 16:9, the
-game's own two; it sets the game's widescreen option), widescreen HUD, resolution (each
-choice shows its size), fullscreen, on-screen FPS counter (off by default), camera
-(Original, Third person (beta) or First person (beta); the right stick, or T F G H, turns it), baked shadows
-(Sharp: each room's light maps are upscaled 4x as it loads, with CMPR's blocks
-evened out and edge-directed doubling, so window light and shadows on the
-walls and floors have clean edges; Original: as on the disc), music and
-sound-effect volumes, audio buffer, and Controls: Original (GameCube
-positions), Modern (attack RT/A, action B, aim LT, sprint and creep on the stick clicks
-as toggles, LB/RB as the GameCube L/R for paging the game's menus, reload
-X/Square, quickcast Y/Triangle) or
-Custom (select an action, then press a button, trigger or key), Sprint, Creep
-and Target as hold or toggle, stick deadzone and vibration. Bindings show
-as Xbox, PlayStation or Switch button icons for the connected controller, and
-the game's own prompts ("B Examine", the inventory's L/R) are redrawn with the
-same icons for the button that does each action (keyboard keys with no
-controller).
+### How it works
 
-Quick save: 2 saves the whole machine to `build/runs/quick.state` and 1 loads
-it back, in the same session or after a restart (`ED_QUICKSTATE=path` picks
-another file). Memory-card saves are never touched by a load.
+The game's PowerPC code is translated to C by [DolRecomp](https://github.com/ExpansionPak/DolRecomp) and compiled
+for your machine. It runs on [GXRuntime](https://github.com/aharonahdoot/GXRuntime), which supplies the
+GameCube's devices and SDK, and draws through its gxcore renderer on Aurora and Dawn (Direct3D 12, Vulkan or
+Metal). Co-op lives in the host layer, `runtime/host/`: it runs the game's own functions for each player in turn.
+`docs/` holds the notes behind it, and `tools/ed/` the tools that map the game's systems.
 
-Memory cards: slot A is `ed-GEDP01-slot-a.dolcard` (the disc's game ID in the
-name) in the folder the game runs from. A card beside it named
-`...-slot-b.dolcard`, or one given with `--card-b PATH` or `ED_CARD_B=path`,
-goes in slot B, and the game's Load Game and Save screens offer it there.
-The console's own settings sit beside slot A as `...-sram.bin`: the game takes
-its Audio Mode from them at start, as on a GameCube, and writes them when you
-change it. Without that file a new game starts in Stereo.
-`tools/gci.py` lists a card and moves saves in and out as GCI files (as
-Dolphin exports them; MaxDrive `.sav` and GameShark `.gcs` import too).
+---
 
-## Layout
+## Credits
 
-- `runtime/host/`: the game's host layer (SDK intercepts, interrupts, disc,
-  audio and disc-music streaming), derived from
-  [StrikersRecomp](https://github.com/aharonahdoot/StrikersRecomp)'s host.
-- `tools/`: disc reading and code generation (`generate.py`), the symbol map
-  carried from the USA decomp to the PAL disc (`symbols.py`), per-build
-  constants read from the game's code (`gamedata.py`), and debugging helpers.
-- `config/GEDE01/symbols.txt`: function names from the
-  [unending-occlusion](https://github.com/PattyTrish/unending-occlusion) decomp (CC0).
-- `patches/gxruntime/`, `patches/dolrecomp/`: fixes to GXRuntime and the
-  recompiler this game needs.
-- `res/icon/`: the Eternal Darkness Recomp emblem (window and Dock icon,
-  `AppIcon.icns` for the Mac app).
-- `res/`: the launcher and in-game menu (RmlUi documents) and their fonts
-  (Alegreya SC and Fira Sans, SIL Open Font License, licences alongside), and
-  button icons from Kenney's Input Prompts (CC0).
+- **[griches](https://github.com/griches)**, for **[Eternal Darkness Recomp](https://github.com/griches/eternaldarknessrecomp)**,
+  the recompilation that made Bound Souls possible: the native port, launcher, widescreen, controls, baked
+  shadows, save slots and everything else under the co-op. Thank you.
+- **Zombie**, for the HD texture pack.
+- [DolRecomp](https://github.com/ExpansionPak/DolRecomp), [GXRuntime](https://github.com/aharonahdoot/GXRuntime)
+  and [StrikersRecomp](https://github.com/aharonahdoot/StrikersRecomp), the tools and host this is built on.
+- The [unending-occlusion](https://github.com/PattyTrish/unending-occlusion) decomp, for function names (CC0).
+- Alegreya SC and Fira Sans (SIL Open Font License), and Kenney's Input Prompts (CC0).
+- **Silicon Knights and Nintendo**, for the game itself.
+
+Bound Souls is a fan project, not affiliated with or endorsed by Nintendo or Silicon Knights. Please own the game.
 
 ## Licence
 
-GPL-3.0-or-later (see `LICENSE`), as the GXRuntime and StrikersRecomp code it
-builds on. `THIRD_PARTY.md` lists everything else a build holds and its
-licence; every package carries their texts in `licenses/`.
+GPL-3.0-or-later (see `LICENSE`), as the projects it builds on. `THIRD_PARTY.md` lists everything else a build
+holds and its licence.
