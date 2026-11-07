@@ -62,12 +62,30 @@ From `0x80155830` at 0, then `0x80152614(room, entry, camera, script, flags)`:
 
 ## For two players
 
-`coop_follow` moves player 2 to player 1's room. **Whoever is current as the ticket is written takes the marker** (`g_coop_entered_p2`, at the ticket's notice). Zones, Tome items and non-exit prompts of player 2 run as them, so they take it. Exit prompts 1, 2, 3, 4, 10 (`coop_prompt_is_exit`) run as player 1 through `coop_use_start(script, false)`, so player 1 takes it even when player 2 pressed. `coop_door_motion` hooks `0x801669AC`: when player 2 opened it, the motion is theirs, and if they're still in state 121 on arrival `coop_follow` forces state 80 with that motion running on.
+`coop_follow` moves player 2 to player 1's room. **Whoever is current as the ticket is written takes the marker** (`g_coop_entered_p2`, at the ticket's notice). Zones, Tome items and non-exit prompts of player 2 run as them, so they take it. Exit prompts 1, 2, 3, 4, 10 (`coop_prompt_is_exit`) pressed by player 2 run as player 2 too (`coop_use_start(script, true)`, since 2026-11-06; before, as player 1, so a locked door's words opened in player 1's half and player 1 stood held). Their locked-door words show in their half for their pad, what the script asks of "the player" (script 132's model) is theirs, and player 1 walks through their script's hold (`coop_p2_holds`). `g_coop_exit_p2_until` stays pending until that script's ticket or motion, or a real press of player 1's (r4 0 at `0x80006EBC` from `0x8013E334`: the dispatch also calls it with r4 3 every 60 frames as player 1 walks). Both players still stand through the 62-tick fade (busy 4) of the other's door. `coop_door_motion` hooks `0x801669AC`: when player 2 opened it, the motion is theirs, and if they're still in state 121 on arrival `coop_follow` forces state 80 with that motion running on.
 
-**Seen in runs: the other player stands still through the leaving, and arrives standing, 150 units from the opener where the floor allows, then 75, else on their spot (`coop_place`).** It's the arrival event 238 that plays the motion, and `coop_follow` sends none, so a follower gets no arrival motion. That's from player 1 opening, in today's runs. Player 2 opening is in older logs with no recording: `logs/run-20261102-0141-coop-slot6-door80`, `logs/t28-doors-unheld.log`. In slot 7's door, player 2 lands between the camera and player 1, hiding them. Whether that wants changing is the user's call.
+**The follower is placed by `coop_place` (2026-11-06):** 150 units round the arrival spot, then the nearest the two can stand clear (r1 + r2 + 10), each needing a clear 30-unit line, a floor within 12 (then 50) and room for the placed player's own ball at the spot; then the old rules without the room test, 150 and 75 last. `ED_COOP_PLACE_LOG=1` logs each try. In room 158 all 8 directions at 150 are walls or too narrow, so the follower goes to the stairs side. **Seen in runs: the other player stands still through the leaving, and arrives standing.** It's the arrival event 238 that plays the motion, and `coop_follow` sends none, so a follower gets no arrival motion. That's from player 1 opening, in today's runs. Player 2 opening is in older logs with no recording: `logs/run-20261102-0141-coop-slot6-door80`, `logs/t28-doors-unheld.log`. In slot 7's door, player 2 lands between the camera and player 1, hiding them. Whether that wants changing is the user's call.
 
 **Already tried: sending player 2 event 238 by `hle_guest_call`, as themselves** (`2fa5936`). They stopped where they were, twisted, in mid motion, so `862e14d` set state 80 instead: `docs/coop-failed-attempts.md`. That try never read the event's answer, or sent event 191 after, as the game does: `hle_guest_call` returns `r3` and restores registers, while event 238's answer is in `r4` (`0x801526F0`).
 
 **A zone a follower lands in must not send them back:** comment at `COOP_SCRIPT_GO_TO_ROOM`.
 
 **Not worked out:** what motion 2 and 99 look like. Whether `fn79(handle, 135, 0)` can also change room. What rooms 1000 and above are for.
+
+## Arrival and the way back (round 5, 2026-11-06)
+
+- The game does NOT keep the arriving player from entering the region they arrive in. In solo the way back's enter script runs on their first look with zones on, and CLIMB DOWN shows on arrival (logs/run-20261106-105222-jtg-fol-solo2-bad, frame 3347).
+- `0x8019C098` returns r13-23040 (zones on). When it is 0, the scan clears the looker's bit in every zone (`0x80134BE8`).
+- `0x80134684`: zone +104 bit 0 is the player (r13-26524), bit 1 anyone else. It returns 1 enter, 2 leave, 3 stay. On a leave, `0x801349C0` calls `0x801170D4`.
+- Leaving a way-back zone resets its script word, so walking back in shows the prompt again and doesn't climb.
+- The game's own step also scans player 2's object with player 1 as the player, using the "other" bit.
+- `0x80134D48` runs at fn22(0) and as words open, and marks what the player stands in as inside without running its script.
+- Script 81 (ch2 L02 BoxRegion04) is room_queue[fn71](138), then go_to_room[fn66](138, EntryMkr01, Camera03, 2, 1163, 0).
+- Co-op (round 5): the follower's first look passes over a way back's prompt and room change (`coop_follow_look`); a zone's room request made while the other player's scene or words are up waits (`g_coop_way_out`).
+
+## Entry markers and zone tests (round 6, 2026-11-06)
+
+- Arrival placement: `0x80152614` -> `0x80155348(entry, 2)` gives the marker index; `0x80151914(index, 2, &heading)` returns a pointer to the marker's place, three halfwords at +44 (read by `0x8016E764`, lha at `0x801519B0`), not floats. The heading is from +56/+68 via `0x8016E998`; `0x80124BE4` faces the player by it (+pi when an arrival motion plays).
+- The ticket at `0x8058AFFC` (read by `0x801558E0`): +8 room, +28 entry, +16 the flags argument of `0x80152614` (bit 1: a saved place, the marker is skipped).
+- `0x8019C0A0(point, zone)` is the zone point test: kind +108 0 is a sphere (radius int at +48, center s16 at +52), 1 a box (min s16 at +48, max at +54, `0x80136BB0`), 2 a plane. Player scripts are at +58/+60/+62 (sphere) and +60/+62/+64 (box): coming in, leaving, staying; other characters' at +64..+70. `0x80134DCC(object, zone)` is the same test at the object's place plus 5 in height. The room's zones come from `0x80123F70(object)` (+180 list, +176 count, 116 bytes each).
+- Co-op (round 6): `coop_place` puts the follower outside any scripted zone the arrival spot isn't in, trying from the marker's heading.

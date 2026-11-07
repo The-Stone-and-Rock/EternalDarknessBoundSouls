@@ -29,4 +29,29 @@ Also: `ed camera NAME`, and `ed door ROOM` for a door's arrival camera. Evidence
 
 **An examine's camera steps:** the close-up pushes and puts record 10 on (`0x80024E90`); its words' opening, through the words' hold (`0x80042A8C(1)`), clears the stack and puts the room's record 2 on (`0x801EC3A0`, `0x801EEB58(2)`), then its words step pushes record 10 again (`0x80025080`); RETURN pops once (`0x8002511C`) back to 2. In co-op the hold is passed over so the other player plays on, and its camera part is done by `coop_words_hold` for either player. Passed over whole, record 10 stayed on after RETURN.
 
+**The stack holds 5 entries,** from `0x806038E8` to `0x8060394C`, where other data starts (`0x800EDB8C`, `0x801ED890`). Each entry is 20 bytes: the two current records' blends (+48 of `0x806037D8` and `0x80603860`), their record pointers (+112) and the index. `0x801EEB58` rewrites those pointers from the index. Other pops: the close-up cancel `0x80024B24` at `0x80024BCC` (look stage 2 or 3) and `0x801ECE3C` (pop then cut). The step `0x801EB9A0` reads neither depth nor index.
+
+**In co-op each player's camera set is their records, the stack, its depth and the index** (`coop_camera_set_io`, `COOP_CAMERA_SET`, 2026-11-06), swapped wherever the records are. Player 2's first set pops player 1's pushes off with the game's own pop (`coop_camera_set_fresh`), and a scene of player 1's that gives player 2 its last camera gives it with depth 0. Before, one player's close-up pushed and popped on the other's depth and index (`ED_CAMSTACK_LOG`: logs/run-20261105-230130-jtg-cs-r1 line 654).
+
 **Open:** who writes a wrong record (`0x80602C90` was never found). Player 1's camera stuck until a room change (`logs/run-20261102-223052-test2`, the user's of 2026-11-02) is the Tome's camera left on, above.
+
+**A room's start camera (2026-11-06, round 3).** The game gives the player a camera at a room's start three ways:
+- Inside the room change, `0x80152614`: `0x801EE998(hash, 2, 0)` at `0x80152790`, `0x801EE764` on eye record 2 (`0x80603288`) at `0x801527CC`, then `0x801ECCE0` and `0x801EEB58(2)`. `0x80152298` has its own set at `0x80152588`. The arrival script runs after it, at `0x801527F4`.
+- The player's first zone look (`0x80134A44`) during the room's 10-tick fade-in. `0x801E7C88(type, ticks)` keeps the ticks at r13-21784. The camera zone they spawn in chooses then: in ch9 room 27, player 1 spawns in CameraRgn07, so script 1067 gives Camera07.
+- A scene's ending fn8.
+
+`0x801EE764` has four callers: `0x800263CC`, `0x80152588`, `0x801527CC`, and fn8's `0x801EE95C`. fn10 calls `0x801EE998` from `0x801F066C` and `0x801F07BC`.
+
+In co-op, player 2's set was made once per room, at their first look, which can come before either of those choices (ch9: eye 0,0,0). Now player 2's set follows the room start's choices until a zone of their own chooses (`coop_camera_p2_in`, `coop_camera_chosen`, `coop_scan_room_start`; log lines "the room's start chose a camera").
+
+## A scene's end camera (round 6, 2026-11-06)
+
+A scene's end camera is often chosen after its fn22(0) (1538: Camera04 by fn8; 1603: Camera07), so nothing should copy the game's camera at fn22(0) itself. Co-op's `coop_scene_set` no longer hands player 2 the game's set there: player 2's own-zone camera is kept, and a bare or fresh set is taken afresh at their next turn.
+
+## The finish close-up (round 7, 2026-11-06)
+
+- States 30, 74 and 84 (`0x80051F0C`, `0x80052384`, `0x80054E70`) put it on at event 1 and pop it at event 2. The count r13-30420 (`0x8061DD4C`) starts at 1 and goes down with every finisher; at 0 the game tries a close-up, and the next count is rand()%3 + 4. The flag r13-25580 is -1 while it is on, and the rotation r13-25584 picks Finishcam01, 02 or 03. It is skipped when the room is in the list at `0x80243850`, the victim is in `0x8030AB10`, or an engaged enemy is within 700.
+- Finishcam01-03 are in the finisher's body model (object+60 -> +132 count, +136 entries of 120 bytes, +52 hash, +56 name), not in rooms. `0x80051D48` tests the line of sight and `0x80051E28` -> `0x801ECE90` puts it on. Forms are scene bodies with no cameras (Chandra's ghost and rotten Ellia have 0).
+- Co-op: each player has their own count, flag, rotation and camera set (`coop_finish_camera`; player 2's words are in `g_fin_p2_words`). A form uses its wearer's own body's cameras for the test and the put only (`coop_finish_body`); this works in solo too. Player 2's events 1 and 2 arrive in `coop_events`: event 1 while the cameras are lent (FINISH HIM runs script 2244 as their use), event 2 after.
+- Known limit: if player 2's finisher ends without its event 2, their flag stays -1 until the next play start (`0x80021648`), and they get no close-ups until then. The shared flag had the same problem before.
+- Not tested: player 1's events while player 2 has the cameras lent; both players finishing close together; a finisher right before a room change; states 74 and 84; other chapters; player 2 cameras other than the game's own (`mod_p2_camera` 0 or 1).

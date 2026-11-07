@@ -43,3 +43,11 @@ Player's control, block `r13-25660`, flags `+8`, read by `0x80045BC4` each frame
 | Stick | 44, else 45, unless R held | `0x8005A28C`, `0x8005A254` |
 | R pressed, at 150, held | 41, 42, 43 | `0x8005A138`, `0x8005A17C`, `0x8005A1D0` |
 | X, L | Flags `0x20`, `0x10` | Move mode, block `+16` |
+
+## Round 5 (2026-11-06)
+
+- Slot +16 is a block: `0x80117960(v)` writes it into all six, and the chooser `0x80117628` skips a slot with +16 != 0. Button-6 asks (BREAK FREE, PUSH OFF) are made in the behaviour's tick (kind 19 state 28; kind 2 states 52, 56, 67, 69).
+- The game's own prompt element is r13-24032, its last id r13-29016. `0x80117628` (only caller `0x800084F8`) frees and remakes it through `0x80117050` / `0x8011708C` when the record's +8 changes.
+- `0x800460EC` (may have a prompt): none if, while `0x80199F50()` is set, object flags & 8 or *(r13-25660 block +0) != 0; none if r13-22316 != 0; none if the node's state is 8.
+- A close-up's DETAIL shows about 55-110 game frames after EXAMINE, as its camera moves: a B before that is not lost, it is early.
+- Co-op's drawing: the renderer (`build_view`, .deps/GXRuntime interp.cpp) moves whole uniform blocks, and the HUD's text shares one. Player 1's icon put far right made the block "farRight", which player 2's view left unshifted until round 5.

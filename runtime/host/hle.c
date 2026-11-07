@@ -3851,6 +3851,8 @@ static int tome_copy_mode(void) {
 // split is off (camera.c) and the close-up shows in their half.
 static bool g_coop_screen;
 bool hle_coop_screen(void) { return g_coop_screen; }
+// Player 2's close-up is going on in the world behind player 1's Tome (coop_menu_input): the world's frames have it.
+static bool g_coop_p2_behind_tome;
 // A close-up of a thing looked at or taken: the player is busy, a mask of
 // reasons at r13 - 23344 (set and cleared by 0x801556CC, read by 0x80155738,
 // which the per-character update 0x80007490 asks before it runs the player's
@@ -4211,7 +4213,13 @@ static void hle_PADRead(CPUState* cpu) {
         // Only the pad: see pad_read_by_monitor.
     } else if (!g_coop_pad_p1)
         coop_menu_input(cpu, menu, cutscene, &state[0]);
-    else
+    else if (hle_coop_tome_shares() && g_coop_tome_owner == 0) {
+        // Their own Tome is up, with player 2's close-up in the world behind it: their pad is the Tome's, and in the
+        // world they stand, as its frames have them (coop_menu_input empties the world's pad for them).
+        const s32 error = state[0].error;
+        memset(&state[0], 0, sizeof state[0]);
+        state[0].error = error;
+    } else
         state[0].button &= (u16)~0x1000u;  // their Start in a close-up of player 2's opens their copy (coop_menu_input)
     // Theirs is in their Tome, not the world: they stand. Unless the game's pad is player 2's just now.
     if (g_tome_copy_open && g_tome_copy_p1) {
@@ -4563,6 +4571,39 @@ static void notify_OSSleepThread(CPUState* cpu) {
         fprintf(stderr, "[tome-copy] a thread sleeps in the copy's turn (lr 0x%08X)\n", cpu->lr);
     if (hle_arg_u32(cpu, 0) == GX_FINISH_QUEUE)
         interrupt_commit_pe_finish();
+}
+
+// In the copy's turn a thread can sleep: the Tome's way in (0x80018728 -> 0x80042910 -> 0x800BBC08) asks the
+// world's background thread to stop and waits for its answer (OSReceiveMessage, 0x80201A2C), so the game's own
+// scheduler runs that thread and then this one again, in the copy. Each thread it loads may not own the FPU
+// (OSSetCurrentContext clears MSR[FP] in its SRR1 then), and the OS gives it the FPU lazily, on its first FP
+// instruction's exception: a guest call ends at any exception, so the turn ended halfway, on another thread's
+// registers. The FPU goes with the context here, as it loads: what the lazy switch would have done at once.
+#define TOME_COPY_CURRENT_CONTEXT 0x800000D4u  // __OSCurrentContext
+static int tome_copy_log(void) {  // ED_TOME11_LOG=1 (testing, only says): the copy's thread switches
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_TOME11_LOG") != NULL;
+    return on;
+}
+static void notify_OSLoadContext(CPUState* cpu) {
+    if (!g_tome_copy_turn)
+        return;
+    const u32 context = hle_arg_u32(cpu, 0);
+    if (tome_copy_log())
+        fprintf(stderr, "[tome-copy] loads context 0x%08X (current 0x%08X, FPU 0x%08X, srr0 0x%08X srr1 0x%08X)\n", context,
+                mem_read32(cpu, TOME_COPY_CURRENT_CONTEXT), mem_read32(cpu, 0x800000D8u), mem_read32(cpu, context + 0x198u),
+                mem_read32(cpu, context + 0x19Cu));
+    if (context != mem_read32(cpu, TOME_COPY_CURRENT_CONTEXT))
+        return;
+    const u32 pc = cpu->pc, msr = cpu->msr, srr0 = cpu->srr0, srr1 = cpu->srr1;
+    cpu->srr0 = pc;
+    cpu->srr1 = msr;
+    interrupt_switch_fpu_context(cpu);  // the owner's registers saved, this one's loaded, MSR[FP] in its SRR1
+    cpu->pc = pc;
+    cpu->msr = msr;
+    cpu->srr0 = srr0;
+    cpu->srr1 = srr1;
 }
 
 static void notify_DSPSendMailToDSP(CPUState* cpu) {
@@ -4981,6 +5022,7 @@ static void notify_LCDisable(CPUState* cpu) {
 
 static const HleAddrEntry kNotify[] = {
     { 0u, notify_OSSleepThread,  "OSSleepThread" },
+    { 0u, notify_OSLoadContext,  "OSLoadContext" },
     { 0u, notify_GXSetDrawSync,  "GXSetDrawSync" },
     { 0u, notify_GXSetDrawDone,  "GXSetDrawDone" },
     { 0u, notify_GXEnableBreakPt, "GXEnableBreakPt" },
@@ -6703,16 +6745,104 @@ static bool coop_floor(CPUState* cpu, float x, float y, float z, float* floor) {
     return true;
 }
 
+// Where they are put there must be room for them: the game's step sweeps a character as a ball of
+// their radius (object +628, 0x80133B24), and one put in a wall, or nearer one than that, does not
+// move. So the way there is the old test's line (30 across, at player 1's height: no wall between),
+// and at the end a short sweep of their own ball and a little more, its bottom as high over the
+// floor there as that line's: room for them. A line of 30 alone took a spot in room 158's corridor
+// (Paul's chapter) that a wider player 2 could not move from. A ball from player 1's place found a
+// wall everywhere at the foot of the ladder in room 342 (Pius's): player 1 stands against it there.
+#define COOP_PLACE_BOTTOM 30.0f  // the sweep's bottom over where they would stand (in the test's frame)
+#define COOP_PLACE_ROOM 10.0f    // clear of walls by this much more than their radius
+#define COOP_PLACE_SWEEP 5.0f    // the room test's sweep, this far each way along the way there
+
+// The zones where they would stand. The scan (0x80134758) tests a sphere (kind +108 = 0) or a box (1) with the game's
+// own 0x8019C0A0(point, zone), at the place plus r2-23048 (5) in height, as 0x80134DCC does for any character; a plane
+// (2) is crossed, not stood in. A zone runs for the player its scripts at +58/+60/+62 (sphere) or +60/+62/+64 (box):
+// coming in, leaving, staying (0x80134910, 0x80134920). The one put beside stands in no zone with a script for coming
+// in or staying that the one who arrived isn't in (CameraRgn03, room 158's way back to 103, was the follower's while
+// the one who came through Region02 stood outside it; their first look came into it and took both back with no press).
+// Where the one who arrived stands in a way back (room 200's Region0101), beside them in it is as they are.
+#define COOP_PLACE_INFO 0x80123F70u     // a character's info: +180 the room's zones, +176 how many
+#define COOP_PLACE_ZONE_HOLDS 0x8019C0A0u
+#define COOP_PLACE_ZONES 64u
+typedef struct {
+    u32 n, zone[COOP_PLACE_ZONES];  // the room's zones with a script for coming in or staying that they don't stand in
+    u32 scratch;                    // a place for the point, below the stack (as coop_look_line's)
+    float lift;
+} CoopPlaceZones;
+static bool coop_place_zone_holds(CPUState* cpu, const CoopPlaceZones* z, u32 zone, const float p[3]) {
+    const float point[3] = {p[0], p[1], p[2] + z->lift};
+    for (u32 i = 0; i < 3u; i++)
+        guest_write_f32(cpu, z->scratch + i * 4u, point[i]);
+    const u32 args[2] = {z->scratch, zone};
+    u32 inside = 0u;
+    return hle_guest_call(cpu, COOP_PLACE_ZONE_HOLDS, args, 2, 0.0, &inside) && (inside & 0xFFu) != 0u;
+}
+// The zones the one at `at` doesn't stand in, of `object`'s room. False when the room's zones aren't known.
+static bool coop_place_zones(CPUState* cpu, u32 object, const float at[3], CoopPlaceZones* z) {
+    static int log = -1;
+    if (log < 0)
+        log = getenv("ED_COOP_PLACE_LOG") != NULL;
+    z->n = 0u;
+    z->scratch = (cpu->gpr[1] - 0x700u) & ~15u;
+    z->lift = guest_read_f32(cpu, cpu->gpr[2] - 23048u);
+    if (!isfinite(z->lift) || fabsf(z->lift) > 100.0f)
+        z->lift = 5.0f;
+    u32 info = 0u;
+    if (!guest_ram_range_valid(cpu, z->scratch, 16u) || !hle_guest_call(cpu, COOP_PLACE_INFO, &object, 1, 0.0, &info) ||
+        !guest_ram_range_valid(cpu, info, 184u))
+        return false;
+    const u32 list = mem_read32(cpu, info + 180u), count = mem_read16(cpu, info + 176u);
+    if (count > 256u || (count != 0u && !guest_ram_range_valid(cpu, list, count * 116u)))
+        return false;
+    for (u32 i = 0; i < count; i++) {
+        const u32 zone = list + i * 116u;
+        const s16 kind = (s16)mem_read16(cpu, zone + 108u);
+        if (kind != 0 && kind != 1)
+            continue;
+        const u32 scripts = zone + (kind == 0 ? 58u : 60u);
+        const s16 in = (s16)mem_read16(cpu, scripts), stay = (s16)mem_read16(cpu, scripts + 4u);
+        if (in <= 0 && stay <= 0)
+            continue;
+        const bool there = coop_place_zone_holds(cpu, z, zone, at);
+        if (log)
+            fprintf(stderr, "[coop] place: zone %u (kind %d, coming in %d, staying %d)%s\n", i, kind, in, stay,
+                    there ? ": the one beside stands in it" : "");
+        if (!there && z->n < COOP_PLACE_ZONES)
+            z->zone[z->n++] = zone;
+    }
+    return true;
+}
+
 static bool coop_place_try(CPUState* cpu, const float at[3], float under, float facing, float distance, float rise,
-                           float out[3]) {
+                           float radius, bool room, const CoopPlaceZones* zones, float out[3]) {
     static const float kTurns[8] = {1.571f, -1.571f, 0.785f, -0.785f, 0.0f, 2.356f, -2.356f, 3.142f};
+    static int log = -1;
+    if (log < 0)
+        log = getenv("ED_COOP_PLACE_LOG") != NULL;
+    const float sweep = radius + COOP_PLACE_ROOM;
     for (int i = 0; i < 8; i++) {
-        const float a = facing + kTurns[i];
+        const float a = facing + kTurns[i], c = cosf(a), s = sinf(a);
         const float from[3] = {at[0], at[1], at[2] + 60.0f};
-        const float to[3] = {at[0] + cosf(a) * distance, at[1] + sinf(a) * distance, at[2] + 60.0f};
+        const float to[3] = {at[0] + c * distance, at[1] + s * distance, at[2] + 60.0f};
         float hit[3], floor = under;
-        if (camera_collide(cpu, from, to, 30.0f, hit) || !coop_floor(cpu, to[0], to[1], at[2], &floor) ||
-            fabsf(floor - under) > rise)
+        const bool wall = camera_collide(cpu, from, to, 30.0f, hit);
+        const bool floored = !wall && coop_floor(cpu, to[0], to[1], at[2], &floor);
+        const bool level = floored && fabsf(floor - under) <= rise;
+        const float middle = at[2] + (floor - under) + COOP_PLACE_BOTTOM + sweep;
+        const float before[3] = {to[0] - c * COOP_PLACE_SWEEP, to[1] - s * COOP_PLACE_SWEEP, middle};
+        const float beyond[3] = {to[0] + c * COOP_PLACE_SWEEP, to[1] + s * COOP_PLACE_SWEEP, middle};
+        const bool crowded = level && room && camera_collide(cpu, before, beyond, sweep, hit);
+        const float stand[3] = {to[0], to[1], at[2] + (floor - under)};
+        bool zoned = false;
+        for (u32 k = 0; zones != NULL && level && !crowded && !zoned && k < zones->n; k++)
+            zoned = coop_place_zone_holds(cpu, zones, zones->zone[k], stand);
+        if (log)
+            fprintf(stderr, "[coop] place: %.0f %.0f (%.0f away, radius %.1f): %s\n", to[0], to[1], distance, radius,
+                    wall ? "a wall in the way" : !floored ? "no floor" : !level ? "floor too high or low"
+                                                       : crowded ? "no room for them" : zoned ? "in a zone the one beside isn't in" : "taken");
+        if (!level || crowded || zoned)
             continue;
         out[0] = to[0];
         out[1] = to[1];
@@ -6722,18 +6852,57 @@ static bool coop_place_try(CPUState* cpu, const float at[3], float under, float 
     return false;
 }
 
-static void coop_place(CPUState* cpu, u32 object, float out[3]) {
+// Nearer, when there's no room further out: as near as the two can stand clear of each other (the
+// step sweeps a character against the others too, 0x8013085C). At half of 150, two of radius 50 were
+// put into each other, and the game pushed player 2 off into room 158's way back (Paul's chapter).
+static float coop_place_nearest(CPUState* cpu, u32 object, float radius) {
+    // `object` is the one stood beside; when it is also the one placed (player 1 following player 2's door: both
+    // the same object) the other is player 2.
+    float theirs = guest_ram_range_valid(cpu, object, 632u) ? guest_read_f32(cpu, object + 628u) : 0.0f;
+    if (!(isfinite(theirs) && theirs >= 1.0f && theirs < 500.0f))
+        theirs = radius;
+    const float nearest = theirs + radius + COOP_PLACE_ROOM;
+    return nearest > COOP_SPAWN_DISTANCE * 0.5f ? nearest : COOP_SPAWN_DISTANCE * 0.5f;
+}
+
+// `object` is who they go beside, `placed` who is put there (for their radius; 0 for one not made
+// yet: the other's). `heading`, when known, is the way the game faces the one who arrived (the entry marker's,
+// coop_arrival_marker), the angle 0x80124BE4 takes; otherwise the object's own facing, which for player 1 going on
+// through player 2's door is wherever they walked during the fade.
+static void coop_place_facing(CPUState* cpu, u32 object, u32 placed, const float* heading, float out[3]) {
     float at[3], under = 0.0f;
+    const u32 sized = placed != 0u && guest_ram_range_valid(cpu, placed, 632u) ? placed : object;
+    float radius = guest_ram_range_valid(cpu, sized, 632u) ? guest_read_f32(cpu, sized + 628u) : 0.0f;
+    if (!(isfinite(radius) && radius >= 1.0f && radius < 500.0f))
+        radius = 30.0f;  // the old test's
     for (u32 i = 0; i < 3u; i++)
         out[i] = at[i] = guest_read_f32(cpu, object + i * 4u);
     const float qz = guest_read_f32(cpu, object + 52u), qw = guest_read_f32(cpu, object + 56u);
-    const float facing = isfinite(qz) && isfinite(qw) ? 2.0f * atan2f(qz, qw) - 1.5707963f : 0.0f;
+    const float facing = heading != NULL && isfinite(*heading) ? *heading - 1.5707963f
+                         : isfinite(qz) && isfinite(qw)       ? 2.0f * atan2f(qz, qw) - 1.5707963f
+                                                              : 0.0f;
     if (!coop_floor(cpu, at[0], at[1], at[2], &under))
         return;  // no floor known under player 1: where they stand
-    if (!coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE, COOP_PLACE_LEVEL, out) &&
-        !coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE, COOP_PLACE_STEP, out))
-        coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE * 0.5f, COOP_PLACE_STEP, out);
+    // Last, without the room test, as it was before it: never on top of player 1 where that found a place.
+    // Player 1 following player 2's door is placed beside the arrival spot from their own object: the other one
+    // there is player 2's.
+    const u32 beside = placed == object && g_coop_p2 != 0u && guest_ram_range_valid(cpu, g_coop_p2 + 52u, 4u) ? mem_read32(cpu, g_coop_p2 + 52u) : object;
+    const float nearest = coop_place_nearest(cpu, beside, radius);
+    // First with room for them and in no zone the one beside isn't in; then as before, zones or not.
+    static CoopPlaceZones zones;
+    if (coop_place_zones(cpu, object, at, &zones) && zones.n != 0u &&
+        (coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE, COOP_PLACE_LEVEL, radius, true, &zones, out) ||
+         coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE, COOP_PLACE_STEP, radius, true, &zones, out) ||
+         coop_place_try(cpu, at, under, facing, nearest, COOP_PLACE_STEP, radius, true, &zones, out)))
+        return;
+    if (!coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE, COOP_PLACE_LEVEL, radius, true, NULL, out) &&
+        !coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE, COOP_PLACE_STEP, radius, true, NULL, out) &&
+        !coop_place_try(cpu, at, under, facing, nearest, COOP_PLACE_STEP, radius, true, NULL, out) &&
+        !coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE, COOP_PLACE_STEP, radius, false, NULL, out) &&
+        !coop_place_try(cpu, at, under, facing, nearest, COOP_PLACE_STEP, radius, false, NULL, out))
+        coop_place_try(cpu, at, under, facing, COOP_SPAWN_DISTANCE * 0.5f, COOP_PLACE_STEP, radius, false, NULL, out);  // the old last
 }
+static void coop_place(CPUState* cpu, u32 object, u32 placed, float out[3]) { coop_place_facing(cpu, object, placed, NULL, out); }
 
 // A save made in co-op keeps player 2 as one of the area's characters: a
 // second of the player's own type, with the player's model or player 2's
@@ -6802,7 +6971,7 @@ static void coop_adopt(CPUState* cpu, u32 player) {
             if (getenv("ED_COOP_P2_STAYS") == NULL && guest_ram_range_valid(cpu, o1, 64u) &&
                 guest_ram_range_valid(cpu, o2, 64u)) {
                 float at[3];
-                coop_place(cpu, o1, at);
+                coop_place(cpu, o1, o2, at);
                 for (u32 i = 0; i < 3u; i++)
                     guest_write_f32(cpu, o2 + i * 4u, at[i]);
                 const u32 room_args[] = {node, mem_read32(cpu, cpu->gpr[13] + (u32)(s32)g_coop_room_offset)};
@@ -6922,7 +7091,7 @@ static void coop_park(CPUState* cpu, u32 player, bool park) {
     if (!guest_ram_range_valid(cpu, o1, 64u) || !guest_ram_range_valid(cpu, o2, 64u))
         return;
     float at[3];
-    coop_place(cpu, o1, at);
+    coop_place(cpu, o1, o2, at);
     if (park)
         at[0] += COOP_PARK_DISTANCE;
     for (u32 i = 0; i < 3u; i++)
@@ -7160,9 +7329,17 @@ static struct {
 static struct {
     int model, part;  // what is in the slot, -1 nothing
     u32 ready, sets;
-} g_p2_moves[P2_MOVES_SLOTS + 2] = {{-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}};
+} g_p2_moves[P2_MOVES_SLOTS + 3] = {{-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}, {-1, -1, 0u, 0u}};
 // A file's moves for a form's held pose, past the four and past the first body (slot 4 would be on SCRATCH_BODY).
 #define COSTUME_MOVES_SLOT 5
+// The held weapon's home character's part, for their finishing move (fin_swap): past the Tome's memory (SCRATCH_TOME,
+// 0x2D8020 bytes) and before the meshes' pools (DETAIL_POOL_POINTS, 0x82800000). It is not cleared with the others
+// (p2_moves_clear) as the level data unpacks: none goes there.
+#define FIN_MOVES_SLOT 6
+#define SCRATCH_FINISH 0x82400000u
+static u32 moves_slot_table(int k) {
+    return k == FIN_MOVES_SLOT ? SCRATCH_FINISH : SCRATCH_RAM + (u32)k * P2_MOVES_SLOT;
+}
 // Track lists too long for where they streamed in (costume_tracks), past that file's part.
 #define SCRATCH_TRACKS 0x81D90000u
 #define SCRATCH_TRACKS_SIZE 0x70000u
@@ -7177,17 +7354,199 @@ static int moves_listed(CPUState* cpu, u32 list, u32 count, int part) {
     return -1;
 }
 
-// Parts come in sevens, one seven to a kind of weapon. Each character's
-// file has only the kinds they hold in their own chapter (Pius's and Alex's
-// none of Anthony's sword's): another's weapon in their hands asked for a
-// part their file has not, and the moves twisted. Theirs of the same place
-// in the sword's seven (14), else the bare hands' (0), is played instead.
-static int moves_part(CPUState* cpu, u32 list, u32 count, int part) {
+// The moves a part of a character's file holds, by number, read from the
+// disc: the file's first 1 KB lists its parts (as above), and a part holds
+// its moves at its own +24 (how many at +20), 296 bytes each, the move's
+// number at +6 (as 0x8012484C reads them). Read through the scratch past the
+// moves slots, whose bytes are put back.
+#define MOVES_NUMBERS 192u
+#define MOVES_ENTRY_SIZE 296u
+typedef struct {
+    u32 bits[MOVES_NUMBERS / 32u];
+} MovesSet;
+
+static u32 moves_be32(const u8* p) {
+    return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3];
+}
+
+static bool moves_disc(CPUState* cpu, u32 disc_off, u32 length, u8* out) {
+    static u8 keep[0x8000];
+    const u32 at = SCRATCH_TRACKS;
+    if (length == 0u || length > sizeof keep || (u64)(at - GC_RAM_BASE) + length > cpu->ram_size)
+        return false;
+    u8* ram = cpu->ram + (at - GC_RAM_BASE);
+    memcpy(keep, ram, length);
+    dvd_read_to_guest(cpu, at, disc_off, length);
+    memcpy(out, ram, length);
+    memcpy(ram, keep, length);
+    return true;
+}
+
+// A character's file's list of parts, once read.
+static const u8* moves_file(CPUState* cpu, int model, u32* start, u32* length, u32* count) {
+    static struct {
+        int model;
+        bool ok;
+        u32 start, length, count;
+        u8 head[1024];
+    } files[20];
+    static int used;
+    for (int i = 0; i < used; i++)
+        if (files[i].model == model) {
+            *start = files[i].start, *length = files[i].length, *count = files[i].count;
+            return files[i].ok ? files[i].head : NULL;
+        }
+    if (used == (int)(sizeof files / sizeof files[0]))
+        return NULL;
+    __typeof__(&files[0]) f = &files[used++];
+    f->model = model;
+    f->ok = false;
+    char path[32];
+    snprintf(path, sizeof path, "/Chars/char%04d.cpk", model);
+    const s32 file = dvd_path_to_entrynum(path);
+    if (file >= 0 && dvd_entry_info(file, &f->start, &f->length) && f->length >= 1024u &&
+        moves_disc(cpu, f->start, 1024u, f->head)) {
+        const u32 n = moves_be32(f->head + 16u), list = moves_be32(f->head + 20u);
+        f->ok = n <= 64u && list + n * 16u <= 1024u;
+        f->count = f->ok ? n : 0u;
+        if (f->ok && list != 0u)
+            memmove(f->head, f->head + list, n * 16u);
+    }
+    *start = f->start, *length = f->length, *count = f->count;
+    return f->ok ? f->head : NULL;
+}
+
+static bool moves_of(CPUState* cpu, int model, int part, MovesSet* out) {
+    static struct {
+        int model, part;
+        bool ok;
+        MovesSet set;
+    } parts[96];
+    static int used;
+    for (int i = 0; i < used; i++)
+        if (parts[i].model == model && parts[i].part == part) {
+            *out = parts[i].set;
+            return parts[i].ok;
+        }
+    memset(out, 0, sizeof *out);
+    u32 start = 0u, length = 0u, count = 0u;
+    const u8* list = moves_file(cpu, model, &start, &length, &count);
+    bool ok = false;
+    for (u32 i = 0; list != NULL && i < count && !ok; i++) {
+        if ((int)((u32)list[i * 16u + 8u] << 8 | list[i * 16u + 9u]) != part)
+            continue;
+        const u32 offset = moves_be32(list + i * 16u), size = moves_be32(list + i * 16u + 4u);
+        u8 head[32];
+        if (offset + size > length || size < 32u || !moves_disc(cpu, start + offset, 32u, head))
+            break;
+        const u32 n = (u32)head[20] << 8 | head[21], where = moves_be32(head + 24u);
+        static u8 moves[0x8000];
+        if (n == 0u || n * MOVES_ENTRY_SIZE > sizeof moves || where + n * MOVES_ENTRY_SIZE > size ||
+            !moves_disc(cpu, start + offset + where, n * MOVES_ENTRY_SIZE, moves))
+            break;
+        for (u32 k = 0; k < n; k++) {
+            const u32 id = (u32)moves[k * MOVES_ENTRY_SIZE + 6u] << 8 | moves[k * MOVES_ENTRY_SIZE + 7u];
+            if (id < MOVES_NUMBERS)
+                out->bits[id / 32u] |= 1u << (id % 32u);
+        }
+        ok = true;
+    }
+    if (used < (int)(sizeof parts / sizeof parts[0])) {
+        parts[used].model = model, parts[used].part = part, parts[used].ok = ok, parts[used].set = *out;
+        used++;
+    }
+    return ok;
+}
+
+// What a weapon's part adds to the bare hands' moves of its place in the seven (their part of
+// part % 7, else part 0): the swings, the finisher, the aim.
+static bool moves_added(CPUState* cpu, int model, int part, MovesSet* out) {
+    MovesSet bare;
+    if (!moves_of(cpu, model, part, out))
+        return false;
+    if (moves_of(cpu, model, part % 7, &bare) || moves_of(cpu, model, 0, &bare))
+        for (u32 w = 0; w < MOVES_NUMBERS / 32u; w++)
+            out->bits[w] &= ~bare.bits[w];
+    return true;
+}
+
+static int moves_count(u32 bits) {
+    int n = 0;
+    for (; bits != 0u; bits &= bits - 1u)
+        n++;
+    return n;
+}
+
+// The part of a character's own file that plays what a part they lack plays: the weapon's
+// moves are what that part adds in most of the other playables' files that have it (one file
+// that differs, Ellia's sword without move 8, doesn't take a move away), against what each of
+// theirs of the same place in a seven adds. The best of theirs, with more of the weapon's moves
+// than moves the weapon has not, or -1. Lindsey's and Michael's files have no sword's seven (14)
+// but their own blade's (42) with the same swings and finisher (65).
+static int moves_instead(CPUState* cpu, int model, int part) {
+    static struct {
+        int model, part, instead;
+    } known[32];
+    static int used;
+    for (int i = 0; i < used; i++)
+        if (known[i].model == model && known[i].part == part)
+            return known[i].instead;
+    MovesSet weapon, added;
+    memset(&weapon, 0, sizeof weapon);
+    int votes[MOVES_NUMBERS] = {0}, files = 0;
+    for (int m = 0; m < 256; m++)
+        if (m != model && coop_playable(m) && moves_added(cpu, m, part, &added)) {
+            for (u32 id = 0; id < MOVES_NUMBERS; id++)
+                votes[id] += (int)(added.bits[id / 32u] >> (id % 32u) & 1u);
+            files++;
+        }
+    for (u32 id = 0; id < MOVES_NUMBERS; id++)
+        if (2 * votes[id] > files)
+            weapon.bits[id / 32u] |= 1u << (id % 32u);
+    const bool found = files > 0;
+    int instead = -1, best = 0;
+    u32 start = 0u, length = 0u, count = 0u;
+    const u8* list = found ? moves_file(cpu, model, &start, &length, &count) : NULL;
+    for (u32 i = 0; list != NULL && i < count; i++) {
+        const int q = (int)((u32)list[i * 16u + 8u] << 8 | list[i * 16u + 9u]);
+        if (q == part || q % 7 != part % 7 || !moves_added(cpu, model, q, &added))
+            continue;
+        int score = 0;
+        for (u32 w = 0; w < MOVES_NUMBERS / 32u; w++)
+            score += moves_count(added.bits[w] & weapon.bits[w]) - moves_count(added.bits[w] & ~weapon.bits[w]);
+        if (score > best)
+            best = score, instead = q;
+    }
+    fprintf(stderr, "[player] moves: %d's file has no part %d: %s %d (%d)\n", model, part,
+            instead >= 0 ? "their part" : "no part of theirs plays its moves", instead, best);
+    if (used < (int)(sizeof known / sizeof known[0])) {
+        known[used].model = model, known[used].part = part, known[used].instead = instead;
+        used++;
+    }
+    return instead;
+}
+
+// Parts come in sevens, one seven to a kind of weapon (the weapon's record,
+// InvU's +54, names its seven: 0x800CBE7C asks for the one of its place). Each
+// character's file has only the kinds they hold in their own chapter (Pius's
+// and Alex's none of Anthony's sword's): another's weapon in their hands asked
+// for a part their file has not, and the moves twisted. Theirs of the same
+// place in the sword's seven (14) is played instead, else the bare hands' (0),
+// as the game's own copy of another's part does (0x800DAF10: the part, else
+// part 0). Only where that lands a weapon on the bare hands (a file with no
+// sword's seven: Lindsey's, Michael's), its A and aim have no moves (Lindsey
+// held state 6 for ever with Pius's sword): their part with that weapon's
+// moves is played then (moves_instead). Every other answer is as before.
+static int moves_part(CPUState* cpu, int model, u32 list, u32 count, int part) {
     static const int kInstead[2] = {14, 0};
+    const int asked = part;
     for (int i = 0; i < 2 && moves_listed(cpu, list, count, part) < 0; i++)
         if (moves_listed(cpu, list, count, kInstead[i] + part % 7) >= 0)
             part = kInstead[i] + part % 7;
-    return part;
+    if (part == asked || asked < 7 || (part >= 7 && moves_listed(cpu, list, count, part) >= 0))
+        return part;
+    const int instead = moves_instead(cpu, model, asked);
+    return instead >= 0 && moves_listed(cpu, list, count, instead) >= 0 ? instead : part;
 }
 
 static void p2_moves_clear(void) {
@@ -7196,7 +7555,7 @@ static void p2_moves_clear(void) {
 }
 
 static bool p2_moves_load(CPUState* cpu, int k, int model, int part) {
-    const u32 table = SCRATCH_RAM + (u32)k * P2_MOVES_SLOT;
+    const u32 table = moves_slot_table(k);
     const u32 at = table + 0x400u;
     const u32 end = table + P2_MOVES_SLOT;
     // What was in it lets go of its animations first.
@@ -7225,9 +7584,11 @@ static bool p2_moves_load(CPUState* cpu, int k, int model, int part) {
     const u32 count = mem_read32(cpu, at + 16u);
     const u32 list = mem_read32(cpu, at + 20u);
     u32 offset = 0u, size = 0u;
+    int played = part;
     const u32 listed = count <= 64u && list + count * 16u <= 1024u ? count : 0u;
-    const int i = moves_listed(cpu, at + list, listed, moves_part(cpu, at + list, listed, part));
+    const int i = moves_listed(cpu, at + list, listed, moves_part(cpu, model, at + list, listed, part));
     if (i >= 0) {
+        played = (int)mem_read16(cpu, at + list + (u32)i * 16u + 8u);
         offset = mem_read32(cpu, at + list + (u32)i * 16u);
         size = mem_read32(cpu, at + list + (u32)i * 16u + 4u);
     }
@@ -7255,12 +7616,38 @@ static bool p2_moves_load(CPUState* cpu, int k, int model, int part) {
     g_p2_moves[k].part = part;
     g_p2_moves[k].ready = ready;
     g_p2_moves[k].sets = sets;
-    fprintf(stderr, "[coop] player 2's moves: part %d of %s (%u bytes, %u sets)\n", part, path, size, n);
+    fprintf(stderr, "[coop] player 2's moves: part %d of %s (%u bytes, %u sets, part %d played)\n", part, path, size, n,
+            played);
     return true;
 }
 
 static bool g_coop_turn;
 static u32 g_coop_turn_p1;
+
+// The game gives a part's slot back only once a move from the next part has
+// started (0x80123224 calls 0x80132BB0 while +596 has 0x1000): until then the
+// move playing (the object's animation controller, +64 then +2176 the one in
+// use, 272 bytes each, +184 its set, the set's +4 the animation) still reads
+// the old part, and 0x80132970 answers 0 for a part asked meanwhile. Player 2
+// asked for part 0 then part 4 in a row (Lindsey's chapter, standing still):
+// part 4 went over the slot their standing move still played from, its
+// tracks had no keys made ready, and the key search (0x8011FD64) walked
+// memory for ever (0x8011FDA8).
+static bool moves_slot_playing(CPUState* cpu, u32 object, int k) {
+    const u32 base = SCRATCH_RAM + (u32)k * P2_MOVES_SLOT;
+    const u32 anim = mem_read32(cpu, object + 64u);
+    if (!guest_ram_range_valid(cpu, anim + 2176u, 2u))
+        return false;
+    const u32 index = mem_read16(cpu, anim + 2176u);
+    if (index >= 8u)
+        return false;
+    const u32 set = mem_read32(cpu, anim + index * 272u + 184u);
+    if (set - base < P2_MOVES_SLOT)
+        return true;
+    if (!guest_ram_range_valid(cpu, set + 4u, 4u))
+        return false;
+    return mem_read32(cpu, set + 4u) - base < P2_MOVES_SLOT;
+}
 
 static void hle_moves_want(CPUState* cpu) {
     g_hle_passthrough = true;
@@ -7280,13 +7667,21 @@ static void hle_moves_want(CPUState* cpu) {
                     (g_settings.mod_coop && model == coop_wanted_character() && (p1 == 0u || mem_read32(cpu, p1 + 52u) != object));
     if (!coop_playable(model))
         return;
+    // ED_MOVES_LOG: every part asked for (testing).
+    static int log_asks = -1;
+    if (log_asks < 0)
+        log_asks = getenv("ED_MOVES_LOG") != NULL;
+    if (log_asks)
+        fprintf(stderr, "[moves] %s (character %d, object 0x%08X) asks part %d (lr 0x%08X)\n",
+                p2 ? "player 2" : model == (s16)mem_read16(cpu, COOP_PLAYABLE_SLOT + 4u) ? "player 1" : "another",
+                model, object, part, cpu->lr);
     if (!p2 && model == (s16)mem_read16(cpu, COOP_PLAYABLE_SLOT + 4u)) {
         // Player 1, from the playable's file (its list kept at 0x80582360).
         const u32 header = 0x80582360u;
         const u32 list = mem_read32(cpu, header + 20u);
         const u32 count = mem_read32(cpu, header + 16u);
         if (guest_ram_range_valid(cpu, list, 16u) && count != 0u && count <= 64u)
-            cpu->gpr[4] = (u32)moves_part(cpu, list, count, part);
+            cpu->gpr[4] = (u32)moves_part(cpu, model, list, count, part);
         if ((int)cpu->gpr[4] != part) {
             static int told = -1;
             if (told != part)
@@ -7303,6 +7698,17 @@ static void hle_moves_want(CPUState* cpu) {
     if (k < 0) {
         // Into the slot of theirs they are not playing from.
         k = mem_read32(cpu, object + 648u) == SCRATCH_RAM + (u32)first * P2_MOVES_SLOT ? first + 1 : first;
+        // Not over the move still playing: not ready yet, as the game's own answer, asked again.
+        if (moves_slot_playing(cpu, object, k)) {
+            static int told = -1;
+            if (told != part)
+                fprintf(stderr, "[coop] player %d's moves: part %d waits, slot %d's move still plays\n", p2 ? 2 : 1,
+                        part, k);
+            told = part;
+            g_hle_passthrough = false;
+            hle_set_u32(cpu, 0u);
+            return;
+        }
         if (!p2_moves_load(cpu, k, model, part))
             return;
     }
@@ -7579,6 +7985,245 @@ static const Costume* costume_to_fit(CPUState* cpu, u32 object) {
     return g_costume_map->bones != 0u ? c : NULL;
 }
 
+// FINISH HIM (0x800C30CC, event 202) plays one move, 65, by bl 0x80122920(object, 65, 256, 6) returning to FIN_CALL,
+// from the holder's own table (+648) for the held weapon's seven of parts (InvU +54, the place in it the part's). Each
+// file has one move 65 per seven, made for that character's own weapon: Karim's and Alex's for the swords (part 14)
+// drive both fists down onto the body with a Gladius held blade up. The held weapon's own finish is played instead: the
+// move 65 of its home character (the playable of the first level that places it, else gives it), from their own file,
+// fitted to the holder's body (and form) bone by bone by name. Only that one move: the walk to the body, the swings,
+// the reach, the body and the camera are the holder's as before. The holder's own weapon, a weapon with no home, or a
+// home file without move 65 there: nothing changes.
+// tools/ed/facts/weapon_homes.py --c made these from the disc: each weapon's home (only those whose home file has a
+// move 65 for it), and each home's skeleton, the bone names (+64 of each 80-byte bone) by the tracks' order.
+static const struct { u16 item, home; } kFinHome[] = {
+    {62, 74}, {63, 69}, {64, 9}, {66, 75}, {81, 150}, {83, 150}, {84, 150}, {89, 85}, {96, 0}, {97, 73}, {101, 18}, {102, 76}, {103, 85}, {104, 70}, {133, 81}};
+static const u32 kFinBones0[72] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0x359392DBu, 0xDB0ADC42u,
+    0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xAD886CCCu, 0xB2999EDFu, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0x30510360u, 0x3082E2B3u, 0x31258114u,
+    0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u, 0x5695E5A4u, 0x57328603u, 0x57E167D0u, 0xF964B630u,
+    0xFF8A70DEu, 0x15B919EAu, 0x1C94EED9u, 0x30504362u, 0x3083A2B1u, 0x3124C116u, 0x31F720C5u, 0x326A0658u,
+    0x404D0308u, 0x43D88F94u, 0x54AEE09Cu, 0x56474475u, 0x5694A5A6u, 0x5733C601u, 0x57E027D2u, 0x61186C2Au,
+    0x61192C28u, 0x7157B604u, 0x765F130Du, 0x7B666832u, 0x830D473Cu, 0x8F8062B1u, 0x8F8122B3u, 0xAEE56ABCu,
+    0xC631B565u, 0xCE935CDEu, 0xD3B5B685u, 0xD55B706Bu, 0xDCFA4FAEu, 0xEA973AC4u, 0xEBCF4A8Bu, 0xEEC0228Cu,
+};
+static const u32 kFinBones9[73] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0xAD886CCCu, 0x359392DBu,
+    0xDB0ADC42u, 0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xB2999EDFu, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0xFF13F322u, 0x13AFE29Eu, 0x30510360u,
+    0x3082E2B3u, 0x31258114u, 0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u, 0x5695E5A4u, 0x57328603u,
+    0x57E167D0u, 0xF964B630u, 0xFF8A70DEu, 0x0D72A043u, 0x13AEA29Cu, 0x1C79DF3Cu, 0x1EEDEDB9u, 0x2D636A30u,
+    0x30504362u, 0x3083A2B1u, 0x3124C116u, 0x31F720C5u, 0x326A0658u, 0x3F4CC609u, 0x54AEE09Cu, 0x56474475u,
+    0x5694A5A6u, 0x5733C601u, 0x57E027D2u, 0x5A39A819u, 0x5B1D962Cu, 0x5C9BB9C9u, 0x5C9EE5DBu, 0x5D9F4FD2u,
+    0x6CABEC99u, 0x75BD50EFu, 0x7A29BA1Bu, 0xB7FB96BFu, 0xBDBDAEF2u, 0xD3B5B685u, 0xD55B706Bu, 0xEA973AC4u,
+    0xEBBE669Eu,
+};
+static const u32 kFinBones18[70] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0xAD886CCCu, 0x359392DBu,
+    0xDB0ADC42u, 0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xB2999EDFu, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0x30510360u, 0x3082E2B3u, 0x31258114u,
+    0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u, 0x5695E5A4u, 0x57328603u, 0x57E167D0u, 0xF964B630u,
+    0xFF8A70DEu, 0x08010F52u, 0x0B16F859u, 0x30504362u, 0x3083A2B1u, 0x3124C116u, 0x31F720C5u, 0x326A0658u,
+    0x40D8819Cu, 0x463CF573u, 0x508473CFu, 0x54AEE09Cu, 0x56474475u, 0x5694A5A6u, 0x5733C601u, 0x57E027D2u,
+    0x7B559A11u, 0x82791136u, 0x9C762E3Bu, 0x9EA58DEAu, 0x9EB147F4u, 0xD3B5B685u, 0xD5010C44u, 0xD55B706Bu,
+    0xD7C6658Bu, 0xDA407D13u, 0xE5AE57E3u, 0xEA973AC4u, 0xEB5AC81Fu, 0xF452C61Fu,
+};
+static const u32 kFinBones69[72] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0xAD886CCCu, 0x359392DBu,
+    0xB2999EDFu, 0xDB0ADC42u, 0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0xF964B630u, 0x30510360u, 0x3082E2B3u,
+    0x31258114u, 0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u, 0x5695E5A4u, 0x57328603u, 0x57E167D0u,
+    0xFF8A70DEu, 0x08010F52u, 0x0B16F859u, 0x30504362u, 0x3083A2B1u, 0x3124C116u, 0x31F720C5u, 0x326A0658u,
+    0x3AB89CEBu, 0x463CF573u, 0x508473CFu, 0x54AEE09Cu, 0x56474475u, 0x5694A5A6u, 0x5733C601u, 0x57E027D2u,
+    0x6239676Au, 0x63BD82F9u, 0x6C0F7E42u, 0x7B559A11u, 0x82791136u, 0x90FAA2B7u, 0x9553071Eu, 0xA25B3B1Eu,
+    0xA7FA9EBFu, 0xC83FCB7Au, 0xD1558318u, 0xD3B5B685u, 0xD55B706Bu, 0xEA973AC4u, 0xF9257E76u, 0xFBA7A8E8u,
+};
+static const u32 kFinBones70[77] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0xAD886CCCu, 0x359392DBu,
+    0xDB0ADC42u, 0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xB2999EDFu, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0xFF12B320u, 0xFF13F322u, 0x12DB60EAu,
+    0x13AFE29Eu, 0x30510360u, 0x3082E2B3u, 0x31258114u, 0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u,
+    0x5695E5A4u, 0x57328603u, 0x57E167D0u, 0xF964B630u, 0xFF8A70DEu, 0x12DA20E8u, 0x13AEA29Cu, 0x24BF36F2u,
+    0x2530167Fu, 0x30504362u, 0x3083A2B1u, 0x3124C116u, 0x31F720C5u, 0x326A0658u, 0x3539E774u, 0x44150750u,
+    0x52A41AF0u, 0x54AEE09Cu, 0x56474475u, 0x5694A5A6u, 0x5733C601u, 0x57E027D2u, 0x71ACC2E3u, 0x750FB25Cu,
+    0x7742040Du, 0x93657531u, 0xA1FB33B6u, 0xAEB76DFCu, 0xB07DE230u, 0xC4E256B6u, 0xD133027Cu, 0xD3B5B685u,
+    0xD55B706Bu, 0xE1CD669Eu, 0xEA973AC4u, 0xEDF0DEBFu, 0xEF974ED3u,
+};
+static const u32 kFinBones73[70] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0xAD886CCCu, 0x359392DBu,
+    0xDB0ADC42u, 0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xB2999EDFu, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0x30510360u, 0x3082E2B3u, 0x31258114u,
+    0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u, 0x5695E5A4u, 0x57328603u, 0x57E167D0u, 0xF964B630u,
+    0xFF8A70DEu, 0x08010F52u, 0x0B16F859u, 0x18A5F9E1u, 0x30504362u, 0x3083A2B1u, 0x3124C116u, 0x31F720C5u,
+    0x326A0658u, 0x43D88F94u, 0x463CF573u, 0x508473CFu, 0x54AEE09Cu, 0x56474475u, 0x5694A5A6u, 0x5733C601u,
+    0x57E027D2u, 0x6C0F7E42u, 0x7B559A11u, 0x823D056Eu, 0x82791136u, 0x8D0C7F41u, 0x90FAA2B7u, 0xB327B062u,
+    0xC90AFB47u, 0xD3B5B685u, 0xD55B706Bu, 0xE3F8D0B7u, 0xEA973AC4u, 0xF5DEA5EFu,
+};
+static const u32 kFinBones74[70] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0xAD886CCCu, 0x359392DBu,
+    0xDB0ADC42u, 0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xB2999EDFu, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0x30510360u, 0x3082E2B3u, 0x31258114u,
+    0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u, 0x5695E5A4u, 0x57328603u, 0x57E167D0u, 0xF964B630u,
+    0xFF8A70DEu, 0x01CC4798u, 0x0B16F859u, 0x12CF0082u, 0x30504362u, 0x3083A2B1u, 0x3124C116u, 0x31F720C5u,
+    0x326A0658u, 0x463CF573u, 0x505CB319u, 0x508473CFu, 0x50A3C2EEu, 0x54AEE09Cu, 0x56474475u, 0x5694A5A6u,
+    0x5733C601u, 0x57E027D2u, 0x61460615u, 0x6C0F7E42u, 0x7B559A11u, 0x82791136u, 0x90FAA2B7u, 0x98FAEBB5u,
+    0xD3B5B685u, 0xD55B706Bu, 0xE1CD669Eu, 0xEA973AC4u, 0xFB8033D4u, 0xFBDEFA9Au,
+};
+static const u32 kFinBones75[70] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0xAD886CCCu, 0x359392DBu,
+    0xDB0ADC42u, 0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xB2999EDFu, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0x30510360u, 0x3082E2B3u, 0x31258114u,
+    0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u, 0x5695E5A4u, 0x57328603u, 0x57E167D0u, 0xF964B630u,
+    0xFF8A70DEu, 0x0B16F859u, 0x2F90E7C4u, 0x30504362u, 0x3083A2B1u, 0x3124C116u, 0x31F720C5u, 0x326A0658u,
+    0x463CF573u, 0x4F4C681Fu, 0x508473CFu, 0x54AEE09Cu, 0x56474475u, 0x5694A5A6u, 0x5733C601u, 0x57E027D2u,
+    0x6C0F7E42u, 0x794A4B07u, 0x7B559A11u, 0x7E56DD13u, 0x82791136u, 0x84B316FEu, 0x90FAA2B7u, 0x92BE61F1u,
+    0x9B185D4Cu, 0xD3B5B685u, 0xD55B706Bu, 0xD5D49490u, 0xE1CD669Eu, 0xEA973AC4u,
+};
+static const u32 kFinBones76[70] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0x359392DBu, 0xDB0ADC42u,
+    0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xAD886CCCu, 0xB2999EDFu, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0x30510360u, 0x3082E2B3u, 0x31258114u,
+    0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u, 0x5695E5A4u, 0x57328603u, 0x57E167D0u, 0xF964B630u,
+    0xFF8A70DEu, 0x13B4A0FBu, 0x24BF36F2u, 0x2D005F4Du, 0x30504362u, 0x3083A2B1u, 0x3124C116u, 0x31F720C5u,
+    0x326A0658u, 0x54AEE09Cu, 0x56474475u, 0x5694A5A6u, 0x5733C601u, 0x57E027D2u, 0x5C2CBF69u, 0x64777D32u,
+    0x6D360A65u, 0x7B559A11u, 0xA1FB33B6u, 0xA8445A09u, 0xAEB76DFCu, 0xB0C43596u, 0xCEA28BF0u, 0xD3B5B685u,
+    0xD55B706Bu, 0xE1337876u, 0xE1CD669Eu, 0xE8F33BBCu, 0xEA973AC4u, 0xF7AEF6EAu,
+};
+static const u32 kFinBones81[70] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0x359392DBu, 0xDB0ADC42u,
+    0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xAD886CCCu, 0xB2999EDFu, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0x30510360u, 0x3082E2B3u, 0x31258114u,
+    0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u, 0x5695E5A4u, 0x57328603u, 0x57E167D0u, 0xF964B630u,
+    0xFF8A70DEu, 0x13B4A0FBu, 0x24BF36F2u, 0x2D005F4Du, 0x30504362u, 0x3083A2B1u, 0x3124C116u, 0x31F720C5u,
+    0x326A0658u, 0x54AEE09Cu, 0x56474475u, 0x5694A5A6u, 0x5733C601u, 0x57E027D2u, 0x5C2CBF69u, 0x64777D32u,
+    0x6D360A65u, 0x7B559A11u, 0xA1FB33B6u, 0xA8445A09u, 0xAEB76DFCu, 0xB0C43596u, 0xCEA28BF0u, 0xD3B5B685u,
+    0xD55B706Bu, 0xE1337876u, 0xE1CD669Eu, 0xE8F33BBCu, 0xEA973AC4u, 0xF7AEF6EAu,
+};
+static const u32 kFinBones85[70] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0x359392DBu, 0xDB0ADC42u,
+    0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xAD886CCCu, 0xB2999EDFu, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0x30510360u, 0x3082E2B3u, 0x31258114u,
+    0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u, 0x5695E5A4u, 0x57328603u, 0x57E167D0u, 0xF964B630u,
+    0xFF8A70DEu, 0x0B16F859u, 0x0D032C47u, 0x2B8A19C7u, 0x30504362u, 0x3083A2B1u, 0x3124C116u, 0x31F720C5u,
+    0x326A0658u, 0x3CB95AEDu, 0x457EB631u, 0x463CF573u, 0x508473CFu, 0x54AEE09Cu, 0x56474475u, 0x5694A5A6u,
+    0x5733C601u, 0x57E027D2u, 0x6C0F7E42u, 0x6F8C9DC1u, 0x7B559A11u, 0x82791136u, 0x8E9566C1u, 0x90FAA2B7u,
+    0x979BD0C8u, 0xA68165C4u, 0xD3B5B685u, 0xD55B706Bu, 0xE1CD669Eu, 0xEA973AC4u,
+};
+static const u32 kFinBones150[72] = {
+    0x0CF89CC9u, 0xB4877DD4u, 0x681A465Fu, 0x1A679F56u, 0x1A66DF54u, 0x786A9B21u, 0xA5E8C9ADu, 0xC32C2F69u,
+    0x9A47880Au, 0xFC836ECEu, 0x8C7F9E32u, 0xF2192054u, 0x69E347A7u, 0x6F0D8149u, 0xAD886CCCu, 0x359392DBu,
+    0xDB0ADC42u, 0xA154F360u, 0xA1567364u, 0xA156D365u, 0xA1573366u, 0xA1579367u, 0xB2999EDFu, 0xB4775831u,
+    0xDF306D03u, 0xDF30CD02u, 0xDF312D01u, 0xDF318D00u, 0xDF324D06u, 0x30510360u, 0x3082E2B3u, 0x31258114u,
+    0x31F660C7u, 0x326B465Au, 0x54AFA09Eu, 0x56460477u, 0x5695E5A4u, 0x57328603u, 0x57E167D0u, 0xF964B630u,
+    0xFF13F322u, 0xFF8A70DEu, 0x13AFE29Eu, 0x13B4A0FBu, 0x24BF36F2u, 0x2D005F4Du, 0x30504362u, 0x3083A2B1u,
+    0x3124C116u, 0x31F720C5u, 0x326A0658u, 0x54AEE09Cu, 0x56474475u, 0x5694A5A6u, 0x5733C601u, 0x57E027D2u,
+    0x5C2CBF69u, 0x64777D32u, 0x6D360A65u, 0x7B559A11u, 0xA1FB33B6u, 0xA8445A09u, 0xAEB76DFCu, 0xB0C43596u,
+    0xCEA28BF0u, 0xD3B5B685u, 0xD55B706Bu, 0xE1337876u, 0xE1CD669Eu, 0xE8F33BBCu, 0xEA973AC4u, 0xF7AEF6EAu,
+};
+static const struct { int model; u32 count; const u32* names; } kFinSkeletons[] = {
+    {0, 72, kFinBones0}, {9, 73, kFinBones9}, {18, 70, kFinBones18}, {69, 72, kFinBones69}, {70, 77, kFinBones70}, {73, 70, kFinBones73}, {74, 70, kFinBones74}, {75, 70, kFinBones75}, {76, 70, kFinBones76}, {81, 70, kFinBones81}, {85, 70, kFinBones85}, {150, 72, kFinBones150}};
+#define FIN_CALL 0x800C3258u
+#define FIN_ATTACK_BLOCK 25        // 0x800C30CC's r25 (0x800460DC's, the attack block), live at its call
+#define FIN_ATTACK_WEAPON 104u     // the block's weapon (0x8019BA14): an item's info, +4 its InvU record, +12 its type
+#define FIN_GAME_SLOTS 0x805822B8u // + 80 * i: player 1's two parts in the game's slots (0x80132970), +0 the id, +68 made ready
+#define FIN_SCRATCH 0x82500000u    // each player's: the set (16 bytes), the track list, the held keys
+#define FIN_PER_PLAYER 0x1000u
+#define FIN_LIST 16u
+#define FIN_KEYS 0x600u
+static struct {
+    u32 object, table, own_set, record;
+    bool swapped;
+    int home, part, holder;
+    u32 bones, home_bones;
+    int from[COSTUME_MAX_BONES];  // the home's track for each of the holder's bones, or -1
+    u32 held_n[COSTUME_MAX_BONES][2];
+    u8 held[COSTUME_MAX_BONES][2][12];  // for a bone the home hasn't: the first key of the move the holder played before
+} g_fin[2];
+
+static const char* fin_name(int model) {
+    switch (model) {
+    case 0: return "Pius";
+    case 9: return "Alex";
+    case 18: return "Max";
+    case 69: return "Edward";
+    case 70: return "Ellia";
+    case 73: return "Lindsey";
+    case 74: return "Paul";
+    case 75: return "Peter";
+    case 76: return "Roberto";
+    case 81: return "Michael";
+    case 85: return "Anthony";
+    case 150: return "Karim";
+    default: return "another";
+    }
+}
+
+static int fin_streams(u32 object, u32 record) {
+    for (int k = 0; k < 2; k++)
+        if (g_fin[k].object == object && g_fin[k].record == record && record != 0u)
+            return k;
+    return -1;
+}
+
+// The home's move, just streamed in (its tracks by the home's bones, then the root): a list by the holder's bones.
+static void fin_fit(CPUState* cpu, int k) {
+    const u32 record = g_fin[k].record;
+    const u32 tracks = mem_read32(cpu, record), count = mem_read16(cpu, record + 4u);
+    const u32 hb = g_fin[k].home_bones, nb = g_fin[k].bones;
+    if (count < hb || count > COSTUME_MAX_BONES || !guest_ram_range_valid(cpu, tracks, count * 16u))
+        return;
+    u32 old[COSTUME_MAX_BONES * 4u];
+    for (u32 i = 0u; i < count * 4u; i++)
+        old[i] = mem_read32(cpu, tracks + i * 4u);
+    u32 first = 0u, last = 0u, longest = 0u;
+    for (u32 i = 0u; i < count; i++)
+        for (u32 list = 0u; list < 2u; list++) {
+            const u32 n = old[i * 4u + list * 2u] >> 16, keys = old[i * 4u + list * 2u + 1u];
+            if (n > longest && guest_ram_range_valid(cpu, keys, n * 12u)) {
+                longest = n;
+                first = mem_read32(cpu, keys);
+                last = mem_read32(cpu, keys + (n - 1u) * 12u);
+            }
+        }
+    const u32 base = FIN_SCRATCH + (u32)k * FIN_PER_PLAYER, list_at = base + FIN_LIST;
+    u32 keys_at = base + FIN_KEYS;
+    const u32 places = nb + 1u > count ? nb + 1u : count;
+    if (FIN_LIST + places * 16u > FIN_KEYS)
+        return;
+    for (u32 j = 0u; j < places; j++) {
+        const int from = j < nb ? g_fin[k].from[j] : j == nb && count > hb ? (int)hb : -1;
+        for (u32 w = 0u; w < 4u; w++)
+            mem_write32(cpu, list_at + j * 16u + w * 4u, from >= 0 ? old[(u32)from * 4u + w] : 0u);
+        if (from >= 0 || j >= nb || longest == 0u)
+            continue;
+        for (u32 list = 0u; list < 2u; list++) {
+            if (g_fin[k].held_n[j][list] == 0u || keys_at + 24u > base + FIN_PER_PLAYER)
+                continue;
+            for (u32 key = 0u; key < 2u; key++) {
+                for (u32 b = 0u; b < 12u; b++)
+                    mem_write8(cpu, keys_at + key * 12u + b, g_fin[k].held[j][list][b]);
+                const u32 word = mem_read32(cpu, keys_at + key * 12u);
+                mem_write32(cpu, keys_at + key * 12u, ((key == 0u ? first : last) & ~3u) | (word & 3u));
+            }
+            mem_write16(cpu, list_at + j * 16u + list * 8u, 2u);
+            mem_write32(cpu, list_at + j * 16u + list * 8u + 4u, keys_at);
+            keys_at += 24u;
+        }
+    }
+    mem_write32(cpu, record, list_at);
+}
+
 // A move's tracks, just streamed in and made addresses (0x8012E588, whose result is the cache's
 // entry): the other body's bones get theirs, and the root the place after its last.
 // A bone the wearer hasn't stays as it was modelled, and the Liche's cape was modelled flying out. Its
@@ -7591,6 +8236,7 @@ static struct {
     int place, held_file;
     u32 object, result, held_record;
     bool holding;
+    int fin;  // 1 + the player whose finishing move (fin_swap) this is, 0 none
 } g_tracks_load;
 
 static struct {
@@ -7603,6 +8249,14 @@ static struct {
 
 static void hle_tracks_load(CPUState* cpu) {
     g_hle_passthrough = true;
+    // Another's finishing move: fitted to the holder's body as it is (a form's too), so not again by the form's map.
+    const int fin = g_tracks_load.caller == 0u ? fin_streams(cpu->gpr[3], cpu->gpr[4]) : -1;
+    if (fin >= 0) {
+        g_tracks_load.caller = cpu->lr;
+        g_tracks_load.fin = fin + 1;
+        cpu->lr = HLE_TRACKS_RETURN;
+        return;
+    }
     const Costume* c = g_tracks_load.caller == 0u ? costume_to_fit(cpu, cpu->gpr[3]) : NULL;
     if (c != NULL && cpu->ram_size >= SCRATCH_END - GC_RAM_BASE) {
         g_tracks_load.caller = cpu->lr;
@@ -7642,6 +8296,13 @@ static void costume_held_keep(CPUState* cpu, u32 record) {
 static bool continue_tracks_load(CPUState* cpu) {
     if (g_tracks_load.caller == 0u)
         return false;
+    if (g_tracks_load.fin != 0) {
+        fin_fit(cpu, g_tracks_load.fin - 1);
+        cpu->lr = cpu->pc = g_tracks_load.caller;
+        g_tracks_load.caller = 0u;
+        g_tracks_load.fin = 0;
+        return true;
+    }
     if (g_tracks_load.holding) {
         costume_held_keep(cpu, g_tracks_load.held_record);
         cpu->gpr[3] = g_tracks_load.result;
@@ -7772,8 +8433,264 @@ static void costume_moves(CPUState* cpu, u32 node) {
 // look alone, the first picture after they were made showed Pius's standing, twisted.
 #define PLAY_BY_NUMBER 0x80122920u
 
+// ED_FIN_LOG (testing): read once.
+static bool fin_log(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_FIN_LOG") != NULL;
+    return on != 0;
+}
+// Their own move 65 back in their table, once another move of theirs is asked for (the finisher reads the move's
+// length and hits from the table right after its call, 0x80123600 and 0x80123640, so not before).
+static void fin_restore(CPUState* cpu, int k) {
+    if (!g_fin[k].swapped)
+        return;
+    const u32 mine = FIN_SCRATCH + (u32)k * FIN_PER_PLAYER;
+    if (guest_ram_range_valid(cpu, g_fin[k].table + 65u * 4u, 4u) && mem_read32(cpu, g_fin[k].table + 65u * 4u) == mine)
+        mem_write32(cpu, g_fin[k].table + 65u * 4u, g_fin[k].own_set);
+    g_fin[k].swapped = false;
+}
+
+static void fin_swap(CPUState* cpu) {
+    const u32 object = cpu->gpr[3];
+    int k = -1;
+    if (g_coop_p2 != 0u && guest_ram_range_valid(cpu, g_coop_p2 + 52u, 4u) && mem_read32(cpu, g_coop_p2 + 52u) == object)
+        k = 1;
+    const u32 p1 = k < 0 ? coop_player(cpu) : 0u;
+    if (p1 != 0u && guest_ram_range_valid(cpu, p1 + 52u, 4u) && mem_read32(cpu, p1 + 52u) == object)
+        k = 0;
+    if (k < 0 || !guest_ram_range_valid(cpu, object + 580u, 72u) || cpu->ram_size < FIN_SCRATCH + 2u * FIN_PER_PLAYER - GC_RAM_BASE)
+        return;
+    const char* who = k == 0 ? "player 1" : "player 2";
+    const int holder = (s32)mem_read32(cpu, object + 580u);
+    const u32 block = cpu->gpr[FIN_ATTACK_BLOCK];
+    const u32 info = guest_ram_range_valid(cpu, block + FIN_ATTACK_WEAPON, 4u) ? mem_read32(cpu, block + FIN_ATTACK_WEAPON) : 0u;
+    const u32 inv = guest_ram_range_valid(cpu, info, 16u) ? mem_read32(cpu, info + 4u) : 0u;
+    if (!guest_ram_range_valid(cpu, inv, 88u)) {
+        if (fin_log())
+            fprintf(stderr, "[fin] %s (%s) finishes: their own move 65 (no weapon held found)\n", who, fin_name(holder));
+        return;
+    }
+    const u32 item = mem_read32(cpu, info + 12u), seven = mem_read16(cpu, inv + 54u);
+    int home = -1;
+    for (size_t i = 0; i < sizeof kFinHome / sizeof kFinHome[0]; i++)
+        if (kFinHome[i].item == item)
+            home = kFinHome[i].home;
+    const u32* names = NULL;
+    u32 home_bones = 0u;
+    for (size_t i = 0; i < sizeof kFinSkeletons / sizeof kFinSkeletons[0]; i++)
+        if (kFinSkeletons[i].model == home)
+            names = kFinSkeletons[i].names, home_bones = kFinSkeletons[i].count;
+    const u32 table = mem_read32(cpu, object + 648u);
+    const u32 own_set = guest_ram_range_valid(cpu, table, 170u * 4u) ? mem_read32(cpu, table + 65u * 4u) : 0u;
+    if (own_set == FIN_SCRATCH + (u32)k * FIN_PER_PLAYER) {
+        if (fin_log())
+            fprintf(stderr, "[fin] %s (%s) finishes with item %u: the entry from a state saved in a finish\n", who, fin_name(holder), item);
+        return;
+    }
+    if (home < 0 || home == holder || names == NULL || seven < 7u || seven % 7u != 0u || !guest_ram_range_valid(cpu, own_set, 16u)) {
+        if (fin_log())
+            fprintf(stderr, "[fin] %s (%s) finishes with item %u: their own move 65 (%s)\n", who, fin_name(holder), item,
+                    home < 0 ? "no home for it" : home == holder ? "it is theirs" : "nothing to play");
+        return;
+    }
+    // The place in the seven: the part they play from now (the game's slot, or the host's).
+    const u32 ready = mem_read32(cpu, object + 644u);
+    int part = -1;
+    for (u32 i = 0u; i < 2u && part < 0; i++)
+        if (mem_read32(cpu, FIN_GAME_SLOTS + i * 80u + 68u) == ready)
+            part = (s32)mem_read32(cpu, FIN_GAME_SLOTS + i * 80u);
+    for (int s = 0; s < P2_MOVES_SLOTS && part < 0; s++)
+        if (g_p2_moves[s].model >= 0 && g_p2_moves[s].ready == ready)
+            part = g_p2_moves[s].part;
+    const int want = (int)seven + (part >= 0 ? part % 7 : 0);
+    MovesSet has;
+    if (!moves_of(cpu, home, want, &has) || (has.bits[65u / 32u] >> (65u % 32u) & 1u) == 0u) {
+        if (fin_log())
+            fprintf(stderr, "[fin] %s (%s) finishes with item %u: their own move 65 (%s's file has none in part %d)\n", who,
+                    fin_name(holder), item, fin_name(home), want);
+        return;
+    }
+    // The holder's body as it is, and the names its bones go by (a form's: its wearer's, costume_bone_map).
+    const u32 body = mem_read32(cpu, object + 60u);
+    const u32 nb = guest_ram_range_valid(cpu, body, 40u) ? mem_read16(cpu, body + 8u) : 0u;
+    const u32 own = nb != 0u ? body_bones(cpu, body) : 0u;
+    if (nb == 0u || nb + 1u >= COSTUME_MAX_BONES || FIN_LIST + (nb + 1u) * 16u > FIN_KEYS || !guest_ram_range_valid(cpu, own, nb * 80u)) {
+        if (fin_log())
+            fprintf(stderr, "[fin] %s (%s) finishes with item %u: their own move 65 (their body's bones not found)\n", who, fin_name(holder), item);
+        return;
+    }
+    const Costume* c = costume_to_fit(cpu, object);
+    const u32 plain = c != NULL ? body_bones(cpu, g_costume_plain[c->place]) : 0u;
+    // The other player's finish from this slot goes back first: the slot is about to hold another part.
+    if (g_p2_moves[FIN_MOVES_SLOT].model != home || g_p2_moves[FIN_MOVES_SLOT].part != want) {
+        fin_restore(cpu, 1 - k);
+        g_fin[1 - k].object = g_fin[1 - k].record = 0u;
+        if (!p2_moves_load(cpu, FIN_MOVES_SLOT, home, want)) {
+            if (fin_log())
+                fprintf(stderr, "[fin] %s (%s) finishes with item %u: their own move 65 (%s's part %d didn't load)\n", who, fin_name(holder),
+                        item, fin_name(home), want);
+            return;
+        }
+    }
+    const u32 home_set = mem_read32(cpu, SCRATCH_FINISH + 65u * 4u);
+    const u32 record = guest_ram_range_valid(cpu, home_set, 16u) ? mem_read32(cpu, home_set + 4u) : 0u;
+    if (!guest_ram_range_valid(cpu, record, 296u)) {
+        // Not as it was loaded: loaded again next time.
+        g_p2_moves[FIN_MOVES_SLOT].model = g_p2_moves[FIN_MOVES_SLOT].part = -1;
+        if (fin_log())
+            fprintf(stderr, "[fin] %s (%s) finishes with item %u: their own move 65 (%s's move 65 not where it was loaded)\n", who,
+                    fin_name(holder), item, fin_name(home));
+        return;
+    }
+    // The move they play now: its tracks are by this body's bones, for those the home hasn't.
+    u32 now = 0u, now_n = 0u;
+    const u32 anim = mem_read32(cpu, object + 64u);
+    if (guest_ram_range_valid(cpu, anim + 2176u, 2u) && mem_read16(cpu, anim + 2176u) < 8u) {
+        const u32 set = mem_read32(cpu, anim + mem_read16(cpu, anim + 2176u) * 272u + 184u);
+        const u32 rec = guest_ram_range_valid(cpu, set, 8u) ? mem_read32(cpu, set + 4u) : 0u;
+        if (guest_ram_range_valid(cpu, rec, 8u)) {
+            now = mem_read32(cpu, rec);
+            now_n = c != NULL ? nb : mem_read16(cpu, rec + 4u);
+            if (!guest_ram_range_valid(cpu, now, now_n * 16u))
+                now = 0u;
+        }
+    }
+    g_fin[k].object = object;
+    g_fin[k].record = record;
+    g_fin[k].home = home;
+    g_fin[k].part = want;
+    g_fin[k].holder = holder;
+    g_fin[k].bones = nb;
+    g_fin[k].home_bones = home_bones;
+    u32 matched = 0u, held = 0u;
+    for (u32 j = 0u; j < nb; j++) {
+        const u32 name = c != NULL && g_costume_map->from[j] >= 0 ? mem_read32(cpu, plain + (u32)g_costume_map->from[j] * 80u + 64u)
+                                                                  : mem_read32(cpu, own + j * 80u + 64u);
+        g_fin[k].from[j] = -1;
+        for (u32 h = 0u; h < home_bones && g_fin[k].from[j] < 0; h++)
+            if (names[h] == name)
+                g_fin[k].from[j] = (int)h;
+        g_fin[k].held_n[j][0] = g_fin[k].held_n[j][1] = 0u;
+        if (g_fin[k].from[j] >= 0) {
+            matched++;
+            continue;
+        }
+        for (u32 list = 0u; list < 2u && now != 0u && j < now_n; list++) {
+            const u32 n = mem_read16(cpu, now + j * 16u + list * 8u), keys = mem_read32(cpu, now + j * 16u + list * 8u + 4u);
+            if (n == 0u || !guest_ram_range_valid(cpu, keys, 12u))
+                continue;
+            for (u32 b = 0u; b < 12u; b++)
+                g_fin[k].held[j][list][b] = (u8)mem_read8(cpu, keys + b);
+            g_fin[k].held_n[j][list] = 1u;
+        }
+        held += g_fin[k].held_n[j][0] != 0u || g_fin[k].held_n[j][1] != 0u;
+    }
+    // Streamed again, so it is fitted to this body (another's may have played it).
+    u32 entry = 0u, ignore = 0u;
+    if (hle_guest_call(cpu, MOVES_ENTRY, &record, 1, 0.0, &entry) && entry != 0u) {
+        mem_write8(cpu, entry + 22u, 0u);
+        hle_guest_call(cpu, MOVES_FREE, &entry, 1, 0.0, &ignore);
+    }
+    // Their set, the home's move in it: the holder's part (its bones, +36) and flags stay.
+    const u32 mine = FIN_SCRATCH + (u32)k * FIN_PER_PLAYER;
+    for (u32 w = 0u; w < 4u; w++)
+        mem_write32(cpu, mine + w * 4u, mem_read32(cpu, own_set + w * 4u));
+    mem_write32(cpu, mine + 4u, record);
+    g_fin[k].table = table;
+    g_fin[k].own_set = own_set;
+    g_fin[k].swapped = true;
+    mem_write32(cpu, table + 65u * 4u, mine);
+    if (fin_log())
+        fprintf(stderr, "[fin] %s finishes with item %u: %s's move 65 (part %d) fitted to %s%s%s (%u of %u bones by name, %u held, from %u) (frame %llu)\n",
+                who, item, fin_name(home), want, fin_name(holder), c != NULL ? " in " : "", c != NULL ? c->name : "", matched, nb, held,
+                home_bones, (unsigned long long)(cpu->timebase / 675000ull));
+}
+
+// ED_FIN_TRACE (testing, reads only): the finisher's moves and cameras. 1: the moves of a playable in the
+// 600 frames after a finishing move (65) is asked or FINISH HIM starts; 2: every move of a playable.
+static int fin_trace(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_FIN_TRACE") != NULL ? atoi(getenv("ED_FIN_TRACE")) > 1 ? 2 : 1 : 0;
+    return on;
+}
+static unsigned long long g_fin_window;  // the frame the finisher's move log runs to
+static void fin_trace_globals(CPUState* cpu, const char* where) {
+    if (!sda_ready(cpu))
+        return;
+    const u32 r13 = cpu->gpr[13];
+    fprintf(stderr, "[fintrace] %s: countdown r13-30420 %d, finish camera on r13-25580 %d, next of three r13-25584 %d, room r13-23276 %d (frame %llu)\n",
+            where, (s32)mem_read32(cpu, r13 - 30420u), (s32)mem_read32(cpu, r13 - 25580u), (s32)mem_read32(cpu, r13 - 25584u),
+            (s32)mem_read32(cpu, r13 - 23276u), (unsigned long long)(cpu->timebase / 675000ull));
+}
+static void fin_trace_move(CPUState* cpu) {
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    const u32 object = cpu->gpr[3], id = cpu->gpr[4];
+    if (!guest_ram_range_valid(cpu, object + 648u, 4u) || !guest_ram_range_valid(cpu, object + 580u, 4u))
+        return;
+    const int model = (s32)mem_read32(cpu, object + 580u);
+    if (!coop_playable(model))
+        return;
+    if (id == 65u)
+        g_fin_window = frame + 600ull;
+    if (fin_trace() < 2 && frame > g_fin_window)
+        return;
+    static u32 last_object, last_id;
+    static unsigned long long last_frame;
+    if (object == last_object && id == last_id && frame <= last_frame + 2ull)
+        return;
+    last_object = object;
+    last_id = id;
+    last_frame = frame;
+    const u32 table = mem_read32(cpu, object + 648u);
+    const u32 rec = id < 170u && guest_ram_range_valid(cpu, table + id * 4u, 4u) ? mem_read32(cpu, table + id * 4u) : 0u;
+    u32 w[4] = {0u, 0u, 0u, 0u};
+    for (u32 i = 0u; i < 4u && guest_ram_range_valid(cpu, rec + i * 4u, 4u); i++)
+        w[i] = mem_read32(cpu, rec + i * 4u);
+    const char* who = g_coop_p2 != 0u && mem_read32(cpu, g_coop_p2 + 52u) == object ? "player 2"
+                      : coop_player(cpu) != 0u && mem_read32(cpu, coop_player(cpu) + 52u) == object ? "player 1" : "a playable";
+    fprintf(stderr, "[fintrace] %s (model %d, object 0x%08X) move %u: table 0x%08X, record 0x%08X = %08X %08X %08X %08X, lr 0x%08X (frame %llu)\n",
+            who, model, object, id, table, rec, w[0], w[1], w[2], w[3], cpu->lr, frame);
+    if (id == 65u)
+        fin_trace_globals(cpu, "finishing move asked");
+}
 static void hle_play_by_number(CPUState* cpu) {
     g_hle_passthrough = true;
+    if (fin_trace())
+        fin_trace_move(cpu);
+    for (int k = 0; k < 2; k++)
+        if (g_fin[k].swapped && g_fin[k].object == cpu->gpr[3] && (cpu->gpr[4] != 65u || cpu->lr != FIN_CALL))
+            fin_restore(cpu, k);
+    if (cpu->gpr[4] == 65u && cpu->lr == FIN_CALL) {
+        fin_swap(cpu);
+        g_hle_passthrough = true;
+    }
+    // ED_FIN_LOG (testing, reads only): which of the swings (5 to 9) and the finishing move (65) a character's table has,
+    // as it changes, and each finishing move asked.
+    if (fin_log() && guest_ram_range_valid(cpu, cpu->gpr[3] + 648u, 4u)) {
+        const u32 table = mem_read32(cpu, cpu->gpr[3] + 648u);
+        static const u32 kIds[6] = {5u, 6u, 7u, 8u, 9u, 65u};
+        u32 have = 0u;
+        for (u32 i = 0; i < 6u && guest_ram_range_valid(cpu, table, 170u * 4u); i++)
+            have |= mem_read32(cpu, table + kIds[i] * 4u) != 0u ? 1u << i : 0u;
+        static u32 object_was[8], have_was[8], table_was[8];
+        u32 k = 0u;
+        while (k < 8u && object_was[k] != 0u && object_was[k] != cpu->gpr[3])
+            k++;
+        const int model = guest_ram_range_valid(cpu, cpu->gpr[3] + 580u, 4u) ? (s32)mem_read32(cpu, cpu->gpr[3] + 580u) : -1;
+        if (k < 8u && (object_was[k] != cpu->gpr[3] || have_was[k] != have || table_was[k] != table) && model >= 0 && coop_playable(model)) {
+            object_was[k] = cpu->gpr[3];
+            have_was[k] = have;
+            table_was[k] = table;
+            fprintf(stderr, "[fin] moves of 0x%08X (model %d): table 0x%08X, swings 5-9 %s, finishing move 65 %s (frame %llu)\n", cpu->gpr[3], model, table,
+                    (have & 31u) == 31u ? "all" : (have & 31u) == 0u ? "none" : "some", (have & 32u) != 0u ? "yes" : "NO",
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        }
+        if (cpu->gpr[4] == 65u)
+            fprintf(stderr, "[fin] finishing move asked of 0x%08X (model %d), %s in its table, lr 0x%08X (frame %llu)\n", cpu->gpr[3], model,
+                    (have & 32u) != 0u ? "there" : "NOT", cpu->lr, (unsigned long long)(cpu->timebase / 675000ull));
+    }
     costume_tracks_on(cpu, cpu->gpr[3]);
 }
 
@@ -8162,13 +9079,70 @@ static bool g_coop_room_asked;
 static bool g_coop_room_asked_now;  // and for coop_menu_input
 static bool g_coop_entered_p2;  // player 2 asked for the room: the first zone's scene there is theirs
 static s32 g_coop_arrival_scene;
+// The one brought along by coop_follow (1 player 1, 2 player 2), until their first look at the zones with them on
+// (coop_follow_look). The way back they were brought into counts as come into, as the one who opened the door
+// arrives in it: the look marks them inside it (0x80134684), and what its script asks for there, the way back's
+// prompt (an exit prompt, coop_prompt_is_exit) or its room (fn66), is passed over, its word put back as it was.
+static int g_follow_fresh;
+static unsigned long long g_follow_fresh_until;
+static bool g_follow_refusing;
+static s32 g_follow_refused[8];
+static u32 g_follow_refused_n;
 static unsigned long long g_trace_ticket_frame;  // ED_COOP_TRACE: both players' places, frame by frame, after this
+// Player 2's press on a way out (OPEN DOOR, CLIMB UP...): its script runs as theirs (hle_coop_controller), pending
+// until a room is asked for. Its later steps may go on from the game (a wait's end, run as player 1's): the room that
+// script asks for is still player 2's. They arrive on its spot and own what plays there, player 1 brought beside them
+// (coop_follow), as for a zone of theirs.
+static unsigned long long g_coop_exit_p2_until;
+static s32 g_coop_exit_p2_script;  // and its script: only a room that script asks for (the running script, r13-23228)
+static unsigned g_coop_tickets;  // rooms asked for: a look of player 2's that asked keeps the game busy (coop_prompt_look)
+static bool g_coop_room_p2;  // the room change on its way is player 2's (asked with them the player, or their way out)
+
+// A room change on its way: the ticket written (0x80155770: busy 4 by 0x801556CC(4, 1), its countdown at +0 of
+// 0x8058AFFC) and the countdown not yet run out. The game holds everyone but the one who asked (event 102 to the rest
+// sets their node +28's 8; fn66 clears it for the player, 0x801F6828(player, 0)), and a held node's update neither
+// runs its controller nor moves its motion on (0x80007490, 0x800271F0: busy and that bit). The other player is not
+// held: they go on as the one who asked does, until the room changes and they are brought along (coop_follow).
+// Not a scene, words or a find on top (bits 8, 16, 32), nor the room's own load once the countdown is out.
+#define COOP_ROOM_TICKET 0x8058AFFCu
+#define COOP_BUSY_ROOM 4u
+static bool coop_room_change_on(CPUState* cpu) {
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu))
+        return false;
+    const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u);
+    return (busy & COOP_BUSY_ROOM) != 0u && (busy & ~(COOP_BUSY_ROOM | 2u | 1u)) == 0u && (s32)mem_read32(cpu, COOP_ROOM_TICKET) > 0 &&
+           !cutscene_playing(cpu) && !game_menu_open(cpu);
+}
+// The one who didn't ask, during it: player 1 for a room of player 2's, and player 2 for one of player 1's.
+static bool coop_room_change_other(CPUState* cpu, bool p2) { return coop_room_change_on(cpu) && g_coop_room_p2 != p2; }
+static bool coop_room_change_log(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_COOP_LOG") != NULL;
+    return on != 0;
+}
 
 static void notify_room_ticket(CPUState* cpu) {
     g_coop_room_asked = true;
     g_coop_room_asked_now = true;
-    g_coop_entered_p2 = g_coop_p2 != 0u && mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u);
+    g_coop_tickets++;
+    const s32 running = (s16)mem_read32(cpu, cpu->gpr[13] - 23228u);
+    // Pending from player 2's press until a room is asked for, player 1 presses a prompt of their own, or player 2
+    // presses again: not a time. Door scripts wait in game ticks (script 132 about 145), and at 16 fps a 300-frame
+    // window ran out before its ticket and player 1 got the arrival (logs/run-20261105-224829-jtg-ver-doorown-c4p2-fix2).
+    const bool exit_p2 = g_coop_exit_p2_until != 0ull && running == g_coop_exit_p2_script;
+    if (g_coop_exit_p2_until != 0ull && getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] a room asked for by script %d, player 2's way out was script %d\n", running, g_coop_exit_p2_script);
+    g_coop_exit_p2_until = 0ull;
+    g_coop_entered_p2 = g_coop_p2 != 0u && (exit_p2 || mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u));
+    g_coop_room_p2 = g_coop_entered_p2;
+    if (coop_room_change_log())
+        fprintf(stderr, "[coop] a room change of player %d's: the other goes on through it (frame %llu)\n", g_coop_room_p2 ? 2 : 1,
+                (unsigned long long)(cpu->timebase / 675000ull));
+    if (exit_p2 && getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] the room player 2's way out asks for is theirs (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
     g_coop_arrival_scene = 0;
+    g_follow_fresh = 0;
     g_trace_ticket_frame = cpu->timebase / 675000ull;
     if (getenv("ED_ROOM_LOG") != NULL)
         room_log(cpu, "ticket");
@@ -8536,6 +9510,39 @@ static const Costume* costume_worn(CPUState* cpu, u32 node) {
     return costume_object(cpu, object);
 }
 
+// A form is how a player looks, not how big they are. The game sizes a character as it makes it
+// (0x80117F64): its radius, object +624 and +628 (what its step sweeps it with, 0x80118858), and the
+// height of its middle, +620 (+612's z), are the larger of the default (r13 - 28952, 0x8013A364) and
+// its body's +248. Made in a form, that body is the form's: rotten Ellia's (a scene's body) gave
+// 135.6, near three times a player's 50, and in room 158's corridor (Paul's chapter) she could not
+// move at all, brought there or put there; plain Ellia walked it. Each frame, a player in a form has
+// the size their own body (g_costume_plain) gives, as the game would have made them; a size the
+// game set since (not the form's) is left.
+static void costume_size(CPUState* cpu, u32 node) {
+    const u32 object = node != 0u && guest_ram_range_valid(cpu, node + 52u, 4u) ? mem_read32(cpu, node + 52u) : 0u;
+    const Costume* c = guest_ram_range_valid(cpu, object, 632u) ? costume_object(cpu, object) : NULL;
+    if (c == NULL)
+        return;
+    const u32 body = mem_read32(cpu, object + 60u), plain = g_costume_plain[c->place];
+    if (plain == body || !guest_ram_range_valid(cpu, body, 252u) || !guest_ram_range_valid(cpu, plain, 252u))
+        return;
+    const float base = guest_read_f32(cpu, cpu->gpr[13] - 28952u);
+    const float worn = guest_read_f32(cpu, body + 248u), own = guest_read_f32(cpu, plain + 248u);
+    const float radius = guest_read_f32(cpu, object + 628u);
+    if (!isfinite(base) || !isfinite(worn) || !isfinite(own) || !isfinite(radius) || base < 0.0f || own > 1000.0f)
+        return;
+    const float made = worn > base ? worn : base, want = own > base ? own : base;
+    if (fabsf(radius - made) > 0.01f || fabsf(radius - want) < 0.01f)
+        return;
+    if (fabsf(guest_read_f32(cpu, object + 620u) - radius) < 0.01f)
+        guest_write_f32(cpu, object + 620u, want);
+    if (fabsf(guest_read_f32(cpu, object + 624u) - radius) < 0.01f)
+        guest_write_f32(cpu, object + 624u, want);
+    guest_write_f32(cpu, object + 628u, want);
+    fprintf(stderr, "[player] %s (form %d): their own size, radius %.1f (the form's body gave %.1f)\n", c->name, c->form,
+            want, radius);
+}
+
 static void hle_spawn_create(CPUState* cpu) {
     const u32 rec = cpu->gpr[3];
     const int want = player_model();
@@ -8642,7 +9649,7 @@ static void coop_spawn(CPUState* cpu, u32 player) {
     const u32 rec = (cpu->gpr[1] - 0x200u) & ~15u;
     u32 made = 0u, ignore = 0u;
     float at[3];
-    coop_place(cpu, object, at);
+    coop_place(cpu, object, 0u, at);
     if (!hle_guest_call(cpu, COOP_SPAWN_INIT, &rec, 1, 0.0, &ignore))
         return;
     for (u32 i = 0; i < 3u; i++)
@@ -9104,12 +10111,13 @@ static void coop_quick_swap(CPUState* cpu, bool p2) {
 // In player 2's turn, with them the player: a quick spell's button pressed
 // casts theirs. The cast pays from the character the game controls (r13 -
 // 21488 its id, - 21484 its node; 0x801F6258, 0x801F6250), which is player 2
-// for their cast too, with what they are casting (coop_be_player2).
-static void coop_quick_cast(CPUState* cpu) {
+// for their cast too, with what they are casting (coop_be_player2). Not while
+// they wait (wait): a press then is let go, not kept.
+static void coop_quick_cast(CPUState* cpu, bool wait) {
     static u16 held;
     const u16 pressed = (u16)(g_coop_p2_buttons & ~held);
-    held = g_coop_p2_buttons;
-    if (pressed == 0u || cpu->ram_size < SCRATCH_END - GC_RAM_BASE)
+    held = g_coop_p2_buttons;  // (a press while they wait is not kept, as the game keeps none)
+    if (pressed == 0u || wait || cpu->ram_size < SCRATCH_END - GC_RAM_BASE)
         return;
     // ED_COOP_P2_QUICK=spell (testing): player 2's D-pad up casts that spell.
     const char* test = getenv("ED_COOP_P2_QUICK");
@@ -9454,13 +10462,30 @@ static void coop_controlled_id(CPUState* cpu) {
 // transition showed in their half at their cameras, with player 1's view held.
 #define SCRIPT_HOLD_FROM 0x8016820Cu
 #define SCRIPT_HOLD_TO 0x801682A8u
+#define COOP_BUSY_SCRIPT 1u  // the busy word's bit a script's busy_set (fn91(1), 0x801556CC) sets
 static bool g_coop_script_hold;
 // Player 1 looking closely at a thing they pressed on, held with no words or find up yet (the circle:
 // its scene, then DETAIL). The hold stays for them; player 2 plays on (coop_p1_close_up).
 static bool g_coop_p1_look;
 static s32 g_coop_p1_used_script, g_coop_p1_ran_script;
+// The close-up stepper (0x80024D78, a press of a close-up prompt, script -2) holds play itself: as its close-up opens,
+// before DETAIL (0x80024E8C), and as its words close, before RETURN or PICK UP (0x800253C8). Busy 2 then, with no
+// words or find up for coop_no_pause to let go of, and player 2's turn passed over it: they stood still from player
+// 1's B till their DETAIL, and again from their words' end till RETURN (logs/run-20261105-202032-jtg-p1door, frames
+// 2000 to 2080). A look of player 1's, as a script's hold they pressed on is. Player 2's own close-up isn't this:
+// its first hold is in their use, the second with it on their half (g_coop_screen), and player 1's turn lets go there.
+#define CLOSE_UP_STEP_FROM 0x80024D78u
+#define CLOSE_UP_STEP_TO 0x800255A4u
+static bool coop_use_theirs(void);  // a use of player 2's is up (g_coop_use, below)
 
 static void coop_play_hold(CPUState* cpu) {
+    if (cpu->lr >= CLOSE_UP_STEP_FROM && cpu->lr < CLOSE_UP_STEP_TO && cpu->gpr[3] == 0u && g_settings.mod_coop && g_coop_p2 != 0u &&
+        sda_ready(cpu) && !g_coop_turn && !g_coop_screen && !coop_use_theirs() && !cutscene_playing(cpu) &&
+        mem_read32(cpu, cpu->gpr[13] - 21496u) != mem_read32(cpu, g_coop_p2 + 16u) && mem_read32(cpu, cpu->gpr[13] - 21492u) != g_coop_p2) {
+        g_coop_p1_look = true;
+        if (getenv("ED_COOP_LOG") != NULL || coop_trace())
+            fprintf(stderr, "[coop] player 1's close-up holds them alone (lr 0x%08X frame %llu)\n", cpu->lr, (unsigned long long)(cpu->timebase / 675000ull));
+    }
     if (cpu->lr >= SCRIPT_HOLD_FROM && cpu->lr < SCRIPT_HOLD_TO && g_coop_p2 != 0u && sda_ready(cpu)) {
         g_coop_script_hold = cpu->gpr[3] == 0u && mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u);
         if (cpu->gpr[3] == 0u && !g_coop_script_hold && g_coop_p1_used_script > 0 && g_coop_p1_ran_script == g_coop_p1_used_script) {
@@ -9518,6 +10543,15 @@ static struct {
 
 bool hle_coop_tome_shares(void) { return g_tw.sharing; }
 
+// The menu's "depth" (game_menu_open, found from its reset, 0x801ECCE0 on this disc) is the camera stack's depth
+// (r13-21700, kTwSwitches' next to last): one word, in the switches twice. Each is saved and loaded in turn, so the
+// second took the other mode's value just loaded by the first, and was then emptied for the world as "no menu": the
+// world's camera depth came back 0, or another frame's, each Tome frame. A close-up of player 2's behind player 1's Tome
+// pushed its camera in the world, lost it, and its RETURN popped nothing, so player 2's half stayed on the close-up's
+// camera (logs/run-20261106-033439-jtg-ov-c1-f5, ExamineCam01; [diag] builds showed world 1 0 / tome 0 1 rotating).
+// Once only, with the camera's: each mode keeps its own depth, and the world's menu flag alone says no menu.
+static bool tw_menu_depth_is_camera(void) { return g_menu_depth_offset == -(s32)kTwSwitches[TW_SWITCHES - 2u]; }
+
 static bool tw_world_turn(void) { return g_tw.sharing && g_tw.world_tick; }
 // A pad read is for the frame after it.
 static bool tw_tome_next(void) { return g_tw.sharing && g_tw.world_tick && g_tw.worlds_left <= 1u; }
@@ -9530,6 +10564,8 @@ static void tw_switches(CPUState* cpu, u32* save, const u32* load) {
     const u32 sda = cpu->gpr[13];
     for (u32 i = 0; i < TW_SWITCHES + 2u; i++) {
         const u32 at = i < TW_SWITCHES ? sda - kTwSwitches[i] : sda + (u32)(i == TW_SWITCHES ? g_menu_flag_offset : g_menu_depth_offset);
+        if (i == TW_SWITCHES + 1u && tw_menu_depth_is_camera())
+            continue;  // the camera's depth, already in (tw_menu_depth_is_camera)
         if (save != NULL)
             save[i] = mem_read32(cpu, at);
         if (load != NULL)
@@ -9547,6 +10583,152 @@ static void tw_block(CPUState* cpu, int save, int load) {
         memcpy(&v, g_tw.block[load] + i, 4u);
         mem_write32(cpu, TW_BLOCK + i, v);
     }
+}
+
+// Player 2's close-up in the world behind player 1's Tome (g_coop_p2_behind_tome): the game has one words window (r13-25960,
+// a channel of 0x8013DB3C opened by 0x80024310 with the script its close runs, -25944, -25948, -25940, and the words' element
+// in its bindings' r4, 0x8023E458 +12 +44 +76) and one input focus (r13-23556, taken by 0x8013DB1C; -23552 its copy at the pad
+// update's end, 0x8013E808, against which 0x8013E1A0 passes over every channel but the focus), and both modes' frames run the
+// words (the world's 0x800084FC, the Tome's 0x80111484). Shared, player 2's words behind the Tome took player 1's B in the
+// Tome's frame and closed there, and their focus passed over the Tome's own channels: player 1's Start didn't close their Tome
+// (logs/run-20261106-044758-jtg-vov-c1b-ov6). From then on each mode has its own, as the game has them in its one mode at a
+// time: the world's words for the world's frames, the Tome's for the Tome's, until the world has none left with the close-up
+// over. The words' text (the game's elements, 0x805F87D0, ten of 0x660 bytes, ticked and drawn by 0x801DA574 in both modes'
+// frames) is each mode's alike, by who laid it out (0x801DB088 in its frames): the Tome's item name and its LB / RB were
+// drawn in player 2's half, and player 2's words over player 1's Tome page (run-20261106-044135-jtg-vov-c1-ov6 shots 000235).
+// The other mode's are left out of a frame: off the screen's left (+8, where it is across, TW_ELEMENT_AWAY: the words'
+// box and their B icon go with it, which their alpha alone left on player 1's Tome page, logs/run-20261106-055643-jtg-tw-c1b-t2
+// shots/000156.jpg; no view brings back what is off the left, gfx/interp.cpp build_view), their alpha (+7) 0 and their fade
+// (+16 0x40 / 0x80) held.
+static const u32 kTwWords[] = {25960u, 25944u, 25948u, 25940u, 23556u, 23552u};
+#define TW_WORDS (sizeof kTwWords / sizeof kTwWords[0])
+#define TW_WORDS_ALL (TW_WORDS + 3u)
+#define TW_WORDS_RECORD 0x8023E458u
+#define TW_ELEMENTS 0x805F87D0u
+#define TW_ELEMENT_SIZE 0x660u
+#define TW_ELEMENT_COUNT 10u
+#define TW_ELEMENT_AWAY ((u16)(s16)-16000)
+static struct {
+    bool on, owners_set;
+    u32 words[2][TW_WORDS_ALL];  // 0 the world's, 1 the Tome's
+    u32 window_last;             // the words window as the last frame left it, and whose frame opened it
+    int window_mode;
+    s8 owner[TW_ELEMENT_COUNT];  // -1 not known, 0 laid out in the world's frames, 1 in the Tome's
+    bool hidden[TW_ELEMENT_COUNT];
+    u8 alpha[TW_ELEMENT_COUNT];
+    u32 fade[TW_ELEMENT_COUNT];
+    u16 across[TW_ELEMENT_COUNT];
+} g_tw_split;
+
+static int tw_split_log(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_COOP_LOG") != NULL || getenv("ED_TW_SPLIT_LOG") != NULL;
+    return on;
+}
+
+static void tw_words_io(CPUState* cpu, int save, int load) {
+    const u32 sda = cpu->gpr[13];
+    for (u32 i = 0u; i < TW_WORDS_ALL; i++) {
+        const u32 at = i < TW_WORDS ? sda - kTwWords[i] : TW_WORDS_RECORD + 12u + (i - TW_WORDS) * 32u;
+        if (save >= 0)
+            g_tw_split.words[save][i] = mem_read32(cpu, at);
+        if (load >= 0)
+            mem_write32(cpu, at, g_tw_split.words[load][i]);
+    }
+}
+
+static bool tw_element_used(CPUState* cpu, u32 element) {
+    return mem_read8(cpu, element + 122u) != 0u || mem_read8(cpu, element + 123u) != 0u;
+}
+
+// What was seen through for the frame just run, back as it was (unless gone, or laid out anew since: tw_element_laid).
+static void tw_elements_show(CPUState* cpu) {
+    for (u32 k = 0u; k < TW_ELEMENT_COUNT; k++) {
+        if (!g_tw_split.hidden[k])
+            continue;
+        g_tw_split.hidden[k] = false;
+        const u32 e = TW_ELEMENTS + k * TW_ELEMENT_SIZE;
+        if (!tw_element_used(cpu, e))
+            continue;
+        mem_write8(cpu, e + 7u, g_tw_split.alpha[k]);
+        mem_write32(cpu, e + 16u, (mem_read32(cpu, e + 16u) & ~0xC0u) | (g_tw_split.fade[k] & 0xC0u));
+        if (mem_read16(cpu, e + 8u) == TW_ELEMENT_AWAY)  // unless put somewhere since
+            mem_write16(cpu, e + 8u, g_tw_split.across[k]);
+    }
+}
+
+// The other mode's text, seen through for this mode's frame (mode 0 the world's, 1 the Tome's).
+static void tw_elements_hide(CPUState* cpu, int mode) {
+    if (!g_tw_split.on || !g_tw_split.owners_set)
+        return;
+    for (u32 k = 0u; k < TW_ELEMENT_COUNT; k++) {
+        const u32 e = TW_ELEMENTS + k * TW_ELEMENT_SIZE;
+        if (g_tw_split.owner[k] < 0 || g_tw_split.owner[k] == mode || !tw_element_used(cpu, e))
+            continue;
+        g_tw_split.alpha[k] = mem_read8(cpu, e + 7u);
+        g_tw_split.fade[k] = mem_read32(cpu, e + 16u);
+        g_tw_split.across[k] = mem_read16(cpu, e + 8u);
+        mem_write8(cpu, e + 7u, 0u);
+        mem_write32(cpu, e + 16u, g_tw_split.fade[k] & ~0xC0u);
+        mem_write16(cpu, e + 8u, TW_ELEMENT_AWAY);
+        g_tw_split.hidden[k] = true;
+    }
+}
+
+// An element laid out (hle_words_layout): whose frame it is in is whose it is.
+static void tw_element_laid(CPUState* cpu, u32 element) {
+    if (element < TW_ELEMENTS || element >= TW_ELEMENTS + TW_ELEMENT_COUNT * TW_ELEMENT_SIZE || (element - TW_ELEMENTS) % TW_ELEMENT_SIZE != 0u)
+        return;
+    if (!g_tw_split.owners_set) {
+        memset(g_tw_split.owner, -1, sizeof g_tw_split.owner);
+        g_tw_split.owners_set = true;
+    }
+    const u32 k = (element - TW_ELEMENTS) / TW_ELEMENT_SIZE;
+    // Seen through and laid out again as it was (its alpha and fade as hidden): back as it was. Made anew in the
+    // slot, the making set its own.
+    if (g_tw_split.hidden[k] && mem_read8(cpu, element + 7u) == 0u && (mem_read32(cpu, element + 16u) & 0xC0u) == 0u) {
+        mem_write8(cpu, element + 7u, g_tw_split.alpha[k]);
+        mem_write32(cpu, element + 16u, mem_read32(cpu, element + 16u) | (g_tw_split.fade[k] & 0xC0u));
+    }
+    if (g_tw_split.hidden[k] && mem_read16(cpu, element + 8u) == TW_ELEMENT_AWAY)
+        mem_write16(cpu, element + 8u, g_tw_split.across[k]);
+    const s8 owner = mem_read32(cpu, cpu->gpr[13] - 26240u) == 3u ? 1 : 0;
+    if (g_tw.sharing && owner != g_tw_split.owner[k] && tw_split_log()) {
+        char text[33];
+        u32 n = 0u;
+        for (; n + 1u < sizeof text; n++) {
+            const u8 c = mem_read8(cpu, element + 122u + n);
+            if (c == 0u)
+                break;
+            text[n] = (char)(c >= 32u && c < 127u ? c : '.');
+        }
+        text[n] = 0;
+        fprintf(stderr, "[coop] text %u is the %s's: %s\n", k, owner == 1 ? "Tome" : "world", text);
+    }
+    g_tw_split.owner[k] = owner;
+    g_tw_split.hidden[k] = false;  // its own frame's: not seen through
+}
+
+// Whose frame opened the words up (0 the world's, 1 the Tome's), while the modes share them.
+static void tw_window_seen(CPUState* cpu, int mode_ran) {
+    const u32 window = mem_read32(cpu, cpu->gpr[13] - 25960u);
+    if (!g_tw_split.on && window != g_tw_split.window_last) {
+        g_tw_split.window_last = window;
+        g_tw_split.window_mode = mode_ran;
+    }
+}
+
+// The Tome closes, or a state is loaded: the modes are one again.
+static void tw_split_off(CPUState* cpu, bool world_words) {
+    if (cpu != NULL)
+        tw_elements_show(cpu);
+    if (cpu != NULL && g_tw_split.on && world_words)
+        tw_words_io(cpu, -1, 0);
+    if (g_tw_split.on && tw_split_log())
+        fprintf(stderr, "[coop] the world's words and the Tome's are one again%s\n", world_words ? " (the world's in)" : "");
+    g_tw_split.on = false;
+    g_tw_split.window_last = cpu != NULL ? mem_read32(cpu, cpu->gpr[13] - 25960u) : 0u;
 }
 
 #define TOME_COPY_GX_POINTER 26688u  // r13 -: the GX library's record, what it thinks the GPU holds
@@ -9604,6 +10786,7 @@ static void tw_state_loaded(void) {
     g_tome_copy_p1 = false;
     g_tome_copy_p1_hold = 0u;
     g_tw.sharing = g_tw.world_tick = g_tw.have_world = false;
+    memset(&g_tw_split, 0, sizeof g_tw_split);  // the elements as the state has them: whose not known
     g_tome_copy.stands_in = g_tome_copy.clean_set = false;
     dol_aurora_split_skip_views(0);
     dol_aurora_frame_unpaced(false);
@@ -9615,7 +10798,9 @@ static void tw_tome_start(CPUState* cpu) {
         tw_block(cpu, 0, -1);
         tw_switches(cpu, g_tw.world, NULL);
         // The world's frames know of no menu (its asking may have set these already).
-        g_tw.world[TW_SWITCHES] = g_tw.world[TW_SWITCHES + 1u] = 0u;
+        g_tw.world[TW_SWITCHES] = 0u;
+        if (!tw_menu_depth_is_camera())
+            g_tw.world[TW_SWITCHES + 1u] = 0u;
         g_tw.world[TW_OBJECTS_OFF] = 0u;  // the Tome's own (0x8014ED04): kept, nobody moved or was drawn, then or after it
         g_tw.have_world = true;
     }
@@ -10003,6 +11188,13 @@ static bool tome_copy_step(CPUState* cpu) {
     // of player 2's (their page) beside it keeps the second (tw_mode_change).
     dol_aurora_split_skip_views(g_tome_copy_p1 ? 1 : 2);
     dol_aurora_frame_unpaced(true);
+    // The turn is this thread's: a guest call puts back its registers up to the MSR, not the paired-single
+    // quantizers, which OSLoadContext sets from each thread it loads. A turn that ended on another thread
+    // left that one's: the world's background thread keeps GQR6 0 (float), the game's thread 0x04070407 (s16),
+    // so its next psq_lu through GQR6 (0x8011E398) on a 2-byte-aligned address took an alignment exception,
+    // "the game stopped: cpu exception" at pc 0x600, lr 0x8011E734.
+    u32 gqr_was[8];
+    memcpy(gqr_was, cpu->gqr, sizeof gqr_was);
     tome_copy_swap(cpu, true);
     u32 ignore = 0u;
     if (opening) {
@@ -10080,6 +11272,11 @@ static bool tome_copy_step(CPUState* cpu) {
     g_tome_copy_turn = false;
     g_coop_tome_p2 = false;
     tome_copy_swap(cpu, false);
+    if (tome_copy_log() && memcmp(gqr_was, cpu->gqr, sizeof gqr_was) != 0)
+        fprintf(stderr, "[tome-copy] its turn left GQRs %08X %08X %08X %08X %08X %08X %08X (were %08X %08X %08X %08X %08X %08X %08X)\n", cpu->gqr[1],
+                cpu->gqr[2], cpu->gqr[3], cpu->gqr[4], cpu->gqr[5], cpu->gqr[6], cpu->gqr[7], gqr_was[1], gqr_was[2], gqr_was[3], gqr_was[4],
+                gqr_was[5], gqr_was[6], gqr_was[7]);
+    memcpy(cpu->gqr, gqr_was, sizeof gqr_was);
     dol_aurora_split_skip_views(0);
     tome_copy_equips(cpu);
     if (g_tome_copy.stands_in) {
@@ -10238,13 +11435,16 @@ static void tw_mode_change(CPUState* cpu) {
             fprintf(stderr, "[coop] the world asks for mode %u with the Tome open\n", asked);
             tw_switches(cpu, g_tw.world, g_tw.tome);
             tw_block(cpu, 0, 1);
+            tw_split_off(cpu, false);  // the world's words stay in: the Tome goes, the world's close-up goes on
         } else {
             // The Tome's way out has run: the menu's words as it left them.
             const u32 flag = mem_read32(cpu, sda + (u32)g_menu_flag_offset), depth = mem_read32(cpu, sda + (u32)g_menu_depth_offset);
             tw_switches(cpu, NULL, g_tw.world);
             mem_write32(cpu, sda + (u32)g_menu_flag_offset, flag);
-            mem_write32(cpu, sda + (u32)g_menu_depth_offset, depth);
+            if (!tw_menu_depth_is_camera())  // the world's camera depth stays, with its index
+                mem_write32(cpu, sda + (u32)g_menu_depth_offset, depth);
             tw_block(cpu, 1, 0);
+            tw_split_off(cpu, true);  // the world's words (player 2's behind it) and focus, as the world left them
         }
         if (!g_tw.world_tick || asked != 3u) {
             mem_write32(cpu, sda - 26240u, 3u);
@@ -10280,8 +11480,19 @@ static void tw_mode_change(CPUState* cpu) {
         hle_guest_call(cpu, 0x801E58C8u, none, 3, 0.0, &ignore);  // its fog, as its start set
         cpu->lr = lr;
         tw_switches(cpu, g_tw.world, g_tw.tome);
-        g_tw.world[TW_SWITCHES] = g_tw.world[TW_SWITCHES + 1u] = 0u;
+        g_tw.world[TW_SWITCHES] = 0u;
+        if (!tw_menu_depth_is_camera())
+            g_tw.world[TW_SWITCHES + 1u] = 0u;
         g_tw.world[TW_OBJECTS_OFF] = 0u;  // the Tome's own (0x8014ED04): kept, nobody moved or was drawn, then or after it
+        tw_window_seen(cpu, 0);
+        tw_elements_show(cpu);
+        if (g_tw_split.on) {
+            tw_words_io(cpu, 0, 1);  // the world's words kept, the Tome's in
+            // Player 2's close-up over, and no words or focus left in the world: one again, from the Tome's.
+            if (!g_coop_p2_behind_tome && g_tw_split.words[0][0] == 0u && g_tw_split.words[0][4] == 0u && g_tw_split.words[0][5] == 0u)
+                tw_split_off(cpu, false);
+        }
+        tw_elements_hide(cpu, 1);
         mem_write32(cpu, sda - 26240u, 3u);
         mem_write32(cpu, sda - 26188u, 3u);
         mem_write32(cpu, sda - 26192u, TW_TOME_FRAME);
@@ -10290,9 +11501,36 @@ static void tw_mode_change(CPUState* cpu) {
     } else {
         if (g_coop_tome_owner == 1)
             coop_tome_player(cpu, false);
+        tw_window_seen(cpu, 1);
         tw_switches(cpu, g_tw.tome, g_tw.world);
+        tw_elements_show(cpu);
+        if (!g_tw_split.on && g_coop_p2_behind_tome) {
+            // Player 2's close-up has begun behind player 1's Tome: from here each mode's words and focus are its own.
+            // Words up now go with the mode whose frame opened them; the other begins with none.
+            tw_words_io(cpu, 1, -1);
+            memcpy(g_tw_split.words[0], g_tw_split.words[1], sizeof g_tw_split.words[0]);
+            const int none = g_tw_split.words[1][0] != 0u && g_tw_split.window_mode == 0 ? 1 : 0;
+            g_tw_split.words[none][0] = g_tw_split.words[none][4] = g_tw_split.words[none][5] = 0u;
+            g_tw_split.on = true;
+            if (tw_split_log())
+                fprintf(stderr, "[coop] player 2's close-up behind player 1's Tome: the world's words and focus are its own (window 0x%08X focus 0x%08X, the %s's)\n",
+                        g_tw_split.words[1 - none][0], g_tw_split.words[1 - none][4], none == 1 ? "world" : "Tome");
+        } else if (g_tw_split.on) {
+            tw_words_io(cpu, 1, -1);
+        }
+        if (g_tw_split.on)
+            tw_words_io(cpu, -1, 0);  // the world's in
+        tw_elements_hide(cpu, 0);
+        // The Tome's start set bit 0x10 of the prompts' word (0x80117260(0x10, 1) at 0x800187A8; the world's own frame
+        // clears it at 0x80008258 as it comes back), and the world behind the Tome went on with it: with any bit there
+        // only slot 0 is shown (0x80117628), so a close-up of player 2's behind it had its DETAIL, RETURN and PICK UP
+        // (slot 2 or 4) asked but never shown, and their B did nothing until the Tome closed. Off in the world's frames
+        // while it's up, as the world has it.
+        if (g_coop_p2_behind_tome)
+            mem_write32(cpu, sda - 24048u, mem_read32(cpu, sda - 24048u) & ~0x10u);
         mem_write32(cpu, sda + (u32)g_menu_flag_offset, 0u);
-        mem_write32(cpu, sda + (u32)g_menu_depth_offset, 0u);
+        if (!tw_menu_depth_is_camera())
+            mem_write32(cpu, sda + (u32)g_menu_depth_offset, 0u);
         mem_write32(cpu, sda - 26240u, 2u);
         mem_write32(cpu, sda - 26188u, 2u);
         mem_write32(cpu, sda - 26192u, TW_WORLD_FRAME);
@@ -10395,6 +11633,8 @@ static void coop_talk_slot_clear(void) {
 // player 2 stood by, and player 2 nothing. It is looked for in their look, with
 // their prompts in, and goes unless asked for again.
 #define COOP_THING_LOOK 0x800C030Cu
+#define COOP_NODE_NOW 20u     // a character's state as its behaviour runs it (+24 the one asked for, 0x801F64A0)
+#define COOP_STATE_LOOKS 1u   // the state whose event 3 looks for things lying about (0x80058BE8)
 #define COOP_THING_PROMPT 19
 #define COOP_THING_SCRIPT 2246
 
@@ -10413,26 +11653,67 @@ static void coop_thing_look(CPUState* cpu) {
 // c the step's (r2 - 23120), made into the step's line (0x801389DC(line,
 // from, to)) below the stack. Their last place kept from their last look.
 static bool g_coop_arrived;
+// Player 2's own steps since their last look, as the game's step (0x80133434) is given them: from (r4) and to (r5),
+// each their place plus their offset (object +612), as 0x801241B4 makes them, before the step's collision. The zones'
+// test is at the line's end (0x80134758 reads line +12, the to, and adds 5 to its z): for player 1 that is where their
+// step was going, not where its collision left them, and the line is from where the step began. Player 2's look made
+// its own from where their last look was to where they stood (after the collision, a frame late): pushing into a
+// zone at a wall or a door, player 1's to is in it and player 2's never was. First step's from, last step's to.
+static struct {
+    u32 object;
+    float from[3], to[3];
+    bool fresh;
+} g_coop_p2_step;
+static void coop_p2_step_seen(CPUState* cpu, u32 object) {
+    const u32 from = cpu->gpr[4], to = cpu->gpr[5];
+    // The step's other callers (0x8004582C mode 1, 0x801FA494 mode 3) give one place as both (mr r5,r4): not a move.
+    if (from == to || !guest_ram_range_valid(cpu, from, 12u) || !guest_ram_range_valid(cpu, to, 12u))
+        return;
+    float a[3], b[3];
+    for (u32 i = 0; i < 3u; i++) {
+        a[i] = guest_read_f32(cpu, from + i * 4u);
+        b[i] = guest_read_f32(cpu, to + i * 4u);
+        if (!isfinite(a[i]) || !isfinite(b[i]) || fabsf(a[i]) > 1e6f || fabsf(b[i]) > 1e6f)
+            return;
+    }
+    if (!g_coop_p2_step.fresh || g_coop_p2_step.object != object)
+        memcpy(g_coop_p2_step.from, a, sizeof a);
+    memcpy(g_coop_p2_step.to, b, sizeof b);
+    g_coop_p2_step.object = object;
+    g_coop_p2_step.fresh = true;
+}
 static u32 coop_look_line(CPUState* cpu, u32 object) {
-    static float was[3];
     static u32 was_for;
-    // Just brought to a new room (coop_follow): where they were is the old room's.
-    if (was_for != object || g_coop_arrived)
-        for (u32 i = 0; i < 3u; i++)
-            was[i] = guest_read_f32(cpu, object + i * 4u);
+    // Just brought to a new room (coop_follow): a step from before it is the old room's.
+    const bool stepped = g_coop_p2_step.fresh && g_coop_p2_step.object == object && was_for == object && !g_coop_arrived;
+    g_coop_p2_step.fresh = false;
     was_for = object;
     const u32 from = (cpu->gpr[1] - 0x600u) & ~15u, to = from + 16u, line = from + 32u;
-    // The step's line runs at their waist, height above them: the zones it
-    // crosses (the cameras' among them, as a wire across the floor) test that.
-    // Below the floor, only what they stand in was found: the Original camera
-    // needs the rest.
+    // The step's line runs where they stand: the step takes its places less (c, c, object +628), and the zones' test
+    // adds 5 to the line's end (0x80134758, r2-23048). Player 1 comes into room 341's CameraRgn01 (z -9 to 134) on the
+    // floor, so the step's places are +628 over where they stand (object +0): inferred from that, not read. From
+    // object +0 less +628 (135.6 for player 2's body, 50 for player 1's) their line ran under the floor and found
+    // nothing; plus +628 (the Original camera's, 7221cd7) at their middle, over every low camera zone: room 341's
+    // CameraRgn01 never gave them its camera, only the tall examine boxes were found. At object +0 they come into
+    // CameraRgn01 at the edge player 1 does, and its camera is theirs (logs/run-20261105-214323-jtg-p2cam-diag4-ch1-zone-t1),
+    // and room 338's planes still turn theirs (logs/run-20261105-214258-jtg-p2cam-diag4-ch4-t1).
+    // The step's places are object +0 plus their offset (object +612, 0x801188D0), as 0x80133584 and 0x801241B4 make
+    // them: read, not assumed (measured (0, 0, +628) for models 9, 70, 74 and 85, with and without forms, so the
+    // line is at their feet for every body and form, player 1's look's place). Any camera mode.
     const float c = guest_read_f32(cpu, cpu->gpr[2] - 23120u), height = guest_read_f32(cpu, object + 628u);
-    const float less[3] = {c, c, g_settings.mod_p2_camera == 2 ? -height : height};
+    float off[3];
     for (u32 i = 0; i < 3u; i++) {
-        const float now = guest_read_f32(cpu, object + i * 4u);
-        guest_write_f32(cpu, from + i * 4u, was[i] - less[i]);
-        guest_write_f32(cpu, to + i * 4u, now - less[i]);
-        was[i] = now;
+        off[i] = guest_read_f32(cpu, object + 612u + i * 4u);
+        if (!isfinite(off[i]) || fabsf(off[i]) > 1e4f)
+            off[i] = i == 2u && isfinite(height) ? height : 0.0f;
+    }
+    // The step's own places when it ran for them (coop_p2_step_seen); standing where they are otherwise (no step since:
+    // a line of no length, at their place plus offset, crossing nothing).
+    const float less[3] = {c, c, isfinite(height) ? height : 0.0f};
+    for (u32 i = 0; i < 3u; i++) {
+        const float here = guest_read_f32(cpu, object + i * 4u) + off[i];
+        guest_write_f32(cpu, from + i * 4u, (stepped ? g_coop_p2_step.from[i] : here) - less[i]);
+        guest_write_f32(cpu, to + i * 4u, (stepped ? g_coop_p2_step.to[i] : here) - less[i]);
     }
     const u32 make_line[3] = {line, from, to};
     u32 ignore = 0u;
@@ -10457,12 +11738,81 @@ static u32 coop_look_line(CPUState* cpu, u32 object) {
 // their zone sees it), player 1's otherwise.
 #define COOP_ZONE_CAMERAS 0x80602B18u
 #define COOP_ZONE_CAMERAS_SIZE 0xDC8u
+// And the camera's stack that goes with the records: its entries (0x801ECD68 pushes the two current records' blend
+// (+48), the entries they're on (+112) and the index, 20 bytes each, at 0x806038E8; 0x801ECCEC pops), five of them up
+// to 0x8060394C (something else's), its depth (r13-21700) and which record is on (r13-26864). One for both players,
+// the close-up, words' hold (0x801EC3A0 clears the stack) or script camera of one pushed, popped or cleared the
+// other's: a RETURN popped what the other player's words or camera left, or nothing, and that camera went to another's
+// record or stayed on its close-up. Each player's are their own, in and out with their records (a set: the records and
+// stack as they are in memory, then the depth and the index).
+#define CAMERA_STACK_END 0x8060394Cu
+#define COOP_CAMERA_BYTES (CAMERA_STACK_END - COOP_ZONE_CAMERAS)
+#define COOP_CAMERA_SET (COOP_CAMERA_BYTES + 8u)
+static void coop_camera_set_io(CPUState* cpu, u8* set, bool read) {
+    coop_bytes(cpu, COOP_ZONE_CAMERAS, set, COOP_CAMERA_BYTES, read);
+    if (!sda_ready(cpu))
+        return;
+    const u32 at[2] = {cpu->gpr[13] - CAMERA_DEPTH, cpu->gpr[13] - CAMERA_INDEX};
+    for (u32 i = 0u; i < 2u; i++) {
+        u32 v = 0u;
+        if (read) {
+            v = mem_read32(cpu, at[i]);
+            memcpy(set + COOP_CAMERA_BYTES + i * 4u, &v, 4u);
+        } else {
+            memcpy(&v, set + COOP_CAMERA_BYTES + i * 4u, 4u);
+            mem_write32(cpu, at[i], v);
+        }
+    }
+}
+// Player 2's set first made from the game's (player 1's) as it is: what player 1 has pushed (their close-up) comes
+// off it by the game's own pop, down to the camera under all of them, so theirs doesn't start on player 1's close-up.
+static void coop_scene_p2_fresh(CPUState* cpu);
+static void coop_camera_set_fresh(CPUState* cpu) {
+    if (!sda_ready(cpu))
+        return;
+    for (u32 i = 0u; i < 5u && (s32)mem_read32(cpu, cpu->gpr[13] - CAMERA_DEPTH) > 0; i++) {
+        const u32 lr = cpu->lr;
+        u32 ignore = 0u;
+        hle_guest_call(cpu, 0x801ECCECu, NULL, 0, 0.0, &ignore);
+        cpu->lr = lr;
+    }
+    coop_scene_p2_fresh(cpu);
+}
+// A room's start gives the player its camera: the arrival's (0x80152614: 0x801EE998(hash, 2, 0), 0x801EE764 on the
+// room record, 0x801EEB58(2)), the room's scripts' (fn8, fn10), and the player's first look at its zones, which has
+// the camera zone they stand in choose (chapter 9's room 27: player 1 starts inside CameraRgn07, its script 1067's
+// fn8). Player 2's set was made from the game's at their first look in the room, a few frames before any of that (the
+// room's records still empty at a chapter's start): theirs looked from 0,0,0 at nothing until they walked into a
+// camera zone of their own (logs/run-20261105-231132-jtg-rb-c9b, 12 s). Until a zone of theirs chooses (p2_bare),
+// each camera the room's start gives (room_choices, counted by coop_camera_chosen) is theirs too, from the game's
+// set as it then is; player 1's zones walked into after their first look (in the room's fade in) stay player 1's.
 static struct {
-    u8 p2[COOP_ZONE_CAMERAS_SIZE], p1[COOP_ZONE_CAMERAS_SIZE];
+    u8 p2[COOP_CAMERA_SET], p1[COOP_CAMERA_SET];
     u8 p1_prompts[PROMPT_SLOTS_SIZE];
     u8 p1_looks[PROMPT_LOOKS_SIZE];
     bool p2_set, lent;
+    bool p2_bare;            // no camera zone of player 2's has chosen in this room
+    unsigned room_choices;   // cameras the room's start chose, in the game's set
+    unsigned p2_seen;        // the count player 2's set was last made from
+    int p1_zones;            // player 1's look at the zones is running: 1 their first in the room, 2 a later one
+    u32 p1_room;             // the zones player 1 last looked at, zones on
 } g_coop_cameras;
+
+// Player 2's set in, into the game's place (the caller keeps the game's): their own, or made from the game's as it
+// is, when they have none yet or the room's start has chosen a camera since theirs was made.
+static void coop_camera_p2_in(CPUState* cpu) {
+    const bool follow = g_coop_cameras.p2_set && g_coop_cameras.p2_bare && g_coop_cameras.p2_seen != g_coop_cameras.room_choices &&
+                        !g_coop_p1_look && !g_coop_screen;
+    if (g_coop_cameras.p2_set && !follow) {
+        coop_camera_set_io(cpu, g_coop_cameras.p2, false);
+        return;
+    }
+    if (follow && (getenv("ED_COOP_LOG") != NULL || coop_trace()))
+        fprintf(stderr, "[coop] player 2's camera: the room's start chose one, theirs too (frame %llu)\n",
+                (unsigned long long)(cpu->timebase / 675000ull));
+    coop_camera_set_fresh(cpu);
+    g_coop_cameras.p2_seen = g_coop_cameras.room_choices;
+}
 
 // Player 2's cameras in for their close-up (on) or player 1's back, and
 // their prompts: what a close-up of theirs asks for is theirs, and took player
@@ -10473,8 +11823,8 @@ static void coop_cameras_lend(CPUState* cpu, bool on) {
     if (on == g_coop_cameras.lent || (on && !g_coop_cameras.p2_set))
         return;
     g_coop_cameras.lent = on;
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, on ? g_coop_cameras.p1 : g_coop_cameras.p2, COOP_ZONE_CAMERAS_SIZE, true);
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, on ? g_coop_cameras.p2 : g_coop_cameras.p1, COOP_ZONE_CAMERAS_SIZE, false);
+    coop_camera_set_io(cpu, on ? g_coop_cameras.p1 : g_coop_cameras.p2, true);
+    coop_camera_set_io(cpu, on ? g_coop_cameras.p2 : g_coop_cameras.p1, false);
     if (on && !g_coop_prompt_slots_set)
         coop_prompt_slots_clear();
     coop_bytes(cpu, PROMPT_SLOTS, on ? g_coop_cameras.p1_prompts : g_coop_prompt_slots, PROMPT_SLOTS_SIZE, true);
@@ -10486,17 +11836,11 @@ static void coop_cameras_lend(CPUState* cpu, bool on) {
         g_coop_p2_looks_set = true;
         coop_bytes(cpu, PROMPT_LOOKS, on ? g_coop_p2_looks : g_coop_cameras.p1_looks, PROMPT_LOOKS_SIZE, false);
     }
-    // The close-up being lent asked for its prompt (script -2) before the lending, so player 1's copy had it too (slot 4,
-    // 6/-2): player 1 walking out of any zone let go of it, and with it player 2's close-up, or the RETURN it asked for
-    // next. It's player 2's: player 1's copy goes without it, emptied as the game empties a slot (0x80116E70).
-    for (u32 i = 0u; on && i < 6u; i++) {
-        u8* slot = g_coop_cameras.p1_prompts + i * 28u;
-        if ((s32)((u32)slot[12] << 24 | (u32)slot[13] << 16 | (u32)slot[14] << 8 | slot[15]) != -2)
-            continue;
-        memset(slot, 0, 28u);
-        for (u32 at = 4u; at <= 20u; at += (at == 8u ? 12u : 4u))
-            memset(slot + at, 0xFF, 4u);
-    }
+    // A script -2 prompt in player 1's copy is their own: a zone's EXAMINE or PICK UP asks with -2 too (0x80117404(2, 6, -2,
+    // zone script, 50, 2, 0)), and player 2's close-up asks only after the lending, in their slots (coop_close_up_start).
+    // Emptied here, player 1 stood at their EXAMINE with no prompt through player 2's close-up and after it. Player 1
+    // walking out of their zone in it lets go of theirs with their slot; the close-up's cancel that goes with it
+    // (0x80024CDC -> 0x80024B24) is kept from player 2's close-up by coop_close_up_kept.
     static u8 said[PROMPT_SLOTS_SIZE];
     if (coop_trace() && memcmp(said, g_coop_cameras.p1_prompts, sizeof said) != 0) {
         memcpy(said, g_coop_cameras.p1_prompts, sizeof said);
@@ -10565,7 +11909,11 @@ static void coop_zones_new(CPUState* cpu, u32 info) {
         g_coop_zones.list = zones;
         memset(g_coop_zones.p2, 0, sizeof g_coop_zones.p2);
         coop_prompt_slots_clear();
+        // And the looks those prompts made ready (PROMPT_LOOKS): the old room's, a press in the new one went on from them.
+        memset(g_coop_p2_looks, 0, sizeof g_coop_p2_looks);
+        g_coop_p2_looks_set = true;
         g_coop_cameras.p2_set = false;
+        g_coop_cameras.p2_bare = true;
         g_coop_own_view_frame = 0ull;
         memset(g_coop_states.p2, 0, sizeof g_coop_states.p2);
     }
@@ -10634,12 +11982,11 @@ static void coop_camera_step(CPUState* cpu) {
     coop_cameras_own(cpu);
     if (g_settings.mod_p2_camera != 2 || coop_left_behind(cpu))
         return;
-    static u8 cameras[COOP_ZONE_CAMERAS_SIZE];
+    static u8 cameras[COOP_CAMERA_SET];
     u8 view[CAMERA_VIEW_SIZE];
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, cameras, sizeof cameras, true);
+    coop_camera_set_io(cpu, cameras, true);
     coop_bytes(cpu, CAMERA_VIEW, view, sizeof view, true);
-    if (g_coop_cameras.p2_set)
-        coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p2, sizeof g_coop_cameras.p2, false);
+    coop_camera_p2_in(cpu);
     // The records name whom they follow, each as it was set for the player:
     // their copies follow them.
     const u32 p1 = g_coop_turn_p1 != 0u ? mem_read32(cpu, g_coop_turn_p1 + 52u) : 0u,
@@ -10672,9 +12019,9 @@ static void coop_camera_step(CPUState* cpu) {
                               ? tanf(game_fov * half) / tanf(own_fov * half)
                               : 1.0f;
     }
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p2, sizeof g_coop_cameras.p2, true);
+    coop_camera_set_io(cpu, g_coop_cameras.p2, true);
     g_coop_cameras.p2_set = true;
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, cameras, sizeof cameras, false);
+    coop_camera_set_io(cpu, cameras, false);
     coop_bytes(cpu, CAMERA_VIEW, view, sizeof view, false);
 }
 
@@ -10689,11 +12036,11 @@ static unsigned long long g_coop_p1_view_frame;
 static void coop_player1_camera(CPUState* cpu) {
     if (!g_coop_cameras.lent)
         return;
-    static u8 theirs[COOP_ZONE_CAMERAS_SIZE];
+    static u8 theirs[COOP_CAMERA_SET];
     u8 view[CAMERA_VIEW_SIZE];
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, theirs, sizeof theirs, true);
+    coop_camera_set_io(cpu, theirs, true);
     coop_bytes(cpu, CAMERA_VIEW, view, sizeof view, true);
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p1, sizeof g_coop_cameras.p1, false);
+    coop_camera_set_io(cpu, g_coop_cameras.p1, false);
     // Their records follow them: set with player 2 the player, one named player 2 (coop_cameras_own),
     // and their half looked at player 2 from wherever they were.
     const u32 p1_object = mem_read32(cpu, cpu->gpr[13] - 26524u), them = mem_read32(cpu, g_coop_p2 + 52u);
@@ -10716,8 +12063,8 @@ static void coop_player1_camera(CPUState* cpu) {
                              ? tanf(game_fov * half) / tanf(own_fov * half)
                              : 1.0f;
     }
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p1, sizeof g_coop_cameras.p1, true);
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, theirs, sizeof theirs, false);
+    coop_camera_set_io(cpu, g_coop_cameras.p1, true);
+    coop_camera_set_io(cpu, theirs, false);
     coop_bytes(cpu, CAMERA_VIEW, view, sizeof view, false);
 }
 
@@ -10762,7 +12109,154 @@ static bool coop_door_turns(const CPUState* cpu) {
     return g_coop_door_turns_until != 0ull && cpu->timebase / 675000ull <= g_coop_door_turns_until;
 }
 
+// A scene of player 1's is on (coop_scene_set, their fn22 / fn139 on, until its off or a room asked for).
+static bool coop_p1_scene_on(void);
+static bool coop_scene_log(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_COOP_LOG") != NULL || getenv("ED_COOP_TRACE") != NULL;
+    return on != 0;
+}
+// Player 2 walks in player 1's scene, their zones their own. A zone of theirs that asks for a room there (a way out
+// walked into: L02/81's fn71, fn66) took both players out mid-scene: its fn22(0) never ran, the play hold (r13 - 25696)
+// stayed on and both stood for good (logs/run-20261106-031806-jtg-vfyp1s-exit3). The game has the player's zones off
+// in a scene (fn22 -> 0x8019C088(0)): their zones wait for its end.
+// And in the other's words, find or close-up, as in the scene: a way out taken just after the scene's fn22(0), its words
+// still up, took the room from under them, and the words went on in the new room in the taker's half, the reader left in
+// "close-up" for good (logs/run-20261106-073524-jtg-vp1s2-st2x, player 1's exit at 5055 in player 2's words). So a way
+// out of one player's waits (g_coop_way_out) while the other's scene, words, find, close-up or script hold is up: the
+// zone's asking for a room goes unheard (coop_script_go_to_room), the zone stays come into as the game marked it (its
+// script doesn't run again each look), and their looks go on, camera zones and prompts with them: only the room waits.
+// As the other's is over, that zone is marked not come into again, and their next look comes into it by the game's own
+// path: its script runs, the room is theirs and the other follows (coop_follow). Left as it was, the game's own marking
+// of what the player stands in as a scene ends or words open (0x80134D48, no script) kept it come into with nothing run:
+// it fired only after they stepped out and back in (logs/run-20261106-074111-jtg-vp1s2-st2e, frame 5021).
+typedef struct {
+    bool on;
+    unsigned tickets;  // g_coop_tickets as it was asked: a room asked for since takes it away
+    u32 list;          // the room's zones it's in (a character's info +180)
+    u32 zones[COOP_ZONES_MAX / 32u];
+} CoopWayOut;
+static CoopWayOut g_coop_way_out[2];  // 0 player 1's, 1 player 2's
+// The look a way out may wait in: whose (-1 none), whether the other's is up as it began, and the zones' inside words
+// before it (the words in: player 2's, in their look).
+static struct {
+    int who;
+    bool waits, refused;
+    u32 list, count;
+    u32 was[COOP_ZONES_MAX];
+} g_coop_way_look = {-1, false, false, 0u, 0u, {0u}};
+static bool g_coop_p1_own_look;  // the game's own look of player 1's, run from coop_scan_player1 as a way out may wait
+static bool coop_player1_mid_use(CPUState* cpu);
+static bool coop_scene_p2s_on(void);
+static bool coop_p2_scene_on(void);
+static bool coop_p2_holds(CPUState* cpu);
+static bool g_coop_find_free, g_coop_words_free, g_coop_words_theirs;
+static bool g_coop_p1_scan;  // player 1's look at the zones in player 2's close-up (coop_scan_player1)
+// The scene's owner is done with all it led to: nobody busy, no words up (r13 - 25960), and for player 1 no look,
+// find or script of theirs going on (coop_player1_mid_use, what holds player 2's presses). Let go at fn22(0) itself,
+// player 2's way out took both players on as the statue's find went on to its words (2242 -> 2240): player 1's look
+// was cut mid-way, and their B in the next room ran the statue's script there (look stage 2, script 2240).
+static bool coop_scene_use_over(CPUState* cpu) {
+    return sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 23344u) == 0u && mem_read32(cpu, cpu->gpr[13] - 25960u) == 0u &&
+           !coop_player1_mid_use(cpu);
+}
+
+// Player 1's scene, look, find or words are up (theirs: not player 2's words): what player 2's way out waits for.
+static bool coop_way_out_p1_up(CPUState* cpu) {
+    return coop_p1_scene_on() || coop_player1_mid_use(cpu) || g_coop_words_free || g_coop_find_free ||
+           (sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u && !g_coop_words_theirs);
+}
+// Player 2's scene, close-up, words or script hold are up (not player 1's own words): what player 1's way out waits for.
+static bool coop_way_out_p2_up(CPUState* cpu) {
+    return coop_scene_p2s_on() || coop_p2_scene_on() || g_coop_screen || g_coop_words_theirs || coop_p2_holds(cpu) ||
+           (sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u && !g_coop_words_free);
+}
+
+static void coop_way_look_begin(CPUState* cpu, int who, u32 list, u32 count, bool waits) {
+    g_coop_way_look.who = who;
+    g_coop_way_look.waits = waits;
+    g_coop_way_look.refused = false;
+    g_coop_way_look.list = list;
+    g_coop_way_look.count = 0u;
+    const u32 n = count < COOP_ZONES_MAX ? count : COOP_ZONES_MAX;
+    if (!waits || !guest_ram_range_valid(cpu, list, n * COOP_ZONE_SIZE))
+        return;
+    g_coop_way_look.count = n;
+    for (u32 i = 0u; i < n; i++)
+        g_coop_way_look.was[i] = mem_read32(cpu, list + i * COOP_ZONE_SIZE + COOP_ZONE_INSIDE);
+}
+static void coop_way_look_end(void) {
+    g_coop_way_look.who = -1;
+    g_coop_way_look.waits = false;
+}
+
+// The zone that asks, in a look that waits: the last come into so far. The scan goes through the zones in order and marks
+// each come into (0x80134684, bit 1 of +104) before its script runs (0x801642D4).
+static void coop_way_out_wait(CPUState* cpu) {
+    const int who = g_coop_way_look.who;
+    int asked = -1;
+    for (u32 i = 0u; i < g_coop_way_look.count; i++)
+        if ((mem_read32(cpu, g_coop_way_look.list + i * COOP_ZONE_SIZE + COOP_ZONE_INSIDE) & 1u) != 0u && (g_coop_way_look.was[i] & 1u) == 0u)
+            asked = (int)i;
+    CoopWayOut* way = &g_coop_way_out[who];
+    if (asked >= 0) {
+        if (!way->on || way->tickets != g_coop_tickets || way->list != g_coop_way_look.list)
+            memset(way->zones, 0, sizeof way->zones);
+        way->on = true;
+        way->tickets = g_coop_tickets;
+        way->list = g_coop_way_look.list;
+        way->zones[(u32)asked / 32u] |= 1u << ((u32)asked % 32u);
+    }
+    if (!g_coop_way_look.refused && coop_scene_log())
+        fprintf(stderr, "[coop] player %d's zone %d asked for a room while player %d's scene, words or close-up is up: it waits for its end (frame %llu)\n",
+                who + 1, asked, 2 - who, (unsigned long long)(cpu->timebase / 675000ull));
+    g_coop_way_look.refused = true;
+}
+
+// A way out that waited, let go as the other's is over: its zone marked not come into in that player's own words (player
+// 2's copy, words; player 1's in the room's list), so their next look comes into it. Gone with a room asked for since.
+static void coop_way_out_go(CPUState* cpu, int who, u32 list, u32* words) {
+    CoopWayOut* way = &g_coop_way_out[who];
+    if (!way->on)
+        return;
+    way->on = false;
+    const bool here = way->tickets == g_coop_tickets && way->list == list;
+    for (u32 i = 0u; here && i < COOP_ZONES_MAX; i++) {
+        if ((way->zones[i / 32u] & (1u << (i % 32u))) == 0u)
+            continue;
+        const u32 at = list + i * COOP_ZONE_SIZE + COOP_ZONE_INSIDE;
+        if (words != NULL)
+            words[i] &= ~1u;
+        else if (guest_ram_range_valid(cpu, at, 4u))
+            mem_write32(cpu, at, mem_read32(cpu, at) & ~1u);
+    }
+    if (coop_scene_log())
+        fprintf(stderr, here ? "[coop] player %d's way out goes: player %d's is over, their next look comes into it (frame %llu)\n"
+                             : "[coop] player %d's way out let go: a room was asked for since (player %d's, frame %llu)\n",
+                who + 1, 2 - who, (unsigned long long)(cpu->timebase / 675000ull));
+}
+
 static void coop_script_go_to_room(CPUState* cpu) {
+    if (g_follow_refusing) {
+        if (coop_room_change_log())
+            fprintf(stderr, "[coop] player %d, brought along, stands inside a way back: its room change passed over\n", g_follow_fresh);
+        cpu->gpr[3] = 0u;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
+    // Not a way back they were brought into (g_coop_arrived, a door's turns): that one counts as come into, below.
+    const int who = g_coop_way_look.who;
+    const bool waits = who >= 0 && g_coop_way_look.waits &&
+                       (who == 1 ? g_coop_prompt_look && !g_coop_arrived && !coop_door_turns(cpu) : g_coop_p1_scan || g_coop_p1_own_look);
+    if (waits) {
+        coop_way_out_wait(cpu);
+        cpu->gpr[3] = 0u;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
     g_hle_passthrough = !g_coop_prompt_look || (!g_coop_arrived && !coop_door_turns(cpu));
     if (g_hle_passthrough)
         return;
@@ -10778,19 +12272,23 @@ static void coop_prompt_look(CPUState* cpu, u32 object) {
     u32 info = 0u, ignore = 0u;
     if (!hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) || !guest_ram_range_valid(cpu, info, 184u))
         return;
-    static u8 words[2060], slots[PROMPT_SLOTS_SIZE], cameras[COOP_ZONE_CAMERAS_SIZE];
+    static u8 words[2060], slots[PROMPT_SLOTS_SIZE], cameras[COOP_CAMERA_SET];
     coop_zones_new(cpu, info);
     if (coop_left_behind(cpu)) {
         g_coop_prompt = -1;
         g_coop_prompt_script = 0;
         return;
     }
+    // A way out of theirs waits for player 1's scene, words, look or find, and what they led to: let go as all that's
+    // over (coop_scene_use_over: nobody busy, no words, no look, find or script of player 1's).
+    const bool p1_up = coop_way_out_p1_up(cpu);
+    if (g_coop_way_out[1].on && (g_coop_way_out[1].tickets != g_coop_tickets || (!p1_up && coop_scene_use_over(cpu))))
+        coop_way_out_go(cpu, 1, mem_read32(cpu, info + 180u), g_coop_zones.p2);
     const u32 at = cpu->gpr[13] - 24040u;
     coop_bytes(cpu, at, words, sizeof words, true);
     coop_bytes(cpu, PROMPT_SLOTS, slots, sizeof slots, true);
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, cameras, sizeof cameras, true);
-    if (g_coop_cameras.p2_set)
-        coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p2, sizeof g_coop_cameras.p2, false);
+    coop_camera_set_io(cpu, cameras, true);
+    coop_camera_p2_in(cpu);
     const u32 line = coop_look_line(cpu, object);
     const u32 args[4] = {object, mem_read32(cpu, info + 180u), mem_read16(cpu, info + 176u), line};
     coop_zones_swap(cpu, info, true);
@@ -10808,12 +12306,20 @@ static void coop_prompt_look(CPUState* cpu, u32 object) {
             coop_bytes(cpu, PROMPT_LOOKS, g_coop_p2_looks, sizeof g_coop_p2_looks, false);
     }
     g_coop_prompt_look = true;
+    const unsigned tickets = g_coop_tickets;
+    coop_way_look_begin(cpu, 1, args[1], args[2], p1_up);
+    const bool scene_was = coop_p2_scene_on();
     hle_guest_call(cpu, COOP_SCAN, args, 4, 0.0, &ignore);
+    coop_way_look_end();
     if (mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2) {
         coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, sizeof g_coop_prompt_slots, true);
         coop_prompt_slot_clear(COOP_THING_PROMPT, COOP_THING_SCRIPT);
         coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, sizeof g_coop_prompt_slots, false);
-        hle_guest_call(cpu, COOP_THING_LOOK, &g_coop_p2, 1, 0.0, &ignore);
+        // Only in the state the game's own look runs from: the player's answer to event 3 in state 1 (0x80058BE8, from
+        // their behaviour's 0x8005AA44; the state is the node's +20). Asked in any state, FINISH HIM stayed up through their
+        // finisher and each B ran its script (2244) again over the move.
+        if (mem_read32(cpu, g_coop_p2 + COOP_NODE_NOW) == COOP_STATE_LOOKS)
+            hle_guest_call(cpu, COOP_THING_LOOK, &g_coop_p2, 1, 0.0, &ignore);
     }
     g_coop_prompt_look = false;
     g_coop_arrived = false;
@@ -10825,11 +12331,41 @@ static void coop_prompt_look(CPUState* cpu, u32 object) {
     coop_zones_swap(cpu, info, false);
     coop_states_swap(cpu, false);
     coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, sizeof g_coop_prompt_slots, true);
+    // A zone of theirs asked for a room (0x80155770): the game is busy with it (0x801556CC(4, 1): r13-23344)
+    // and its ticket marked (r13-23392), as it is when player 1 walks into one. Both are among the words put
+    // back: neither was, and both players went on through the fade, either free to ask for another room.
+    const bool asked = g_coop_tickets != tickets;
+    const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u);
+    const u8 mark = mem_read8(cpu, cpu->gpr[13] - 23392u);
+    // A scene of their own begun in this look (a zone's fn22(1): ch2 room 138's CameraRgn01, script 1538) holds them as
+    // the game holds the player: its busy word (0x801556CC: play's 2, the scene's 32), the zones off (0x8019C088(0),
+    // r13-23040) and r13-23280 (0x80152204) are among the words put back, so the hold was gone as the look ended. Player
+    // 2 walked on through their own scene, out of its zone with the stick held, and cut it before its state 3 set flag
+    // 986, so it began again at each entry (logs/run-20261106-112423-jtg-regm4-c2q-m4, 4129-4650). Kept as the scene
+    // left them: their turn waits on the busy word, and player 1 plays on with the hold let go (coop_p2_holds).
+    const bool scene_began = !scene_was && coop_p2_scene_on() && !asked;
+    const u32 zones_on = mem_read32(cpu, cpu->gpr[13] - 23040u), scene_word = mem_read32(cpu, cpu->gpr[13] - 23280u);
     coop_words_back(cpu, words);
+    if (scene_began) {
+        mem_write32(cpu, cpu->gpr[13] - 23344u, busy);
+        mem_write32(cpu, cpu->gpr[13] - 23040u, zones_on);
+        mem_write32(cpu, cpu->gpr[13] - 23280u, scene_word);
+        if (coop_scene_log())
+            fprintf(stderr, "[coop] player 2's own scene holds them: busy %u, zones %u kept from their look (frame %llu)\n", busy, zones_on,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    if (asked) {
+        mem_write32(cpu, cpu->gpr[13] - 23344u, busy);
+        mem_write8(cpu, cpu->gpr[13] - 23392u, mark);
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] player 2's zone asked for a room: busy %u kept (frame %llu)\n", busy, (unsigned long long)(cpu->timebase / 675000ull));
+        if (p1_up && coop_scene_log())
+            fprintf(stderr, "[coop] (that room was asked in player 1's scene or words by no script's fn66: not held)\n");
+    }
     coop_bytes(cpu, PROMPT_SLOTS, slots, sizeof slots, false);
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p2, sizeof g_coop_cameras.p2, true);
+    coop_camera_set_io(cpu, g_coop_cameras.p2, true);
     g_coop_cameras.p2_set = true;
-    coop_bytes(cpu, COOP_ZONE_CAMERAS, cameras, sizeof cameras, false);
+    coop_camera_set_io(cpu, cameras, false);
     g_coop_prompt = -1;
     g_coop_prompt_script = 0;
     for (u32 i = 0; i < 6u && g_coop_prompt < 0; i++) {
@@ -10840,6 +12376,35 @@ static void coop_prompt_look(CPUState* cpu, u32 object) {
             g_coop_prompt = id;
             g_coop_prompt_script = (s32)((u32)slot[12] << 24 | (u32)slot[13] << 16 | (u32)slot[14] << 8 | slot[15]);
         }
+    }
+    // ED_FIN_LOG (testing, reads only): their six as chosen from, when they change.
+    if (fin_log()) {
+        static u8 seen[6u * 28u];
+        if (memcmp(seen, g_coop_prompt_slots, sizeof seen) != 0) {
+            memcpy(seen, g_coop_prompt_slots, sizeof seen);
+            fprintf(stderr, "[fin] player 2's prompts (priority/id/script):");
+            for (u32 i = 0; i < 6u; i++) {
+                const u8* slot = g_coop_prompt_slots + i * 28u;
+                fprintf(stderr, " %u:%d/%d/%d", i, (s32)((u32)slot[0] << 24 | (u32)slot[1] << 16 | (u32)slot[2] << 8 | slot[3]),
+                        (s32)((u32)slot[8] << 24 | (u32)slot[9] << 16 | (u32)slot[10] << 8 | slot[11]),
+                        (s32)((u32)slot[12] << 24 | (u32)slot[13] << 16 | (u32)slot[14] << 8 | slot[15]));
+            }
+            fprintf(stderr, " -> %d (frame %llu)\n", g_coop_prompt, (unsigned long long)(cpu->timebase / 675000ull));
+        }
+    }
+    // The game's choosing (0x80117628), once it has chosen, empties slots 0, 1, 3 and 5 (0x80116E70 each): what is asked
+    // there is asked again each tick while it holds (the look for things lying about: PICK UP, RELOAD, AUTOPSY, FINISH HIM,
+    // 0x800C030C; TALK). Only 2 and 4, a zone's (ed301), stay until the zone is left or the prompt used. Player 2's are
+    // chosen here, and were never emptied: an ask stayed for good, and a slot's ask goes in only at its priority or above
+    // (0x801175E4), so a RELOAD (50) once asked would keep FINISH HIM (49) out of slot 3 for good, and a FINISH HIM left
+    // from a fight would show with no one there. (Read from the code; a downed enemy was not reached in a run to see it.)
+    for (u32 i = 0; i < 6u; i++) {
+        if (i == 2u || i == 4u)
+            continue;
+        u8* slot = g_coop_prompt_slots + i * 28u;
+        memset(slot, 0, 28u);
+        for (u32 at = 4u; at <= 20u; at += (at == 8u ? 12u : 4u))
+            memset(slot + at, 0xFF, 4u);
     }
 }
 
@@ -10867,8 +12432,238 @@ static struct {
     bool active, resumed, p2, found, at_press, lent_before;
     u32 resume, was[5], info;
     s32 script;  // what it last ran
+    unsigned tickets;  // g_coop_tickets as it began: a room asked for in it (a way out of theirs)
     HleSavedContext saved;
 } g_coop_use;
+static bool coop_use_theirs(void) { return g_coop_use.active && g_coop_use.p2; }
+
+// A scene's camera is the player's: its script chooses the camera the scene ends on (chapter 1's intro: fn8 Camera01
+// just before fn22(0, 1)) in the game's records, which outside player 2's look and close-ups are player 1's. Player 2's
+// turn doesn't run in a scene of player 1's (coop_busy), and their records stayed on what they last had: chapter 1's
+// IntroCam01, taken at their first turn a few frames into the intro, for the whole chapter, the stick's directions with
+// it. As a scene of player 1's ends (fn22's 0x80042974(0), fn139's 0x80042B30(0)) on another room camera than it began
+// on (the room record's eye and target entries), that camera is player 2's too, following them (coop_camera_step);
+// a scene that puts back the camera it began on (fn134's save and restore) leaves theirs. Their zones go on from what
+// they're inside, as player 1's do: the game's look doesn't run in a scene, so nobody's inside words change in one
+// (player 1 still inside the dais's zone at the intro's end, logs/run-20261105-205039-jtg-p2cam-v1-ch1-p1ex-t1).
+#define SCENE_CAMERA_SET 0x80042974u  // fn22's: the scene on (1) or off (0)
+#define SCENE_HOLD_SET 0x80042B30u    // fn139's
+#define CAMERA_EYES 0x80603178u
+#define CAMERA_RECORD 136u
+#define CAMERA_ENTRY 124u
+#define CAMERA_ROOM_RECORD 2u
+static struct {
+    bool on, in_call;
+    u32 target, eye;
+    // Player 2's set first made in this scene (coop_camera_set_fresh: a new room's, with no camera of theirs yet), and
+    // the camera it was then: the scene's, not one of theirs. Player 2 walks in player 1's scene, so their first turn
+    // can come in it (Ellia's chapter's start, script 1603: Camera14, the scene, then Camera05).
+    bool p2_fresh;
+    u32 fresh_target, fresh_eye;
+    unsigned tickets;  // g_coop_tickets as it began: a room asked for since cut it (no fn22(0) comes)
+} g_coop_scene_camera;
+
+static bool coop_p1_scene_on(void) {
+    if (g_coop_scene_camera.on && g_coop_scene_camera.tickets != g_coop_tickets) {
+        // Cut by a room change (its own script's fn66): no fn22(0) comes, and the next scene's on would have kept
+        // this one's start camera.
+        g_coop_scene_camera.on = false;
+        g_coop_scene_camera.p2_fresh = false;
+        if (coop_scene_log())
+            fprintf(stderr, "[coop] player 1's scene cut by a room asked for\n");
+    }
+    return g_coop_scene_camera.on;
+}
+
+static void coop_scene_choice(CPUState* cpu, u32* target, u32* eye) {
+    *target = mem_read32(cpu, COOP_ZONE_CAMERAS + CAMERA_ROOM_RECORD * CAMERA_RECORD + CAMERA_ENTRY);
+    *eye = mem_read32(cpu, CAMERA_EYES + CAMERA_ROOM_RECORD * CAMERA_RECORD + CAMERA_ENTRY);
+}
+
+static void coop_scene_p2_fresh(CPUState* cpu) {
+    if (!coop_p1_scene_on() || g_coop_scene_camera.in_call)
+        return;
+    g_coop_scene_camera.p2_fresh = true;
+    coop_scene_choice(cpu, &g_coop_scene_camera.fresh_target, &g_coop_scene_camera.fresh_eye);
+}
+
+// The scene is player 1's: not one of player 2's (their close-up or use, their cameras in), not in their turn.
+static bool coop_scene_player1s(CPUState* cpu) {
+    return g_settings.mod_coop && g_coop_p2 != 0u && sda_ready(cpu) && !g_coop_turn && !g_coop_cameras.lent && !g_coop_screen &&
+           !(g_coop_use.active && g_coop_use.p2) && mem_read32(cpu, cpu->gpr[13] - 21492u) != g_coop_p2;
+}
+
+// A scene of player 2's own is on: begun (fn22 / fn139 on) with them the player, in their look or a use of theirs (ch2
+// room 138's zombie, script 1538, from its zone). The game doesn't run the player's controller in a scene of theirs, so
+// nothing they press there starts anything; co-op lets the scene's hold go for player 1, and player 2's turn ran on and
+// took their B at a prompt as a use: a close-up begun in their own scene waited for it, the scene's end (fn22(0)) cleared
+// the close-up's hold with its own, the close-up was taken for over, and player 2's camera stayed on its close-up camera
+// for good (logs/run-20261106-004651-jtg-ov-c2-r2). Off as any scene ends, or with a room asked for.
+static bool g_coop_p2_scene;
+static unsigned g_coop_p2_scene_tickets;
+static bool coop_p2_scene_on(void) {
+    if (g_coop_p2_scene && g_coop_p2_scene_tickets != g_coop_tickets)
+        g_coop_p2_scene = false;
+    return g_coop_p2_scene;
+}
+
+// A scene that is not player 1's is on: begun (fn22 / fn139 on) where coop_scene_set doesn't count it as theirs (player
+// 2's close-up or use, their cameras in, their turn): the statue's find 2242 by player 2 runs as player 1 (who 1) from
+// the words' Yes, with player 2's close-up on the screen, so g_coop_p2_scene (the player 2's when it began) wasn't set.
+// Off as any scene ends, or with a room asked for.
+static bool g_coop_scene_p2s;
+static unsigned g_coop_scene_p2s_tickets;
+static bool coop_scene_p2s_on(void) {
+    if (g_coop_scene_p2s && g_coop_scene_p2s_tickets != g_coop_tickets)
+        g_coop_scene_p2s = false;
+    return g_coop_scene_p2s;
+}
+
+static void coop_scene_set(CPUState* cpu, u32 function) {
+    g_hle_passthrough = true;
+    if (g_coop_scene_camera.in_call)
+        return;
+    (void)coop_p1_scene_on();  // one cut by a room change is over
+    if (g_settings.mod_coop && g_coop_p2 != 0u && sda_ready(cpu)) {
+        const bool p2_acts = coop_use_theirs() || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 ||
+                             mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u);
+        if (cpu->gpr[3] == 0u) {
+            if (g_coop_p2_scene && getenv("ED_COOP_LOG") != NULL)
+                fprintf(stderr, "[coop] player 2's own scene is over (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+            g_coop_p2_scene = false;
+            g_coop_scene_p2s = false;  // player 1's way out, if held, waits on for its words (coop_scan_player1)
+        } else if (p2_acts && !g_coop_p2_scene && function == 0x80042974u) {  // fn22's hold; fn139's isn't the player's
+            g_coop_p2_scene = true;
+            g_coop_p2_scene_tickets = g_coop_tickets;
+            if (getenv("ED_COOP_LOG") != NULL)
+                fprintf(stderr, "[coop] player 2's own scene begins (0x%08X, frame %llu): their presses start nothing in it\n", function,
+                        (unsigned long long)(cpu->timebase / 675000ull));
+        }
+    }
+    if (!coop_scene_player1s(cpu)) {
+        if (cpu->gpr[3] == 0u) {
+            g_coop_scene_camera.on = false;  // ended as someone else's: the next begins afresh
+        } else if (!coop_scene_p2s_on() && g_settings.mod_coop && g_coop_p2 != 0u) {
+            g_coop_scene_p2s = true;
+            g_coop_scene_p2s_tickets = g_coop_tickets;
+        }
+        return;
+    }
+    const u32 on = cpu->gpr[3], lr = cpu->lr;
+    const u32 args[2] = {cpu->gpr[3], cpu->gpr[4]};
+    u32 ignore = 0u;
+    g_coop_scene_camera.in_call = true;
+    hle_guest_call(cpu, function, args, 2, 0.0, &ignore);
+    g_coop_scene_camera.in_call = false;
+    cpu->lr = lr;
+    u32 target = 0u, eye = 0u;
+    coop_scene_choice(cpu, &target, &eye);
+    // Player 1's scene holds them alone, as their look does (coop_p1_close_up: busy 34, the hold and bit 32): player 2's
+    // turn runs with the hold let go, and their stick, camera and zones are their own. Begun from no press of theirs
+    // (words' Yes: the statue's find, L02/2240 -> 2242) nothing had set the look, coop_busy passed over player 2's turn,
+    // and they stood the whole scene; player 2's scene already let player 1 go (coop_player1_turn). Not a movie or a
+    // letterboxed cutscene (cutscene_playing): those stay the game's. Only a hold the look keeps (fn139's adds busy 4, a
+    // room's: not a look, and the flag would wait for the next hold of anyone's).
+    if (on != 0u && !g_coop_p1_look && !cutscene_playing(cpu) && (mem_read32(cpu, cpu->gpr[13] - 23344u) & ~(32u | COOP_BUSY_SCRIPT)) == 2u) {
+        g_coop_p1_look = true;
+        if (coop_scene_log())
+            fprintf(stderr, "[coop] player 1's scene holds them alone (0x%08X busy %u frame %llu)\n", function, mem_read32(cpu, cpu->gpr[13] - 23344u),
+                    (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    if (on != 0u && !g_coop_scene_camera.on) {
+        g_coop_scene_camera.on = true;
+        g_coop_scene_camera.target = target;
+        g_coop_scene_camera.eye = eye;
+        g_coop_scene_camera.p2_fresh = false;
+        g_coop_scene_camera.tickets = g_coop_tickets;
+    } else if (on == 0u && g_coop_scene_camera.on) {
+        g_coop_scene_camera.on = false;
+        const bool chose = target != g_coop_scene_camera.target || eye != g_coop_scene_camera.eye;
+        // Only if player 2 was on the camera the scene began on (the scene's, or their first turn's copy taken in it):
+        // one in another camera zone of their own keeps theirs.
+        u32 p2_target = 0u, p2_eye = 0u;
+        memcpy(&p2_target, g_coop_cameras.p2 + CAMERA_ROOM_RECORD * CAMERA_RECORD + CAMERA_ENTRY, 4u);
+        memcpy(&p2_eye, g_coop_cameras.p2 + (CAMERA_EYES - COOP_ZONE_CAMERAS) + CAMERA_ROOM_RECORD * CAMERA_RECORD + CAMERA_ENTRY, 4u);
+        p2_target = __builtin_bswap32(p2_target);
+        p2_eye = __builtin_bswap32(p2_eye);
+        // Or on the copy their set began with in the scene, no zone of theirs since: the scene's camera, as the game's
+        // was then. Kept, player 2 stayed on Camera05 after Ellia's chapter's start, where player 1 went on to Camera07.
+        const bool fresh = g_coop_scene_camera.p2_fresh && p2_target == g_coop_scene_camera.fresh_target && p2_eye == g_coop_scene_camera.fresh_eye;
+        const bool shared = !g_coop_cameras.p2_set || fresh || (p2_target == g_coop_scene_camera.target && p2_eye == g_coop_scene_camera.eye);
+        g_coop_scene_camera.p2_fresh = false;
+        // A camera a zone of player 2's chose in this room (not bare, not made in the scene) is theirs: they walk in player
+        // 1's scene with their own zones and camera (coop_p1_close_up), and its eyes are player 1's alone. Handed the
+        // game's set at fn22(0), player 2 took the scene's last eye: script 1538 (ch2 room 138) sets its Camera04 after
+        // its fn22(0), and player 2's half stayed on ZombieCam02's end (-480,-660,129) until they walked into a camera
+        // zone of their own (logs/run-20261106-120343-jtg-regm4-c2r1-m4, 4510 on). Kept, they're on what their zones
+        // chose, as a player standing there with no scene would be.
+        const bool own = g_coop_cameras.p2_set && !g_coop_cameras.p2_bare && !fresh;
+        const bool afresh = !own && (fresh || (chose && shared)) && !coop_left_behind(cpu);
+        if (afresh) {
+            // Theirs began in the scene, or follows the room's start (no zone of theirs has chosen): taken afresh at their
+            // next turn (coop_camera_step), from where the scene leaves the game's, as before they walked in it. Its own end
+            // chooses after fn22(0) (script 1603: Camera07 set just after; 1538: Camera04), and given the set as it stood
+            // they stayed on the scene's camera (Camera05, ZombieCam02).
+            g_coop_cameras.p2_set = false;
+        }
+        if (getenv("ED_COOP_LOG") != NULL || coop_trace())
+            fprintf(stderr, "[coop] player 1's scene over (0x%08X): %s (frame %llu)\n", function,
+                    fresh ? "player 2's began in the scene: theirs taken afresh" : !chose ? "the camera it began on, player 2's kept" : own ? "it chose another camera; player 2's is their own zones', kept" : afresh ? "it chose another camera; player 2's follows the room's: taken afresh" : "it chose another camera; player 2's kept",
+                    (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+static void coop_scene_camera_set(CPUState* cpu) { coop_scene_set(cpu, SCENE_CAMERA_SET); }
+
+// A camera chosen for the room's record (0x801EE764 on the eye record 2: the arrival's two, fn8's; fn10's path by hash,
+// 0x801EE998 from 0x801F066C / 0x801F07BC), only noted. The room's start is the room change's own (0x80152298 and
+// 0x80152614: the arrival's camera, the script after arrival, 0x801642D4 at 0x801527F4) and player 1's first look
+// at the zones in the room, in its fade in (the camera zone they arrive in). Those are player 2's too (coop_camera_p2_in). Player 2's
+// own (their look, close-up, use, turn): a zone of theirs chose, and their camera is theirs from now on. Anything else
+// (player 1 walking into a zone after, a script a zone of theirs started running on, a look, a scene, which
+// coop_scene_set decides for player 2 at its end) is player 1's alone: counted as the room's, player 2's view went to
+// the ladder's camera when player 1 was put by it (logs/run-20261106-013815-jtg-p2cs-v-c1-p1ladder, frames 4044, 4201).
+#define CAMERA_CHOOSE 0x801EE764u
+#define CAMERA_BY_HASH 0x801EE998u
+#define ROOM_CHANGE_FROM 0x80152298u  // 0x80152298 and 0x80152614, to the end of the latter
+#define ROOM_CHANGE_TO 0x80152814u
+static bool g_coop_p1_scan;  // player 1's look at the zones in player 2's close-up (coop_scan_player1)
+static bool coop_camera_at_room_change(CPUState* cpu) {
+    if (cpu->lr >= ROOM_CHANGE_FROM && cpu->lr < ROOM_CHANGE_TO)
+        return true;
+    u32 at = guest_ram_range_valid(cpu, cpu->gpr[1], 4u) ? mem_read32(cpu, cpu->gpr[1]) : 0u;
+    for (int i = 0; i < 24 && guest_ram_range_valid(cpu, at, 8u); i++) {
+        const u32 back = mem_read32(cpu, at + 4u);
+        if (back >= ROOM_CHANGE_FROM && back < ROOM_CHANGE_TO)
+            return true;
+        at = mem_read32(cpu, at);
+    }
+    return false;
+}
+static void coop_camera_chosen(CPUState* cpu) {
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu))
+        return;
+    if (cpu->pc == CAMERA_CHOOSE ? cpu->gpr[3] != CAMERA_EYES + CAMERA_ROOM_RECORD * CAMERA_RECORD
+                                 : cpu->lr != 0x801F0670u && cpu->lr != 0x801F07C0u)
+        return;
+    if (g_coop_cameras.lent)
+        return;  // in player 2's own set
+    const bool room_change = coop_camera_at_room_change(cpu);
+    if (!room_change && (g_coop_turn || g_coop_prompt_look || coop_use_theirs() || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2)) {
+        if (g_coop_cameras.p2_bare && (getenv("ED_COOP_LOG") != NULL || coop_trace()))
+            fprintf(stderr, "[coop] player 2's zone chose their camera (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+        g_coop_cameras.p2_bare = false;
+        return;
+    }
+    if (!room_change && g_coop_cameras.p1_zones != 1)
+        return;
+    g_coop_cameras.room_choices++;
+    if (g_coop_cameras.p2_bare && (getenv("ED_COOP_LOG") != NULL || coop_trace()))
+        fprintf(stderr, "[coop] the room's start chose a camera (%s, frame %llu)\n", room_change ? "the room change" : "player 1's first look",
+                (unsigned long long)(cpu->timebase / 675000ull));
+}
+static void coop_scene_hold_set(CPUState* cpu) { coop_scene_set(cpu, SCENE_HOLD_SET); }
 
 // What is found is gone for both: the script that gives it (0x80024528, the
 // script running at r13 - 23228) left its word in the table of whoever took
@@ -11173,12 +12968,12 @@ static void camstack_note(CPUState* cpu) {
     const u32 sp = cpu->gpr[1];
     const u32 up = guest_ram_range_valid(cpu, sp, 4u) ? mem_read32(cpu, sp) : 0u;
     const u32 up2 = guest_ram_range_valid(cpu, up, 8u) ? mem_read32(cpu, up) : 0u;
-    fprintf(stderr, "[camstack] %s lr 0x%08X (0x%08X 0x%08X) r3 %d r4 %d depth %d index %d menu-mode %d frame %llu\n",
+    fprintf(stderr, "[camstack] %s lr 0x%08X (0x%08X 0x%08X) r3 %d r4 %d depth %d index %d menu-mode %d lent %d tw %d/%d turn %d look %d frame %llu\n",
             cpu->pc == 0x801ECD68u ? "push" : cpu->pc == 0x801ECCECu ? "pop" : cpu->pc == 0x80024B24u ? "close-up cancel" :
             cpu->pc == 0x80024CDCu ? "prompt slot cleared" : "index", cpu->lr,
             guest_ram_range_valid(cpu, up + 4u, 4u) ? mem_read32(cpu, up + 4u) : 0u, guest_ram_range_valid(cpu, up2 + 4u, 4u) ? mem_read32(cpu, up2 + 4u) : 0u,
             (s32)cpu->gpr[3], (s32)cpu->gpr[4], (s32)mem_read32(cpu, sda - 21700u), (s32)mem_read32(cpu, sda - 26864u), (s32)mem_read32(cpu, sda - 26240u),
-            cpu->timebase / 675000ull);
+            g_coop_cameras.lent, g_tw.sharing, g_tw.world_tick, g_coop_turn, g_coop_prompt_look, cpu->timebase / 675000ull);
 }
 
 static void detail_monitor_install(CPUState* cpu) {
@@ -11327,12 +13122,21 @@ static void test_run_script(CPUState* cpu) {
     memmove(list, *rest == ',' ? rest + 1 : rest, strlen(rest) + 1);
 }
 
+// Player 2's close-up being up (g_coop_screen, and its 20 pad reads of grace after) says whose half and pad it is, not who
+// is acting: player 1 goes on inside it, as player 1, in their own turn (coop_player1_turn) and their zones' look
+// (coop_scan_player1), and their own look is theirs (g_coop_p1_look). Taken as player 2's, what player 1 found or read in
+// or just after player 2's close-up was drawn in player 2's half, named for them, and held as theirs.
+static bool g_coop_p1_turn;
+static bool coop_close_up_p2s(void) {
+    return g_coop_screen && !g_coop_p1_turn && !g_coop_p1_scan && !g_coop_p1_look;
+}
+
 static void hle_coop_found(CPUState* cpu) {
     if (g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu))
         return;
     // Or their close-up is on their half: its PICK UP (script -2) comes by the game's pad, as player 1's, and the find
     // was drawn and named for player 1, with player 2 given the notice. The thing still goes in the one list they share.
-    const bool finder_p2 = (g_coop_use.active && g_coop_use.p2) || cpu->gpr[5] == mem_read32(cpu, g_coop_p2 + 16u) || g_coop_screen;
+    const bool finder_p2 = (g_coop_use.active && g_coop_use.p2) || cpu->gpr[5] == mem_read32(cpu, g_coop_p2 + 16u) || coop_close_up_p2s();
     coop_found_notice(cpu, finder_p2);
     coop_found_for_finder(cpu, finder_p2);
     // What player 2 finds is the players' together: both Tomes list player 1's
@@ -11400,6 +13204,7 @@ static void coop_use_start(CPUState* cpu, s32 script, bool p2) {
     g_coop_use.p2 = p2;
     g_coop_use.script = script;
     g_coop_use.found = false;
+    g_coop_use.tickets = g_coop_tickets;
     if (p2) {
         coop_be_player2(cpu, true, g_coop_use.was);
         coop_kinds(cpu, true);  // what their script gives or takes is from their own counts
@@ -11447,9 +13252,14 @@ static bool continue_coop_use(CPUState* cpu) {
             coop_zones_swap(cpu, g_coop_use.info, false);
         coop_kinds(cpu, false);
         coop_be_player2(cpu, false, g_coop_use.was);
+        // A room it asked for (a way out of theirs): the game's busy word is the room change's, not a close-up of theirs.
+        // Taken for one, their cameras stayed lent into the new room, and player 1's half kept the old room's view.
+        const bool room = g_coop_tickets != g_coop_use.tickets;
+        if (room)
+            g_coop_assist_at = 0u;
         // What it opened is theirs from this frame on: player 1's half keeps
         // their last view from before it (not a frame with its words).
-        if ((coop_busy(cpu) && !g_coop_script_hold) || g_coop_use.found) {
+        if (!room && ((coop_busy(cpu) && !g_coop_script_hold) || g_coop_use.found)) {
             g_coop_screen = true;
             coop_hold_player1();
         }
@@ -11508,7 +13318,15 @@ static u32 g_tome_copy_use_item;
 #define COOP_SHOW_NOW 0x80043D04u
 #define COOP_SHOW_MAIN 0x80043C88u
 #define COOP_LOOK_HIDES 0x80024F68u  // a look's opening, 0x80043C88(0)
-#define COOP_LOOK_SHOWS 0x80025160u  // and its end
+#define COOP_LOOK_SHOWS 0x80025160u  // and its end (RETURN)
+// The close-up stepper's other calls of it (0x80024D78; every bl 0x80043C88 in 0x80024000-0x80026000): a PICK UP's
+// opening (0x80025298, 0) and end (0x80025554, 1), and the close-up's cancel (0x80024B24 at 0x80024C0C, 1). Left to the
+// game, the finder hidden at the opening (g_coop_unseen) stayed hidden in their own view after a PICK UP.
+#define COOP_LOOK_HIDES_PICK 0x8002529Cu
+#define COOP_LOOK_SHOWS_PICK 0x80025558u
+#define COOP_LOOK_SHOWS_CANCEL 0x80024C10u
+static bool coop_look_hides(u32 lr) { return lr == COOP_LOOK_HIDES || lr == COOP_LOOK_HIDES_PICK; }
+static bool coop_look_shows(u32 lr) { return lr == COOP_LOOK_SHOWS || lr == COOP_LOOK_SHOWS_PICK || lr == COOP_LOOK_SHOWS_CANCEL; }
 static bool g_coop_show_kept;
 static void coop_show_asked(CPUState* cpu) {
     g_hle_passthrough = true;
@@ -11521,7 +13339,7 @@ static void coop_show_asked(CPUState* cpu) {
         g_coop_unseen_out_of = -1;
     } else {
         const bool theirs = (g_coop_use.active && g_coop_use.p2) || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2;
-        if (!theirs && !g_coop_p1_look && cpu->lr != COOP_LOOK_HIDES)
+        if (!theirs && !g_coop_p1_look && !coop_look_hides(cpu->lr))
             return;
         if (g_coop_show_kept) {  // asked twice, as the look in a scene
             g_hle_passthrough = false;
@@ -11562,7 +13380,7 @@ static void coop_show_asked(CPUState* cpu) {
 
 // 0x80043C88 from anywhere but a look's opening and end (fn207, a script's own) stays the game's.
 static void coop_show_main_asked(CPUState* cpu) {
-    if (cpu->lr == COOP_LOOK_HIDES || cpu->lr == COOP_LOOK_SHOWS) {
+    if (coop_look_hides(cpu->lr) || coop_look_shows(cpu->lr)) {
         coop_show_asked(cpu);
         return;
     }
@@ -11640,10 +13458,21 @@ static void coop_run_script(CPUState* cpu) {
     // them, and the scene showed them. It goes on from the timers and its end (0x801EC1C8).
     if (g_coop_entered_p2 && cpu->timebase / 675000ull > g_trace_ticket_frame + COOP_ARRIVAL_FRAMES)
         g_coop_entered_p2 = false;
-    if (g_coop_entered_p2 && g_coop_arrival_scene == 0 && cpu->lr == ARRIVAL_ZONE_RAN && !g_coop_prompt_look && !g_coop_turn && (s32)cpu->gpr[3] > 0)
+    // Player 2 stands on the arrival spot (coop_follow) and the first look there is theirs (player 1's waits for
+    // their place, coop_scan_player1), so its scripts already run as theirs, with their words: it's told from that
+    // look, and only its end (a camera's arriving) is gone on as theirs here. Run again as theirs inside their own
+    // look, the zone words kept for player 1 (coop_zones_swap) were player 2's half-made ones and g_coop_turn_p1 was
+    // player 2: player 1 lost the way back they stood in, and their next look "came into" it at word 1, the climb,
+    // taking both players back with no press (logs/run-20261106-092440-jtg-fol-c8p2, frame 6862).
+    if (g_coop_entered_p2 && g_coop_arrival_scene == 0 && cpu->lr == ARRIVAL_ZONE_RAN && g_coop_prompt_look && (s32)cpu->gpr[3] > 0)
         g_coop_arrival_scene = (s32)cpu->gpr[3];
-    const bool arrival_scene = g_coop_entered_p2 && (s32)cpu->gpr[3] == g_coop_arrival_scene &&
-                               (cpu->lr == ARRIVAL_ZONE_RAN || cpu->lr == ARRIVAL_TIMER_RAN || cpu->lr == ARRIVAL_END_RAN);
+    // Not in player 2's own look or turn (that zone's script come to again as they walk in, brought to the arrival spot):
+    // it is run as them already, with their zone words in. Run again here, their words were swapped in over their own,
+    // which put them away as player 1's, and the script's "in the zone" was no: their own CLIMB DOWN (L04/132) into room 5
+    // had them on Camera02 (script 1351 in CameraRgn01), hidden behind the bust, where the one arriving gets Camera01
+    // (logs/run-20261106-075150-jtg-dh6-c4p2climb, frame 3416; Camera01 with this, run-20261106-085728-jtg-dc1-c4p2climb).
+    const bool arrival_scene = g_coop_entered_p2 && (s32)cpu->gpr[3] == g_coop_arrival_scene && cpu->lr == ARRIVAL_END_RAN &&
+                               !g_coop_prompt_look && !g_coop_turn && sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 21492u) != g_coop_p2;
     if ((tome_item || arrival_scene) && g_coop_p2 != 0u && !g_coop_use.active && sda_ready(cpu) &&
         coop_listed(cpu, g_coop_p2)) {
         const u32 args[3] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5]};
@@ -11707,9 +13536,8 @@ static void coop_run_script(CPUState* cpu) {
     }
 }
 
-// A way to another room player 2 opened: it runs as player 1's, and the motion
-// that goes with it (coop_door_motion) is theirs, for as long as its script may
-// wait before it asks for the room.
+// A way to another room player 2 opened: the motion that goes with it (coop_door_motion)
+// is theirs, for as long as its script may wait before it asks for the room.
 #define COOP_DOOR_WAIT 300u
 static unsigned long long g_coop_door_p2_until;
 
@@ -11741,16 +13569,14 @@ static void coop_close_up_start(CPUState* cpu, s32 prompt) {
     cpu->pc = COOP_PROMPT_USE;
 }
 
-// No examine close-ups in co-op (ED_COOP_EXAMINE=1 keeps them). An examine
-// (0x8001000C) makes its words and opens them in the message window
+// An examine (0x8001000C) makes its words and opens them in the message window
 // (0x80024310(words, script, 0), from 0x80010134), which freezes the player
 // until it is closed; closing runs the script it was given
 // (0x80024220: 0x801642D4(script, 0, 0), r13 - 25940 the button: 0 A, 1 B), as
-// often what the examine leads to (the Tome taken). In co-op the window is
-// not opened: the words go and the script runs at the next controller, for
-// the player whose it was (player 2 while their use runs). In a close-up it
-// opens: the player is held, no controller runs (a thing to pick up, seen
-// close, waited for ever), and the close-up's half and pad are its owner's.
+// often what the examine leads to (the Tome taken). They open for both players
+// (hle_message_open). ED_COOP_EXAMINE_PASS=1 (testing) has player 2's passed
+// over as they once were: the words go and the script runs at the next
+// controller, for them (g_coop_close).
 #define MESSAGE_OPEN 0x80024310u
 #define EXAMINE_OPENS 0x80010138u  // the return from the examine's opening
 #define MESSAGE_CLOSED_WITH 25940u // r13 -
@@ -11878,6 +13704,8 @@ static void hle_words_layout(CPUState* cpu) {
         }
     }
     g_hle_passthrough = true;
+    if (!g_tome_copy_turn && tw_on(cpu))
+        tw_element_laid(cpu, cpu->gpr[3]);
     // The labels by a page's L and R, in player 2's Tome, name the tab they go to: a label is
     // yellow (\ay), with nothing after its one word.
     if (g_tome_copy_turn && guest_ram_range_valid(cpu, cpu->gpr[3] + WORDS_AT, WORDS_MOST)) {
@@ -11898,7 +13726,7 @@ static void hle_words_layout(CPUState* cpu) {
         if (kPlayerModel[i] == g_chapter_model)
             chapter = i;
     const bool p2 = g_settings.mod_coop && g_coop_p2 != 0u &&
-                    (g_coop_tome_p2 || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 || g_coop_screen);  // in their close-up too
+                    (g_coop_tome_p2 || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 || coop_close_up_p2s());  // in their close-up too
     const int choice = (p2 ? g_settings.mod_p2_character : g_settings.mod_p1_character) - 1;
     if (chapter < 0 || choice < 0 || choice >= 12 || choice == chapter)
         return;
@@ -11931,9 +13759,12 @@ static bool coop_from_window_close(CPUState* cpu) {
 static void hle_message_open(CPUState* cpu) {
     if (coop_trace())
         trace_look(cpu, "window");
+    // Player 2's too, from a use of theirs (a locked door's "This door is locked...", L07/1214): in their half with their
+    // pad, the hold's bit theirs and player 1 walking (coop_words_hold, coop_their_close_up). Passed over, they read
+    // nothing, as player 1 read nothing at the podium before. ED_COOP_EXAMINE_PASS=1 (testing) passes player 2's over again.
     static int keep = -1;
     if (keep < 0)
-        keep = getenv("ED_COOP_EXAMINE") != NULL;
+        keep = getenv("ED_COOP_EXAMINE_PASS") == NULL;
     // Player 1's words show (coop_words_hold keeps them from stopping player 2). Passed over too,
     // the podium's and the drawer's never showed in Paul's chapter.
     g_hle_passthrough = keep || !g_settings.mod_coop || g_coop_p2 == 0u || cpu->lr != EXAMINE_OPENS || coop_busy(cpu) ||
@@ -11981,6 +13812,40 @@ static bool coop_player1_mid_use(CPUState* cpu) {
     return g_coop_p1_look || (g_coop_found_word.pending && !g_coop_found_word.p2) || g_coop_find_free ||
            mem_read32(cpu, cpu->gpr[13] - 26188u) != mem_read32(cpu, cpu->gpr[13] - 26240u);
 }
+
+// A B on a prompt of one's own while the other player's look, find, scene or hold is up. The game runs one close-up
+// and one script's steps at a time, and in the other's scene it shows the player no prompt (its hold is on), so the
+// press went nowhere: player 2's B on their EXAMINE in player 1's close-up (L01 room 341, Region02 WALL), player 1's B
+// in the exit sphere L01/9 in player 2's hall scene 779, the game's prompt use reached with no prompt on show. Kept,
+// and pressed for them by the game's own path once the other's is over and has been for a moment (a find goes on to
+// its Tome: player 2's close-up started on the frame a find ended went to player 1's half), if the prompt is still
+// theirs then: walked off it, or into another room, it's let go. A room change mid-scene froze both players
+// (docs/coop-failed-attempts.md, p1scene), so a way out waits for the scene's end as anything else does.
+#define COOP_PRESS_SETTLE 10u   // frames with nothing of the other's up before it goes in
+#define COOP_PRESS_GONE 6u      // frames off the prompt before it's let go
+#define COOP_PRESS_UNSHOWN 180u // frames after the other's is over with the prompt still not shown: the game says no
+typedef struct {
+    bool on;
+    s32 prompt, script;
+    unsigned tickets, free, gone, unshown;
+} CoopPressKept;
+static CoopPressKept g_coop_p2_kept, g_coop_p1_kept;
+static void coop_press_keep(CoopPressKept* kept, int who, s32 prompt, s32 script, const char* why) {
+    if (kept->on && kept->prompt == prompt && kept->script == script)
+        return;
+    kept->on = true;
+    kept->prompt = prompt;
+    kept->script = script;
+    kept->tickets = g_coop_tickets;
+    kept->free = kept->gone = kept->unshown = 0u;
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] player %d's B on prompt %d script %d kept: %s; it goes in as that's over\n", who, prompt, script, why);
+}
+static void coop_press_drop(CoopPressKept* kept, int who, const char* why) {
+    if (kept->on && getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] player %d's kept B (prompt %d script %d) let go: %s\n", who, kept->prompt, kept->script, why);
+    kept->on = false;
+}
 static bool g_coop_p1_look_open;  // player 2's turn, with the hold let go for it: the look isn't over
 static bool coop_p1_close_up(CPUState* cpu) {
     if (!g_coop_p1_look)
@@ -11990,7 +13855,11 @@ static bool coop_p1_close_up(CPUState* cpu) {
     // Asked as the hold is still going on, before its bit and channels are: not over yet.
     static bool on;
     const u32 channel = sda_ready(cpu) ? mem_read32(cpu, cpu->gpr[13] - 23060u) : 0u;
-    const bool held = (mem_read32(cpu, cpu->gpr[13] - 23344u) & ~32u) == 2u;  // 32: its scene's, as the lever's
+    // 32: its scene's, as the lever's. 1: its script's busy_set (fn91(1)) beside its hold, as a door that asks first
+    // has it (L01/103: hold, busy, DETAIL, words with a Yes/No): the look went over at it, and the other player stood.
+    // 4: the room their look's script asked for (CLIMB DOWN: its hold, then the ticket), player 2 going on through it.
+    const u32 room_bit = coop_room_change_other(cpu, true) ? COOP_BUSY_ROOM : 0u;
+    const bool held = (mem_read32(cpu, cpu->gpr[13] - 23344u) & ~(32u | COOP_BUSY_SCRIPT | room_bit)) == 2u;
     if (g_coop_screen || cutscene_playing(cpu) || (on && !held)) {
         if (coop_trace())
             fprintf(stderr, "[trace] player 1's look over: screen %d cutscene %d busy %u channel %08X mask %08X lr 0x%08X frame %llu\n", g_coop_screen, cutscene_playing(cpu),
@@ -12010,10 +13879,13 @@ static bool coop_p1_close_up(CPUState* cpu) {
 // A script's own step may have held play just before (the urn, 0x8016820C). Let go as the script's
 // end would: its input channels stay on with only the bit cleared, and player 2, standing, couldn't start.
 static bool coop_script_hold_go(CPUState* cpu) {
+    // Bit 1 with the hold is the script's own busy_set (fn91(1)), which many a look sets beside its hold (126 scripts;
+    // a door that asks first, L01/103): it stays, and the script clears it as it ends. Refused, its words held both
+    // players, as the game's words hold does: the other player stood till the words closed.
     const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u);
-    if ((busy & ~2u) != 0u)
+    if ((busy & ~2u) != 0u && busy != (2u | COOP_BUSY_SCRIPT))
         return false;
-    if (busy != 0u) {
+    if ((busy & 2u) != 0u) {
         // What its own letting go does (0x80042B30(0), the step's 0x8016A6DC): 0x80199EA0 alone left
         // r13 - 25696 on, which the Tome's opening asks (0x80006D0C), and the page after a circle never
         // came. Not the call: its end (0x80134D48) takes "the player", player 2 here, and player 1's
@@ -12037,7 +13909,7 @@ static bool coop_their_close_up(CPUState* cpu) {
     // and were taken for player 1's words, which let go of the hold. Their close-up ended, the words showed in player 1's
     // half, held player 1, and player 2's B no longer reached them.
     if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || cutscene_playing(cpu) ||
-        !((g_coop_use.active && g_coop_use.p2) || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 || g_coop_screen))
+        !((g_coop_use.active && g_coop_use.p2) || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 || coop_close_up_p2s()))
         return false;
     return coop_script_hold_go(cpu);
 }
@@ -12074,6 +13946,35 @@ static void coop_close_up_kept(CPUState* cpu) {
                 (s32)cpu->gpr[4], cpu->timebase / 675000ull);
     g_hle_passthrough = false;
     g_hle_tail_call = false;
+}
+
+// The game's use of a prompt (0x80006EBC(button, 0), from its input's dispatch at 0x8013E334): pressed with the game's pad
+// player 1's (nobody's close-up up, outside player 2's turn and use) on the prompt on show, it's player 1's press. For
+// COOP_ASSIST_WINDOW pad reads after player 2's close-up or page any close-up that opened was taken for theirs, and
+// player 1's EXAMINE just after player 2's RETURN opened in their own half but went to player 2's pad: player 1's B
+// went nowhere, and they stood in their own close-up until player 2 pressed. As their Start does (coop_menu_input).
+#define COOP_PROMPT_DISPATCH 0x8013E334u
+static void coop_prompt_pressed(CPUState* cpu) {
+    if (coop_trace())
+        notify_trace_prompt_use(cpu);
+    // Player 1's own press: a way out player 2 pressed earlier that never asked for a room (a locked door's words) is
+    // no longer theirs to own. Only a press (r4 0): the dispatch also calls it with r4 3 and no button, every 60
+    // frames while player 1 walks, and that took player 2's CLIMB DOWN arrival from them (run-20261105-233711-...-c4e-m1).
+    if (cpu->lr == COOP_PROMPT_DISPATCH && cpu->gpr[4] == 0u && g_settings.mod_coop && !g_coop_turn && !g_coop_use.active && !g_coop_screen &&
+        g_coop_exit_p2_until != 0ull && !(g_coop_use.active && g_coop_use.p2)) {
+        g_coop_exit_p2_until = 0ull;
+        g_coop_door_p2_until = 0ull;
+    }
+    if (g_coop_assist_at == 0u || g_coop_p2 == 0u || !g_settings.mod_coop || cpu->lr != COOP_PROMPT_DISPATCH || g_coop_turn ||
+        g_coop_use.active || g_coop_tome_owner >= 0 || g_coop_screen || !sda_ready(cpu))
+        return;
+    const u32 shown = PROMPT_SLOTS + 6u * 28u;
+    if ((s32)mem_read32(cpu, shown + 8u) < 0 || mem_read32(cpu, shown + 4u) != cpu->gpr[3])
+        return;
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] player 1's press on their prompt %d: what opens next is theirs (frame %llu)\n", (s32)mem_read32(cpu, shown + 8u),
+                (unsigned long long)(cpu->timebase / 675000ull));
+    g_coop_assist_at = 0u;
 }
 
 static void coop_words_hold(CPUState* cpu) {
@@ -12182,12 +14083,115 @@ static void coop_find_hold(CPUState* cpu) {
 // nobody's busy (everyone's update asks, 0x80155738), and at their controller player 1 has a turn as
 // player 2 has theirs: input of their own, with their pad, past the window's lock.
 #define COOP_BUSY_ASK 0x80155738u
+// Player 2's own script holding play (0x8016820C with them the player, g_coop_script_hold: a way out's wait before its
+// room, script 132's climb), with nothing else up: the mirror of player 1's look. It holds them alone: the game is told
+// nobody's busy, and at player 1's controller player 1 has a turn with the hold let go (hle_coop_controller). Held for the
+// game's, player 1 stood as "close-up" from player 2's press to the room (700 frames at low speed in Karim's chapter).
+static bool g_coop_p1_turn_fresh;  // player 1's first turn of such a hold: from where the game has them, not an old close-up's
+// Player 1's own input and controller as they last walked (hle_coop_controller, the game's busy word 0): their first turn
+// through player 2's room change starts from it (g_coop_p1_from_free), as player 2's turns start from their own copy.
+// From the game's as the room change has it, their input block never had the stick (0x805D7BA0 +8: 0x400, no 8), their
+// controller sent 45 each frame and they stood through player 2's OPEN DOOR 1212 and ladder Yes; a walk-in door of
+// theirs, with no press of a prompt, left it as it was and player 1 walked.
+static CoopPlayerState g_coop_p1_free;
+static bool g_coop_p1_free_set, g_coop_p1_from_free;
+static bool g_coop_p2_hold_open;   // and that turn is running, the hold let go for it: player 2 is still held (their prompt stays off)
+static bool coop_p2_holds(CPUState* cpu) {
+    // And with the room that script asked for on its way (busy 4 too: script 132's hold, then its ticket): player 1
+    // goes on through it as through the hold.
+    // Or their own scene, begun in their look (coop_p2_scene_on: a zone's fn22(1), its hold and bit 32 kept by
+    // coop_prompt_look), before any close-up of theirs has the screen: it holds them alone, as player 1's scene holds
+    // player 1 (coop_p1_close_up allows bit 32 the same way).
+    const bool scene = coop_p2_scene_on();
+    if (!(g_coop_script_hold || scene) || g_coop_screen || g_coop_p1_look || !g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) ||
+        cutscene_playing(cpu) || game_menu_open(cpu))
+        return false;
+    const u32 room_bit = coop_room_change_other(cpu, false) ? COOP_BUSY_ROOM : 0u;
+    return (mem_read32(cpu, cpu->gpr[13] - 23344u) & ~(COOP_BUSY_SCRIPT | room_bit | (scene ? 32u : 0u))) == 2u;
+}
+// A player the game holds while the other plays on: their words, find or close-up, their script's hold, their Tome.
+// Alone, nothing can touch them then: the world stands still (busy). Here it goes on for the other player, so enemies and
+// hazards are told they aren't there to go after (coop_send_event's event 59, coop_enemy_target): never by holding the
+// other player. 0 player 1, 1 player 2.
+static bool coop_player_held(CPUState* cpu, int k) {
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || cutscene_playing(cpu) || game_menu_open(cpu))
+        return false;
+    if (k == 0)
+        return g_coop_words_free || g_coop_find_free || g_coop_p1_look || (g_tw.sharing && g_coop_tome_owner == 0) ||
+               (g_tome_copy_open && g_tome_copy_p1);
+    return g_coop_screen || g_coop_words_theirs || coop_p2_holds(cpu) || (g_tw.sharing && g_coop_tome_owner == 1) ||
+           (g_tome_copy_open && !g_tome_copy_p1);
+}
+// Which player an id is (0, 1), or -1. Player 1's while player 2 is the player (their turn, or a call made as them) is
+// the one kept as their turn began.
+static int coop_player_of_id(CPUState* cpu, u32 id) {
+    if (g_coop_p2 == 0u || !sda_ready(cpu))
+        return -1;
+    const u32 p2 = mem_read32(cpu, g_coop_p2 + 16u), now = mem_read32(cpu, cpu->gpr[13] - 21496u);
+    if (id == p2)
+        return 1;
+    return id == (now == p2 ? g_coop_p1_id : now) ? 0 : -1;
+}
+
 static void coop_busy_ask(CPUState* cpu) {
     g_hle_passthrough = true;
-    if ((g_coop_screen && (g_coop_words_theirs || coop_busy(cpu)) && !cutscene_playing(cpu) && !game_menu_open(cpu)) || coop_p1_close_up(cpu)) {
+    // And player 1's words or find with no hold, under their script's own busy bit (fn91(1), a door that asks first):
+    // with the hold let go the word was 1, not 0, so main's controller (0x8000749C), where player 2's turn runs, was
+    // passed over, and player 2 stood till the words closed. Player 1 stays still by the window's lock, as in any words.
+    const bool p1_free = (g_coop_words_free || g_coop_find_free) && sda_ready(cpu) &&
+                         mem_read32(cpu, cpu->gpr[13] - 23344u) == COOP_BUSY_SCRIPT && !cutscene_playing(cpu) && !game_menu_open(cpu);
+    if ((g_coop_screen && (g_coop_words_theirs || coop_busy(cpu)) && !cutscene_playing(cpu) && !game_menu_open(cpu)) || coop_p1_close_up(cpu) || p1_free ||
+        coop_p2_holds(cpu)) {
         hle_set_u32(cpu, 0u);
         g_hle_passthrough = false;
     }
+}
+
+// Whether a node is held while the game is busy (0x801F68D4: its +28's 8, asked with the busy word by its update at
+// 0x800074AC, its motion's step at 0x80027200/0x800272A8/0x80027774/0x80027804, and others): the other player in a
+// room change of the one who asked is not, as that one isn't (fn66's 0x801F6828(player, 0)). Asked, not written:
+// each busy set sends event 102 again, which would hold them again. Held, player 1 stood in their pose through player
+// 2's ladder (L01/103, about 390 frames) and player 2 pushed their stick still through player 1's door.
+#define COOP_NODE_HELD_ASK 0x801F68D4u
+static void coop_node_held_ask(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const u32 node = cpu->gpr[3];
+    if (node == 0u || !coop_room_change_on(cpu) || !guest_ram_range_valid(cpu, node + 16u, 16u))
+        return;
+    const bool p2 = node == g_coop_p2;
+    if (!p2 && (g_coop_p1_id == 0u || mem_read32(cpu, node + 16u) != g_coop_p1_id))
+        return;
+    if (g_coop_room_p2 == p2)
+        return;  // the one who asked: as the game has them
+    static unsigned long long told;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (coop_room_change_log() && frame > told + 120ull) {
+        told = frame;
+        fprintf(stderr, "[coop] player %d goes on through player %d's room change: not held (lr 0x%08X frame %llu)\n", p2 ? 2 : 1, p2 ? 1 : 2, cpu->lr, frame);
+    }
+    hle_set_u32(cpu, 0u);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+// A quick spell's press (0x800069DC(1, slot): Y or the D-pad in play, from the in-play channel at 0x800084F4, player 1's,
+// or player 2's own in their turn, coop_quick_cast) by the player who didn't ask for the room change on its way
+// (coop_room_change_other): refused, as the game refuses one (to 0x80006A80: nothing cast, the press not taken). Not held
+// (coop_node_held_ask), player 1 could cast through player 2's door motion and fade, which may ask for a scene or another
+// room; player 2's were left out of their turn. Their B, zone look and Start wait for coop_follow the same way.
+#define COOP_QUICK_ASK 0x800069DCu
+static void coop_quick_cast_ask(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (g_coop_p2 == 0u || !coop_room_change_on(cpu))
+        return;
+    const bool p2 = mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u);
+    if (!coop_room_change_other(cpu, p2))
+        return;
+    if (coop_room_change_log())
+        fprintf(stderr, "[coop] player %d's quick spell waits: player %d's room change is on its way (frame %llu)\n", p2 ? 2 : 1, p2 ? 1 : 2,
+                (unsigned long long)(cpu->timebase / 675000ull));
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
 }
 
 // The hold let go for the other player's turn, and back after it: its channels count down each frame,
@@ -12228,6 +14232,15 @@ static bool g_coop_p1_turn;
 static void coop_player1_turn(CPUState* cpu) {
     static CoopPlayerState game, own;
     static bool own_set;
+    if (g_coop_p1_turn_fresh) {
+        g_coop_p1_turn_fresh = false;
+        own_set = false;
+        if (g_coop_p1_from_free && g_coop_p1_free_set) {
+            own = g_coop_p1_free;
+            own_set = true;
+        }
+        g_coop_p1_from_free = false;
+    }
     // A script's hold under a look of player 2's, asked for again as it goes on: let go as at their
     // words, its channel on (r13 - 23060, +16) kept player 1 from moving. Its bit stays for this host's
     // asking (coop_busy): the close-up is theirs.
@@ -12240,7 +14253,8 @@ static void coop_player1_turn(CPUState* cpu) {
         // Its bit stays for this host's asking, as below: the pad's read in this turn showed player 2's icon
         // over their own scene and took it away again, each frame. The game's still told nobody's busy.
         mem_write32(cpu, cpu->gpr[13] - 23344u, busy_was);
-    } else if (busy_was == 2u && guest_ram_range_valid(cpu, hold_channel, 20u) && mem_read32(cpu, hold_channel + 16u) != 0u) {
+    } else if ((busy_was & ~COOP_BUSY_SCRIPT) == 2u && guest_ram_range_valid(cpu, hold_channel, 20u) && mem_read32(cpu, hold_channel + 16u) != 0u) {
+        // (With the script's busy_set beside it too: a door that asks first, its DETAIL, held player 1.)
         coop_script_hold_go(cpu);
         mem_write32(cpu, cpu->gpr[13] - 23344u, busy_was);
     }
@@ -12389,6 +14403,14 @@ static bool coop_prompt_player1s(CPUState* cpu, u32 fn, int count) {
 }
 
 static void coop_prompt_set(CPUState* cpu) {
+    if (g_follow_refusing && coop_prompt_is_exit((s32)cpu->gpr[4])) {
+        if (g_follow_refused_n < 8u)
+            g_follow_refused[g_follow_refused_n++] = (s32)cpu->gpr[5];
+        cpu->gpr[3] = 0u;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
     g_hle_passthrough = !coop_prompt_player1s(cpu, COOP_PROMPT_SET, 7);
     g_hle_tail_call = false;
 }
@@ -12401,21 +14423,180 @@ static void coop_prompt_set(CPUState* cpu) {
 // player 1's does, in player 2's close-up. Every zone then fired for them as the scene ended: a look
 // at the bookshelf with no press, and held.
 #define COOP_ZONES_ON 23040u
+// Player 1's look at the zones outside player 2's close-up: whether it's their first in the room while the room change's
+// fade in runs (0x801521A8: 0x801E7C88(.., 10) puts its ticks at r13-21784), and, while player 2 has no zone's camera
+// of their own, run here so that the cameras it chooses are known as player 1's (coop_camera_chosen). The player's look
+// runs only as they move: in chapter 1 player 1 stood still from the intro's end, and their first look came 2300 frames
+// later, put by the ladder; counted as the room's start, player 2's view went to the ladder's camera across the room
+// (logs/run-20261106-031127-jtg-p2cs-x-c1-p1ladder-p2camstart-3, frame 4646). Chapter 9's came at the fade's tick 9.
+#define COOP_FADE_TICKS 21784u
+static void coop_scan_room_start(CPUState* cpu) {
+    if (g_coop_cameras.p1_zones != 0 || g_coop_p1_scan || g_coop_prompt_look || g_coop_cameras.lent || g_coop_screen ||
+        !g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu))
+        return;
+    const u32 node = mem_read32(cpu, cpu->gpr[13] - 21492u);
+    if (node == 0u || node == g_coop_p2 || !guest_ram_range_valid(cpu, node + 52u, 4u) || cpu->gpr[3] != mem_read32(cpu, node + 52u))
+        return;
+    const bool live = mem_read32(cpu, cpu->gpr[13] - COOP_ZONES_ON) != 0u;
+    const bool first = live && cpu->gpr[4] != g_coop_cameras.p1_room && (s32)mem_read32(cpu, cpu->gpr[13] - COOP_FADE_TICKS) > 0;
+    if (live)
+        g_coop_cameras.p1_room = cpu->gpr[4];
+    if (!g_coop_cameras.p2_bare)
+        return;
+    u32 args[4], answer = 0u;
+    for (int i = 0; i < 4; i++)
+        args[i] = cpu->gpr[3 + i];
+    g_coop_cameras.p1_zones = first ? 1 : 2;
+    hle_guest_call(cpu, COOP_SCAN, args, 4, 0.0, &answer);
+    g_coop_cameras.p1_zones = 0;
+    cpu->gpr[3] = answer;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+// A room change of player 2's, the room in and player 2 not yet brought to it (coop_follow, after the frame's
+// turns): player 1 stands where the game put the player, the arrival spot, which is player 2's. A look of theirs
+// there "came into" what is player 2's (the way back's prompt and its word 1, in ch8 room 200 and ch7 room 123), and
+// they were then put beside, still inside it with its word at 1. Their look waits for their place, as player 2's
+// does through player 1's (coop_left_behind).
+static bool coop_p1_unplaced(CPUState* cpu, u32 object) {
+    if (!g_coop_entered_p2 || g_coop_p2 == 0u || !sda_ready(cpu))
+        return false;
+    const u32 o2 = mem_read32(cpu, g_coop_p2 + 52u);
+    if (object == o2 || object != mem_read32(cpu, cpu->gpr[13] - 26524u) || !guest_ram_range_valid(cpu, object + COOP_OBJECT_ROOM, 4u) ||
+        !guest_ram_range_valid(cpu, o2 + COOP_OBJECT_ROOM, 4u))
+        return false;
+    const u32 room = mem_read32(cpu, object + COOP_OBJECT_ROOM);
+    return room != 0u && mem_read32(cpu, o2 + COOP_OBJECT_ROOM) != room;
+}
+
+// The follower's first look with the zones on (g_follow_fresh): the game's own, with what the way back asks for passed
+// over (coop_prompt_set, coop_script_go_to_room) and its word put back. True when it ran here.
+static bool coop_follow_look(CPUState* cpu) {
+    if (g_follow_fresh == 0 || g_follow_refusing || g_coop_p2 == 0u || !sda_ready(cpu))
+        return false;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (frame > g_follow_fresh_until) {
+        g_follow_fresh = 0;
+        return false;
+    }
+    if (mem_read32(cpu, cpu->gpr[13] - COOP_ZONES_ON) == 0u)
+        return false;  // a look with the zones off only clears what they are inside (0x80134BE8)
+    const u32 o2 = mem_read32(cpu, g_coop_p2 + 52u);
+    const bool p2_look = g_coop_prompt_look && cpu->gpr[3] == o2;
+    const bool p1_look = !g_coop_prompt_look && !g_coop_p1_scan && !g_coop_turn && cpu->gpr[3] != o2 &&
+                         cpu->gpr[3] == mem_read32(cpu, cpu->gpr[13] - 26524u);
+    if (!(g_follow_fresh == 2 ? p2_look : p1_look))
+        return false;
+    const int who = g_follow_fresh;
+    u8 before[SCRIPT_STATES_SIZE];
+    coop_bytes(cpu, SCRIPT_STATES, before, SCRIPT_STATES_SIZE, true);
+    u32 args[4], answer = 0u;
+    for (int i = 0; i < 4; i++)
+        args[i] = cpu->gpr[3 + i];
+    g_follow_refusing = true;
+    g_follow_refused_n = 0u;
+    hle_guest_call(cpu, COOP_SCAN, args, 4, 0.0, &answer);
+    g_follow_refusing = false;
+    g_follow_fresh = 0;
+    for (u32 r = 0u; r < g_follow_refused_n; r++) {
+        const s32 script = g_follow_refused[r];
+        for (u32 i = 0u; i < 10u; i++) {
+            const u32 at = SCRIPT_STATES + i * 8u;
+            if ((s16)mem_read16(cpu, at) != (s16)script)
+                continue;
+            const u8* was = NULL;
+            for (u32 j = 0u; j < 10u && was == NULL; j++)
+                if ((s16)(before[j * 8u] << 8 | before[j * 8u + 1u]) == (s16)script)
+                    was = before + j * 8u;
+            for (u32 b = 0u; b < 8u; b++)
+                mem_write8(cpu, at + b, was != NULL ? was[b] : 0u);
+        }
+        if (coop_room_change_log())
+            fprintf(stderr, "[coop] player %d, brought along, stands inside the way back (script %d) as come into: its prompt passed over (frame %llu)\n",
+                    who, script, frame);
+    }
+    cpu->gpr[3] = answer;
+    return true;
+}
+
+// Player 1's way out that waited for player 2's scene, words, close-up or hold: let go as that's over (not at fn22(0)
+// itself: the scene's words come after it, logs/run-20261106-064004-jtg-p1s2v6-exit1), in a look at that room's zones.
+static void coop_way_out_p1_go(CPUState* cpu, bool p2_up) {
+    if (g_coop_way_out[0].on && (g_coop_way_out[0].tickets != g_coop_tickets || !p2_up))
+        coop_way_out_go(cpu, 0, cpu->gpr[4], NULL);
+}
+
 static void coop_scan_player1(CPUState* cpu) {
     g_hle_passthrough = true;
-    if (g_coop_p1_scan || g_coop_prompt_look || !g_coop_screen || !g_coop_cameras.lent || g_coop_use.active || !sda_ready(cpu) ||
-        cpu->gpr[3] == mem_read32(cpu, g_coop_p2 + 52u))
+    if (g_coop_p1_own_look)
+        return;  // the game's own, run from below
+    if (coop_p1_unplaced(cpu, cpu->gpr[3]) && !g_coop_prompt_look && !g_coop_p1_scan && !g_coop_turn) {
+        cpu->gpr[3] = 0u;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
         return;
+    }
+    if (coop_follow_look(cpu)) {
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
+    // Player 1 going on through player 2's room change: their zones aren't looked at till they're brought along. A way out
+    // or a scene of theirs would ask for a second room, or play, over the one on its way. The look's answer isn't used
+    // (0x801335C4).
+    if (!g_coop_prompt_look && !g_coop_p1_scan && coop_room_change_other(cpu, false) && cpu->gpr[3] != mem_read32(cpu, g_coop_p2 + 52u)) {
+        cpu->gpr[3] = 0u;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
+    if (g_coop_p1_scan || g_coop_prompt_look || !g_coop_screen || !g_coop_cameras.lent || g_coop_use.active || !sda_ready(cpu) ||
+        cpu->gpr[3] == mem_read32(cpu, g_coop_p2 + 52u)) {
+        // The game's own look of theirs (not player 2's look, not one inside another, them the player): a way out it
+        // comes into waits as in their look below, while player 2's is up.
+        const bool own = !g_coop_p1_scan && !g_coop_prompt_look && !g_coop_turn && g_settings.mod_coop && g_coop_p2 != 0u &&
+                         sda_ready(cpu) && cpu->gpr[3] == mem_read32(cpu, cpu->gpr[13] - 26524u) &&
+                         cpu->gpr[3] != mem_read32(cpu, g_coop_p2 + 52u);
+        const bool p2_up = own && coop_way_out_p2_up(cpu);
+        if (own)
+            coop_way_out_p1_go(cpu, p2_up);
+        if (p2_up) {
+            u32 look[4], answer = 0u;
+            for (int i = 0; i < 4; i++)
+                look[i] = cpu->gpr[3 + i];
+            g_coop_p1_own_look = true;
+            coop_way_look_begin(cpu, 0, look[1], look[2] & 0xFFFFu, true);
+            coop_scan_room_start(cpu);  // its own look at the zones, or none
+            if (g_hle_passthrough) {
+                hle_guest_call(cpu, COOP_SCAN, look, 4, 0.0, &answer);
+                cpu->gpr[3] = answer;
+            }
+            coop_way_look_end();
+            g_coop_p1_own_look = false;
+            g_hle_passthrough = false;
+            g_hle_tail_call = false;
+            return;
+        }
+        coop_scan_room_start(cpu);
+        return;
+    }
     u32 args[4], ignore = 0u;
     for (int i = 0; i < 4; i++)
         args[i] = cpu->gpr[3 + i];
+    // A way out of theirs waits for player 2's scene, words, close-up or hold, as player 2's does in player 1's
+    // (coop_prompt_look); their looks go on.
+    const bool p2_up = coop_way_out_p2_up(cpu);
+    coop_way_out_p1_go(cpu, p2_up);
     // Their cameras too: a zone's script sets them, and player 2's close-up went to the room's view.
     // Their zones are on, whatever player 2's scene has them as: they walk through it.
     const u32 zones_were = mem_read32(cpu, cpu->gpr[13] - COOP_ZONES_ON);
     mem_write32(cpu, cpu->gpr[13] - COOP_ZONES_ON, 1u);
     coop_cameras_lend(cpu, false);
     g_coop_p1_scan = true;
+    coop_way_look_begin(cpu, 0, args[1], args[2] & 0xFFFFu, p2_up);
     hle_guest_call(cpu, COOP_SCAN, args, 4, 0.0, &ignore);
+    coop_way_look_end();
     g_coop_p1_scan = false;
     coop_cameras_lend(cpu, true);
     mem_write32(cpu, cpu->gpr[13] - COOP_ZONES_ON, zones_were);
@@ -12451,20 +14632,76 @@ static void hle_coop_controller(CPUState* cpu) {
         g_coop_use.resumed = false;
         return;
     }
+    // Player 1 free, as the game runs them: kept, for a room change of player 2's (g_coop_p1_free).
+    if (g_settings.mod_coop && g_coop_p2 != 0u && sda_ready(cpu) && !coop_busy(cpu) && !g_coop_screen && !g_coop_use.active &&
+        !cutscene_playing(cpu) && !game_menu_open(cpu)) {
+        coop_state(cpu, &g_coop_p1_free, true);
+        g_coop_p1_free_set = true;
+    }
     const bool p1_look = coop_p1_close_up(cpu);
     CoopHoldKept look_hold;
     if (p1_look) {
         coop_hold_open(cpu, &look_hold);
         g_coop_p1_look_open = true;
     }
+    // Player 2's own script holding play (coop_p2_holds): player 1's turn runs with the hold let go, and it's back after
+    // for player 2's, who stand in it.
+    static bool p2_hold_was;
+    const bool p2_hold = !p1_look && coop_p2_holds(cpu);
+    if (p2_hold) {
+        CoopHoldKept p2_kept;
+        g_coop_p1_turn_fresh = !p2_hold_was;
+        coop_hold_open(cpu, &p2_kept);
+        g_coop_p2_hold_open = true;
+        coop_player1_turn(cpu);
+        g_coop_p2_hold_open = false;
+        coop_hold_shut(cpu, &p2_kept);
+        if (!p2_hold_was && getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] player 2's script holds them alone: player 1 plays on (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    p2_hold_was = p2_hold;
+    // Player 2's room change on its way (coop_room_change_on: their door's motion and fade): player 1 goes on through it with
+    // a turn of their own, as through player 2's hold (after player 2's turn, below). Their controller as the game's stood
+    // them still from the ticket on (anim 15, stick read), and they stood through the fade (L01/103,
+    // run-20261106-051733-jtg-dh1-c1p2ladder 2786-2834).
+    static bool room_was;
+    const bool room_turn = !p1_look && !p2_hold && coop_room_change_other(cpu, false);
+    // Player 1's words or find with no hold (coop_no_pause), from a look whose script set its own busy bit beside its
+    // hold (fn91(1): a door that asks first, L01/103): the bit stays on through the words, for the script to clear,
+    // and player 2 stood still under it, their stick read. Their turn runs without it, as with the hold's in a look.
+    const u32 busy_was = sda_ready(cpu) ? mem_read32(cpu, cpu->gpr[13] - 23344u) : 0u;
+    const bool busy_out = !p1_look && (g_coop_words_free || g_coop_find_free) && busy_was == COOP_BUSY_SCRIPT;
+    if (busy_out)
+        mem_write32(cpu, cpu->gpr[13] - 23344u, 0u);
     coop_player_turn(cpu);
+    if (busy_out)
+        mem_write32(cpu, cpu->gpr[13] - 23344u, mem_read32(cpu, cpu->gpr[13] - 23344u) | busy_was);
     if (p1_look) {
         g_coop_p1_look_open = false;
         coop_hold_shut(cpu, &look_hold);
     }
+    if (room_turn) {
+        // After player 2's turn, which runs through their own door's fade (coop_door_turns): run before it, player 1 stood
+        // all the same (run-20261106-055737-jtg-dh3-c7p2door 2648-2704), though not at a walk-in door with no turns of theirs.
+        // With the hold let go for it, as for a hold of player 2's (coop_hold_open: the busy word, the hold's channels and
+        // words), and back after: the game, and player 2 in their motion, are still busy with it. With the busy word alone
+        // let go their controller still stood them (event 45 each frame, their input's status 0x400, no stick: the room change
+        // of a prompt player 2 pressed, OPEN DOOR 1212 and the ladder's Yes, not a walk-in door).
+        CoopHoldKept room_kept;
+        g_coop_p1_turn_fresh = !room_was;
+        g_coop_p1_from_free = !room_was;
+        coop_hold_open(cpu, &room_kept);
+        coop_player1_turn(cpu);
+        coop_hold_shut(cpu, &room_kept);
+        if (!room_was && coop_room_change_log())
+            fprintf(stderr, "[coop] player 2's room change: player 1 plays on (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    if (room_was && !room_turn)
+        g_coop_p1_turn_fresh = true;  // their next turn, in a close-up or hold of player 2's, from the game's again
+    room_was = room_turn;
     // Player 2's turn calls into the game, whose hooks leave these as they
-    // wanted: player 1's controller runs after it.
-    g_hle_passthrough = true;
+    // wanted: player 1's controller runs after it (or ran, in a hold of player 2's).
+    g_hle_passthrough = !p2_hold && !room_turn;
     g_hle_tail_call = false;
     if ((g_coop_find_free || g_coop_words_free) && coop_trace() && g_coop_p2 != 0u && cpu->timebase / 675000ull % 30ull == 0ull) {
         const u32 o2 = mem_read32(cpu, g_coop_p2 + 52u);
@@ -12489,8 +14726,7 @@ static void hle_coop_controller(CPUState* cpu) {
     // Pressed just before player 1's look or find, it would start with player 1's next step: their Tome's
     // page went to player 2's half, and player 2's close-up to player 1's (run-20261103-181505-both, 10703).
     if (g_coop_use_script != 0 && coop_player1_mid_use(cpu)) {
-        if (getenv("ED_COOP_LOG") != NULL)
-            fprintf(stderr, "[coop] player 2's press for script %d let go: player 1's look or find is up\n", g_coop_use_script);
+        coop_press_keep(&g_coop_p2_kept, 2, g_coop_use_prompt, g_coop_use_script, "player 1's look or find came first");
         g_coop_use_script = 0;
     }
     // The game has one window: what player 2 pressed for waits for player 1's words to close.
@@ -12500,14 +14736,16 @@ static void hle_coop_controller(CPUState* cpu) {
         if (script == COOP_PROMPT_CLOSE_UP) {
             coop_close_up_start(cpu, g_coop_use_prompt);
         } else if (coop_prompt_is_exit(g_coop_use_prompt)) {
-            // A way to another room: the game loads rooms round player 1,
-            // so it is taken as player 1 takes it, from what player 2's
-            // prompt left (their script's word moved to the game's table):
-            // its later steps run as the game's, and both players arrive
-            // in the room (player 2 brought along, coop_follow).
-            coop_state_to_game(cpu, script);
-            coop_use_start(cpu, script, false);
-            g_coop_door_p2_until = cpu->timebase / 675000ull + COOP_DOOR_WAIT;
+            // A way to another room: theirs, as any use of theirs. Run as player 1's (from their word moved to the
+            // game's table), a locked door's words opened in player 1's half for player 1's pad, player 1 stood held
+            // through it, and what the script asks of "the player" (script 132's model, the motion) was player 1's.
+            // The room it asks for is still the game's one change: the ticket written with them the player is theirs
+            // (notify_room_ticket), they arrive on its spot and player 1 is brought beside them (coop_follow).
+            coop_use_start(cpu, script, true);
+            // Pending until their door's motion or room (coop_door_motion, notify_room_ticket), or player 1's own press.
+            g_coop_door_p2_until = ~0ull;
+            g_coop_exit_p2_until = ~0ull;
+            g_coop_exit_p2_script = script;
         } else {
             coop_use_start(cpu, script, true);
         }
@@ -12786,6 +15024,29 @@ static void ghost_sparkles_step(CPUState* cpu) {
     }
 }
 
+// Player 2's B while the game is busy with player 1's (a scene, a door's transition, a hold of theirs): their turn
+// doesn't run then, so nothing read it. On the prompt they stood by as the turn stopped, it's kept (coop_press_keep)
+// and goes in from their turn once player 1's is over. Not in anything of their own (their use, close-up, words,
+// scene or Tome: the B is for that), and not in a cutscene, whose skip is the game's.
+static void coop_p2_press_held(CPUState* cpu) {
+#ifdef ED_AURORA
+    static bool b_was;
+    DolPadState pad;
+    controls_read_player2(&pad);
+    const bool b = ((pad.button & (u16)~g_coop_p2_hold) & 0x0200u) != 0u;
+    if (b && !b_was && g_coop_use_own && g_coop_p2_is_player && g_coop_prompt >= 0 &&
+        (g_coop_prompt_script > 0 || g_coop_prompt_script == COOP_PROMPT_CLOSE_UP) && sda_ready(cpu) &&
+        mem_read32(cpu, cpu->gpr[13] - 21492u) != g_coop_p2 && (mem_read32(cpu, cpu->gpr[13] - 23344u) & 4u) == 0u &&  // 4: a room's
+        !(g_coop_use.active && g_coop_use.p2) && !g_coop_screen &&
+        !g_coop_words_theirs && !coop_p2_scene_on() && !g_coop_script_hold && g_coop_tome_owner < 0 && !g_tome_copy_open &&
+        !cutscene_playing(cpu) && !game_menu_open(cpu))
+        coop_press_keep(&g_coop_p2_kept, 2, g_coop_prompt, g_coop_prompt_script, "player 1's scene or hold has the game");
+    b_was = b;
+#else
+    (void)cpu;
+#endif
+}
+
 static void coop_player_turn(CPUState* cpu) {
     cheat_apply(cpu);  // Mods' Cheats, at the player's frame
     sanity_tool_step(cpu);  // Mods' Sanity Effects
@@ -12822,8 +15083,12 @@ static void coop_player_turn(CPUState* cpu) {
     // While the player is busy (a close-up, a thing taken) the game runs it
     // for player 1 alone: player 2's turn, which pumps the game's input with
     // their pad and is "the player" for a while, kept it from going on.
-    if (coop_busy(cpu) && !coop_door_turns(cpu))
+    // Nor in a room change of player 1's (coop_room_change_on): they go on through it, as player 1 does through theirs.
+    const bool room_other = coop_room_change_other(cpu, true);
+    if (coop_busy(cpu) && !coop_door_turns(cpu) && !room_other) {
+        coop_p2_press_held(cpu);
         return;
+    }
     g_coop_turn = true;
     coop_kinds(cpu, true);  // their own counts, for what they fire and use
     const u32 node = cpu->gpr[3];
@@ -12839,6 +15104,29 @@ static void coop_player_turn(CPUState* cpu) {
         const u8* b = g_coop_state[0].input + at;
         const u32 mask = (u32)b[0] << 24 | (u32)b[1] << 16 | (u32)b[2] << 8 | b[3];
         mem_write32(cpu, COOP_INPUT + at, mask == 0x0FFFFFFEu ? 0x0FFFFFFFu : mask);
+    }
+    // Their input has the focus, as player 1's has in their turn (coop_player1_turn). The game's one focus
+    // (r13 - 23556, given by 0x8013DB1C to the first window to ask; - 23552 is the copy the pad's channels are
+    // checked against, 0x8013E1A0, a channel not the focus passed over) is in the pad's words their copy keeps.
+    // Their first turn takes the game's as it stands, and at a chapter's start that is player 1's words, opened
+    // with no hold: kept in their copy, their controller's channel was passed over ("standing" whatever the stick)
+    // for good, since a window's closing (0x8013DB94) lets go of the focus only in the game's (Roberto's room 82,
+    // Michael's room 50: player 2 never walked). Back with the game's after the turn (coop_state).
+    static int focus_kept = -1;  // (testing) ED_COOP_P2_FOCUS_KEPT=1: their copy's focus kept, as before
+    if (focus_kept < 0)
+        focus_kept = getenv("ED_COOP_P2_FOCUS_KEPT") != NULL;
+    if (!focus_kept) {
+        const u32 focus = mem_read32(cpu, cpu->gpr[13] - 23556u), checked = mem_read32(cpu, cpu->gpr[13] - 23552u);
+        static u32 told;
+        const u8* g = g_coop_state[0].pad_globals + 48u;  // the game's - 23556 (the words from - 23604)
+        if ((focus | checked) != 0u && (focus | checked) != told && getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] player 2's input had the focus of 0x%08X (checked 0x%08X; the game's 0x%08X): let go for their turn (frame %llu)\n",
+                    focus, checked, (u32)g[0] << 24 | (u32)g[1] << 16 | (u32)g[2] << 8 | g[3],
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        if ((focus | checked) != 0u)
+            told = focus | checked;
+        mem_write32(cpu, cpu->gpr[13] - 23556u, 0u);
+        mem_write32(cpu, cpu->gpr[13] - 23552u, 0u);
     }
     u32 ignore = 0u;
     g_coop_pad_p2 = true;
@@ -12881,7 +15169,12 @@ static void coop_player_turn(CPUState* cpu) {
     const u32 prompt = cpu->gpr[13] - 24040u;
     if (scan)
         coop_bytes(cpu, prompt, p1_prompt, sizeof p1_prompt, true);
-    if (!scan && g_coop_p2_is_player) {
+    // Through player 1's room change their zones aren't looked at, and their B starts nothing: a way out or a scene
+    // would ask for a second room, or play, over the one on its way. Brought along, they look again.
+    if (!scan && g_coop_p2_is_player && room_other) {
+        g_coop_prompt = -1;
+        g_coop_prompt_script = 0;
+    } else if (!scan && g_coop_p2_is_player) {
         coop_prompt_look(cpu, now[0]);
         // Their B with a prompt: its script runs at player 1's controller
         // (coop_use_start).
@@ -12889,17 +15182,49 @@ static void coop_player_turn(CPUState* cpu) {
         const bool b = (g_coop_p2_buttons & 0x0200u) != 0u;
         if (g_coop_use_own && b && !b_was && getenv("ED_COOP_LOG") != NULL)
             fprintf(stderr, "[coop] player 2's B: prompt %d script %d\n", g_coop_prompt, g_coop_prompt_script);
-        if (g_coop_use_own && b && !b_was && g_coop_prompt >= 0 && !coop_door_turns(cpu) &&
+        // Not while their close-up (or the moments after it) has the screen: at 8 fps a second B on a locked door
+        // inside that grace started its use again under their open words, and they slid off on player 1's walk
+        // (run-20261106-002422-jtg-ver-p2exit-ch7).
+        if (g_coop_use_own && b && !b_was && g_coop_prompt >= 0 && !coop_door_turns(cpu) && !g_coop_screen &&
             (g_coop_prompt_script > 0 || g_coop_prompt_script == COOP_PROMPT_CLOSE_UP)) {
-            if (coop_player1_mid_use(cpu)) {
+            if (coop_p2_scene_on()) {
+                // In a scene of their own, as the game has it for the player: no press starts a use.
                 if (getenv("ED_COOP_LOG") != NULL)
-                    fprintf(stderr, "[coop] player 2's press waits for nothing: player 1's look or find is up\n");
+                    fprintf(stderr, "[coop] player 2's press starts nothing: a scene of their own is on\n");
+            } else if (coop_player1_mid_use(cpu)) {
+                coop_press_keep(&g_coop_p2_kept, 2, g_coop_prompt, g_coop_prompt_script, "player 1's look or find is up");
             } else {
+                coop_press_drop(&g_coop_p2_kept, 2, "pressed again");
                 g_coop_use_script = g_coop_prompt_script;
                 g_coop_use_prompt = g_coop_prompt;
             }
         }
         b_was = b;
+        // Their kept B (coop_press_keep): on their prompt still, and nothing of player 1's up for a moment, it's theirs as
+        // a press now is.
+        if (g_coop_p2_kept.on) {
+            CoopPressKept* const kept = &g_coop_p2_kept;
+            if (kept->tickets != g_coop_tickets) {
+                coop_press_drop(kept, 2, "a room was asked for");
+            } else if (g_coop_prompt != kept->prompt || g_coop_prompt_script != kept->script) {
+                kept->free = 0u;
+                if (++kept->gone >= COOP_PRESS_GONE)
+                    coop_press_drop(kept, 2, "they're off that prompt");
+            } else {
+                kept->gone = 0u;
+                if (coop_player1_mid_use(cpu) || coop_p2_scene_on() || g_coop_screen || coop_door_turns(cpu) || g_coop_use.active ||
+                    g_coop_use_script != 0 || g_coop_tome_owner >= 0) {
+                    kept->free = 0u;
+                } else if (++kept->free >= COOP_PRESS_SETTLE) {
+                    kept->on = false;
+                    g_coop_use_script = kept->script;
+                    g_coop_use_prompt = kept->prompt;
+                    if (getenv("ED_COOP_LOG") != NULL)
+                        fprintf(stderr, "[coop] player 2's kept B goes in: prompt %d script %d (frame %llu)\n", kept->prompt, kept->script,
+                                (unsigned long long)(cpu->timebase / 675000ull));
+                }
+            }
+        }
     }
     if (scan && g_coop_p2_is_player && g_coop_scan) {
         u32 info = 0u;
@@ -12919,8 +15244,11 @@ static void coop_player_turn(CPUState* cpu) {
         mem_write32(cpu, threat_at[i], g_coop_threat[i]);
     }
     hle_guest_call(cpu, COOP_THREAT_LOOK, &p2, 1, 0.0, &ignore);
+    // Their quick spells wait through player 1's room change (as player 1's through theirs: coop_quick_cast_ask) and in the
+    // new room until coop_follow brings them (coop_left_behind): cast there, at the old room's numbers, 30 frames after
+    // player 1's room change (logs/run-20261106-092849-jtg-dc3-c12p1-p2cast, frame 4796).
     if (g_coop_p2_is_player)
-        coop_quick_cast(cpu);  // their quick spells, as the player
+        coop_quick_cast(cpu, room_other || coop_left_behind(cpu));  // their quick spells, as the player
     const bool ran = hle_guest_call(cpu, COOP_CONTROLLER, &p2, 1, 0.0, &ignore);
     if (g_coop_p2_is_player)
         coop_camera_step(cpu);
@@ -12964,8 +15292,195 @@ static void coop_player_turn(CPUState* cpu) {
 // player 1 for a threat (on guard with no enemy near).
 #define COOP_SEND_EVENT 0x801F59B0u
 
+static int hurt_log(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_HURT_LOG") != NULL;
+    return on;
+}
+static void hurt_chain(CPUState* cpu, u32 out[3]) {
+    u32 sp = cpu->gpr[1];
+    for (int i = 0; i < 3; i++) {
+        out[i] = 0u;
+        if (!guest_ram_range_valid(cpu, sp, 4u))
+            continue;
+        sp = mem_read32(cpu, sp);
+        out[i] = guest_ram_range_valid(cpu, sp + 4u, 4u) ? mem_read32(cpu, sp + 4u) : 0u;
+    }
+}
+static void hurt_note_damage(CPUState* cpu) {
+    u32 c[3];
+    hurt_chain(cpu, c);
+    const u32 node = cpu->gpr[3];
+    fprintf(stderr, "[hurt] damage node %08X id %u meter %d flags %04X amount %d now %d min %d lr %08X (%08X %08X %08X) cur %u main %u turn %d frame %llu\n", node,
+            guest_ram_range_valid(cpu, node, 20u) ? mem_read32(cpu, node + 16u) : 0u, (s32)cpu->gpr[5], cpu->gpr[6] & 0xFFFFu, (s16)cpu->gpr[7], (s16)cpu->gpr[8],
+            (s16)cpu->gpr[9], cpu->lr, c[0], c[1], c[2], mem_read32(cpu, cpu->gpr[13] - 21496u), mem_read32(cpu, cpu->gpr[13] - 21488u), g_coop_turn,
+            cpu->timebase / 675000ull);
+}
+static void hurt_note_field(CPUState* cpu) {
+    const u32 other = cpu->gpr[5], rec = cpu->gpr[6];
+    fprintf(stderr, "[hurt] field rec %08X other %08X last %d now %d lr %08X cur %u turn %d frame %llu\n", rec, other,
+            guest_ram_range_valid(cpu, rec, 200u) ? (s32)mem_read32(cpu, rec + 196u) : -1, (s32)mem_read32(cpu, cpu->gpr[13] - 22216u), cpu->lr,
+            mem_read32(cpu, cpu->gpr[13] - 21496u), g_coop_turn, cpu->timebase / 675000ull);
+}
+static void hurt_note_later(CPUState* cpu) {
+    if (cpu->gpr[3] != 237u)
+        return;
+    u32 c[3];
+    hurt_chain(cpu, c);
+    fprintf(stderr, "[hurt] later 237 from %u to %u data %08X lr %08X (%08X %08X %08X) cur %u turn %d frame %llu\n", cpu->gpr[4], cpu->gpr[5], cpu->gpr[6], cpu->lr,
+            c[0], c[1], c[2], mem_read32(cpu, cpu->gpr[13] - 21496u), g_coop_turn, cpu->timebase / 675000ull);
+}
+// One body, one finisher. The game's look for someone down to finish (0x800330E0, from the thing look 0x800C030C)
+// asks each body down in the looker's room (state 8 or 9) event 193 (0x8003335C(193, looker, body, 0)): an answer of 0
+// passes it over. FINISH HIM's event 202 (0x800C30CC) takes the body found (the looker's node +40 -> +0 -> +116, an id),
+// puts it in the attack's victim (node +40 -> +140 -> +28, read by the move's hit and end callbacks 0x80032CB0,
+// 0x80032C1C, 0x800C306C) and plays move 65 in state 30. The body stays down (state 8) until the first hit, some 100
+// frames on. Alone, nothing else could ask for it then: the finisher's tick (0x80117260(8, 1)) hides every prompt. With
+// that hiding each player's own (COOP_OWN_BUSY_BITS), the other player was offered the same body and both knelt on it
+// (logs/run-20261106-065401-jtg-vf4-bothB). So a body that the other player's running finisher is on (their state 30,
+// asked or current, and their victim that body) answers the question no, and an event 202 whose body is already
+// theirs (both pressed in one tick) does what the handler does with no body: nothing.
+#define COOP_FINISH_ASK 193u
+#define COOP_FINISH_STATE 30u
+#define COOP_FINISH_START 0x800C30CCu
+static u32 coop_finish_victim(CPUState* cpu, u32 node) {
+    if (node == 0u || !guest_ram_range_valid(cpu, node + 40u, 32u))
+        return 0u;
+    if (mem_read32(cpu, node + 20u) != COOP_FINISH_STATE && mem_read32(cpu, node + 24u) != COOP_FINISH_STATE)
+        return 0u;
+    const u32 data = mem_read32(cpu, node + 40u);
+    const u32 attack = guest_ram_range_valid(cpu, data + 140u, 4u) ? mem_read32(cpu, data + 140u) : 0u;
+    return guest_ram_range_valid(cpu, attack + 28u, 4u) ? mem_read32(cpu, attack + 28u) : 0u;
+}
+// Whether the body (an id) is the victim of a running finisher of a player who is not `who` (an id).
+static bool coop_finish_taken(CPUState* cpu, u32 who, u32 body) {
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || body == 0u || body == ~0u)
+        return false;
+    u32 p1 = 0u;
+    for (u32 n = 0u, i = 0u; i < 1024u && (n = coop_next(cpu, n)) != 0u; i++)
+        if (n != g_coop_p2 && mem_read32(cpu, n + 16u) == g_coop_p1_id) {
+            p1 = n;
+            break;
+        }
+    const u32 players[2] = {p1, g_coop_p2};
+    for (int k = 0; k < 2; k++)
+        if (players[k] != 0u && mem_read32(cpu, players[k] + 16u) != who && coop_finish_victim(cpu, players[k]) == body)
+            return true;
+    return false;
+}
+static int finish_log(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_FIN_LOG") != NULL || getenv("ED_COOP_LOG") != NULL;
+    return on;
+}
+static void coop_finish_start(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const u32 node = cpu->gpr[3];
+    if (fin_trace() && guest_ram_range_valid(cpu, node + 52u, 4u)) {
+        const u32 object = mem_read32(cpu, node + 52u);
+        const int model = guest_ram_range_valid(cpu, object + 580u, 4u) ? (s32)mem_read32(cpu, object + 580u) : -1;
+        g_fin_window = cpu->timebase / 675000ull + 600ull;
+        fprintf(stderr, "[fintrace] FINISH HIM (event 202) for %s, node 0x%08X, model %d, lr 0x%08X\n",
+                g_coop_p2 != 0u && node == g_coop_p2 ? "player 2" : node == coop_player(cpu) ? "player 1" : "another", node, model, cpu->lr);
+        fin_trace_globals(cpu, "FINISH HIM");
+    }
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || !guest_ram_range_valid(cpu, node + 40u, 32u))
+        return;
+    const u32 data = mem_read32(cpu, node + 40u);
+    const u32 look = guest_ram_range_valid(cpu, data, 4u) ? mem_read32(cpu, data) : 0u;
+    const u32 body = guest_ram_range_valid(cpu, look + 116u, 4u) ? mem_read32(cpu, look + 116u) : 0u;
+    if (!coop_finish_taken(cpu, mem_read32(cpu, node + 16u), body))
+        return;
+    if (finish_log())
+        fprintf(stderr, "[coop] %s's FINISH HIM on %u passed over: the other player's finisher is on it (frame %llu)\n",
+                node == g_coop_p2 ? "player 2" : "player 1", body, (unsigned long long)(cpu->timebase / 675000ull));
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+#define FIN_CAMERA_TEST 0x80051D48u
+#define FIN_CAMERA_PUT 0x80051E28u
+#define CAMERA_PUT_ON 0x801ECE90u
+static void fin_trace_camera_name(CPUState* cpu, u32 camera, char* out, size_t n) {
+    out[0] = 0;
+    // The camera found by name (0x801DBC4C): try its name at a few places, printing what is text.
+    static const u32 kAt[] = {0u, 4u, 8u, 12u, 16u};
+    for (size_t k = 0; k < sizeof kAt / sizeof kAt[0] && out[0] == 0; k++) {
+        u32 p = camera + kAt[k];
+        if (k > 0 && guest_ram_range_valid(cpu, camera + kAt[k], 4u))
+            p = mem_read32(cpu, camera + kAt[k]);
+        if (!guest_ram_range_valid(cpu, p, 16u))
+            continue;
+        size_t i = 0;
+        for (; i + 1 < n && i < 31u; i++) {
+            const u8 c = (u8)mem_read8(cpu, p + (u32)i);
+            if (c == 0)
+                break;
+            if (c < 32 || c > 126) {
+                i = 0;
+                break;
+            }
+            out[i] = (char)c;
+        }
+        out[i < 3 ? 0 : i] = 0;
+    }
+}
+static void fin_trace_camera_test(CPUState* cpu) {
+    char name[32];
+    fin_trace_camera_name(cpu, cpu->gpr[3], name, sizeof name);
+    fprintf(stderr, "[fintrace] finish camera tried: 0x%08X '%s' (r4 0x%08X, r5 0x%08X, r6 %u), lr 0x%08X\n", cpu->gpr[3], name, cpu->gpr[4],
+            cpu->gpr[5], cpu->gpr[6], cpu->lr);
+    fin_trace_globals(cpu, "camera tried");
+}
+static void fin_trace_camera_put(CPUState* cpu) {
+    char name[32];
+    fin_trace_camera_name(cpu, cpu->gpr[3], name, sizeof name);
+    fprintf(stderr, "[fintrace] finish camera PUT ON: 0x%08X '%s' (r4 0x%08X, r5 0x%08X), lr 0x%08X, in %s's turn\n", cpu->gpr[3], name, cpu->gpr[4],
+            cpu->gpr[5], cpu->lr, g_coop_turn ? "player 2" : "player 1 / the game");
+    fin_trace_globals(cpu, "camera put on");
+}
+static void fin_trace_camera_on(CPUState* cpu) {
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (frame > g_fin_window)
+        return;
+    char name[32];
+    fin_trace_camera_name(cpu, cpu->gpr[3], name, sizeof name);
+    fprintf(stderr, "[fintrace] a camera put on (0x801ECE90): 0x%08X '%s' r4 0x%08X r5 0x%08X r6 0x%08X r7 0x%08X, lr 0x%08X, %s's turn (frame %llu)\n", cpu->gpr[3],
+            name, cpu->gpr[4], cpu->gpr[5], cpu->gpr[6], cpu->gpr[7], cpu->lr, g_coop_turn ? "player 2" : "player 1 / the game", frame);
+}
+static void fin_trace_install(void) {
+    static const struct { u32 at; HleHandler fn; } kHooks[] = {
+        {FIN_CAMERA_TEST, fin_trace_camera_test}, {FIN_CAMERA_PUT, fin_trace_camera_put}, {CAMERA_PUT_ON, fin_trace_camera_on}};
+    for (size_t i = 0; i < sizeof kHooks / sizeof kHooks[0]; i++) {
+        HleDispatchEntry* e = hle_dispatch_entry(kHooks[i].at);
+        if (e != NULL && e->notify == NULL)
+            e->notify = kHooks[i].fn;
+        else
+            fprintf(stderr, "[fintrace] 0x%08X already watched: not traced\n", kHooks[i].at);
+    }
+}
+
 static void coop_send_event(CPUState* cpu) {
     const u32 event = cpu->gpr[3], from = cpu->gpr[4], to = cpu->gpr[5];
+    if (event == COOP_FINISH_ASK && coop_finish_taken(cpu, from, to)) {
+        static unsigned long long told;
+        const unsigned long long frame = cpu->timebase / 675000ull;
+        if (finish_log() && frame > told + 60ull) {
+            told = frame;
+            fprintf(stderr, "[coop] %u not offered to %u to finish: the other player's finisher is on it (frame %llu)\n", to, from, frame);
+        }
+        cpu->gpr[3] = 0u;
+        cpu->gpr[4] = 0u;
+        return;
+    }
+    if (hurt_log() && (event == 8u || event == 9u || event == 11u || event == 39u || event == 53u || event == 201u || event == 237u)) {
+        u32 c[3];
+        hurt_chain(cpu, c);
+        fprintf(stderr, "[hurt] event %u from %u to %u data %08X lr %08X (%08X %08X %08X) cur %u turn %d frame %llu\n", event, from, to, cpu->gpr[6], cpu->lr, c[0], c[1],
+                c[2], sda_ready(cpu) ? mem_read32(cpu, cpu->gpr[13] - 21496u) : 0u, g_coop_turn, cpu->timebase / 675000ull);
+    }
     if ((event == 59u || event == 239u) && g_coop_p2 != 0u && sda_ready(cpu)) {
         const u32 player = coop_player(cpu);
         if (player != 0u && player != g_coop_p2)
@@ -12977,7 +15492,84 @@ static void coop_send_event(CPUState* cpu) {
             return;
         }
     }
+    // Is it one to go after (event 59: an enemy's threat search, 0x8003230C; a hazard's touch, 0x8014512C; a damage
+    // field's, 0x801CB658)? Not a player the game holds while the other plays on (coop_player_held): alone, the world
+    // stands still for them then. Player 1 read their chapter's first words with an enemy loose, was grabbed and died
+    // (ch11 room 50).
+    if (event == 59u && g_settings.mod_coop && g_coop_p2 != 0u && sda_ready(cpu)) {
+        const int k = coop_player_of_id(cpu, to);
+        if (k >= 0 && coop_player_held(cpu, k)) {
+            static unsigned n;
+            if (n++ < 8u && getenv("ED_COOP_ENEMY_LOG") != NULL)
+                fprintf(stderr, "[coop] player %d is held (words, close-up, Tome): %u's question passed over\n", k + 1, from);
+            cpu->gpr[3] = 0u;
+            cpu->gpr[4] = 0u;
+            return;
+        }
+    }
     g_hle_passthrough = true;
+}
+
+// A hazard's touch (0x80144F38(box, box, thing, ...), a collision's answer: the shield across Alex's room 100) asks the
+// thing touched (event 59) and hurts it by 10 (event 237, 0x801453C4). The player once in 120 frames: r13-23500 is the
+// frame of their last hit, kept for "the player" alone (0x801F62B8, 0x80145164); anyone else on every frame it touches.
+// Player 2, not the player then, took 10 every frame or two, stood in their hurt state and died (ch12, 75 to 0 in 15
+// frames). The one touched is the player for it, with their own last hit's frame: player 2's kept here, player 1's the
+// game's (it is never left with player 2's).
+#define COOP_HAZARD_TOUCH 0x80144F38u
+#define COOP_HAZARD_LAST 23500u
+static u32 g_coop_hazard_last_p2;
+static void coop_hazard_touch(CPUState* cpu) {
+    static bool running;
+    g_hle_passthrough = true;
+    const u32 thing = cpu->gpr[5];
+    if (running || !g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || !guest_ram_range_valid(cpu, thing, 376u) ||
+        !coop_listed(cpu, g_coop_p2))
+        return;
+    // Whom it hurts: the thing, or what it is a part of (+372, 0x80118FAC), as the touch takes it (0x801450E4..0x80145124).
+    const u32 part_of = mem_read32(cpu, thing + 372u), touched = part_of != thing ? part_of : thing;
+    const u32 p2_object = mem_read32(cpu, g_coop_p2 + 52u);
+    const u32 now_node = mem_read32(cpu, cpu->gpr[13] - 21492u);
+    u32 node = 0u;
+    if (touched == p2_object)
+        node = g_coop_p2;
+    else if (now_node == g_coop_p2)  // player 1 touched while player 2 is the player: player 1's node
+        for (u32 n = 0u, i = 0u; i < 1024u && (n = coop_next(cpu, n)) != 0u; i++)
+            if (mem_read32(cpu, n + 16u) == g_coop_p1_id && mem_read32(cpu, n + 52u) == touched) {
+                node = n;
+                break;
+            }
+    if (node == 0u || (node == now_node && node != g_coop_p2))
+        return;  // nobody's, or player 1's as the game has it
+    const u32 who[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+    const u32 as[3] = {mem_read32(cpu, node + 52u), node, mem_read32(cpu, node + 16u)};
+    u32 was[3], args[8], result = 0u;
+    for (int i = 0; i < 3; i++) {
+        was[i] = mem_read32(cpu, who[i]);
+        mem_write32(cpu, who[i], as[i]);
+    }
+    for (int i = 0; i < 8; i++)
+        args[i] = cpu->gpr[3 + i];
+    const u32 last = cpu->gpr[13] - COOP_HAZARD_LAST, p1_last = mem_read32(cpu, last);
+    if (node == g_coop_p2)
+        mem_write32(cpu, last, g_coop_hazard_last_p2);
+    const u32 lr = cpu->lr;
+    running = true;
+    hle_guest_call(cpu, COOP_HAZARD_TOUCH, args, 8, cpu->fpr[1], &result);
+    running = false;
+    cpu->lr = lr;
+    if (node == g_coop_p2) {
+        const u32 after = mem_read32(cpu, last);
+        if (after != g_coop_hazard_last_p2 && getenv("ED_COOP_ENEMY_LOG") != NULL)
+            fprintf(stderr, "[coop] a hazard hurts player 2 (their last hit %u frames before)\n", after - g_coop_hazard_last_p2);
+        g_coop_hazard_last_p2 = after;
+        mem_write32(cpu, last, p1_last);
+    }
+    for (int i = 0; i < 3; i++)
+        mem_write32(cpu, who[i], was[i]);
+    cpu->gpr[3] = result;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
 }
 
 // Through doors together. A character's room is its object's +592 (what the
@@ -12992,6 +15584,42 @@ static void coop_send_event(CPUState* cpu) {
 #define COOP_STATE_ARRIVING 80u
 #define COOP_NODE_HELD_SET 0x801F6828u
 static bool g_coop_door_held;  // held while the game is busy, before a door of theirs let them go on
+
+// The entry marker the game put the one who arrived on (0x80152614: 0x80155348(entry, 2), its index in the room's
+// markers; 0x80151914(index, 2, &heading), its place (three halfwords) and the heading from its +56 and +68 that 0x80124BE4 faces them
+// by). The last room change's (the ticket stays after use: +8 room, +16 flags, +28 entry), for this room. Not one that
+// arrives at a saved place (flags bit 1, 0x80152680), nor a marker the room hasn't got (placing skipped).
+#define COOP_MARKER_FIND 0x80155348u
+#define COOP_MARKER_PLACE 0x80151914u
+static bool coop_place_log(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_COOP_PLACE_LOG") != NULL;
+    return on != 0;
+}
+static bool coop_arrival_marker(CPUState* cpu, u32 room, float place[3], float* heading) {
+    const u32 ticket_room = mem_read32(cpu, COOP_ROOM_TICKET + 8u), flags = mem_read32(cpu, COOP_ROOM_TICKET + 16u);
+    const u32 entry = mem_read32(cpu, COOP_ROOM_TICKET + 28u);
+    const u32 find[2] = {entry, 2u};
+    u32 index = ~0u, at = 0u;
+    const bool ours = ticket_room == room && (flags & 1u) == 0u;
+    const bool listed = ours && hle_guest_call(cpu, COOP_MARKER_FIND, find, 2, 0.0, &index) && (s32)index >= 0;
+    if (coop_place_log())
+        fprintf(stderr, "[coop] place: the ticket's room %u, flags 0x%X, entry %u: marker %d\n", ticket_room, flags, entry, (s32)index);
+    if (!listed)
+        return false;
+    const u32 scratch = (cpu->gpr[1] - 0x700u) & ~15u;
+    if (!guest_ram_range_valid(cpu, scratch, 16u))
+        return false;
+    guest_write_f32(cpu, scratch, NAN);
+    const u32 args[3] = {index, 2u, scratch};
+    if (!hle_guest_call(cpu, COOP_MARKER_PLACE, args, 3, 0.0, &at) || !guest_ram_range_valid(cpu, at, 6u))
+        return false;
+    for (u32 i = 0; i < 3u; i++)  // whole numbers, as 0x8016E764 reads them (lha, 0x801519B0)
+        place[i] = (float)(s16)mem_read16(cpu, at + i * 2u);
+    *heading = guest_read_f32(cpu, scratch);
+    return isfinite(*heading) && isfinite(place[0]) && isfinite(place[1]) && isfinite(place[2]);
+}
 
 static void coop_follow(CPUState* cpu, u32 player) {
     const u32 o1 = mem_read32(cpu, player + 52u), o2 = mem_read32(cpu, g_coop_p2 + 52u);
@@ -13041,7 +15669,7 @@ static void coop_follow(CPUState* cpu, u32 player) {
         const unsigned long long frame = cpu->timebase / 675000ull;
         if ((fallen || (inside >= 60u && frame >= retry)) && !cutscene_playing(cpu)) {
             float at[3];
-            coop_place(cpu, o1, at);
+            coop_place(cpu, o1, o2, at);
             const float ax = at[0] - guest_read_f32(cpu, o1), ay = at[1] - guest_read_f32(cpu, o1 + 4u);
             if (!fallen && ax * ax + ay * ay < COOP_INSIDE * COOP_INSIDE) {
                 retry = frame + 600u;
@@ -13053,12 +15681,27 @@ static void coop_follow(CPUState* cpu, u32 player) {
             fprintf(stderr, "[coop] player 2 %s (at %.0f, stood at %.0f): beside player 1, at %.0f %.0f %.0f\n",
                     fallen ? "fell out of the room" : "stood inside player 1", z2, stood_z, at[0], at[1], at[2]);
             stood_z = at[2];
+            // Put there, as one brought along is: their first look counts what they stand in as come into.
+            g_follow_fresh = 2;
+            g_follow_fresh_until = frame + 3600ull;
             inside = 0u;
         }
         return;
     }
-    float at[3];
-    coop_place(cpu, o1, at);
+    float at[3], mark[3] = {0.0f, 0.0f, 0.0f}, heading = NAN;
+    // Beside the arrival spot as the game faces the one who arrived there: its entry marker's heading. Player 1's
+    // object, which the game put there in a room change of player 2's, has walked and turned since (they go on through
+    // its fade), and along their facing the follower was put into room 158's way back.
+    // Only a marker by the one there: a script after arrival may have put them elsewhere.
+    const bool found = coop_arrival_marker(cpu, room, mark, &heading);
+    const float mx = found ? mark[0] - guest_read_f32(cpu, o1) : 0.0f, my = found ? mark[1] - guest_read_f32(cpu, o1 + 4u) : 0.0f;
+    const bool marked = found && mx * mx + my * my < COOP_SPAWN_DISTANCE * COOP_SPAWN_DISTANCE;
+    if (coop_place_log())
+        fprintf(stderr, "[coop] place: arrival in room %u at frame %llu, the one there at %.0f %.0f %.0f facing %.2f; marker %s %.0f %.0f %.0f heading %.2f\n",
+                room, (unsigned long long)(cpu->timebase / 675000ull), guest_read_f32(cpu, o1), guest_read_f32(cpu, o1 + 4u),
+                guest_read_f32(cpu, o1 + 8u), 2.0f * atan2f(guest_read_f32(cpu, o1 + 52u), guest_read_f32(cpu, o1 + 56u)),
+                marked ? "at" : found ? "too far, at" : "not found", mark[0], mark[1], mark[2], heading);
+    coop_place_facing(cpu, o1, g_coop_entered_p2 ? o1 : o2, marked ? &heading : NULL, at);  // whoever goes beside the arrival spot
     for (u32 i = 0; i < 3u; i++) {
         // They asked for the room: its arrival spot is theirs, what plays there framed on it.
         const float arrival = guest_read_f32(cpu, o1 + i * 4u);
@@ -13073,6 +15716,8 @@ static void coop_follow(CPUState* cpu, u32 player) {
     u32 ignore = 0u;
     hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, args, 2, 0.0, &ignore);
     g_coop_arrived = true;
+    g_follow_fresh = g_coop_entered_p2 ? 1 : 2;
+    g_follow_fresh_until = cpu->timebase / 675000ull + 3600ull;
     g_coop_show_kept = false;
     g_coop_unseen_out_of = -1;
     g_coop_door_turns_until = 0ull;
@@ -13224,16 +15869,17 @@ static void coop_as_player2(CPUState* cpu, u32 fn) {
 }
 
 // A script's asking for a room plays its motion on whoever is the player
-// (0x801669AC(motion): event 253 to them; 25 a door, from 0x801666A4): player 1,
-// the script being run as theirs so the rooms load round them, whoever opened
-// it. The one who opened it goes through it.
+// (0x801669AC(motion): event 253 to them; 25 a door, from 0x801666A4): player 1
+// when the script goes on as the game's (a wait's end), whoever opened it. The
+// one who opened it goes through it.
 #define COOP_DOOR_MOTION 0x801669ACu
 #define COOP_DOOR_FADE 120u  // frames at most: a door's fade is 60
 
 static void coop_door_motion(CPUState* cpu) {
     const unsigned long long frame = cpu->timebase / 675000ull;
     const bool theirs = g_coop_door_p2_until != 0ull && frame <= g_coop_door_p2_until && g_settings.mod_coop &&
-                        g_coop_p2 != 0u && sda_ready(cpu);
+                        g_coop_p2 != 0u && sda_ready(cpu) &&
+                        (s32)(s16)mem_read32(cpu, cpu->gpr[13] - 23228u) == g_coop_exit_p2_script;
     g_coop_door_p2_until = 0ull;  // once: not for this call again, nor player 1's next door
     if (!theirs) {
         g_hle_passthrough = true;
@@ -13257,6 +15903,7 @@ static void coop_door_motion(CPUState* cpu) {
 // event 147, whose answer is the prompt: 22, script 1902): only ever player 1.
 // It looks for player 2 too, with them the player and their prompts in.
 #define COOP_TALK_CHECK 0x80091F0Cu
+static bool g_coop_talk_running;  // its look for player 2 is running, with their prompts in
 
 static void coop_talk_check(CPUState* cpu) {
     static bool running;
@@ -13289,7 +15936,9 @@ static void coop_talk_check(CPUState* cpu) {
         mem_write32(cpu, who[i], now[i]);
     }
     running = true;
+    g_coop_talk_running = true;
     hle_guest_call(cpu, COOP_TALK_CHECK, args, 8, cpu->fpr[1], &ignore);
+    g_coop_talk_running = false;
     running = false;
     for (int i = 0; i < 3; i++)
         mem_write32(cpu, who[i], was[i]);
@@ -13318,10 +15967,175 @@ static void coop_sighting(CPUState* cpu) {
 static void coop_seen_shared(CPUState* cpu);
 static bool g_coop_seen_p2;
 
+// Player 2's own words for what their character answers outside their turn. The player's behaviour (0x80058DD8: each
+// state's handler, every frame's ticks among them) is run for player 2's character by the game's update, between their
+// turns, with player 1's words in: the attack block (channel 3's context, 0x8122A5A0, which r13-25656 names, 0x800460DC),
+// the controller's words (r13-25680..), the pad's (r13-23604.., with the input's lock r13-23592), and r13-24048's bit 8
+// (a finishing move's every frame: no prompts while set, 0x800084DC). Player 2's FINISH HIM (event 202, 0x800C30CC) so
+// built its stab's hits from player 1's attack block (from player 1, at player 1's victim: no one was finished, and the
+// move's end never came back to player 2, who stayed in state 30 for good), and locked player 1's input for the move's
+// length (0x800443E4: player 1 stood 200 to 330 frames). Theirs are in for it, as in their turn (coop_state), kept for
+// their next turn, and player 1's back after.
+#define COOP_OWN_BUSY_BITS 8u          // r13-24048's bits each player keeps (2, 4 and 32 are the holds')
+static CoopPlayerState g_coop_events_p1;  // player 1's words, while player 2's are in for an answer
+static bool g_coop_events_own;            // player 2's words are in (coop_events)
+static bool g_coop_events_call;           // the call made here, at its start
+static u32 g_coop_p2_busy_bits;           // player 2's bits of r13-24048
+static bool coop_events_log(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_FIN_LOG") != NULL || getenv("ED_COOP_EVENTS_LOG") != NULL;
+    return on != 0;
+}
+static void coop_events_words(CPUState* cpu, bool in) {
+    const u32 at = cpu->gpr[13] - 24048u;
+    static u32 p1_bits;
+    const u32 word = mem_read32(cpu, at);
+    if (in) {
+        coop_state(cpu, &g_coop_events_p1, true);
+        coop_state(cpu, &g_coop_state[1], false);
+        p1_bits = word & COOP_OWN_BUSY_BITS;
+        mem_write32(cpu, at, (word & ~COOP_OWN_BUSY_BITS) | g_coop_p2_busy_bits);
+    } else {
+        coop_state(cpu, &g_coop_state[1], true);
+        coop_state(cpu, &g_coop_events_p1, false);
+        if (coop_events_log() && (word & COOP_OWN_BUSY_BITS) != g_coop_p2_busy_bits)
+            fprintf(stderr, "[fin] player 2's bit 8 of r13-24048 %s, theirs (frame %llu)\n", (word & COOP_OWN_BUSY_BITS) != 0u ? "on" : "off",
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        g_coop_p2_busy_bits = word & COOP_OWN_BUSY_BITS;
+        mem_write32(cpu, at, (mem_read32(cpu, at) & ~COOP_OWN_BUSY_BITS) | p1_bits);
+    }
+}
+
+// Player 2's own prompts for what their character asks as its behaviour runs outside their turn. A behaviour asks for
+// its prompt in its tick (event 3), into the game's six (0x80117404): the enemy's grab (kind 19, 0x80060EC8) asks
+// BREAK FREE (20, button 6, slot 1) each tick of its state 28 (0x80061A64) when the one held is a player (+158, the
+// stick's sector changes counting through event 44, 0x80060DC4), and kind 2's states 52, 56, 67 and 69 ask PUSH OFF and
+// BREAK FREE the same way; the grab blocks all six as it starts and frees them as its state 26 ends (0x80117960(1) at
+// 0x80060F8C, (0) at 0x80061840). Player 2's ran with player 1's six in: their BREAK FREE was player 1's prompt, drawn
+// in player 1's half, none was in theirs, and player 2's grab blocked player 1's zones' prompts. Theirs are in for it,
+// as their look has them (coop_prompt_look, which chooses from them in their turn), and player 1's back after. Not while
+// their look or talk check has theirs in already, nor in their close-up (the game's are the close-up's then).
+static bool g_coop_p2_asks;  // player 2's six are in for their character's own asks
+static bool coop_p2_asks_in(CPUState* cpu, u8* p1s) {
+    if (g_coop_p2_asks || g_coop_prompt_look || g_coop_talk_running || g_coop_screen)
+        return false;
+    if (!g_coop_prompt_slots_set)
+        coop_prompt_slots_clear();
+    coop_bytes(cpu, PROMPT_SLOTS, p1s, PROMPT_SLOTS_SIZE, true);
+    coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, PROMPT_SLOTS_SIZE, false);
+    g_coop_p2_asks = true;
+    return true;
+}
+static void coop_p2_asks_out(CPUState* cpu, u8* p1s) {
+    coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, PROMPT_SLOTS_SIZE, true);
+    coop_bytes(cpu, PROMPT_SLOTS, p1s, PROMPT_SLOTS_SIZE, false);
+    g_coop_p2_asks = false;
+}
+static bool coop_grab_log(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_GRAB_LOG") != NULL;
+    return on != 0;
+}
+
+// Whether a close-up of player 2's runs on the game's input, outside their turn: their close-up or words have the game's
+// pad (g_coop_screen; behind player 1's Tome, g_coop_p2_behind_tome; or one on its way, their use's press with the game
+// busy, g_coop_assist_at). Their character's events answer in the game's then, as everything else of their close-up
+// does (and as before coop_events): the words' or find's own channel and focus are in it, and what closes them takes
+// them out of it.
+static bool coop_p2_input_in_game(CPUState* cpu) {
+    return g_coop_screen || g_coop_p2_behind_tome || (g_coop_assist_at != 0u && coop_busy(cpu) && !g_coop_p1_look);
+}
+
+// A window that one of player 2's events opened in a use of theirs (coop_use_start: FINISH HIM's script 2244, a find's
+// 2246) with their words in (coop_events), taking the input's focus: their close-up, which goes on on the game's pad
+// (coop_menu_input), so its input is the game's. The find's event 71 (Max's DESK, script 2246, a find with no close-up
+// camera) opens the words and registers their input channel (handler 0x80024434) and the focus (r13-23556) in the input
+// it finds: player 2's copy. The game's kept the in-play channel, the words never had the pad, and each B of theirs on
+// them was the game's prompt use (0x80006EBC) as player 1's: never closed (logs/run-20261106-124737-jtg-ev-c5bp-log1,
+// frame 3161). What the event changed in the input's channels and the pad's words goes to the game's (g_coop_events_p1,
+// put back after), where the game alone has it, and player 2's copy keeps what it had. A word the game's has otherwise
+// is left (and told).
+#define COOP_INPUT_CHANNELS 176u  // COOP_INPUT's channels, after the pads
+#define COOP_PAD_FOCUS 48u        // r13-23556 in CoopPlayerState's pad_globals (from r13-23604)
+static void coop_events_window(CPUState* cpu, const u8* in_was, const u8* pad_was) {
+    u8 in_now[COOP_INPUT_SIZE], pad_now[sizeof g_coop_events_p1.pad_globals];
+    coop_bytes(cpu, COOP_INPUT, in_now, COOP_INPUT_SIZE, true);
+    coop_bytes(cpu, cpu->gpr[13] - 23604u, pad_now, sizeof pad_now, true);
+    unsigned moved = 0u, left = 0u;
+    for (u32 i = COOP_INPUT_CHANNELS; i + 4u <= COOP_INPUT_SIZE; i += 4u) {
+        if (memcmp(in_now + i, in_was + i, 4u) == 0)
+            continue;
+        if (memcmp(g_coop_events_p1.input + i, in_was + i, 4u) == 0) {
+            memcpy(g_coop_events_p1.input + i, in_now + i, 4u);
+            moved++;
+        } else {
+            left++;
+        }
+    }
+    for (u32 i = 0u; i + 4u <= sizeof pad_now; i += 4u) {
+        if (memcmp(pad_now + i, pad_was + i, 4u) == 0)
+            continue;
+        if (memcmp(g_coop_events_p1.pad_globals + i, pad_was + i, 4u) == 0 || i == COOP_PAD_FOCUS) {
+            memcpy(g_coop_events_p1.pad_globals + i, pad_now + i, 4u);
+            moved++;
+        } else {
+            left++;
+        }
+    }
+    coop_bytes(cpu, COOP_INPUT + COOP_INPUT_CHANNELS, (u8*)in_was + COOP_INPUT_CHANNELS, COOP_INPUT_SIZE - COOP_INPUT_CHANNELS, false);
+    coop_bytes(cpu, cpu->gpr[13] - 23604u, (u8*)pad_was, sizeof pad_now, false);
+    if (coop_events_log() || coop_room_change_log())
+        fprintf(stderr, "[coop] a window of player 2's use took the input: %u words to the game's input, %u left as the game had them (frame %llu)\n",
+                moved, left, (unsigned long long)(cpu->timebase / 675000ull));
+}
+
 static void coop_events(CPUState* cpu) {
     const u32 node = cpu->gpr[3], message = cpu->gpr[5];
-    if (!g_coop_seen_p2)  // not again for the call made here
+    const bool again = g_coop_events_call;  // the call made below, at its start
+    g_coop_events_call = false;
+    if (!g_coop_seen_p2 && !again)  // not again for the call made here
         coop_seen_shared(cpu);
+    if (!again && !g_coop_events_own && !g_coop_turn && g_coop_p2_state && g_settings.mod_coop && g_coop_p2 != 0u && node == g_coop_p2 &&
+        sda_ready(cpu) && !coop_p2_input_in_game(cpu)) {
+        u32 args[8], result = 0u;
+        for (int i = 0; i < 8; i++)
+            args[i] = cpu->gpr[3 + i];
+        static int log_left = 400;
+        const u32 event = guest_ram_range_valid(cpu, message, 4u) ? mem_read32(cpu, message) : 0u;
+        if (coop_events_log() && event != 1u && log_left > 0) {
+            log_left--;
+            fprintf(stderr, "[fin] player 2's event %u in state %u answered in their words, lr 0x%08X (frame %llu)\n", event, cpu->gpr[4], cpu->lr,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        }
+        coop_events_words(cpu, true);
+        // In a use of theirs: what their input was, for a window the event may open (coop_events_window).
+        const bool use = coop_use_theirs() || g_coop_assist_at != 0u;
+        static u8 in_was[COOP_INPUT_SIZE], pad_was[sizeof g_coop_events_p1.pad_globals];
+        const u32 focus = cpu->gpr[13] - 23604u + COOP_PAD_FOCUS, focus_was = mem_read32(cpu, focus);
+        if (use) {
+            coop_bytes(cpu, COOP_INPUT, in_was, COOP_INPUT_SIZE, true);
+            coop_bytes(cpu, cpu->gpr[13] - 23604u, pad_was, sizeof pad_was, true);
+        }
+        g_coop_events_own = true;
+        g_coop_events_call = true;
+        static u8 p1s[PROMPT_SLOTS_SIZE];
+        const bool asks = event == 3u && coop_p2_asks_in(cpu, p1s);
+        hle_guest_call(cpu, COOP_EVENTS, args, 8, cpu->fpr[1], &result);
+        if (asks)
+            coop_p2_asks_out(cpu, p1s);
+        g_coop_events_call = false;
+        g_coop_events_own = false;
+        const u32 focus_now = mem_read32(cpu, focus);
+        if (use && focus_now != focus_was && focus_now != 0u)
+            coop_events_window(cpu, in_was, pad_was);
+        coop_events_words(cpu, false);
+        cpu->gpr[3] = result;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
     if (g_coop_seen_p2 || !g_settings.mod_coop || g_coop_p2 == 0u || node != g_coop_p2 || !sda_ready(cpu) ||
         !guest_ram_range_valid(cpu, message, 4u) || mem_read32(cpu, message) != COOP_SEEN_EVENT) {
         g_hle_passthrough = true;
@@ -13330,6 +16144,291 @@ static void coop_events(CPUState* cpu) {
     g_coop_seen_p2 = true;
     coop_as_player2(cpu, COOP_EVENTS);
     g_coop_seen_p2 = false;
+}
+
+// The finisher's close-up camera (Finishcam01 to 03), each player's own. A finishing move's state 30 (0x80051F0C), and
+// states 74 (0x80052384) and 84 (0x80054E70, the autopsy), put it on at their event 1 and take it off at their event 2:
+// event 1 counts r13-30420 down (always, 0x80051F84; it starts at 1 in the DOL and nothing resets it), and with no
+// close-up on (r13-25580 == 0), the count at 0 or below, no engaged enemy near the body (0x8003A1D0) and a room not in
+// the 62 at 0x80243850 (0x80051C00), tries up to three of the finisher's own cameras by name from r13-25584 (01, 02, 03,
+// moving on at each try). A camera that sees them (0x80051D48: 0x80134FB8, 0x80135368 with them put at the finish spot)
+// is put on with 0x80051E28 -> 0x801ECE90 (a push on the camera's stack, eye and target records 3 following them), the
+// flag goes to -1 and the count to 4..6 (rand). Event 2 pops it (0x801ECE3C) when the flag is -1, and clears the flag.
+// 0x80021648 (the start of play) sets the flag and the next-of-three to 0.
+// In co-op the three words and the camera set were one: player 2's finisher's close-up was pushed on player 1's stack
+// (player 2's node answers outside their turn, coop_events, with the game's set in), shown in player 1's half aimed
+// at player 1 once coop_cameras_own turned it to them, and their state 30's end popped player 1's stack. Each counted
+// the other's finishers down. Now each player has their own: player 1's are the game's words and set; player 2's are
+// copies (g_fin_p2_words, {1, 0, 0} as the DOL's, flag and next-of-three cleared where the game clears its own) and
+// their camera set (g_coop_cameras.p2). The finisher's are in for their event 1 and 2, whoever's turn and whoever's set
+// is in memory (player 2's while lent to their close-up, g_coop_cameras.lent: player 1's are then g_coop_cameras.p1),
+// and the game's put back after.
+#define FIN_STATE_30 0x80051F0Cu
+#define FIN_STATE_74 0x80052384u
+#define FIN_STATE_84 0x80054E70u
+#define FIN_PLAY_START 0x80021648u
+#define FIN_CAMERA_SEES FIN_CAMERA_TEST  // 0x80051D48(name hash, node, object, 1): 0 when that camera sees them
+static const u32 kFinWords[3] = {30420u, 25580u, 25584u};  // r13 - : the count, the close-up on (-1), the next of three
+static s32 g_fin_p2_words[3] = {1, 0, 0};
+static bool g_fin_call;       // the call made in coop_finish_camera, at its start
+static bool g_fin_body_call;  // the call made in coop_finish_body, at its start
+static void fin_words_swap(CPUState* cpu, s32* keep, const s32* put) {
+    for (u32 i = 0u; i < 3u; i++) {
+        keep[i] = (s32)mem_read32(cpu, cpu->gpr[13] - kFinWords[i]);
+        mem_write32(cpu, cpu->gpr[13] - kFinWords[i], (u32)put[i]);
+    }
+}
+// A body's cameras (+132 how many, +136 the eye's entries of 120 bytes: +52 the name's hash, +56 the name).
+static bool fin_body_has(CPUState* cpu, u32 body, u32 hash) {
+    if (!guest_ram_range_valid(cpu, body, 148u))
+        return false;
+    const u32 n = mem_read16(cpu, body + 132u), list = mem_read32(cpu, body + 136u);
+    for (u32 i = 0u; i < n && i < 64u; i++)
+        if (guest_ram_range_valid(cpu, list + i * 120u + 52u, 4u) && mem_read32(cpu, list + i * 120u + 52u) == hash)
+            return true;
+    return false;
+}
+static void fin_trace_body(CPUState* cpu, const char* what, u32 body) {
+    if (!guest_ram_range_valid(cpu, body, 148u)) {
+        fprintf(stderr, "[fincam] %s body 0x%08X: none\n", what, body);
+        return;
+    }
+    const u32 n = mem_read16(cpu, body + 132u), list = mem_read32(cpu, body + 136u);
+    char names[256];
+    int at = 0;
+    names[0] = 0;
+    for (u32 i = 0u; i < n && i < 12u && at < 200; i++) {
+        const u32 e = list + i * 120u;
+        char name[24];
+        u32 k = 0u;
+        for (; guest_ram_range_valid(cpu, e + 56u, 24u) && k < 23u; k++) {
+            const u8 c = (u8)mem_read8(cpu, e + 56u + k);
+            if (c < 32u || c > 126u)
+                break;
+            name[k] = (char)c;
+        }
+        name[k] = 0;
+        at += snprintf(names + at, sizeof names - (size_t)at, " %s(0x%08X)", name,
+                       guest_ram_range_valid(cpu, e + 52u, 4u) ? mem_read32(cpu, e + 52u) : 0u);
+    }
+    fprintf(stderr, "[fincam] %s body 0x%08X: %u cameras:%s\n", what, body, n, names);
+}
+static void coop_finish_camera(CPUState* cpu, u32 fn) {
+    g_hle_passthrough = true;
+    if (g_fin_call) {
+        g_fin_call = false;
+        return;
+    }
+    const u32 node = cpu->gpr[3], message = cpu->gpr[4];
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || !guest_ram_range_valid(cpu, message, 4u))
+        return;
+    const u32 event = mem_read32(cpu, message);
+    if (event != 1u && event != 2u)
+        return;
+    const int who = node == g_coop_p2 ? 2 : 1;
+    // Whose set is in memory: player 2's in their close-up (lent) and their look; player 1's (the game's) otherwise.
+    // In a camera step (g_coop_own_step) it is left as it is.
+    const int in = g_coop_own_step ? 0 : g_coop_cameras.lent || g_coop_prompt_look ? 2 : 1;
+    const bool swap = in != 0 && in != who && !(who == 1 && g_coop_prompt_look);
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (fin_trace()) {
+        fprintf(stderr, "[fincam] state %s event %u for player %d (node 0x%08X): %s, %s set in memory%s%s; words %d %d %d, theirs %d %d %d, depth %d (frame %llu)\n",
+                fn == FIN_STATE_30 ? "30" : fn == FIN_STATE_74 ? "74" : "84", event, who, node,
+                g_coop_turn ? "in player 2's turn" : g_coop_events_own ? "their words in (coop_events)" : "the world's",
+                in == 0 ? "a camera step's" : in == 2 ? "player 2's" : "player 1's", g_coop_cameras.lent ? " (lent)" : "",
+                swap ? ", theirs put in" : "", (s32)mem_read32(cpu, cpu->gpr[13] - kFinWords[0]), (s32)mem_read32(cpu, cpu->gpr[13] - kFinWords[1]),
+                (s32)mem_read32(cpu, cpu->gpr[13] - kFinWords[2]), g_fin_p2_words[0], g_fin_p2_words[1], g_fin_p2_words[2],
+                (s32)mem_read32(cpu, cpu->gpr[13] - CAMERA_DEPTH), frame);
+        if (event == 1u && guest_ram_range_valid(cpu, node + 52u, 4u)) {
+            const u32 object = mem_read32(cpu, node + 52u);
+            const u32 body = guest_ram_range_valid(cpu, object, 64u) ? mem_read32(cpu, object + 60u) : 0u;
+            const Costume* c = guest_ram_range_valid(cpu, object, 64u) ? costume_object(cpu, object) : NULL;
+            fin_trace_body(cpu, c != NULL ? c->name : "the finisher's", body);
+            if (c != NULL)
+                fin_trace_body(cpu, "and the wearer's own", g_costume_plain[c->place]);
+        }
+    }
+    if (!swap && who == 1)
+        return;
+    u8 kept[COOP_CAMERA_SET];
+    s32 game_words[3];
+    if (swap) {
+        coop_camera_set_io(cpu, kept, true);
+        if (who == 2)
+            coop_camera_p2_in(cpu);
+        else
+            coop_camera_set_io(cpu, g_coop_cameras.p1, false);
+    }
+    if (who == 2)
+        fin_words_swap(cpu, game_words, g_fin_p2_words);
+    u32 args[8], result = 0u;
+    for (int i = 0; i < 8; i++)
+        args[i] = cpu->gpr[3 + i];
+    g_fin_call = true;
+    hle_guest_call(cpu, fn, args, 8, cpu->fpr[1], &result);
+    g_fin_call = false;
+    if (who == 2)
+        fin_words_swap(cpu, g_fin_p2_words, game_words);
+    if (fin_trace())
+        fprintf(stderr, "[fincam] after it: player %d's words %d %d %d, their depth %d, index %d (frame %llu)\n", who,
+                who == 2 ? g_fin_p2_words[0] : (s32)mem_read32(cpu, cpu->gpr[13] - kFinWords[0]),
+                who == 2 ? g_fin_p2_words[1] : (s32)mem_read32(cpu, cpu->gpr[13] - kFinWords[1]),
+                who == 2 ? g_fin_p2_words[2] : (s32)mem_read32(cpu, cpu->gpr[13] - kFinWords[2]),
+                (s32)mem_read32(cpu, cpu->gpr[13] - CAMERA_DEPTH), (s32)mem_read32(cpu, cpu->gpr[13] - CAMERA_INDEX), frame);
+    if (swap) {
+        if (who == 2) {
+            coop_camera_set_io(cpu, g_coop_cameras.p2, true);
+            g_coop_cameras.p2_set = true;
+        } else {
+            coop_camera_set_io(cpu, g_coop_cameras.p1, true);
+        }
+        coop_camera_set_io(cpu, kept, false);
+    }
+    cpu->gpr[3] = result;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+static void coop_finish_camera_30(CPUState* cpu) { coop_finish_camera(cpu, FIN_STATE_30); }
+static void coop_finish_camera_74(CPUState* cpu) { coop_finish_camera(cpu, FIN_STATE_74); }
+static void coop_finish_camera_84(CPUState* cpu) { coop_finish_camera(cpu, FIN_STATE_84); }
+static void coop_finish_play_start(CPUState* cpu) {
+    (void)cpu;
+    g_fin_p2_words[1] = 0;
+    g_fin_p2_words[2] = 0;
+}
+// A finisher in a form: the close-up's cameras are their body's (+132, +136: 0x80134FB8 and 0x801EE998 look them up by
+// name in object +60). A form's body that has none of them (it is another character's, made for a scene) gave every
+// try a miss, and a player in it never had a close-up. Its wearer's own body (g_costume_plain, kept loaded for its
+// moves and size) has their character's: the look (0x80051D48) and the put (0x80051E28) are asked with it at +60, and
+// the form's put back after the call, so the form is still what is drawn. The records keep the camera's entries they
+// were made from (0x801EE43C), so the close-up stays their character's.
+static void coop_finish_body(CPUState* cpu, u32 fn) {
+    g_hle_passthrough = true;
+    if (g_fin_body_call) {
+        g_fin_body_call = false;
+        return;
+    }
+    const u32 hash = cpu->gpr[3], object = cpu->gpr[5];
+    if (!guest_ram_range_valid(cpu, object, 64u))
+        return;
+    const Costume* c = costume_object(cpu, object);
+    if (c == NULL)
+        return;
+    const u32 body = mem_read32(cpu, object + 60u), plain = g_costume_plain[c->place];
+    if (plain == 0u || plain == body || fin_body_has(cpu, body, hash) || !fin_body_has(cpu, plain, hash))
+        return;
+    u32 args[8], result = 0u;
+    for (int i = 0; i < 8; i++)
+        args[i] = cpu->gpr[3 + i];
+    mem_write32(cpu, object + 60u, plain);
+    g_fin_body_call = true;
+    hle_guest_call(cpu, fn, args, 8, cpu->fpr[1], &result);
+    g_fin_body_call = false;
+    mem_write32(cpu, object + 60u, body);
+    if (fin_trace())
+        fprintf(stderr, "[fincam] %s's form has no camera 0x%08X: %s with their own body's: %u (frame %llu)\n", c->name, hash,
+                fn == FIN_CAMERA_SEES ? "looked" : "put on", result, (unsigned long long)(cpu->timebase / 675000ull));
+    cpu->gpr[3] = result;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+static void coop_finish_body_sees(CPUState* cpu) { coop_finish_body(cpu, FIN_CAMERA_SEES); }
+static void coop_finish_body_put(CPUState* cpu) { coop_finish_body(cpu, FIN_CAMERA_PUT); }
+static void coop_finish_camera_install(CPUState* cpu) {
+    static const struct {
+        u32 at, first;
+        HleHandler fn;
+        bool notify;
+    } kHooks[] = {
+        {FIN_STATE_30, 0x9421FF90u, coop_finish_camera_30, false}, {FIN_STATE_74, 0x9421FFD0u, coop_finish_camera_74, false},
+        {FIN_STATE_84, 0x9421FFC0u, coop_finish_camera_84, false}, {FIN_PLAY_START, 0x9421FFD0u, coop_finish_play_start, true},
+        {FIN_CAMERA_SEES, 0x9421FFC0u, coop_finish_body_sees, false}, {FIN_CAMERA_PUT, 0x9421FFC0u, coop_finish_body_put, false}};
+    for (size_t i = 0; i < sizeof kHooks / sizeof kHooks[0]; i++) {
+        HleDispatchEntry* e = hle_dispatch_entry(kHooks[i].at);
+        if (e != NULL && mem_read32(cpu, kHooks[i].at) == kHooks[i].first && (kHooks[i].notify ? e->notify : e->intercept) == NULL) {
+            if (kHooks[i].notify)
+                e->notify = kHooks[i].fn;
+            else
+                e->intercept = kHooks[i].fn;
+        } else {
+            fprintf(stderr, "[coop] the finish close-up's 0x%08X not found: that part of it stays shared\n", kHooks[i].at);
+        }
+    }
+}
+
+// The player's behaviour while an enemy holds them (kind 19, fn(node, state, message, answer); registered at
+// 0x80030E14): event 1 starts it in state 26 (seized), whose end (the motion 37, event 35) is state 28 (held). State
+// 28's tick asks BREAK FREE when the one held is a player and, without one, counts for them every 8th frame; event 44,
+// the controller's each frame the stick is pushed (0x80046004, with the control block), counts its sector changes
+// (0x80060DC4 into actor +140 -> +357), and at 8 they break free (event 37: motion 39, state 123, then the behaviour they
+// had, +140 -> +24). The enemy's hits come as event 39 (0x80060188). The controller's events come in the turn, at once
+// (0x801F59B0 -> 0x801F5000 answers an event that isn't for later then and there), so player 2's own stick counts for
+// them. The rest (the start, the ticks, the hits) comes from the world's update, outside their turn: that runs here with
+// their words in, as coop_events has them for kind 2, and their prompts (coop_p2_asks_in).
+#define COOP_GRAB_EVENTS 0x80060EC8u
+static void coop_grab_events(CPUState* cpu) {
+    static bool running;
+    static u32 answering;  // the message the call made here answers (it comes back through here first)
+    const u32 node = cpu->gpr[3];
+    g_hle_passthrough = true;
+    g_hle_tail_call = false;
+    const u32 message = cpu->gpr[5];
+    const u32 event = guest_ram_range_valid(cpu, message, 4u) ? mem_read32(cpu, message) : 0u;
+    // ED_GRAB_LOG (testing, reads only): each player's held behaviour's events but the every-frame ones (3, 4, 44, 45),
+    // from whom, in which state, and whose turn.
+    if (coop_grab_log() && event != 3u && event != 4u && event != 44u && event != 45u && g_coop_p2 != 0u && sda_ready(cpu) &&
+        !(running && message == answering) &&
+        (node == g_coop_p2 || node == (g_coop_turn ? g_coop_turn_p1 : mem_read32(cpu, cpu->gpr[13] - 21492u))))
+        fprintf(stderr, "[grab] player %d's held behaviour: event %u from %u in state %u (%s%s, frame %llu)\n", node == g_coop_p2 ? 2 : 1,
+                event, guest_ram_range_valid(cpu, message, 8u) ? mem_read32(cpu, message + 4u) : 0u, cpu->gpr[4],
+                g_coop_turn ? "player 2's turn" : "the world's", running ? ", within" : "", (unsigned long long)(cpu->timebase / 675000ull));
+    // The game's busy set (0x801556CC) tells everyone but the player who set it to hold (event 102, 0x801F5620, from the
+    // player), and the held behaviour lets go of whoever it holds for any event 102 (0x80061148: event 38 to the grabber
+    // and to itself). Alone, the one held never hears it: they are the player who sets it. Here the other player's
+    // examine, pick up, words or scene reached them, and freed them from the grab (player 1's B on WeaponsRegion02 freed a
+    // held player 2, logs/run-20261106-114633-jtg-vg-p2held2-fh 4761 and 5281): one player's busy holds nobody else
+    // (coop_busy_ask). Theirs is passed over, as handled (the handler's answer, 1). Not for a room change of the other's
+    // (its ticket, busy 4): they are let go as the game lets go, and brought along (coop_follow). The held one's own
+    // (the tick's self-sent one at 0x80061AB4, from themselves) is the game's.
+    if (!running && event == 102u && g_settings.mod_coop && g_coop_p2 != 0u && sda_ready(cpu) && guest_ram_range_valid(cpu, message, 8u) &&
+        guest_ram_range_valid(cpu, node + 16u, 4u) && (mem_read32(cpu, cpu->gpr[13] - 23344u) & COOP_BUSY_ROOM) == 0u) {
+        const int held = coop_player_of_id(cpu, mem_read32(cpu, node + 16u)), from = coop_player_of_id(cpu, mem_read32(cpu, message + 4u));
+        if (held >= 0 && from >= 0 && held != from) {
+            if (coop_grab_log() || coop_room_change_log())
+                fprintf(stderr, "[coop] player %d's busy set doesn't let go of player %d, held (state %u, busy %u, frame %llu)\n", from + 1, held + 1,
+                        cpu->gpr[4], mem_read32(cpu, cpu->gpr[13] - 23344u), (unsigned long long)(cpu->timebase / 675000ull));
+            cpu->gpr[3] = 1u;
+            g_hle_passthrough = false;
+            return;
+        }
+    }
+    if (running || g_coop_p2 == 0u || node != g_coop_p2 || !g_settings.mod_coop || !g_coop_p2_state || !sda_ready(cpu))
+        return;
+    const bool words = !g_coop_turn && !g_coop_events_own && !coop_p2_input_in_game(cpu);
+    static u8 p1s[PROMPT_SLOTS_SIZE];
+    const bool asks = coop_p2_asks_in(cpu, p1s);
+    if (!words && !asks)
+        return;
+    u32 args[8], result = 0u;
+    for (int i = 0; i < 8; i++)
+        args[i] = cpu->gpr[3 + i];
+    if (words) {
+        coop_events_words(cpu, true);
+        g_coop_events_own = true;
+    }
+    running = true;
+    answering = message;
+    hle_guest_call(cpu, COOP_GRAB_EVENTS, args, 8, cpu->fpr[1], &result);
+    answering = 0u;
+    running = false;
+    if (words) {
+        g_coop_events_own = false;
+        coop_events_words(cpu, false);
+    }
+    if (asks)
+        coop_p2_asks_out(cpu, p1s);
+    cpu->gpr[3] = result;
+    g_hle_passthrough = false;
 }
 
 // Whether a character is looking a player's way: within its view (60 degrees
@@ -13425,7 +16524,8 @@ static void coop_seen_shared(CPUState* cpu) {
     if (!guest_ram_range_valid(cpu, seer, 60u) || !guest_ram_range_valid(cpu, them, 16u))
         return;
     float reach, off;
-    const bool in_view = coop_in_view(cpu, seer, them, &reach, &off);
+    // Not the other while the game holds them (coop_player_held): they take it as they come into its view after.
+    const bool in_view = !coop_player_held(cpu, node == p1 ? 1 : 0) && coop_in_view(cpu, seer, them, &reach, &off);
     coop_seen_note(seer_node, seer_id, mem_read32(cpu, message + 28u), node == p1 || in_view, node != p1 || in_view);
     static int log = -1;
     if (log < 0)
@@ -13457,7 +16557,7 @@ static void coop_seen_later(CPUState* cpu, u32 node, u32 object, const u32 nodes
             return;
         for (int k = 0; k < 2; k++) {
             float reach, off;
-            if (g_coop_seen[s].hit[k] || !coop_in_view(cpu, object, objects[k], &reach, &off))
+            if (g_coop_seen[s].hit[k] || coop_player_held(cpu, k) || !coop_in_view(cpu, object, objects[k], &reach, &off))
                 continue;
             g_coop_seen[s].hit[k] = true;
             if (getenv("ED_COOP_ENEMY_LOG") != NULL)
@@ -15085,8 +18185,12 @@ static void coop_enemy_target(CPUState* cpu, u32 object) {
     if (after != ids[0] && after != ids[1])
         return;
     const float d1 = coop_distance(cpu, object, p1), d2 = coop_distance(cpu, object, p2);
-    const u32 want = after == ids[0] ? (d2 + COOP_TARGET_MARGIN < d1 ? ids[1] : ids[0])
-                                     : (d1 + COOP_TARGET_MARGIN < d2 ? ids[0] : ids[1]);
+    u32 want = after == ids[0] ? (d2 + COOP_TARGET_MARGIN < d1 ? ids[1] : ids[0])
+                               : (d1 + COOP_TARGET_MARGIN < d2 ? ids[0] : ids[1]);
+    // One of them held by the game (their words, close-up, Tome) and the other playing on: the other, near or far.
+    const bool held[2] = {coop_player_held(cpu, 0), coop_player_held(cpu, 1)};
+    if (held[0] != held[1])
+        want = held[0] ? ids[1] : ids[0];
     if (want == after)
         return;
     mem_write32(cpu, stats + COOP_TARGET_B, want);
@@ -15105,6 +18209,8 @@ static void coop_character_step(CPUState* cpu) {
         fprintf(stderr, "[coop] player 2's step runs (their turn %s yet)\n", g_coop_p2_state ? "has run" : "has not run");
     }
     coop_enemy_target(cpu, object);
+    if (g_coop_p2 != 0u && !g_coop_step_running && object == mem_read32(cpu, g_coop_p2 + 52u))
+        coop_p2_step_seen(cpu, object);
     // Off unless ED_COOP_P2_STEP=1 (testing): with it, player 2 finds doors
     // (the record above is theirs) but neither player can open one yet:
     // something of the door's own, beyond these globals, is upset by the
@@ -15903,7 +19009,7 @@ static void coop_cutscene_held(CPUState* cpu) {
     coop_cutscene_place(cpu, object);
     if (--g_coop_cutscene.hold == 0u) {
         if (g_coop_cutscene.cameras && !g_coop_cameras.lent) {
-            coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p1, COOP_ZONE_CAMERAS_SIZE, false);
+            coop_camera_set_io(cpu, g_coop_cameras.p1, false);
             coop_bytes(cpu, PROMPT_SLOTS, g_coop_cameras.p1_prompts, PROMPT_SLOTS_SIZE, false);
         }
         coop_cutscene_word(cpu);
@@ -15937,9 +19043,9 @@ static void coop_cutscene_over(CPUState* cpu) {
     coop_cutscene_place(cpu, object);
     g_coop_cutscene.hold = COOP_CUTSCENE_HOLD;
     if (g_coop_cutscene.cameras) {
-        coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p2, COOP_ZONE_CAMERAS_SIZE, true);
+        coop_camera_set_io(cpu, g_coop_cameras.p2, true);
         g_coop_cameras.p2_set = true;
-        coop_bytes(cpu, COOP_ZONE_CAMERAS, g_coop_cameras.p1, COOP_ZONE_CAMERAS_SIZE, false);
+        coop_camera_set_io(cpu, g_coop_cameras.p1, false);
         coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, PROMPT_SLOTS_SIZE, true);
         coop_bytes(cpu, PROMPT_SLOTS, g_coop_cameras.p1_prompts, PROMPT_SLOTS_SIZE, false);
     }
@@ -15980,6 +19086,106 @@ static void coop_close_up_prompt(CPUState* cpu) {
     if (was && !g_coop_screen && g_coop_found_word.p2 && g_coop_found_word.script > 0 && g_coop_found_word.script == g_coop_use.script)
         g_coop_found_word.pending = true;
     was = g_coop_screen;
+}
+
+// Player 1's B on a prompt of their own (kept in their copy while player 2's close-up has the game's: a zone's EXAMINE or
+// PICK UP, button 2) in player 2's close-up. The game runs one close-up at a time and its pad is player 2's, so the press
+// went nowhere. It waits, as player 2's press in player 1's look does (g_coop_use_script), and goes in by the game's pad
+// as play comes back to player 1, if the prompt is still theirs then: their close-up opens as theirs.
+static bool g_coop_p1_b_waits;
+static unsigned g_coop_p1_b_press;
+static bool coop_p1_prompt_kept(void) {
+    for (u32 i = 0u; i < 7u; i++) {
+        const u8* slot = g_coop_cameras.p1_prompts + i * 28u;
+        const s32 button = (s32)((u32)slot[4] << 24 | (u32)slot[5] << 16 | (u32)slot[6] << 8 | slot[7]);
+        const s32 id = (s32)((u32)slot[8] << 24 | (u32)slot[9] << 16 | (u32)slot[10] << 8 | slot[11]);
+        if (id >= 0 && button == 2)
+            return true;
+    }
+    return false;
+}
+
+// Player 1's B in a scene or hold of player 2's, outside their close-up (which has g_coop_p1_b_waits): the game's hold
+// is on, and with it its choosing of a prompt shows the player none of their zones' (0x80117628), so its use of the press
+// (0x80006EBC(2, 0), from the dispatch) found no prompt of button 2 on show and ran nothing: the exit sphere L01/9 in
+// player 2's hall scene 779. Kept (coop_press_keep) and pressed by the game's pad as the game shows that prompt again.
+static bool coop_p2_scene_or_hold(CPUState* cpu) {
+    return coop_p2_scene_on() || coop_p2_holds(cpu) || g_coop_script_hold || (g_coop_use.active && g_coop_use.p2) || g_coop_cameras.lent ||
+           g_coop_screen;
+}
+static bool coop_p1_own_b_prompt(CPUState* cpu, s32* id_out, s32* script_out) {
+    u8 slots[6u * 28u];
+    if (g_coop_cameras.lent)
+        memcpy(slots, g_coop_cameras.p1_prompts, sizeof slots);  // theirs while player 2's are in
+    else
+        coop_bytes(cpu, PROMPT_SLOTS, slots, sizeof slots, true);
+    for (u32 i = 0u; i < 6u; i++) {
+        const u8* slot = slots + i * 28u;
+        const s32 button = (s32)((u32)slot[4] << 24 | (u32)slot[5] << 16 | (u32)slot[6] << 8 | slot[7]);
+        const s32 id = (s32)((u32)slot[8] << 24 | (u32)slot[9] << 16 | (u32)slot[10] << 8 | slot[11]);
+        const s32 script = (s32)((u32)slot[12] << 24 | (u32)slot[13] << 16 | (u32)slot[14] << 8 | slot[15]);
+        const u32 skip = (u32)slot[16] << 24 | (u32)slot[17] << 16 | (u32)slot[18] << 8 | slot[19];
+        if (id >= 0 && button == 2 && skip == 0u && (script > 0 || script == COOP_PROMPT_CLOSE_UP)) {
+            *id_out = id;
+            *script_out = script;
+            return true;
+        }
+    }
+    return false;
+}
+static void coop_p1_press_kept(CPUState* cpu, const DolPadState* pad) {
+    if (!sda_ready(cpu))
+        return;
+    static bool b_was;
+    const bool b = (pad->button & 0x0200u) != 0u && g_coop_p1_b_press == 0u && !g_coop_press_b;  // not a press put in for them
+    const u32 shown = PROMPT_SLOTS + 6u * 28u;
+    const s32 shown_id = (s32)mem_read32(cpu, shown + 8u), shown_script = (s32)mem_read32(cpu, shown + 12u);
+    // On show and player 1's: with player 2's prompts lent in, what's on show is theirs.
+    const bool shown_b = shown_id >= 0 && mem_read32(cpu, shown + 4u) == 2u && !g_coop_cameras.lent;
+    const bool up = coop_p2_scene_or_hold(cpu);
+    s32 id = -1, script = 0;
+    if (b && !b_was && up && !shown_b && !g_coop_p1_look && !(g_coop_use.active && !g_coop_use.p2) && coop_p1_own_b_prompt(cpu, &id, &script)) {
+        if (coop_trace())
+            fprintf(stderr, "[trace] player 1's B in player 2's: shown %d/%d button %u, words 24048 0x%X 24044 0x%X 25696 0x%X busy %u scene %d hold %d lent %d frame %llu\n",
+                    shown_id, shown_script, mem_read32(cpu, shown + 4u), mem_read32(cpu, cpu->gpr[13] - 24048u), mem_read32(cpu, cpu->gpr[13] - 24044u),
+                    mem_read32(cpu, cpu->gpr[13] - 25696u), mem_read32(cpu, cpu->gpr[13] - 23344u), coop_p2_scene_on(), g_coop_script_hold,
+                    g_coop_cameras.lent, (unsigned long long)(cpu->timebase / 675000ull));
+        coop_press_keep(&g_coop_p1_kept, 1, id, script, "player 2's scene or hold is up");
+    }
+    b_was = b;
+    if (!g_coop_p1_kept.on)
+        return;
+    CoopPressKept* const kept = &g_coop_p1_kept;
+    if (kept->tickets != g_coop_tickets) {
+        coop_press_drop(kept, 1, "a room was asked for");
+        return;
+    }
+    const bool theirs = coop_p1_own_b_prompt(cpu, &id, &script) && id == kept->prompt && script == kept->script;
+    if (!theirs && !(shown_b && shown_id == kept->prompt && shown_script == kept->script)) {
+        kept->free = 0u;
+        if (++kept->gone >= COOP_PRESS_GONE)
+            coop_press_drop(kept, 1, "they're off that prompt");
+        return;
+    }
+    kept->gone = 0u;
+    if (up || g_coop_p1_look || g_coop_use.active || g_coop_tome_owner >= 0 || coop_busy(cpu)) {
+        kept->free = 0u;
+        kept->unshown = 0u;
+        return;
+    }
+    if (!(shown_b && shown_id == kept->prompt && shown_script == kept->script)) {
+        kept->free = 0u;
+        if (++kept->unshown >= COOP_PRESS_UNSHOWN)
+            coop_press_drop(kept, 1, "the game doesn't show that prompt");
+        return;
+    }
+    if (++kept->free < COOP_PRESS_SETTLE)
+        return;
+    kept->on = false;
+    g_coop_p1_b_press = 3u;  // a read with B up, then two with it down: a press, by the game's pad
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] player 1's kept B goes in: prompt %d script %d (frame %llu)\n", kept->prompt, kept->script,
+                (unsigned long long)(cpu->timebase / 675000ull));
 }
 
 static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState* pad) {
@@ -16029,7 +19235,7 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             DolPadState theirs;
             controls_read_player2(&theirs);
             const bool down = (theirs.button & 0x1000u) != 0u;
-            if (down && !start_was && !g_tome_copy_open && !g_tome_copy_ask)
+            if (down && !start_was && !g_tome_copy_open && !g_tome_copy_ask && !coop_room_change_other(cpu, true))
                 g_tome_copy_ask = true;
             start_was = down;
         }
@@ -16051,6 +19257,44 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
                 g_tw_taps |= pad->button;
                 memset(pad, 0, sizeof *pad);
                 pad->error = error;
+                // A close-up of player 2's in the world behind player 1's Tome (their B on a prompt with player 1's Tome
+                // up, coop_use_start: g_coop_assist_at, their cameras in): the world's frames run it, by the game's pad,
+                // which is theirs for it, as when no Tome is up. Emptied, their DETAIL and RETURN never reached it, and it
+                // went to player 1's pad as the Tome closed (logs/run-20261106-004630-jtg-ov-c1-r2).
+                static u16 behind_held;
+                const bool behind = g_coop_assist_at != 0u && g_coop_cameras.lent && !g_coop_script_hold && !g_coop_p1_look &&
+                                    coop_busy(cpu) && !cutscene_playing(cpu) && !(g_tome_copy_open && g_tome_copy_p1);
+                if (behind) {
+                    DolPadState theirs;
+                    controls_set_tome_read(0);
+                    controls_read_player2(&theirs);
+                    controls_set_tome_read(-1);
+                    if (!g_coop_p2_behind_tome) {
+                        behind_held = theirs.button;  // what they held as it opened is not a press in it
+                        fprintf(stderr, "[coop] player 2's close-up behind player 1's Tome: the world's pad is theirs\n");
+                    }
+                    behind_held &= theirs.button;
+                    theirs.button &= (u16)~(behind_held | 0x1000u);
+                    *pad = theirs;
+                    pad->error = 0;
+                }
+                // Over behind the Tome (no hold for 20 world reads, not a moment between its pages): what opens next
+                // isn't theirs, or player 1's own close-up just after their Tome closed was taken for player 2's.
+                static unsigned behind_gone;
+                if (behind) {
+                    g_coop_p2_behind_tome = true;
+                    behind_gone = 0u;
+                } else if (g_coop_p2_behind_tome && ++behind_gone > 20u) {
+                    g_coop_p2_behind_tome = false;
+                    behind_gone = 0u;
+                    if (!coop_busy(cpu))
+                        g_coop_assist_at = 0u;
+                }
+                // The pad's read comes after each frame (0x8013E518 in the loop at 0x800186E8): this one, after the
+                // Tome's, is for the world's frame next, which runs their close-up in their half (their words and find
+                // theirs, their B not a press of their own prompt). The read after the world's frame puts it off for the
+                // Tome's (below).
+                g_coop_screen = g_coop_p2_behind_tome;
             }
             // Words in a Tome the game opened for player 2 (a rune they found) go on in the world's
             // frames, and took player 1's B while their half showed them: player 2's pad for those.
@@ -16067,6 +19311,8 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             g_tw_taps = 0u;
         }
         menu = true;
+    } else {
+        g_coop_p2_behind_tome = false;
     }
     g_coop_screen = false;
     g_coop_cutscene_pending = g_coop_cutscene.pending;
@@ -16162,8 +19408,27 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
         quick_press = false;
         pad_held = p2.button;
     }
+    // Player 1's Tome has closed in a close-up of player 2's, begun behind it (their use, g_coop_assist_at, their cameras
+    // in): it stays theirs, pad and half, as one begun with no Tome up. Left as player 1's screen (owner 0), the game's pad
+    // was player 1's for it, their B drove player 2's DETAIL and words ("player 1's words"), and the close-up's end went
+    // as player 1's with player 2's camera left on the close-up's (logs/run-20261106-004630-jtg-ov-c1-r2, ExamineCam01).
+    if (owner == 0 && closeup && !menu && !cutscene && !hle_coop_tome_shares() && g_coop_cameras.lent && !g_coop_p1_look) {
+        fprintf(stderr, "[coop] player 1's Tome closed in player 2's close-up: it stays player 2's\n");
+        coop_tome_player(cpu, false);
+        owner = 1;
+        pad_held = p2.button;
+        closeup_grace = 20u;
+    }
     const bool start = (p2.button & 0x1000u) != 0u;
-    const bool start_pressed = start && !start_was;
+    // Not in a room change of player 1's (coop_room_change_other): the game opens no Tome in one, as player 1's Start in
+    // player 2's opens none (its handler 0x80006CDC isn't reached, run-20261106-101126-jtg-dc4-c1p2-p1start). A copy opened
+    // in the fade was taken with the room change in it and showed black in their half once the new room was in, till B
+    // closed it blind (logs/run-20261106-081752-jtg-vdh6-c1p1-p2start); one opened before the ticket stays whole through it
+    // (run-20261106-101418-jtg-dcm4b-c1p1-p2tome). Their B and quick spells wait the same way. A press then is not kept.
+    const bool start_room = start && !start_was && coop_room_change_other(cpu, true);
+    if (start_room && coop_room_change_log())
+        fprintf(stderr, "[coop] player 2's Start in player 1's room change: no Tome (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+    const bool start_pressed = start && !start_was && !start_room;
     start_was = start;
     if (!menu && !cutscene && !closeup) {
         // Where player 1 is in play, for a cutscene of player 2's.
@@ -16180,6 +19445,14 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             if (getenv("ED_COOP_LOG") != NULL)
                 fprintf(stderr, "[coop] player 1's Start: what opens next is theirs\n");
             g_coop_assist_at = 0u;
+        }
+        coop_p1_press_kept(cpu, pad);
+        if (g_coop_p1_b_press > 0u) {
+            if (g_coop_p1_b_press-- == 3u)
+                pad->button &= (u16)~0x0200u;
+            else
+                pad->button |= 0x0200u;
+            pad->error = 0;
         }
         if (g_tome_copy_ask)
             return;
@@ -16204,6 +19477,23 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             fprintf(stderr, "[coop] play goes on: the pad is player 1's again\n");
             coop_talk_over(cpu);
             coop_cameras_lend(cpu, false);
+            if (g_coop_p1_b_waits) {
+                g_coop_p1_b_waits = false;
+                const u32 shown = PROMPT_SLOTS + 6u * 28u;
+                if ((s32)mem_read32(cpu, shown + 8u) >= 0 && mem_read32(cpu, shown + 4u) == 2u) {
+                    g_coop_p1_b_press = 3u;  // a read with B up, then two with it down: a press
+                    if (getenv("ED_COOP_LOG") != NULL)
+                        fprintf(stderr, "[coop] player 1's B from player 2's close-up: pressed on their prompt %d\n", (s32)mem_read32(cpu, shown + 8u));
+                } else {
+                    // Not on show yet: a scene's hold shows nobody's prompt (0x80117628) till the game chooses again. Kept,
+                    // as a B in player 2's scene outside a close-up is (coop_press_keep), for the game to show it: dropped,
+                    // player 1's B in exit sphere L01/9 through player 2's own hall scene 779 (now theirs to its end, as a
+                    // close-up) never went in (logs/run-20261106-141622-jtg-sc-c1hL-s1, 8389 on).
+                    s32 id = -1, script = 0;
+                    if (coop_p1_own_b_prompt(cpu, &id, &script))
+                        coop_press_keep(&g_coop_p1_kept, 1, id, script, "player 2's close-up is over, its prompt not on show yet");
+                }
+            }
             coop_snapshot(cpu);
             coop_tome_player(cpu, false);
             owner = -1;
@@ -16225,6 +19515,7 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     }
     start_wait = 0u;
     quick_wait = 0u;
+    g_coop_p1_b_press = 0u;
     // A cutscene player 2's close-up led to (the Tome taken) is the game's:
     // play is handed back as it starts. The cameras lent stay the game's
     // (put back, the cutscene's own went and it ended; put back after it,
@@ -16260,18 +19551,39 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             fprintf(stderr, "[coop] %s has the %s\n", owner == 1 ? "player 2" : "player 1",
                     closeup ? "close-up" : "screen");
     }
-    g_coop_screen = closeup && owner == 1;
+    // Or their close-up behind player 1's Tome (g_coop_p2_behind_tome): this read comes after a world's frame, with its
+    // memory in. Their prompt stays where theirs goes (on through the Tome's frames too, or its close-up end would be
+    // taken as come each frame), and the screen is off for the Tome's frame next (at the end here).
+    const bool behind_now = hle_coop_tome_shares() && owner == 0 && g_coop_p2_behind_tome;
+    g_coop_screen = (closeup && owner == 1) || behind_now;
     coop_close_up_prompt(cpu);
+    // Their close-up over behind the Tome (its RETURN popped their camera in the world's frames): their cameras are
+    // theirs again, as play going on gives them back, in this world frame's read (the world's camera set is in).
+    if (hle_coop_tome_shares() && owner == 0 && !g_coop_p2_behind_tome && g_coop_cameras.lent && g_coop_assist_at == 0u &&
+        !coop_busy(cpu) && !g_coop_use.active && !cutscene_playing(cpu) && !g_coop_cutscene.pending) {
+        coop_cameras_lend(cpu, false);
+        fprintf(stderr, "[coop] player 2's close-up over behind player 1's Tome: their cameras are theirs again\n");
+    }
     // Player 1's Start in player 2's close-up: their Tome, in a copy of its own. The close-up goes on.
+    // (Not with their own Tome up: Start and B are its. What they hold is still kept, or the Start that closed their Tome
+    // over player 2's close-up, still down as it closed, opened their copy at once, logs/run-20261106-040511-jtg-ov-c1c-f7.)
     {
         static bool p1_start_was;
         const bool p1_start = (g_tome_copy_p1_pad.button & 0x1000u) != 0u;
-        if (p1_start && !p1_start_was && g_coop_screen && tome_copy_mode() == 2 && !g_tome_copy_open && !g_tome_copy_ask) {
+        if (p1_start && !p1_start_was && g_coop_screen && !behind_now && tome_copy_mode() == 2 && !g_tome_copy_open && !g_tome_copy_ask) {
             g_tome_copy_p1 = true;
             g_tome_copy_ask = true;
             fprintf(stderr, "[coop] player 1 opens their Tome in player 2's close-up\n");
         }
         p1_start_was = p1_start;
+        static bool p1_b_was;
+        const bool p1_b = (g_tome_copy_p1_pad.button & 0x0200u) != 0u;
+        if (p1_b && !p1_b_was && g_coop_screen && !behind_now && !g_coop_p1_b_waits && !(g_tome_copy_open && g_tome_copy_p1) && coop_p1_prompt_kept()) {
+            g_coop_p1_b_waits = true;
+            if (getenv("ED_COOP_LOG") != NULL)
+                fprintf(stderr, "[coop] player 1's B on their prompt in player 2's close-up: waits for it to end\n");
+        }
+        p1_b_was = p1_b;
     }
     if (owner == 1) {
         pad_held &= p2.button;
@@ -16291,6 +19603,8 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     // taken), whoever's press led to it.
     if (owner >= 0 && !(g_tome_copy_open && g_tome_copy_p1))
         aurora_split_menu(cutscene ? -1 : owner, g_settings.mod_split);
+    if (behind_now)
+        g_coop_screen = false;  // the Tome's frame: player 1's
     g_coop_tome_owner = owner;
 }
 
@@ -16524,12 +19838,12 @@ bool tome_copy_hook_off(HleHandler fn) {
         const char* name;
     } kOff[] = {
 #define OFF(f) {f, #f}
-        OFF(hle_coop_controller), OFF(coop_sighting), OFF(coop_events), OFF(coop_character_step), OFF(hle_coop_found), OFF(coop_bar_frame),
+        OFF(hle_coop_controller), OFF(coop_sighting), OFF(coop_events), OFF(coop_grab_events), OFF(coop_character_step), OFF(hle_coop_found), OFF(coop_bar_frame),
         OFF(coop_find_node), OFF(coop_stat_most), OFF(coop_thing_look), OFF(coop_talk_check), OFF(coop_script_timers), OFF(coop_door_motion),
         OFF(coop_script_go_to_room), OFF(coop_cast), OFF(tw_mode_change), OFF(tw_tome_start), OFF(coop_controlled_id), OFF(coop_play_hold),
         OFF(coop_enchanted_look), OFF(coop_sign_follow), OFF(coop_lasting_find), OFF(coop_spells_update),
         OFF(coop_game_camera), OFF(hle_moves_let_go), OFF(hle_moves_want), OFF(hle_find_by_id), OFF(coop_position_copy),
-        OFF(coop_send_event), OFF(notify_GXSetDrawDone), OFF(coop_prompt_choose), OFF(coop_prompt_set), OFF(coop_prompt_clear), OFF(coop_scan_player1), OFF(coop_words_hold), OFF(coop_find_hold), OFF(coop_look_prompt), OFF(coop_script_sends), OFF(coop_show_asked), OFF(coop_show_main_asked), OFF(coop_found_object_draw), OFF(coop_busy_ask),
+        OFF(coop_send_event), OFF(notify_GXSetDrawDone), OFF(coop_prompt_choose), OFF(coop_prompt_set), OFF(coop_prompt_clear), OFF(coop_scan_player1), OFF(coop_camera_chosen), OFF(coop_words_hold), OFF(coop_find_hold), OFF(coop_look_prompt), OFF(coop_script_sends), OFF(coop_show_asked), OFF(coop_show_main_asked), OFF(coop_found_object_draw), OFF(coop_busy_ask),
 #undef OFF
     };
     static bool said[sizeof kOff / sizeof kOff[0]];
@@ -16719,6 +20033,7 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         return;
     characters_reload(cpu, player);
     costume_moves(cpu, player);
+    costume_size(cpu, player);
     const u32 standing = mem_read32(cpu, player + 52u);
     if (guest_ram_range_valid(cpu, standing, 12u)) {
         for (u32 i = 0u; i < 3u; i++)
@@ -16741,10 +20056,12 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         moves_repair(cpu, g_coop_p2, true);
         moves_repair(cpu, player, false);
         costume_moves(cpu, g_coop_p2);
+        costume_size(cpu, g_coop_p2);
         coop_door_proxy(cpu);
         coop_follow(cpu, player);
         // Up through player 1's look at something and its scene, as theirs is through player 2's.
-        coop_prompt_show(cpu, (!coop_busy(cpu) || g_coop_p1_look) && !game_menu_open(cpu) && !cutscene_playing(cpu));
+        // Not through their own script's hold (coop_p2_holds), asked in player 1's turn with it let go: made and let go each frame.
+        coop_prompt_show(cpu, (!coop_busy(cpu) || g_coop_p1_look) && !g_coop_p2_hold_open && !game_menu_open(cpu) && !cutscene_playing(cpu));
         coop_p1_icon_show(cpu);
     }
     static int log = -1;
@@ -16817,6 +20134,50 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
 // the health setter, and the stat setter's actor getter), the health (the
 // health setter's), and the spawn's calls, as upstream's debug menu finds
 // them (PAL only).
+// What a character holds to fight with (0x801F99F0(node)): the first thing on their carried list (+48, entries +4 next,
+// +8 the id) whose record (the thing's node +44) has bit 0x2 (0x80150BE8), found by its id (0x801F5F88). The look for
+// someone down to finish (0x800330E0, from the player's look for things lying about, 0x800C030C) asks it first and gives
+// up on nothing held (0x800331F4); reloading, the finishing move and the swings ask it too. Player 2 carries nothing of
+// their own (the things are player 1's, coop_script_item), so the game had them holding nothing: no FINISH HIM for them
+// over anyone they knocked down, with a sword in their hands. What they hold is their own equipment (0x80151500(their
+// id, 0): +388 entries of 12 bytes from +4, naming their copies outside their Tome, coop_equip_names): for player 2 the
+// answer is the first thing there the game's own test takes, found by the game's own look-up. Nothing there (their
+// hands empty), or their Tome open (it names the originals then), the game answers from their list as it is.
+#define HELD_WEAPON 0x801F99F0u
+#define FIND_BY_ID 0x801F5F88u
+#define THING_FLAGS 0x80150BE8u
+static void coop_held_weapon(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const u32 node = cpu->gpr[3];
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || node != g_coop_p2 || g_coop_tome_p2 || !guest_ram_range_valid(cpu, node, 56u))
+        return;
+    u32 own = 0u;
+    const u32 find[2] = {mem_read32(cpu, node + 16u), 0u};
+    if (!hle_guest_call(cpu, EQUIP_FIND, find, 2, 0.0, &own) || !guest_ram_range_valid(cpu, own, EQUIP_ENTRIES + 4u))
+        return;
+    const u32 n = mem_read32(cpu, own + EQUIP_ENTRIES);
+    for (u32 i = 0u; i < n && i < 32u; i++) {
+        const u32 id = mem_read32(cpu, own + 4u + i * 12u);
+        u32 thing = 0u, flags = 0u;
+        if (!hle_guest_call(cpu, FIND_BY_ID, &id, 1, 0.0, &thing) || !guest_ram_range_valid(cpu, thing, 48u))
+            continue;
+        const u32 record = mem_read32(cpu, thing + 44u);
+        if (!guest_ram_range_valid(cpu, record, 20u) || !hle_guest_call(cpu, THING_FLAGS, &record, 1, 0.0, &flags) || (flags & 0x2u) == 0u)
+            continue;
+        if (fin_log()) {
+            static u32 told;
+            if (told != thing)
+                fprintf(stderr, "[fin] player 2 holds 0x%08X (id %u) to fight with, from their equipment (lr 0x%08X, frame %llu)\n", thing, id,
+                        cpu->lr, (unsigned long long)(cpu->timebase / 675000ull));
+            told = thing;
+        }
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        hle_set_u32(cpu, thing);
+        return;
+    }
+}
+
 static void find_coop(CPUState* cpu) {
     if (strcmp(ED_GAME_ID, "GEDP01") != 0 || g_camera_player_offset == 0) {
         fprintf(stderr, "[coop] not on this disc: no player 2\n");
@@ -16875,6 +20236,14 @@ static void find_coop(CPUState* cpu) {
     } else {
         fprintf(stderr, "[coop] the enemies' look not found: only player 1 is seen\n");
     }
+    // The held behaviour (stwu r1,-144(r1); its BREAK FREE ask, bl 0x80117404 at +0xB9C), registered as kind 19
+    // (addi r3,r3,0xEC8 at 0x80030E18).
+    HleDispatchEntry* grab = hle_dispatch_entry(COOP_GRAB_EVENTS);
+    if (mem_read32(cpu, COOP_GRAB_EVENTS) == 0x9421FF70u && mem_read32(cpu, 0x80061A64u) == 0x480B59A1u &&
+        mem_read32(cpu, 0x80030E18u) == 0x38630EC8u && grab != NULL && grab->intercept == NULL && grab->notify == NULL)
+        grab->intercept = coop_grab_events;
+    else
+        fprintf(stderr, "[coop] the held behaviour not found: player 2's BREAK FREE stays player 1's\n");
     // Each character's step (stwu r1,-240(r1) ... or r31,r3,r3), and its
     // scan for the player (bl at 0x801335C4), for player 2's own.
     HleDispatchEntry* step = hle_dispatch_entry(COOP_CHARACTER_STEP);
@@ -16970,6 +20339,13 @@ static void find_coop(CPUState* cpu) {
     } else {
         fprintf(stderr, "[coop] the look for things lying about not found: player 1 is offered what player 2 stands by\n");
     }
+    // What a character holds to fight with (stwu r1,-16(r1); ... lwz r3,48(r3) at +0x18), player 2's from their equipment.
+    HleDispatchEntry* held = hle_dispatch_entry(HELD_WEAPON);
+    if (mem_read32(cpu, HELD_WEAPON) == 0x9421FFF0u && mem_read32(cpu, HELD_WEAPON + 0x18u) == 0x80630030u && held != NULL &&
+        held->intercept == NULL && held->notify == NULL)
+        held->intercept = coop_held_weapon;
+    else
+        fprintf(stderr, "[coop] the look for what a character holds not found: player 2 holds nothing to the game (no FINISH HIM)\n");
     // The look for the player to talk to them (stwu r1,-64(r1); ... bl 0x801F62B8
     // at +0x18), for player 2 too.
     HleDispatchEntry* talk_check = hle_dispatch_entry(COOP_TALK_CHECK);
@@ -17135,6 +20511,20 @@ static void find_coop(CPUState* cpu) {
         busy_ask->intercept = coop_busy_ask;
     else
         fprintf(stderr, "[coop] the busy asking not found: player 2's close-ups stop player 1\n");
+    // A node's held asking (lwz r0,28(r3); rlwinm r3,r0,0,28,28; blr).
+    HleDispatchEntry* held_ask = hle_dispatch_entry(COOP_NODE_HELD_ASK);
+    if (mem_read32(cpu, COOP_NODE_HELD_ASK) == 0x8003001Cu && mem_read32(cpu, COOP_NODE_HELD_ASK + 4u) == 0x54030738u && held_ask != NULL &&
+        held_ask->intercept == NULL && held_ask->notify == NULL)
+        held_ask->intercept = coop_node_held_ask;
+    else
+        fprintf(stderr, "[coop] the held asking not found: the other player stands through a room change\n");
+    // A quick spell's press (stwu r1,-16(r1); mflr r0; stw r0,20(r1); stw r31,12(r1)).
+    HleDispatchEntry* quick_ask = hle_dispatch_entry(COOP_QUICK_ASK);
+    if (mem_read32(cpu, COOP_QUICK_ASK) == 0x9421FFF0u && mem_read32(cpu, COOP_QUICK_ASK + 12u) == 0x93E1000Cu && quick_ask != NULL &&
+        quick_ask->intercept == NULL && quick_ask->notify == NULL)
+        quick_ask->intercept = coop_quick_cast_ask;
+    else
+        fprintf(stderr, "[coop] a quick spell's press not found: player 1 casts through player 2's room change\n");
     // The scenes' black bars (stwu r1,-48(r1), and the world's call of it).
     HleDispatchEntry* bars = hle_dispatch_entry(SCENE_BARS);
     if (mem_read32(cpu, SCENE_BARS) == 0x9421FFD0u && mem_read32(cpu, SCENE_BARS_WORLD - 8u) == 0x806DAA74u && bars != NULL &&
@@ -17151,12 +20541,44 @@ static void find_coop(CPUState* cpu) {
     } else {
         fprintf(stderr, "[coop] the words' hold not found: words stop both players\n");
     }
+    // A scene's start and end, fn22's and fn139's (stwu r1,-48(r1) / stwu r1,-16(r1)): player 2's camera with
+    // player 1's scene (coop_scene_set).
+    {
+        HleDispatchEntry* scene = hle_dispatch_entry(SCENE_CAMERA_SET);
+        HleDispatchEntry* scene_hold = hle_dispatch_entry(SCENE_HOLD_SET);
+        if (getenv("ED_COOP_SCENE_CAMERA_OFF") == NULL && mem_read32(cpu, SCENE_CAMERA_SET) == 0x9421FFD0u &&
+            mem_read32(cpu, SCENE_HOLD_SET) == 0x9421FFF0u && scene != NULL && scene->intercept == NULL && scene->notify == NULL &&
+            scene_hold != NULL && scene_hold->intercept == NULL && scene_hold->notify == NULL) {
+            scene->intercept = coop_scene_camera_set;
+            scene_hold->intercept = coop_scene_hold_set;
+        } else {
+            fprintf(stderr, "[coop] a scene's start and end not found: player 2's camera stays on what a scene of player 1's began on\n");
+        }
+    }
+    // A camera chosen for the room's record (only notified): a room's start camera is player 2's too.
+    {
+        HleDispatchEntry* choose = hle_dispatch_entry(CAMERA_CHOOSE);
+        HleDispatchEntry* by_hash = hle_dispatch_entry(CAMERA_BY_HASH);
+        if (choose != NULL && choose->intercept == NULL && choose->notify == NULL && by_hash != NULL && by_hash->intercept == NULL &&
+            by_hash->notify == NULL) {
+            choose->notify = coop_camera_chosen;
+            by_hash->notify = coop_camera_chosen;
+        } else {
+            fprintf(stderr, "[coop] the camera's choosing not found: player 2 has no camera at a room's start until a zone of theirs\n");
+        }
+    }
     // A zone's prompt let go (stwu r1,-16(r1); mflr; cmpwi r3,-2).
     HleDispatchEntry* let_go = hle_dispatch_entry(PROMPT_LET_GO);
     if (mem_read32(cpu, PROMPT_LET_GO) == 0x9421FFF0u && mem_read32(cpu, PROMPT_LET_GO + 8u) == 0x2C03FFFEu && let_go != NULL && let_go->intercept == NULL)
         let_go->intercept = coop_close_up_kept;
     else
         fprintf(stderr, "[coop] a zone's prompt let go not found: player 1 leaving a zone can end player 2's close-up\n");
+    // A prompt's use (only notified): whose press it is.
+    HleDispatchEntry* pressed = hle_dispatch_entry(COOP_PROMPT_USE);
+    if (pressed != NULL && pressed->notify == NULL && pressed->intercept == NULL)
+        pressed->notify = coop_prompt_pressed;
+    else
+        fprintf(stderr, "[coop] a prompt's use not found: player 1's press just after player 2's close-up can go to player 2\n");
     // An enchanted thing's look (stwu r1,-16(r1); ... or r30,r3,r3 at +0x14).
     HleDispatchEntry* enchanted = hle_dispatch_entry(COOP_ENCHANTED_LOOK);
     if (mem_read32(cpu, COOP_ENCHANTED_LOOK) == 0x9421FFF0u && mem_read32(cpu, COOP_ENCHANTED_LOOK + 0x14u) == 0x7C7E1B78u &&
@@ -17335,6 +20757,41 @@ static void find_coop(CPUState* cpu) {
         send->intercept = coop_send_event;
     else
         fprintf(stderr, "[coop] the threat search's question not found: the players square up to each other\n");
+    // FINISH HIM's event 202 (stwu r1,-336(r1); the body from +116 at +0x78) and the look's question to each body down
+    // (li r3,193 at 0x80033350, bl the event call at 0x8003335C): one body, one finisher.
+    HleDispatchEntry* finish = hle_dispatch_entry(COOP_FINISH_START);
+    if (mem_read32(cpu, COOP_FINISH_START) == 0x9421FEB0u && mem_read32(cpu, COOP_FINISH_START + 0x78u) == 0x80760074u &&
+        mem_read32(cpu, 0x80033350u) == 0x386000C1u && mem_read32(cpu, 0x8003335Cu) == 0x481C2655u && finish != NULL &&
+        finish->intercept == NULL && send != NULL && send->intercept == coop_send_event)
+        finish->intercept = coop_finish_start;
+    else
+        fprintf(stderr, "[coop] FINISH HIM's start not found: both players can finish one body\n");
+    if (fin_trace())
+        fin_trace_install();
+    coop_finish_camera_install(cpu);
+    // A hazard's touch (stwu r1,-160(r1); ...; li r30,1 at +0x28) and its frame of the player's last hit (lwz r0,-23500(r13)).
+    HleDispatchEntry* hazard = hle_dispatch_entry(COOP_HAZARD_TOUCH);
+    if (mem_read32(cpu, COOP_HAZARD_TOUCH) == 0x9421FF60u && mem_read32(cpu, COOP_HAZARD_TOUCH + 0x28u) == 0x3BC00001u &&
+        mem_read32(cpu, 0x80145174u) == 0x800DA434u && hazard != NULL && hazard->intercept == NULL && hazard->notify == NULL)
+        hazard->intercept = coop_hazard_touch;
+    else
+        fprintf(stderr, "[coop] the hazards' touch not found: they hurt player 2 every frame\n");
+    if (hurt_log()) {
+        HleDispatchEntry* dmg = hle_dispatch_entry(0x80061E90u);
+        if (dmg != NULL && dmg->intercept == NULL && dmg->notify == NULL)
+            dmg->notify = hurt_note_damage;
+        else
+            fprintf(stderr, "[hurt] can't watch 0x80061E90\n");
+        const u32 at[2] = {0x801CB580u, 0x801F57C0u};
+        const HleHandler fn[2] = {hurt_note_field, hurt_note_later};
+        for (int i = 0; i < 2; i++) {
+            HleDispatchEntry* e = hle_dispatch_entry(at[i]);
+            if (e != NULL && e->intercept == NULL && e->notify == NULL)
+                e->notify = fn[i];
+            else
+                fprintf(stderr, "[hurt] can't watch 0x%08X\n", at[i]);
+        }
+    }
     g_coop_found = true;
     fprintf(stderr, "[coop] the player object's pointer is at 0x%08X; the characters' list at 0x%08X\n",
             ED_GUEST_R13 + (u32)(s32)g_camera_player_offset, ED_GUEST_R13 + (u32)(s32)g_coop_list_offset);
@@ -17492,6 +20949,9 @@ bool hle_save_held(void) {
 // NULL: a state saved before co-op was kept; player 2 is found again as
 // after a co-op save.
 void hle_coop_state_load(const void* in) {
+    // The finish slot (fin_swap) is in RAM the state brings back: what it held is not known, so it's loaded again.
+    g_p2_moves[FIN_MOVES_SLOT].model = g_p2_moves[FIN_MOVES_SLOT].part = -1;
+    memset(g_fin, 0, sizeof g_fin);
     g_coop_p1_icon.element = 0u;
     g_coop_p1_icon.id = -1;
     g_coop_show_kept = false;

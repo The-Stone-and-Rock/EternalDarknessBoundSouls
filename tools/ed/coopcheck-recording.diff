@@ -1,0 +1,66 @@
+--- a/runtime/host/hle.c
++++ b/runtime/host/hle.c
+@@ -288,6 +288,20 @@
+     return true;
+ }
+ 
++// What ED_INPUT_SCRIPT holds for a frame, with nothing logged or kept: for both_record, which runs before it is applied.
++static void input_script_peek(u64 frame, u16* buttons, s8* stick_x, s8* stick_y) {
++    for (unsigned i = 0; i < g_input_script_count; ++i) {
++        const InputScriptEvent* event = &g_input_script[i];
++        if (frame < event->start_frame || frame >= event->end_frame)
++            continue;
++        *buttons |= event->buttons;
++        if (event->stick_x != 0)
++            *stick_x = event->stick_x;
++        if (event->stick_y != 0)
++            *stick_y = event->stick_y;
++    }
++}
++
+ static bool input_script_apply(CPUState* cpu,
+                                u16* buttons,
+                                s8* stick_x,
+@@ -11223,7 +11237,9 @@
+                        "p1ex\tp1ey\tp1ez\tp1tx\tp1ty\tp1tz\tp2ex\tp2ey\tp2ez\tp2tx\tp2ty\tp2tz\t"
+                        "busy\thold\tfocus\tfocus2\twindow\tscript\tmode\tmode2\t"
+                        "screen\towner\tshares\tcopy\tcopyp1\tlent\tcutscene\tmenu\t"
+-                       "ticket\tfade\tp1anim\tp2anim\tcamidx\tcamhash\tp1carry\tp2carry\tp1lod\tp2lod\tlodlow\n");
++                       "ticket\tfade\tp1anim\tp2anim\tcamidx\tcamhash\tp1carry\tp2carry\tp1lod\tp2lod\tlodlow\t"
++                       "p1room\tp2room\ttkroom\ttkentry\ttkcam\ttktrans\ttkby\tp1prompt\tp2prompt\t"
++                       "v2on\tv2ex\tv2ey\tv2ez\tv2tx\tv2ty\tv2tz\tcurp\tmainp\tuse\tp1sb\tp1ssx\tp1ssy\n");
+     }
+     if (!on || !sda_ready(cpu))
+         return;
+@@ -11291,6 +11307,31 @@
+         fprintf(f, "\t%d", guest_ram_range_valid(cpu, list + 8u, 4u) ? (s32)mem_read32(cpu, list + 8u) : -1);
+     }
+     fprintf(f, "\t%.2f\t%.2f\t%.2f", g_detail.p1, g_detail.p2, g_detail.lowest);
++    // tools/ed/coopcheck.py: each player's own room (object +592), the ticket's room, entry, camera and transition with who
++    // was current as it was written (2 player 2, 1 player 1, 0 none yet), the prompt each has up (the game's shown slot,
++    // player 2's own), player 2's half as camera.c drew it, whom the game's current and main pairs name and whose use is
++    // running (1 player 1, 2 player 2, 0 neither), and player 1's scripted pad, which this row is written before.
++    // Reads only, as every column here.
++    for (int i = 0; i < 2; i++) {
++        const u32 node = nodes_of_both[i];
++        const u32 object = node != 0u && guest_ram_range_valid(cpu, node + 52u, 4u) ? mem_read32(cpu, node + 52u) : 0u;
++        fprintf(f, "\t%u", guest_ram_range_valid(cpu, object + COOP_OBJECT_ROOM, 4u) ? mem_read32(cpu, object + COOP_OBJECT_ROOM) : 0u);
++    }
++    fprintf(f, "\t%d\t%u\t%u\t%d\t%d\t%d\t%d", (s32)mem_read32(cpu, 0x8058AFFCu + 8u), mem_read32(cpu, 0x8058AFFCu + 28u),
++            mem_read32(cpu, 0x8058AFFCu + 32u), (s32)mem_read32(cpu, 0x8058AFFCu + 20u),
++            g_trace_ticket_frame == 0ull ? 0 : g_coop_entered_p2 ? 2 : 1, (s32)mem_read32(cpu, PROMPT_SLOTS + 6u * 28u + 8u), g_coop_prompt);
++    float v2_eye[3] = {0.0f, 0.0f, 0.0f}, v2_target[3] = {0.0f, 0.0f, 0.0f};
++    const bool v2 = camera_player2_view(v2_eye, v2_target);
++    fprintf(f, "\t%d\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f\t%.1f", v2 ? 1 : 0, v2_eye[0], v2_eye[1], v2_eye[2], v2_target[0], v2_target[1],
++            v2_target[2]);
++    const u32 current = mem_read32(cpu, sda - 21492u), main_node = mem_read32(cpu, sda - 21484u);
++    const int current_is = g_coop_p2 != 0u && current == g_coop_p2 ? 2 : current == nodes_of_both[0] ? 1 : 0;
++    const int main_is = g_coop_p2 != 0u && main_node == g_coop_p2 ? 2 : main_node == nodes_of_both[0] ? 1 : 0;
++    fprintf(f, "\t%d\t%d\t%d", current_is, main_is, g_coop_use.active ? (g_coop_use.p2 ? 2 : 1) : 0);
++    u16 scripted_buttons = 0u;
++    s8 scripted_x = 0, scripted_y = 0;
++    input_script_peek(frame, &scripted_buttons, &scripted_x, &scripted_y);
++    fprintf(f, "\t%u\t%d\t%d", scripted_buttons, scripted_x, scripted_y);
+     fprintf(f, "\n");
+     fflush(f);  // a freeze keeps every row up to it
+ }

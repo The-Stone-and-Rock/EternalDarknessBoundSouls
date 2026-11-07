@@ -4,6 +4,82 @@ Written 2026-11-02. Read this first, then update it at the end of the session.
 
 ## Start here (updated 2026-11-03)
 
+**Whole-game co-op rounds, 2026-11-05 night to 2026-11-06, uncommitted, not yet played by the user.** The user asked for the core loop to work in every chapter for both players: pickups, cameras, finishers, doors and room changes. Nothing is tested from saves now: `tools/ed/jtg.sh` boots cold, goes through the title and Jump to Game, and records both players (`JTG_SLOT=auto` shares 3 slots between agents; `tools/ed/variant.sh NAME DIFF` builds `build-win/var-NAME.exe` from a patch and always puts the tree back). The old `ed test` scenarios load slot saves made on older code, so their results don't count. Merged in `runtime/host/hle.c`:
+- round 1: p2door, nopause, p2cam, finds, finisher slots, doorown (`build/fix/merged-hle.c`, `var-merged.exe`);
+- round 2: p2exit (player 2's door, climb and passage prompts run as player 2), the real-press check for doorown, follow (a form's collision size; the follower's placement), camstack (per-player camera stack). Source is `build/fix/merged2-hle.c`, and `var-r2.exe` is the build. `var-base.exe` is the code before round 1.
+
+What was checked, chapter by chapter and player by player, is in `docs/coop-no-pause.md` (the 2026-11-05 evening and 2026-11-06 rows), and what failed is in `docs/coop-failed-attempts.md`. Still open after round 2:
+- FINISH HIM was never reached in a fight;
+- chapter 6 hangs in co-op (pc `0x8011FDA8`, solo is fine);
+- player 2 couldn't walk at the start of chapters 8 and 11 on older builds;
+- player 2 has no camera at chapter 9's start;
+- player 1's statue scene freezes player 2;
+- player 2's examine during player 1's Tome;
+- player 2 put inside chapter 2's zone exit L02/81.
+
+Round 3 (2026-11-06, agents) is in `build/fix/merged3-hle.c`, which is now `runtime/host/hle.c`, built as `var-r3.exe`. Each of its fixes passed an independent checker:
+- startfreeze: player 2's turn lets go of the input focus, so they walk at the ch8 and ch11 starts;
+- ch6hang: a moves part is never loaded over the move still playing;
+- p2camstart: player 2's camera follows the room start's choice (ch9);
+- zone81: player 2's zone line is the game's own step line;
+- `tw_menu_depth_is_camera`: each Tome mode keeps its own camera depth;
+- `g_coop_p2_scene`: in player 2's own scene, their prompt press starts nothing.
+
+Rejected, with reasons in `docs/coop-failed-attempts.md`:
+- p1scene: player 2 walked in player 1's scenes, but an exit mid-scene locked both;
+- finisher3: player 2 got FINISH HIM but stayed in state 30;
+- the behind-the-Tome close-up routing.
+
+`tools/ed/jtg.sh` has `JTG_SLOW=1` for a loaded machine. Smoke-checked on var-r3: ch6 ran 8900 frames past control with no hang; ch8 and ch11, player 2 walks during player 1's words; ch9, player 2 on Camera07 from the start.
+
+Round 6 (2026-11-06, agents) is in `build/fix/merged6-hle.c` (md5 b0583ad4a50675cb0e2764cc1eb777cb), which is now `runtime/host/hle.c`, built as `var-m6.exe` (build/fix/merged6.diff against merged5). Each fix passed an independent checker; patches in `build/fix/<key>/`:
+- events (2.diff): player 2's pickup words with no close-up close (a window their use opens takes the game's input, not their copy's); round 5's grab ported, and the other player's busy-set event 102 no longer frees a held player (either player);
+- follow2 (4.diff): the follower is never placed inside a scripted zone the arrival spot isn't in, facing from the entry marker;
+- scenecam (2.diff): player 2's own-zone camera kept after player 1's scene; player 2 held by their own walk-in scene (busy, zones and r13-23280 kept after their look); player 1's B kept in a player 2 close-up is no longer dropped when its prompt isn't on show yet;
+- tome11 (1.diff): the ch11 player 2 Tome crash (FPU handed over at OSLoadContext in the copy's turn, GQRs put back).
+
+The user's rule (2026-11-06): a full cinematic (play_cinematic, e.g. the ch3 casket's 128) holds both players, as the host already does; only in-world scenes are walked through by the other player.
+
+The pattern behind the scene bug: `coop_prompt_look` puts back r13-24040..-21980 after player 2's look. That range holds the busy word, the zones word (r13-23040) and r13-23280, so anything the game sets there in player 2's look (a scene's hold) is undone unless it is kept explicitly.
+
+Round 6's 12-chapter check of var-m5 (reg-a ch1-6, reg-b ch7-12, about 90 Jump to Game runs) found no round-5 regression. Still open after round 6:  both players starting scene 1538 at once leaves player 1 on ZombieCam01 (old); ch7 158's follower stands on the stairs until the owner moves; player 2's finisher with Finishcam01-03 never seen; player 2's ch3 casket examine untested (the test put missed the casket). `ed test` (old slot saves): 7 of 20 pass on var-m6, the same 7 as on var-m5. Smoke on var-m6:
+- ch5 DESK by player 2: the words close with their B (logs/run-20261106-155300-jtg-regm4-c5bp-m6, 'a window of player 2's use took the input: 6 words', 2036 at 3392);
+- ch5 BOOKSHELVES: player 1's B in player 2's shelf close-up is kept and player 1's ShelfCam02 close-up opens after (logs/run-20261106-155902-jtg-rega5-c5c2-m6; failed on m4 and m5);
+- ch1 exit sphere L01/9: player 1's B during player 2's CHATT_BLOCK pickup is kept and goes in at 7470 (logs/run-20261106-155834-jtg-rega5-c1w-m6; failed on m4 and m5); during player 2's hall scene 779, player 2 held, kept B goes in at 8068 (logs/run-20261106-155940-jtg-regm4-c1hL-m6);
+- ch2 138 scene 1538: player 2 held by their own and it plays once, flag 986 (logs/run-20261106-155416-jtg-vsc-c2q-m6); after player 1's, player 2's own camera kept (logs/run-20261106-155623-jtg-vsc-c2r1-m6);
+- ch2 166 statue by player 1 with player 2 walking, then player 2's exit to 138, then player 2's own 1538 held with player 1's exit waiting (logs/run-20261106-160416-jtg-regm4-c2aL-m6; the shorter c2a ran out of scripted presses as the scene ran long);
+- ch4 player 2's CLIMB DOWN: both on Camera01 (logs/run-20261106-155622-jtg-regm4-c4b-m6); ch1 ladder by player 2 (logs/run-20261106-160044-jtg-regm4-c1d-m6);
+- ch7 1213 by player 2: player 1 placed at 869,-225, no trip back (logs/run-20261106-155319-jtg-rb5-c7p2158-m6); ch8 c8r: follower refused inside 227, player 1's own B later (logs/run-20261106-155452-jtg-rb5-c8r-m6);
+- ch11: 4 player 2 Tome openings, no crash (logs/run-20261106-155735-jtg-t11-g4m6). The scripted player 1 was grabbed, didn't wiggle and died: game over.
+
+Round 7 (2026-11-06, the finisher, agents) is in `build/fix/merged7-hle.c` (md5 11c6676d9f0cf77ff4ee8bf304a85861), which is now `runtime/host/hle.c`, built as `var-m7.exe` (build/fix/merged7.diff against merged6). The user asked that each weapon play its own finish, for every chapter, character, form and both players, and that only the finish move changes:
+- weaponfinish (`build/fix/weaponfinish/4.diff`, `fin_swap`): at FINISH HIM's one call for move 65 (lr `0x800C3258`), the held weapon's home character's move 65 is played, fitted to the holder by bone name. The table comes from the disc via `tools/ed/facts/weapon_homes.py`. Checked on slot13 with the Gladius on Karim, Alex, Alex in Chandra's ghost (the user's 77841), Ellia, Lindsey, Max, Paul, Edward and Michael (blade point-down into the body); Pius unchanged; again after a quick-load. The checker found the quick-load bug in 3.diff, fixed in 4.diff;
+- fincam (`build/fix/fincam/fix.diff`, `coop_finish_camera`, `coop_finish_body`): each player's own finish close-up (count, flag, rotation and camera set), only in their own half; a form uses its wearer's body's Finishcams (solo too). It also carries the ED_FIN_TRACE trace.
+Not run: player 2's finish (slot13's player 2 holds no weapon) and the 14 other home weapons; player 1's finish while player 2 has the cameras lent; both finishing close together; other chapters. `ed test` (old slot saves) on var-m7: 7 of 20 pass, the same 7 as on var-m6. Pictures: `Screenshots for Claude/finisher-m7/` (before and after sheets). Later, with the user: rearrange the character selection screens (Chandra sits under Karim's forms but uses Alex's moves).
+
+Line endings: `runtime/host/hle.c` and the docs are LF again, as in git, since the round-7 commit. The earlier rounds' diffs in `build/fix/` were made against a CRLF copy and need `--ignore-whitespace` or a conversion to apply.
+
+Round 5 (2026-11-06, agents) is in `build/fix/merged5-hle.c` (md5 d337e680beed550fc33730c897f4a98c), which is now `runtime/host/hle.c`, built as `var-m5.exe`, with the prompts change in `.deps/GXRuntime` (patch regenerated). Each fix passed an independent checker; patches in `build/fix/<key>/`, reports in the session's r5-fixes.txt:
+- scenewords (1.diff): one "a way out waits" rule for both players: a zone's room request during the other's scene, words, find, close-up or hold is refused, remembered and let go through the game's own scan when that's over;
+- finisher5 (1.diff): one body, one finisher (event 193 answered 0 and event 202 passed over for the other's victim). Player 1's finisher matched solo frame by frame;
+- moves8 (1.diff): moves7 narrowed to answers that landed a weapon on bare hands (Lindsey and Michael only), by majority;
+- doorcasts (4.diff): no quick casts or player 2 Tome for the non-owner in a room change; player 2's CLIMB DOWN camera;
+- follower (2.diff, hand-merged): the follower's first look passes over a way back's prompt and room change; player 1's look waits until placed;
+- prompts (GXRuntime interp.cpp): player 2's DETAIL in their half while player 1 is on a prompt.
+
+Not merged: grab (player 1's B freed a grabbed player 2). Round 5's chapter checks on var-m4 found: player 2's pickup words with no close-up never close (ch5 DESK, since finisher4: a regression); player 1 placed inside room 158's way back after following player 2 through ch7 1213 (since round 4); player 2's Tome crash in ch11 (old); player 2's camera after player 1's scene 1538 and player 2 not held by their own (old). Round 6 (agents) takes those, the grab, and a 12-chapter check of var-m5.
+
+Round 4 (2026-11-06, agents) is in `build/fix/merged4-hle.c` (md5 6e83cec2bc3a1dd64a3bcc524de28caa), which is now `runtime/host/hle.c`, built as `var-m4.exe`. Each fix passed an independent checker; the patches are in `build/fix/<key>/`:
+- p1scene2 (7.diff): player 2 walks through player 1's scenes; the other player's exit during a scene that isn't theirs waits for the scene and its words, with no lock;
+- finisher4 (1.diff): player 2's FINISH HIM, which completes (`coop_held_weapon`, events between turns in player 2's own words);
+- moves7 (1.diff): Lindsey and Michael swing a sword (their part 42 in place of the missing 14);
+- presswait (2.diff): a B during the other's close-up or scene is kept and runs after it;
+- doorhold (6.diff): the other player walks through a door's countdown and fade, and follows;
+- hurt (final.diff): the ch12 shield hits player 2 once per touch, with knock-back; a player held in words, a close-up or a Tome isn't attacked;
+- tomewords (3.diff): player 2's close-up behind player 1's real Tome, each with their own words and buttons.
+
+What the checkers asked to change (round 5): one body, one finisher; the held exit to fire when let go, and an exit during the scene's trailing words; moves7's choice kept to cases that would get bare hands; player 1's quick casts and player 2's Tome during the other's room change. Old bugs re-found on var-r3 by the chapter checks, all in `docs/coop-no-pause.md`: the follower arriving inside the way-back door; player 2 grabbed with BREAK FREE in player 1's half; player 2's camera after player 1's scene 1538 and after CLIMB DOWN; words carried through a door. Smoke-checked on var-m4: ch2 statue by player 1 with player 2 walking through scene 2242, and ch2 examines and the zone exit each way.
+
 **The co-op sweep, Pius's chapter, 2026-11-05 night, uncommitted, not yet played by the user:** `tools/ed/sweep.py` (`ed` skill). In room 341 (the dais, the wall) and 342 to 344 (the blocks, the corpse), both players' examines and pickups were whole in their own half with the other walking, both cameras back after. What it found and fixed is in `docs/coop-no-pause.md` (the five rows of 2026-11-05). Since: player 2's PICK UP is theirs (the find drawn and named for them, the notice to player 1) and words in their close-up carry their name; rooms 342 to 344 pass with either player first. The urn tests point at `saves/lever.state` and pass (16 of 20). Not done: the pit in 341 (its zone overlaps others), rooms 183 and 182 (floors at many heights: the runner can't place players there yet), room 342's skeleton scene (script 779 on SKPlane01, its plane's place isn't read: a player has to walk the corridor to y -1565, and the stick's way turns with the camera), and chapters 2 to 12. **The user's choice, 2026-11-05:** the Health, Sanity and Magick help pages that open the Tome by themselves stay off for everyone (`meter_help_off`): they only explain, mark themselves seen and highlight the meter, and a forced Tome is what paused play. Later, perhaps a quick notice in the player's own half that doesn't disrupt anything: not yet designed.
 
 **Player 1's camera after a Tome, 2026-11-05 evening, uncommitted, not yet played by the user:** closing a Tome in co-op left the game's camera on the Tome's own record, so player 1's view stood still until a room change, in every chapter, and a reload for a change of characters then showed player 1 black. Fixed in `kTwSwitches` and `camera_index_heal`; `docs/game/systems/camera.md`. `ed check` now flags it (`CAMERA ... record 8`). The 6 kit tests that fail load saves that now hold chapter starts: `lever.state` still has the urn, room 147.

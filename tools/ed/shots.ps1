@@ -1,7 +1,7 @@
 # Pictures of the game's own window as a run goes (PrintWindow, so it never catches another window on top), each named by
 # the wall clock the game's recording also keeps, so `ed see` and `ed sheet` find the picture of a frame. It also writes how
 # much each half changed since the last picture, which is how `ed check` sees a half standing still.
-param([string]$dir, [int]$everyMs = 250, [int]$width = 960)
+param([string]$dir, [int]$everyMs = 250, [int]$width = 960, [string]$proc = "EternalDarkness")
 New-Item -ItemType Directory -Force $dir | Out-Null
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
@@ -72,7 +72,7 @@ public static class Shots {
 }
 '@
 for ($i = 0; $i -lt 200; $i++) {
-    $p = Get-Process EternalDarkness -ErrorAction SilentlyContinue | Select-Object -First 1
+    $p = Get-Process $proc -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($p) { break }
     Start-Sleep -Milliseconds 200
 }

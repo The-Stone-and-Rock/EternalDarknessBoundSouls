@@ -10758,10 +10758,10 @@ index 0a23a3f..16a2338 100644
  unsigned long long dst_alpha_fallback_count() noexcept;
 diff --git a/graphics/aurora/lib/gfx/interp.cpp b/graphics/aurora/lib/gfx/interp.cpp
 new file mode 100644
-index 0000000..5df3340
+index 0000000..673e6ed
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/interp.cpp
-@@ -0,0 +1,718 @@
+@@ -0,0 +1,720 @@
 +#include "interp.hpp"
 +
 +#include <atomic>
@@ -11440,14 +11440,16 @@ index 0000000..5df3340
 +        }
 +      }
 +      std::memcpy(dst.projection, out, sizeof out);
-+    } else if (player >= 0 && isHud && farRight.contains(offset)) {
-+      if (player == 0) {
-+        float out[4][4];
-+        std::memcpy(out, src.projection, sizeof out);
-+        out[0][3] -= src.projection[0][0] * kHudAway * 2.f;
-+        std::memcpy(dst.projection, out, sizeof out);
-+      }
++    } else if (player == 0 && isHud && farRight.contains(offset)) {
++      // Player 1's own HUD in player 2's close-up, brought back from past player 2's.
++      float out[4][4];
++      std::memcpy(out, src.projection, sizeof out);
++      out[0][3] -= src.projection[0][0] * kHudAway * 2.f;
++      std::memcpy(dst.projection, out, sizeof out);
 +    } else if (away && isHud && offRight.contains(offset)) {
++      // Player 2's view: their HUD back from kHudAway. A block of player 1's (farRight) is moved the same way and
++      // stays off the right, kHudAway past player 2's: the HUD's text shares one block, and leaving that block
++      // where it was for player 1's prompt left player 2's DETAIL in the same block off their screen too.
 +      float out[4][4];
 +      std::memcpy(out, src.projection, sizeof out);
 +      out[0][3] -= src.projection[0][0] * kHudAway;

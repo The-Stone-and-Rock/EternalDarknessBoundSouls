@@ -445,3 +445,140 @@ Not in the game: both attempts are out, saved in `Screenshots for Claude/chandra
 **Hiding the detail share's totals (`0x8011C7F8`) as a test:** at 650016 and 40000 or over the share (`0x8011CA04`) clears the `+20` of every character in its list, as read in the code. Hidden, faces didn't change and Alex stopped being drawn, though `both.tsv` has her in the room. That test ran on `camera = 0`, where bodies were already right, so it says nothing of the third-person camera. Don't take it as ruling the limit out.
 
 **`ed test` under `mod_coop = 0`:** a kit test uses `settings.ini`. With co-op off the run has no player 2, and `ed check` gave 4052 findings on nothing (`logs/run-20261105-045255-test-both-walk`). See that `[coop] player 2` is in the log before believing a run.
+
+## Round of 2026-11-05 evening (Jump to Game runs, no saves)
+
+**Emptying script -2 slots from player 1's prompt copy when player 2's close-up is lent** (`coop_cameras_lend`, in the tree before this round):
+
+```c
+for (u32 i = 0; i < 6u; i++)
+    if ((s32)read32(slot + 12) == -2) { memset(slot, 0, 28); slot +4, +8, +20 = -1; }
+```
+
+It assumed a -2 slot was player 2's close-up prompt. A zone's EXAMINE and PICK UP are asked with -2 too, so player 1 lost their own EXAMINE for the whole of player 2's close-up and after it (`logs/run-20261105-204217-jtg-finds-p2first-base`). Removed. `coop_close_up_kept` alone keeps player 1's zone leave from cancelling player 2's close-up.
+
+**Clearing the busy word only around player 2's turn in `hle_coop_controller`** (var-p2door-2): with busy 1 left by a script's `busy_set`, the game never calls main's controller (the ask at `0x8000749C`), so `hle_coop_controller` never ran and player 2 stood through player 1's words (`logs/run-20261105-213056-jtg-p2door-f2-p1no2`). What worked: `coop_busy_ask` answers 0 in that state.
+
+**"None of player 2's presses answer the ladder's words"** was the game: the Yes/No sits below the first page, and A or B does nothing until the stick scrolls to it, for player 1 too. Under load a scripted scroll of 120 frames may not reach it: use 300 or more.
+
+**Re-running player 2's zones with zones off at a scene's start** (build/fix/p2cam/1.diff), so every zone they stand in fires again at its end: the game doesn't do that for player 1, and re-entering re-ran examine prompts, door zones and stateful scripts (the ladder at state 1 climbed with no press). Dropped for `coop_scene_set`.
+
+**`0x80134D48` is not the room camera's re-chooser.** It walks `0x80155234(2)`'s list and calls `0x800445C4` / `0x80044538` on 60-byte entries matched by zone+44 (sound or ambience zones). The scene's own `fn8` picks the camera it ends on.
+
+**Player 2's zone look at `object +0 ∓ object+628`** (since 7221cd7): +628 is 135.6 for rotten Ellia's body and 50 for most. With the Original camera's sign the point was 140 over their feet, above low zones (CameraRgn01 of room 341, Region03 of room 103: no OPEN DOOR, no camera); with the other sign 130 under the floor, nothing found. The game's step makes its line from `object +0 + object+612 - (c, c, object+628)`, and +612 measured `(0, 0, +628)`: at their feet. `coop_look_line` now reads +612 and +628 like that. A first fix that only corrected +628 for forms (`coop_look_height`, build/fix/doorown/2.diff) was superseded.
+
+**A 300-frame wall-clock window for "the room player 2's way out asks for is theirs"** (build/fix/doorown/2.diff): door scripts wait in game ticks, and at 16 fps script 132's ticket came after it closed, so player 1 got the arrival again (`logs/run-20261105-224829-jtg-ver-doorown-c4p2-fix2`). Now pending until the pressed script's ticket or motion, or player 1's own press.
+
+**Keeping the chapter's move part when the character's file lists it** (`hle_chapter_body`, char_file_has_part in build/fix/finisher/hle-1.c): logged "body part 14, the chapter's, for 9" and changed nothing measurable for move 65 in ch2. Dropped.
+
+**`JTG_SET="mod_coop=0"` did nothing** before 2026-11-05 22:58: the last key was dropped (no final newline). Fixed in jtg.sh; runs named "solo" before then were co-op.
+
+## Round of 2026-11-06 (Jump to Game runs, no saves)
+
+**Player 2's exit prompt run with `coop_use_start(script, true)` alone** (build/fix/p2exit var-p2exit-1): the locked door's words vanished. `hle_message_open` still passed over every examine window of a use of player 2's (the 2026-11-01 "skip close-ups" leftover) and re-ran script 1214 ("an examine's close-up passed over for player 2", logs/run-20261105-230154-jtg-p2exit-1-ch7locked). Player 1 still stood through script 132's hold.
+
+**Running `coop_player1_turn` under player 2's script hold from `hle_coop_controller` alone** (var-p2exit-2):
+
+```c
+if (p2_hold) { coop_hold_open(cpu, &k); coop_player1_turn(cpu); coop_hold_shut(cpu, &k); }
+...
+g_hle_passthrough = !p2_hold;  // p2_hold = g_coop_script_hold && !g_coop_screen && (busy & ~1) == 2
+```
+
+Player 1 still stood (logs/run-20261105-231743-jtg-p2exit-2-ch4-p2): the step's busy ask skips the controller, so `coop_busy_ask` has to answer 0 under it too (`coop_p2_holds`).
+
+**No `g_coop_p2_hold_open`** (var-p2exit-3): player 2's prompt element was made and freed every frame of their hold (logs/run-20261105-232523-jtg-p2exit-3-ch4-p2).
+
+**No room check in `continue_coop_use`** (var-p2exit-4): the ticket's busy 4 was taken for player 2's close-up, and player 1's camera stayed on room 103's Camera01 in room 123 (logs/run-20261105-234448-jtg-p2exit-4-ch7open-p2b). Now `g_coop_use.tickets`.
+
+**"Player 1's own press" counting every `0x80006EBC` call from the dispatch** (doorown, round 1): the dispatch also calls it with r4 3 and no button, every 60 frames while player 1 walks, and that cleared player 2's pending way out, so player 1 got player 2's CLIMB DOWN arrival (logs/run-20261105-233711-jtg-rega-c4e-m1, -233228-...-c4b-m2). Only r4 0 is a press now.
+
+**Placing the follower by sweeping their ball from player 1's spot** (build/fix/follow var-follow-1, `camera_collide(cpu, {at.x, at.y, middle}, {to.x, to.y, middle}, radius + 10, hit)` with middle = at.z + 30 + radius + 10): at the foot of room 342's ladder player 1 stands against the wall, so every direction hit; both players were put on one spot and neither could move (logs/run-20261105-234032-jtg-follow-v5-ch1-p1lead).
+
+**A half-distance (75) fallback with the room test** (var-follow-2): two radius-50 bodies overlapped, the game pushed player 2 into room 158's CameraRgn03, and both went back to room 103 (logs/run-20261105-234617-jtg-follow-v7-ch7-158-p1lead). The nearest try is now r1 + r2 + 10, and 75 only as the very last try without the room test.
+
+**"Player 2 stuck after a door" was not a hold.** Node +28 was 0xA and state 1 for both. Their form's body gave a collision radius of 135.6 (`0x80117F64`: max(r13-28952, body +248)), and that ball didn't fit room 158's corridor (`costume_size` now).
+
+**Round 1's "player 2's camera stalls when player 1's waiting B opens" was on var-finds, without nopause**: player 2's whole turn paused in player 1's close-up. On the merged code it comes back in both orders. The shared camera stack was still real (depth and index are now per player, `coop_camera_set_io`), but it was not that stall.
+
+**Tooling: `variant.sh ... | grep -m8 error`** closed the pipe, killed variant.sh before its restore, and left a patch with broken strings in runtime/host/hle.c for every other agent's build. variant.sh now restores on any exit. **A Python edit script written through a Bash heredoc** turns a backslash-n escape inside a C string into a real newline in a C string: write such scripts with the Write tool, or check the diff.
+
+## Round 3 of 2026-11-06 (Jump to Game runs, no saves)
+
+Taken into var-r3: startfreeze, ch6hang, p2camstart, zone81, and two parts of overlap (`tw_menu_depth_is_camera`, `g_coop_p2_scene`). The attempts below failed or were rejected.
+
+**p1scene 1.diff, the look alone** (`g_coop_p1_look = true` in `coop_scene_set` for player 1's fn22 scene, busy & ~33 == 2, not `cutscene_playing`): player 2 walked, but after ch2's opening scene 1603 they stayed on Camera05, the scene's camera, because their first camera set of the room was copied inside the scene (logs/run-20261106-011325-jtg-p1scene-st1c 1805-3819).
+
+**p1scene 2.diff**, counting that copy as shared and handing player 2 the game's set at fn22(0) (`const bool shared = !g_coop_cameras.p2_set || fresh || ...;`): still Camera05, because script 1603 picks its end camera with fn8 after fn22(0) (logs/run-20261106-012727-jtg-p1scene2-st2 1684-3607).
+
+**p1scene 3.diff (look + `p2_set = false` at the scene's end when player 2's set began in it), REJECTED by its verifier.** It turns on player 2's whole turn, zone scans included, in every scene of player 1's. Player 2 walked into the ch2 exit BoxRegion04 (L02/81) during scene 2242, the room changed before fn22(0), the play-hold word r13-25696 stayed 1 and both players froze for good (logs/run-20261106-031806-jtg-vfyp1s-exit3, -022838-jtg-vfyp1s-exit; var-r2 waits for the scene's end: -032202-jtg-vfyp1s-exit2-r2c). A scene cut by a room change also leaves `g_coop_scene_camera.on` set.
+
+**finisher3, REJECTED.** `coop_held_weapon` on `0x801F99F0` (answers player 2's equipped copy from `0x80151500(id, 0)`, since their carried list node+48 is always empty) gives player 2 FINISH HIM and move 65, but they then stay in state 30 for good and the zombie never reaches state 31. Event 202's handler ran with turn 0 on player 1's block r13-25656 = 0x8122A5A0, and player 1 froze for 200-330 frames (state 30 sets bit 8 of the shared r13-24048). Player 2's thing look also offered FINISH HIM in every state, so script 2244 re-ran on each B (logs/run-20261106-033234-jtg-vf3-p2-d9b, -034140-jtg-vf3-p2-d9-stick, the fixer's -025412-jtg-f3-c19-p2fix). Round 2's note on `0x800C30CC` had the bit backwards: a gun OR bit 0x20 of `0x8019BA1C` sends event 40; only no gun and bit 0x20 clear plays move 65.
+
+**overlap 1.diff**: player 2's pad routed to the world's frames behind player 1's Tome, with the handover at the Tome's close, but bit 0x10 of r13-24048 left set. The presses reached the dispatcher (`prompt use r3 2`) with no look step, because DETAIL was never shown (logs/run-20261106-020921-jtg-ov-c1-f2).
+**overlap 2.diff**: `g_coop_screen` plus `coop_close_up_prompt` in the read after the Tome frame only. The read after the world frame set it false, the "was" cleanup cleared busy 2 every other frame, and player 2's host B ran script -2 again and again (logs/run-20261106-022304-jtg-ov-c1-f3).
+**overlap 3.diff**: `g_coop_screen` set in the read after the world frame instead. That read is for the Tome's frame, so player 2's words opened as "player 1's words" and the close-up was lost (logs/run-20261106-030040-jtg-ov-c1b-f4).
+**overlap 5.diff**: not zeroing the world's menu-depth slot, without the skip in `tw_switches`. Depth was still 0 at RETURN, because the aliased word is saved and loaded twice in turn (logs/run-20261106-035355-jtg-ov-c1-f6).
+**overlap 6.diff behind-the-Tome routing, REJECTED:** it works only while player 1 doesn't touch their Tome. Player 1's B in the Tome closed player 2's words behind it, and their Start couldn't close the Tome (one words window r13-25960, one input focus r13-23552/-23556). "player 1's close-up holds them alone" then took over, and player 2's close-up was left with no owner (logs/run-20261106-044758-jtg-vov-c1b-ov6). Player 1's Start that closed the Tome reopened a copy (p1_start_was not updated while behind). The Tome's item name and LB/RB hints were drawn in player 2's half.
+
+**p2camstart 2.diff**: every camera choice outside player 2's look, player 1's scene, look or close-up counted as the room's. Player 2's view went to player 1's ladder camera when player 1 was put there (logs/run-20261106-013815-jtg-p2cs-v-c1-p1ladder 4044/4201).
+**p2camstart 3.diff**: player 1's first zone look in a room counted with no fade test. Player 1 stood after ch1's intro, their first look came 2300 frames later at the ladder, and player 2's view went across the room (logs/run-20261106-031127-jtg-p2cs-x-c1-p1ladder-p2camstart-3 4646). What worked (4.diff) ties player 1's first look to the fade-in ticks r13-21784.
+
+**The zone81 "regression" was not one.** ED_PUT finds the floor about 50 units low at many spots (z -48 at ch2's (0,-1600)), and the body is pushed back out of the box. On var-base the look line was at waist height and ended inside the box at the put. Puts are not proof of zone behaviour: walk in, or step after a put. The miss walking in was the form's collision radius (fixed by round 2's `costume_size`).
+
+**Tooling traps this round:**
+- `coopcheck.py --help` has no help: it starts a full chapter-1 run. Three agents did it, and each run held `build-win/EternalDarkness.exe`, so every variant link failed ("permission denied").
+- An `ed test` killed by a tool timeout left its game running for an hour (pid 22332, logs/run-20261106-041509-test-urn-p1).
+- Editing `tools/ed/jtg.sh` while runs use it breaks them, because `sh` reads the script as it goes: two runs never closed.
+- Under load the stock Jump to Game grid presses were lost, and runs landed in the wrong chapter (rooms 166, 150, 338, 103) or a menu. `JTG_SLOW=1` (first grid press at T+330, 60 frames apart, 14-frame presses) fixes it.
+
+## Round 4 of 2026-11-06 (Jump to Game runs, no saves)
+
+All seven round-4 fixes passed a checker and are merged in `build/fix/merged4-hle.c` (var-m4.exe), now `runtime/host/hle.c`. What failed along the way:
+
+- **p1scene2, letting the held way out go at fn22(0) itself** (var-p1scene2-1, -3, -4): the statue's find goes 2242 -> words -> 2240, so player 1's look was left at stage 2 in room 138 and their B there ran script 2240 again (logs/run-20261106-062522-jtg-p1s2v4-exit, frame 5500). Code: `if (!g_coop_scene_camera.on) g_coop_scene_held = false;` in `coop_p1_scene_on`.
+- **p1scene2, keying player 1's hold to `g_coop_p2_scene`** (var-3): that flag is never set for player 2's statue scene 2242, which runs as who 1 after the words' Yes, so player 1's exit still locked both (logs/run-20261106-060047-jtg-p1s2v3-exit1). Code: `coop_p1_looks_in_p2_scene() { return g_coop_p1_scan && coop_p2_scene_on(); }`. A scene that isn't player 1's is found by `coop_scene_player1s` being false (`g_coop_scene_p2s`).
+- **p1scene2, holding only `coop_scan_player1` and letting go at fn22(0) plus busy 0** (var-5, -6): the game's own look for player 1 during player 2's words marked them inside the exit without its script (no zone's script runs under words), and they stood in it (logs/run-20261106-064004-jtg-p1s2v6-exit1, frame 5432). 7.diff holds the game's look too, until no words are up. Even so, the checker found player 1 marked inside at fn22(0) and the exit firing only after they stepped out and back in (logs/run-20261106-074111-jtg-vp1s2-st2e, 5021).
+- **doorhold-1, answering only the held ask `0x801F68D4` with 0 for the one who didn't open the door:** player 2 walked through player 1's door, but player 1 still stood through player 2's, since the game's own controller sent event 45 from the ticket on (logs/run-20261106-051733-jtg-dh1-c1p2ladder, 2786-2834).
+- **doorhold-3, -4, -5, a `coop_player1_turn` for player 1 in player 2's room change with only the busy word cleared** (after player 2's turn; with `coop_hold_open`/`coop_hold_shut` round it): player 1 still stood in doors player 2 opened through a prompt (OPEN DOOR 1212, the ladder's Yes), while walking at player 2's walk-in door 1213. Their control block 0x805D7BA0 +8 was 0x400 every frame (no 0x80 stick bit: the controller's 44/45 choice, 0x80045FF0). Code: in `hle_coop_controller`, `CoopHoldKept k; g_coop_p1_turn_fresh = !room_was; coop_hold_open(cpu,&k); coop_player1_turn(cpu); coop_hold_shut(cpu,&k);` while `coop_room_change_other(cpu,false)`. What worked: starting that turn from player 1's own state saved on their last free frame (`g_coop_p1_free`).
+- **hurt-t1, a pointer guard `(s32)thing <= 0 ||` in `coop_hazard_touch`:** every guest pointer (0x8xxxxxxx) is negative as s32, so it always passed through, and player 2 still died 75 -> 0 in 40 frames (logs/run-20261106-054513-jtg-hurt-t1-s12-p2). Check pointers with `guest_ram_range_valid` only.
+- **tomewords-1, the HUD text pool at 0x806087D0** (a sign slip: 0x8060 with -0x7830 is 0x805F87D0): no element ever matched, so no text was hidden. The words and focus split itself worked (logs/run-20261106-052546-jtg-tw-c1c-t1).
+- **tomewords-2, the other mode's HUD elements hidden by alpha (+7 = 0) alone:** the words' text went, but their dark box and B icon stayed on player 1's Tome page (logs/run-20261106-055643-jtg-tw-c1b-t2, shots/000156.jpg). x (+8) off the left as well is what works.
+- **finisher4, the round-3 put beside the body** (ED_FIN_NEAR) was lost when the body slid about 120 units after it (logs/run-20261106-054826-jtg-f4-p2-a). Putting the player again whenever the body moves more than 20 units (2t.diff, a test helper only) got FINISH HIM in 3 of 3 runs.
+
+Found in merging: the patches came with CRLF line ends, and GNU `patch` refuses all hunks ("different line endings") unless run with `--binary`. doorhold's hunk 11 and p1scene2's hunk 14 overlapped presswait's and doorhold's edits and were merged by hand (`build/fix/merged4/`).
+
+Tooling: `sh` reads a script as it runs, so editing a run script that a queued run still uses broke its last line (moves7's checker, p1scene2's fixer). Copy it first. ED_INPUT_SCRIPT's R (0x20) sets only the digital bit, so a scripted player 1 never readies (player 2's "r" pulls the trigger). Under load, coopplan's 8-frame stick nudges behave differently at 29 and 54 fps: use 14-frame presses.
+
+## Round 5 of 2026-11-06 (Jump to Game runs, no saves)
+
+Six of round 5's seven fixes passed a checker and are merged in `build/fix/merged5-hle.c` (var-m5.exe), now `runtime/host/hle.c`, with the prompts change in `.deps/GXRuntime` (and `patches/gxruntime/eternal-darkness.patch`). What failed:
+
+- **p1scene2's rollback (round 4, 7.diff), why it didn't hold:** its `inside_was` rollback and skipping the held player's looks were undone by the game itself: 0x80134D48 runs at fn22(0) and as words open, and marks what the player stands in as inside with no script (logs/run-20261106-074111-jtg-vp1s2-st2e, 5021). The release then found "stay", not "enter", and the skip froze the held player's camera zones. What works (scenewords): don't roll back; clear the asking zone's inside bit at the release.
+- **moves7 (round 4, build/fix/moves7/1.diff, moves_instead called before the kInstead loop for every missing part, the weapon's moves an intersection across files):** 110 answers changed, guns too (Ellia's rifle -> blowgun 112), and one differing file emptied a move set. moves8 changes only answers that landed a weapon on bare hands, with a majority vote.
+- **grab (build/fix/grab/3.diff), not merged** (round 6 found the cause below was wrong: player 1's busy set reached the held player 2 through the busy set's own event-102 broadcast, 0x801F5620 at 0x80155720, not through kind 19's tick; see round 6)**:** putting player 2's words in for kind 19's tick made them "the player" there, and the tick's `if (0x80155738() && 0x801F62B8() == self) event 102` (0x80061A8C..0x80061AB4) let player 1's busy word free a grabbed player 2 (logs/run-20261106-114633-jtg-vg-p2held2-fh, 4759-4761, 5280-5281).
+- **doorcasts, giving player 2 the arrival spot's zone words in the arrival re-run while left behind:** `if (zones && arrival_scene && coop_left_behind(cpu)) { coop_zones_new(cpu, info); for (i...) g_coop_zones.p2[i] = mem_read32(cpu, list + i*COOP_ZONE_SIZE + COOP_ZONE_INSIDE); }` never fired (coop_left_behind was false there, logs/run-20261106-085728-jtg-dc1-c4p2climb). An intercept on player 1's Start 0x80006CDC in player 2's room change was never reached: the game doesn't run it then. Both removed.
+- **finisher5 (test approach):** ED_INPUT_SCRIPT holds at most 256 events and 4096 characters (INPUT_SCRIPT_MAX_EVENTS / _TEXT); a longer script is cut silently (logs/run-20261106-093928-jtg-f5-bb-p2first).
+- **grab (test approaches):** in ch11 room 50 the enemy wouldn't grab a free player 2 while player 1 walked (8 runs); making player 1 "held" with a test helper stopped the enemies from coming at all (their threat search asks only "the player"). What worked: a test helper in coop_enemy_target, `if (test_target) want = ids[test_target - 1];` (build/fix/grab/test-helper.diff). A continuous stick wiggle got the player hit instead of grabbed.
+
+Found in merging: follower's hunks 4 (the arrival scene) and 6 (coop_scan_player1's start) overlapped doorcasts' and scenewords' edits and were merged by hand (`build/fix/merged5/`, scratchpad merge5.py): the follower's capture and `arrival_scene` were kept (they include doorcasts' "not in player 2's own look or turn"), and its two early checks go after scenewords' `g_coop_p1_own_look` return.
+
+Tooling: the stick in ED_INPUT_SCRIPT / ED_PAD2_SCRIPT is camera-relative, and a teleported player keeps their old camera until a camera zone changes it: scripted walkers drift out of a 100-unit zone in about 30 frames. Walking into a zone is reliable as put outside, step, put inside, step. Under this load, 'timeout 2400' kills runs still waiting for a slot: use 6000. Scene 2242 lasts 300 to 780 frames between runs, so key test puts to events, not frames.
+## Round 6 of 2026-11-06 (Jump to Game runs, no saves)
+
+All four of round 6's fixes passed a checker and are merged in `build/fix/merged6-hle.c` (var-m6.exe; build/fix/merged6.diff against merged5). They applied in sequence with offsets only. What failed on the way:
+
+- **events, first version (build/fix/events/1.diff, var-events-1):** skipping coop_events' swap for the whole of player 2's use: `static bool coop_p2_input_in_game(CPUState* cpu) { return coop_use_theirs() || g_coop_screen || g_coop_p2_behind_tome || (g_coop_assist_at != 0u && coop_busy(cpu) && !g_coop_p1_look); }` with `&& !coop_p2_input_in_game(cpu)` in coop_events' condition. It fixed the DESK words, but FINISH HIM is also a use (script 2244): its event 202 ran with player 1's words and player 2 stayed in state 30 for good (logs/run-20261106-130300-jtg-ev-p2fin-t1). The final fix keeps the swap in a use and moves only a window's input (its channel and r13-23556) to the game's.
+- **scenecam, first version (build/fix/scenecam/1.diff, var-scenecam-1):** holding player 2's own scene by keeping the busy word, without a keep fallback in coop_menu_input. Player 2's walk-in scene became a player 2 close-up, so player 1's B in exit sphere L01/9 during player 2's hall scene 779 went to g_coop_p1_b_waits; at 'play goes on' the game showed no prompt yet and `if ((s32)mem_read32(cpu, shown + 8u) >= 0 && mem_read32(cpu, shown + 4u) == 2u) g_coop_p1_b_press = 3u;` pressed nothing (logs/run-20261106-141622-jtg-sc-c1hL-s1). 2.diff adds `else if (coop_p1_own_b_prompt(cpu, &id, &script)) coop_press_keep(&g_coop_p1_kept, 1, id, script, ...)`.
+- **follow2, first version:** read the entry marker's place as floats, `place[i] = guest_read_f32(cpu, at + i * 4u);`, which gave (0, -2.9e37, 0) (logs/run-20261106-125139-jtg-f2-c7p2158-v1). The marker place is three halfwords at +44: `(float)(s16)mem_read16(cpu, at + i * 2u)`.
+- **tome11:** none failed. The crash never came naturally in 29 openings on var-m5; it was proven with a test helper that clears the copy's FPU owner (build/fix/tome11/test-helper.diff).
+
+Tooling: `sed -i` in Git Bash on a CRLF hle.c copy silently rewrites it as LF, and `diff -u` then gives a whole-file diff: edit with Python binary IO and check `file` or the diff size. `git diff --no-index` of two CRLF copies gave a diff `git apply` refused; GNU `diff -u --label a/runtime/host/hle.c --label b/runtime/host/hle.c` works. In ch11 room 50, a put at 0..100,-937 often falls through the floor (100,-937 fell to z -274218); player 1 must press B twice to close the chapter's start words or they never walk. A jtg.sh started with a plain `&` inside a Bash call outlives the call and runs twice if started again. ED_PUT with z 0 in a room whose floor is at 553 (ch5 room 252) does nothing: give a z near the floor.
+
+## Round 7 of 2026-11-06 (finisher: the weapon's own finish and each player's close-up, slot13)
+
+No fix attempt failed. Merged in `build/fix/merged7-hle.c` (build/fix/merged7.diff against merged6): weaponfinish (`build/fix/weaponfinish/4.diff`) and fincam (`build/fix/fincam/fix.diff`, which also carries the ED_FIN_TRACE trace). What went wrong on the way:
+
+- **weaponfinish 3.diff, quick-load:** the home character's moves were loaded into slot 6 (0x82400000), RAM that a save state brings back, and nothing marked the slot empty on a state load. After a quick-load the next finish skipped the load, found nothing, and played the blade-up move with no log line (logs/run-20261106-191833-vwf-reload). 4.diff marks slot 6 empty and clears `g_fin` in `hle_coop_state_load`, and reloads the slot if its move 65 isn't where it was loaded.
+- **Test approaches:** writing 1 health once and swinging took the zombie's head (state 33), which FINISH HIM doesn't accept (it needs state 8); putting player 1 85 units south of the body, facing north, worked. Changing player 1's character in settings reloads the room, so slot13's zombie stands up again. Under load, the scripted presses often never down a body by frame 13700-15000. EDrun copies can be closed from outside mid-run.
+- **Tooling:** a Python string with a single backslash-n written through a quoted heredoc put a real newline into C strings and broke the build; `sed -i` again rewrote a CRLF copy as LF.
