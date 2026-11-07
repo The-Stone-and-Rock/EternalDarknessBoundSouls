@@ -20988,21 +20988,21 @@ static void coop_cutscene_over(CPUState* cpu) {
 // half: where their own goes (COOP_PROMPT_AT, which only their view brings back). At the game's own
 // place it was in player 1's corner. Put back as the close-up ends.
 #define COOP_GAME_PROMPT 24032u
+static u32 g_close_up_prompt_moved;  // the game's prompt put in player 2's half, and its own place (coop_close_up_prompt)
+static u16 g_close_up_prompt_own_x;
 static void coop_close_up_prompt(CPUState* cpu) {
-    static u32 moved;
-    static u16 own_x;
     const u32 element = mem_read32(cpu, cpu->gpr[13] - COOP_GAME_PROMPT);
     const bool valid = guest_ram_range_valid(cpu, element, 0x100u);
     if (g_coop_screen && valid) {
-        if (element != moved) {
-            moved = element;
-            own_x = mem_read16(cpu, element + 8u);
+        if (element != g_close_up_prompt_moved) {
+            g_close_up_prompt_moved = element;
+            g_close_up_prompt_own_x = mem_read16(cpu, element + 8u);
         }
         mem_write16(cpu, element + 8u, (u16)(s16)COOP_PROMPT_AT);
-    } else if (!g_coop_screen && moved != 0u) {
-        if (valid && element == moved)
-            mem_write16(cpu, element + 8u, own_x);
-        moved = 0u;
+    } else if (!g_coop_screen && g_close_up_prompt_moved != 0u) {
+        if (valid && element == g_close_up_prompt_moved)
+            mem_write16(cpu, element + 8u, g_close_up_prompt_own_x);
+        g_close_up_prompt_moved = 0u;
     }
     // Their close-up over, the hold's bit player 1's turn kept is gone with it: with nothing holding
     // (its channel off), it stopped both players' controllers for good.
@@ -21016,6 +21016,38 @@ static void coop_close_up_prompt(CPUState* cpu) {
     if (was && !g_coop_screen && g_coop_found_word.p2 && g_coop_found_word.script > 0 && g_coop_found_word.script == g_coop_use.script)
         g_coop_found_word.pending = true;
     was = g_coop_screen;
+}
+
+// The game makes its prompt anew each time it changes (0x8011708C, from the chooser at 0x80117850: the fireplace's
+// SELECT as the raven stops on a tile, MOVE EXIT as it leaves), after the frame's read moved the last one
+// (coop_close_up_prompt): each new one was drawn a frame at the game's own place, on the right, then jumped to player 2's
+// (the user, 2026-11-07). Put in their half as it's made.
+#define COOP_GAME_PROMPT_MAKE 0x8011708Cu
+static void coop_game_prompt_made(CPUState* cpu) {
+    static bool running;
+    g_hle_passthrough = true;
+    if (running || !g_coop_screen || !sda_ready(cpu))
+        return;
+    u32 args[8], ignore = 0u;
+    for (int i = 0; i < 8; i++)
+        args[i] = cpu->gpr[3 + i];
+    const u32 lr = cpu->lr;
+    running = true;
+    hle_guest_call(cpu, COOP_GAME_PROMPT_MAKE, args, 8, 0.0, &ignore);
+    running = false;
+    const u32 element = mem_read32(cpu, cpu->gpr[13] - COOP_GAME_PROMPT);
+    // Made anew, often in the same place as the last (0x805F87D0 each time): at the game's own place again.
+    if (guest_ram_range_valid(cpu, element, 0x100u) && (s16)mem_read16(cpu, element + 8u) != (s16)COOP_PROMPT_AT) {
+        g_close_up_prompt_moved = element;
+        g_close_up_prompt_own_x = mem_read16(cpu, element + 8u);
+        mem_write16(cpu, element + 8u, (u16)(s16)COOP_PROMPT_AT);
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] the game's new prompt (0x%08X) put in player 2's half as made (frame %llu)%c", element,
+                    (unsigned long long)(cpu->timebase / 675000ull), 10);
+    }
+    cpu->lr = lr;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
 }
 
 // Player 1's B on a prompt of their own (kept in their copy while player 2's close-up has the game's: a zone's EXAMINE or
@@ -22305,6 +22337,11 @@ static void find_coop(CPUState* cpu) {
             fprintf(stderr, "[coop] the current player's %s (0x%08X) not found: a puzzle's wrong tile in player 2's close-up hits player 1\n",
                     i == 0 ? "node" : "id", fn);
     }
+    HleDispatchEntry* made = hle_dispatch_entry(COOP_GAME_PROMPT_MAKE);
+    if (made != NULL && made->intercept == NULL && made->notify == NULL && mem_read32(cpu, COOP_GAME_PROMPT_MAKE) == 0x9421FFF0u)
+        made->intercept = coop_game_prompt_made;
+    else
+        fprintf(stderr, "[coop] the game's prompt's making (0x8011708C) not found: a new one in player 2's close-up shows a frame on the right%c", 10);
     HleDispatchEntry* reload_test = hle_dispatch_entry(COOP_RELOAD_TEST);
     if (mem_read32(cpu, COOP_RELOAD_TEST) == 0x9421FFE0u && reload_test != NULL && reload_test->intercept == NULL &&
         reload_test->notify == NULL)
