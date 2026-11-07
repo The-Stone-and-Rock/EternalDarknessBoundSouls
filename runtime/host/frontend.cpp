@@ -80,7 +80,8 @@ namespace {
 
 // --- Input ------------------------------------------------------------------
 
-enum Button { kUp, kDown, kLeft, kRight, kAccept, kBack, kMenu, kCostume, kPageLeft, kPageRight, kButtonCount };
+// kScrollUp/kScrollDown: the right stick (Page Up/Down on the keyboard), which scrolls a list that scrolls.
+enum Button { kUp, kDown, kLeft, kRight, kAccept, kBack, kMenu, kCostume, kPageLeft, kPageRight, kScrollUp, kScrollDown, kButtonCount };
 
 SDL_Gamepad* g_pad = nullptr;
 
@@ -118,6 +119,9 @@ void read_buttons(bool held[kButtonCount]) {
     held[kCostume] = btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
     held[kPageLeft] = btn(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
     held[kPageRight] = btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    const float ry = pad != nullptr ? SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f : 0.f;
+    held[kScrollUp] = ry < -0.5f;
+    held[kScrollDown] = ry > 0.5f;
 }
 
 // Keyboard presses since the last poll, from RmlUi key events.
@@ -166,6 +170,8 @@ public:
         case KI_C: g_key_pressed[kCostume] = true; break;
         case KI_Q: g_key_pressed[kPageLeft] = true; break;
         case KI_E: g_key_pressed[kPageRight] = true; break;
+        case KI_PRIOR: g_key_pressed[kScrollUp] = true; break;
+        case KI_NEXT: g_key_pressed[kScrollDown] = true; break;
         default: break;
         }
     }
@@ -191,6 +197,9 @@ struct InputState {
             } else if (now[b] && b <= kRight && t >= repeat[b]) {
                 pressed[b] = true;
                 repeat[b] = t + 90;
+            } else if (now[b] && (b == kScrollUp || b == kScrollDown) && t >= repeat[b]) {
+                pressed[b] = true;  // held, the list keeps going a line at a time
+                repeat[b] = t + 160;
             }
             held[b] = now[b];
             if (g_key_pressed[b])
@@ -301,6 +310,7 @@ struct Row {
     std::string section;         // starts a section with this heading
     bool gap = false;            // an ornament before it: a new group
     bool tile = false;           // a character's portrait frame (Character select)
+    int card = 0;                // 1 or 2: that player's card on Choose Character
     bool big = false;            // larger than the rows round it (the main menu's Start game)
     bool chosen = false;         // the choice in force (Character select)
     int page = 0;                // 1: the right-hand column of a spread
@@ -488,6 +498,11 @@ void start_game(int slot) {
 Screen g_mods_return = Screen::Launcher;
 int g_mods_section = 1;  // the Mods page open: 1 Co-op, 2 Challenge, 3 Characters
 int g_mods_row = 0;      // the Mods row to come back to
+// A Mods section's page goes back to the Mods list, or to the launcher when opened from it (Choose
+// Character and Co-op are there too), at that row.
+Screen g_mods_page_return = Screen::Mods;
+int g_mods_page_return_row = 0;
+void mods_page_back();
 int section_number(const std::string& heading);
 int g_options_row = 0;  // the Options row to come back to (its pages, Controls, Mods)
 // Controls: player 1's from Options, player 2's from Mods (co-op), and back.
@@ -508,11 +523,12 @@ Row mods_row(Screen from) {
 
 // The characters, as Jump to Game lists them (settings mod_p1_character 1-12;
 // 0 is each chapter's own).
-const char* const kCharacters[] = {"Vanilla Character", "Pius", "Ellia", "Anthony", "Karim",
+const char* const kCharacters[] = {"Default", "Pius", "Ellia", "Anthony", "Karim",
                                    "Max", "Lindsey", "Paul", "Roberto", "Peter",
                                    "Edward", "Michael", "Alex"};
-constexpr int kRosterCount = 12;    // portrait frames, then Stats, "Vanilla Character" and Back
-constexpr int kRosterColumns = 4;  // beside them, the details panel
+constexpr int kRosterColumns = 4;  // portrait frames four to a line; beside them, the details panel
+constexpr int kRosterLines = 3;    // lines of frames in view; the rest scroll, a line at a time
+int g_roster_top = 0;              // the first line in view
 int g_characters_return_row = 0;    // the Mods row to come back to
 int g_characters_player = 0;        // whose character the page chooses: 0 player 1, 1 player 2
 
@@ -522,28 +538,83 @@ int& chosen_character() {
 
 // The other bodies, for whoever's page this is: 4 bits for each character in the setting, the
 // form, 0 their own. In the order of hle.c's kCostumes for each character.
+// On Character select each form has its own frame, right after its character's; the others from the story
+// (other = true) come together at the end. A form plays with its character's bones, moves and stats, which the
+// details panel shows. The order of each character's forms is hle.c's kCostumes': it's the 4 bits' number.
 struct CharacterForm {
-    int character;     // kCharacters' place
-    const char* name;  // on the details panel
-    const char* word;  // after their name on the Mods row
+    int character;      // kCharacters' place
+    const char* name;   // under the frame's name and on the details panel ("" none)
+    const char* word;   // after their name on the Mods row
+    const char* title;  // the frame's name: nullptr, the character's
+    const char* about;  // the details panel's words
+    const char* year;   // nullptr: the character's
+    bool other;         // one of the others from the story, at the end
 };
-constexpr CharacterForm kForms[] = {
-    {1, "Skeletal form", "skeletal"},
-    {2, "Ghost form", "ghost"},
-    {2, "Rotten form", "rotten"},
-    {3, "Ghost form", "ghost"},
-    {3, "Rotten form", "rotten"},
-    {4, "Ghost form", "ghost"},
-    {4, "Chandra", "Chandra"},
-    {4, "Chandra's ghost", "Chandra's ghost"},
-    {4, "Mutated Chandra", "mutated Chandra"},
-    {5, "Spirit form", "spirit"},
-    {7, "Ghost form", "ghost"},
-    {7, "The Bishop", "the Bishop"},
-    {7, "Monk", "monk"},
-    {7, "Black robes", "black robes"},
-    {8, "Ghost form", "ghost"},
-    {10, "Ghost form", "ghost"},
+const CharacterForm kForms[] = {
+    {1, "Liche", "liche", nullptr,
+     "Bound to an Ancient for two thousand years, Pius endures as an undying liche: the darkness's own champion, set "
+     "against every soul who opens the Tome.", nullptr, false},
+    {2, "Spirit", "spirit", nullptr,
+     "Ellia gave her life fighting the darkness beneath Angkor Thom. Her spirit cannot rest while the Ancient she "
+     "defied still stirs.", nullptr, false},
+    {2, "Corpse", "corpse", nullptr,
+     "Unable to pass on, her spirit stayed in her decaying body for eight centuries, guarding an ancient artifact and "
+     "waiting for the one who could carry her knowledge onward.", nullptr, false},
+    {2, "", "the Maid", "The Maid",
+     "A maid of the Roivas household in Maximillian's day, who saw more of her master's madness than she ever dared "
+     "to tell.", "1760 A.D.", true},
+    {2, "Spirit", "the Maid's spirit", "The Maid",
+     "Long after her service ended, the maid's spirit still drifts through the Roivas halls, murmuring of what she "
+     "saw in Maximillian's house.", "2000 A.D.", true},
+    {3, "Spirit", "spirit", nullptr,
+     "Anthony carried the cursed scroll to his last breath. His spirit still holds the warning he never lived to "
+     "deliver.", nullptr, false},
+    {3, "Cursed", "cursed", nullptr,
+     "The scroll's curse takes hold: Anthony's flesh greys and splits as he presses on toward Charlemagne's court, "
+     "racing the rot to deliver his warning.", nullptr, false},
+    {3, "Corpse", "corpse", nullptr,
+     "The scroll's curse rotted Anthony from within but would not let him die. His ruined body still walks the "
+     "cathedral's halls, a servant of what destroyed him.", nullptr, false},
+    {4, "Spirit", "spirit", nullptr,
+     "Karim fell in the forbidden city, but his vow outlived him. His spirit stands guard there still, waiting for a "
+     "worthy hand.", nullptr, false},
+    {4, "", "Chandra", "Chandra",
+     "Chandra, the woman Karim braved the forbidden city to win. For her love he walked into the dark, and did not "
+     "come back.", nullptr, false},
+    {4, "Spirit", "Chandra's spirit", "Chandra",
+     "Chandra's spirit lingers in the forbidden city, still waiting for the warrior who swore he would return to "
+     "her.", nullptr, false},
+    {4, "Mutilated", "mutilated Chandra", "Chandra",
+     "What the darkness made of Chandra: torn and twisted into a cruel mockery of the woman Karim loved.", nullptr, false},
+    {5, "Spirit", "spirit", nullptr,
+     "Driven mad by what lay beneath the mansion, Max's restless blue spirit still walks the Roivas halls, keeping "
+     "watch over the family he tried to save.", nullptr, false},
+    {7, "Spirit", "spirit", nullptr,
+     "Paul's faith carried him through the cathedral's horrors. His spirit keeps its vigil there, long after the "
+     "last bell rang.", nullptr, false},
+    {7, "", "the Bishop", "The Bishop",
+     "The Bishop in his red robe, from Anthony's chapter. Behind his blessings lies a darker devotion.", "814 A.D.", false},
+    {7, "", "the Custodian", "The Custodian",
+     "The grey old Custodian of the bell tower, who has tended the cathedral's bells longer than anyone remembers, and "
+     "knows what sleeps beneath them.", nullptr, false},
+    {7, "", "black robes", "Black Robes",
+     "One of the robed men who gather in the cathedral's shadows, keeping the rites of a god that is not the "
+     "church's.", nullptr, false},
+    {7, "", "Inspector Legrasse", "Legrasse",
+     "Inspector Legrasse of the Rhode Island police, sent to the Roivas mansion to look into Edward's murder, who finds "
+     "the case stranger than any before it.", "2000 A.D.", true},
+    {8, "Spirit", "spirit", nullptr,
+     "Roberto never left the Forbidden City. His spirit wanders the dark halls where he was held, still searching "
+     "for a way out.", nullptr, false},
+    {10, "Spirit", "spirit", nullptr,
+     "Murdered in his own mansion, Edward lingers to guide his granddaughter through the Tome he spent his life "
+     "studying.", nullptr, false},
+    {10, "", "the Servant", "The Servant",
+     "A servant of the Roivas mansion in Maximillian's day, loyal to his master even as the house filled with "
+     "whispers.", "1760 A.D.", true},
+    {10, "", "the Footman", "The Footman",
+     "A footman of the Roivas mansion in Maximillian's day, who kept the doors and the silence of a house with too "
+     "many secrets.", "1760 A.D.", true},
 };
 
 int forms_of(int character) {
@@ -569,19 +640,56 @@ int form_on(int player, int character) {
     return form <= forms_of(character) ? form : 0;
 }
 
-// The frame's character changes form, on this page's player: on through them, then back to their own.
-void form_swap(int character, int dir) {
-    const int count = forms_of(character) + 1;
+// A character's form, on this page's player: the same 4 bits as ever, so the game reads it as before.
+void form_set(int character, int form) {
     long long& bits = g_characters_player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume;
-    const int form = (form_on(g_characters_player, character) + dir + count) % count;
     const int shift = (character - 1) * 4;
     bits = (bits & ~(15LL << shift)) | (static_cast<long long>(form) << shift);
 }
 
-// What a form's called on the character screens.
-const char* form_name(int player, int character) {
-    const int form = form_on(player, character);
-    return form != 0 ? form_row(character, form)->name : "Original Form";
+// Character select's frames: Default (each chapter's own character) first, then each character followed by
+// each of their forms, so a form sits beside whose it is.
+struct RosterTile {
+    int character;  // kCharacters' place
+    int form;       // 0 their own body
+};
+const std::vector<RosterTile>& roster_tiles() {
+    static std::vector<RosterTile> tiles;
+    if (tiles.empty()) {
+        tiles.push_back({0, 0});
+        for (int i = 1; i <= 12; i++)
+            for (int form = 0; form <= forms_of(i); form++)
+                if (form == 0 || !form_row(i, form)->other)
+                    tiles.push_back({i, form});
+        for (int i = 1; i <= 12; i++)
+            for (int form = 1; form <= forms_of(i); form++)
+                if (form_row(i, form)->other)
+                    tiles.push_back({i, form});
+    }
+    return tiles;
+}
+int roster_count() {
+    return static_cast<int>(roster_tiles().size());
+}
+// The frame of a character in a form (the first frame when there's none).
+int roster_index(int character, int form) {
+    for (int i = 0; i < roster_count(); i++)
+        if (roster_tiles()[i].character == character && roster_tiles()[i].form == form)
+            return i;
+    return 0;
+}
+
+// A frame's name: the form's own (Chandra, The Bishop) or the character's; and the line under it.
+const char* tile_title(const RosterTile& t) {
+    if (t.character == 0)
+        return "Default";
+    const CharacterForm* f = t.form != 0 ? form_row(t.character, t.form) : nullptr;
+    return f != nullptr && f->title != nullptr ? f->title : kCharacters[t.character];
+}
+const char* tile_form_name(const RosterTile& t) {
+    if (t.character == 0)
+        return "";
+    return t.form != 0 ? form_row(t.character, t.form)->name : "";
 }
 
 int& chosen_stats() {
@@ -616,29 +724,24 @@ const CharacterInfo kCharacterInfo[13] = {
     {"2000 A.D.", "Alexandra Roivas, who returns to her grandfather's Rhode Island mansion to solve his murder.", 100, 125, 125},
 };
 
-// A character with other forms, written as a heading in the Tome: its ornament above and below, the form in
-// red ink, a mark for each form with this one's lit, and the buttons that change it.
-std::string form_panel_rml(int i) {
-    // On the keyboard, Q and E are its LB and RB.
-    const bool keys = controls::glyph_set() == "kb";
-    const std::string set = "glyphs/ink/" + controls::glyph_set();
-    std::string marks;
-    for (int form = 0; form <= forms_of(i); form++)
-        marks += std::string("<img class=\"form-mark") + (form == form_on(g_characters_player, i) ? " on" : "") + "\" src=\"tome/mark.png\"/>";
-    return "<div class=\"bio-form\"><div class=\"bio-form-rule\"></div><div class=\"bio-form-name\">&#8249; " + std::string(form_name(g_characters_player, i)) +
-           " &#8250;</div><div class=\"bio-form-marks\">" + marks + "</div><div class=\"bio-form-keys\">Change form <img class=\"glyph\" src=\"" + set +
-           (keys ? "/q.png" : "/lb.png") + "\"/><img class=\"glyph\" src=\"" + set + (keys ? "/e.png" : "/rb.png") + "\"/> or <img class=\"glyph\" src=\"glyphs/ink/kb/c.png\"/></div><div class=\"bio-form-rule\"></div></div>";
-}
-
-// Character select's panel beside the frames: the highlighted character's
-// name, when they lived, who they are and their meters.
-std::string character_details_rml(int i) {
-    const CharacterInfo& c = kCharacterInfo[i];
-    std::string out = "<div class=\"bio\"><div class=\"bio-name\">" + escape(kCharacters[i]) +
-                      "</div><div class=\"bio-year\">" + escape(c.year) + "</div>" +
-                      (forms_of(i) > 0 ? form_panel_rml(i) : std::string()) +
-                      "<div class=\"bio-about\">" +
-                      escape(c.about) + "</div><div class=\"meters\">";
+// Character select's panel beside the frames, the same for every frame: the name, the form in red ink under
+// the Tome's ornament, when they lived, who they are, then the meters. A form's are its character's.
+std::string character_details_rml(const RosterTile& t) {
+    if (t.character == 0)
+        return "<div class=\"bio\"><div class=\"bio-name\">Default</div><div class=\"bio-body\"><div class=\"bio-form\">"
+               "<div class=\"bio-form-rule\"></div></div><div class=\"bio-about\">Play as the game intended: every chapter "
+               "with its own character.</div></div></div>";
+    const CharacterInfo& c = kCharacterInfo[t.character];
+    const CharacterForm* f = t.form != 0 ? form_row(t.character, t.form) : nullptr;
+    const std::string about = f != nullptr ? f->about : c.about;
+    const std::string year = f != nullptr && f->year != nullptr ? f->year : c.year;
+    const std::string form = tile_form_name(t);
+    // The form in red between the Tome's ornaments; a character's own body has the ornament alone.
+    std::string out = "<div class=\"bio\"><div class=\"bio-name\">" + escape(tile_title(t)) +
+                      "</div><div class=\"bio-body\"><div class=\"bio-form\"><div class=\"bio-form-rule\"></div>" +
+                      (form.empty() ? std::string() : "<div class=\"bio-form-name\">" + escape(form) + "</div><div class=\"bio-form-rule\"></div>") +
+                      "</div><div class=\"bio-year\">" + escape(year) + "</div><div class=\"bio-about\">" + escape(about) +
+                      "</div><div class=\"meters\">";
     // Bars on one scale (150, the most any has), in the game's own colours.
     const struct {
         const char* name;
@@ -652,11 +755,10 @@ std::string character_details_rml(int i) {
                std::to_string(width) + "%;\"></div></div><span class=\"meter-value\">" +
                (m.value < 0 ? std::string("?") : std::to_string(m.value)) + "</span></div>";
     }
-    return out + "</div></div>";
+    return out + "</div></div></div>";
 }
 
-// The page's rows under the frames: Stats, the vanilla character, Back.
-constexpr int kRosterVanillaRow = 13;
+// The page's rows under the frames: Stats, Back.
 
 // The characters' portraits, from the player's own disc: the main menu's
 // texture file (UMnMenu.tpl) holds the chapter portraits the save list shows,
@@ -837,8 +939,59 @@ bool ensure_portraits() {
     return have_all();
 }
 
-// Character select: every character at once, their portrait (from the disc,
-// ensure_portraits) with their name under it.
+// A frame's picture: Default's the game's emblem, a form's its own (portraits/Karim-1.png, made by
+// tools/ed/form_portraits.py) when there is one, else the character's.
+std::string portrait_rml(const RosterTile& t) {
+    if (t.character == 0)
+        return "<img class=\"emblem\" src=\"emblem.png\"/>";
+    struct stat st;
+    const std::string form_picture = std::string("portraits/") + kCharacters[t.character] + "-" + std::to_string(t.form) + ".png";
+    if (t.form != 0 && stat((res_dir() + "/ui/" + form_picture).c_str(), &st) == 0)
+        return "<img src=\"" + form_picture + "\"/>";
+    if (stat((res_dir() + "/ui/" + portrait_file(t.character)).c_str(), &st) == 0)
+        return "<img src=\"" + portrait_file(t.character) + "\"/>";
+    return "";
+}
+
+// Choose Character: a player's card. Their label between the Tome's rules, their chosen frame's picture in
+// a leather mount that glows in the player's colour (gold for the first, blue for the second), the name and
+// form, the meters, and which stats they play with. Player 2's is dimmed while co-op is off.
+std::string player_card_rml(int player, bool selected, size_t index) {
+    const int chosen = player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
+    const RosterTile t{chosen, form_on(player, chosen)};
+    const int stats = player == 1 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats;
+    const bool off = player == 1 && !g_settings.mod_coop;
+    std::string out = std::string("<div class=\"pcard p") + (player == 1 ? "2" : "1") + (selected ? " selected" : "") +
+                      (off ? " off" : "") + "\" id=\"row" + std::to_string(index) + "\"><div class=\"pcard-head\"><div class=\"pcard-rule\"></div>" +
+                      "<div class=\"pcard-who\">" + (player == 1 ? "Player II" : "Player I") + "</div><div class=\"pcard-rule\"></div></div>" +
+                      "<div class=\"pcard-frame" + (chosen == 0 ? " default" : "") + "\"><div class=\"pcard-portrait\">" + portrait_rml(t) +
+                      "</div></div><div class=\"pcard-name\">" + escape(tile_title(t)) + "</div><div class=\"pcard-form\">" +
+                      (tile_form_name(t)[0] != 0 ? escape(tile_form_name(t)) : std::string("&nbsp;")) + "</div>";
+    if (chosen == 0) {
+        out += "<div class=\"pcard-default\">Each chapter with its own character, as the game intended.</div>";
+    } else {
+        const CharacterInfo& c = kCharacterInfo[chosen];
+        const struct {
+            const char* name;
+            const char* kind;
+            int value;
+        } meters[] = {{"Health", "health", c.health}, {"Magick", "magick", c.magick}, {"Sanity", "sanity", c.sanity}};
+        out += "<div class=\"meters pcard-meters\">";
+        for (const auto& m : meters)
+            out += std::string("<div class=\"meter\"><span class=\"meter-name\">") + m.name +
+                   "</span><div class=\"meter-bar\"><div class=\"meter-fill " + m.kind + "\" style=\"width: " +
+                   std::to_string(std::min(100, std::max(0, m.value) * 100 / 150)) + "%;\"></div></div><span class=\"meter-value\">" +
+                   std::to_string(m.value) + "</span></div>";
+        out += "</div>";
+    }
+    out += std::string("<div class=\"pcard-foot\">") +
+           (off ? "Co-op is off" : chosen == 0 ? "The chapter's own stats" : stats == 1 ? "Their own stats" : "The chapter's stats") +
+           "</div><div class=\"pcard-press\">" + (selected ? "A &#8212; choose character" : "&nbsp;") + "</div></div>";
+    return out;
+}
+
+// Character select: every character and form, their portrait (from the disc, ensure_portraits; a form's
+// from tools/ed/form_portraits.py) with their name and form under it, in a list that scrolls.
 void build_characters() {
     ensure_portraits();
     auto leave = [] {
@@ -846,21 +999,18 @@ void build_characters() {
         g_screen = Screen::ModsPage;
         g_selected = g_characters_return_row;
     };
-    for (int i = 1; i <= kRosterCount; i++) {
-        Row r{kCharacters[i]};
+    for (const RosterTile& t : roster_tiles()) {
+        Row r{tile_title(t)};
         r.tile = true;
-        r.chosen = chosen_character() == i;
-        struct stat st;
-        // A form's own picture when there is one (portraits/Karim-1.png, made by tools/ed/form_portraits.py).
-        const std::string form_picture = std::string("portraits/") + kCharacters[i] + "-" + std::to_string(form_on(g_characters_player, i)) + ".png";
-        if (form_on(g_characters_player, i) != 0 && stat((res_dir() + "/ui/" + form_picture).c_str(), &st) == 0)
-            r.value_rml = "<img src=\"" + form_picture + "\"/>";
-        else if (stat((res_dir() + "/ui/" + portrait_file(i)).c_str(), &st) == 0)
-            r.value_rml = "<img src=\"" + portrait_file(i) + "\"/>";
-        r.activate = [i, leave] {
-            chosen_character() = i;
-            chosen_stats() = 1;  // a chosen character plays with their own stats
-            leave();
+        r.chosen = chosen_character() == t.character && (t.character == 0 || form_on(g_characters_player, t.character) == t.form);
+        r.value_rml = portrait_rml(t);
+        r.activate = [t] {
+            chosen_character() = t.character;
+            if (t.character != 0) {
+                form_set(t.character, t.form);
+                chosen_stats() = 1;  // a chosen character plays with their own stats
+            }
+            settings_save();  // chosen: the page stays, with the gold frame on it now
         };
         g_rows.push_back(r);
     }
@@ -870,13 +1020,6 @@ void build_characters() {
     stats.note = "Vanilla: the chapter character's health, sanity and magick. Chosen character's: their own, bars too.";
     stats.change = [](int) { chosen_stats() = 1 - chosen_stats(); };
     g_rows.push_back(stats);
-    Row own{kCharacters[0]};
-    own.chosen = chosen_character() == 0;
-    own.activate = [leave] {
-        chosen_character() = 0;
-        leave();
-    };
-    g_rows.push_back(own);
     Row back{"Back"};
     back.activate = leave;
     g_rows.push_back(back);
@@ -886,24 +1029,25 @@ void build_characters() {
 // their lines and the rows under them.
 void move_in_roster(int dx, int dy) {
     const int n = static_cast<int>(g_rows.size());
+    const int count = roster_count();
     int& at = g_selected;
     if (dx != 0) {
-        if (at < kRosterCount)
-            at = (at + dx + kRosterCount) % kRosterCount;
+        if (at < count)
+            at = (at + dx + count) % count;
         else if (g_rows[at].change)
             g_rows[at].change(dx);
         return;
     }
-    if (at < kRosterCount) {
+    if (at < count) {
         at += dy * kRosterColumns;
-        if (at >= kRosterCount)
-            at = kRosterCount;
+        if (at >= count)
+            at = count;
         else if (at < 0)
             at = n - 1;
     } else {
         at += dy;
-        if (at < kRosterCount)
-            at = kRosterCount - kRosterColumns;
+        if (at < count)
+            at = count - 1 - (count - 1) % kRosterColumns;  // the last line's first frame
         else if (at >= n)
             at = 0;
     }
@@ -981,19 +1125,21 @@ void build_mods_rows() {
     // their own body. Player 2's is kept for when player 2 can be another.
     auto character_row = [](int player) {
         const int chosen = player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
-        Row r{player == 1 ? "Player 2 character" : "Player 1 character", kCharacters[chosen]};
-        if (form_on(player, chosen) != 0)
-            r.value += std::string(", ") + form_row(chosen, form_on(player, chosen))->word;
+        const RosterTile t{chosen, form_on(player, chosen)};
+        Row r{player == 1 ? "Player 2 character" : "Player 1 character", tile_title(t)};
+        if (tile_form_name(t)[0] != 0)
+            r.value += std::string(" \u00b7 ") + tile_form_name(t);
         if ((player == 1 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats) == 1)
             r.value += " (own stats)";
         r.page = 1;
+        r.card = player + 1;
         r.note = g_in_game ? "A change reloads the game where you stand once the menu closes."
                            : "Also applies to a save state you load: it reloads with them.";
         r.activate = [player] {
             g_characters_player = player;
             g_characters_return_row = g_selected;
             g_screen = Screen::Characters;
-            g_selected = chosen_character() == 0 ? kRosterVanillaRow : chosen_character() - 1;
+            g_selected = roster_index(chosen_character(), form_on(player, chosen_character()));
         };
         return r;
     };
@@ -1093,6 +1239,7 @@ void build_mods() {
         r.activate = [section] {
             g_mods_section = section;
             g_mods_row = g_selected;
+            g_mods_page_return = Screen::Mods;
             g_screen = Screen::ModsPage;
             g_selected = 0;
         };
@@ -1100,7 +1247,8 @@ void build_mods() {
     };
     g_rows.push_back(page("Co-op", 1));
     g_rows.push_back(page("Challenge", 2));
-    g_rows.push_back(page("Characters", 3));
+    if (g_in_game)  // on the launcher it's Choose Character, under Load game
+        g_rows.push_back(page("Characters", 3));
     g_rows.push_back(page("Cheats", 4));
     g_rows.push_back(page("Sanity Effects", 5));
     // Only on the launcher: it is how Start game starts.
@@ -1152,19 +1300,21 @@ void build_mods_page() {
     }
     Row back{"Back"};
     back.gap = true;
-    back.activate = [] {
-        settings_save();
-        g_screen = Screen::Mods;
-        g_selected = g_mods_row;
-    };
+    back.activate = [] { mods_page_back(); };
     g_rows.push_back(back);
+}
+
+void mods_page_back() {
+    settings_save();
+    g_screen = g_mods_page_return;
+    g_selected = g_mods_page_return == Screen::Mods ? g_mods_row : g_mods_page_return_row;
 }
 
 const char* mods_page_name() {
     switch (g_mods_section) {
     case 1: return "Co-op";
     case 2: return "Challenge";
-    case 3: return "Characters";
+    case 3: return "Choose Character";
     case 4: return "Cheats";
     default: return "Sanity Effects";
     }
@@ -1200,6 +1350,24 @@ void build_launcher() {
         };
         g_rows.push_back(load);
     }
+
+    // Each player's character, and co-op: the Mods pages of the same names, opened from here.
+    auto mods_page = [](const char* label, int section, const char* note) {
+        Row r{label};
+        r.note = note;
+        r.activate = [section] {
+            g_options_return = Screen::Launcher;
+            g_mods_return = Screen::Launcher;
+            g_mods_section = section;
+            g_mods_page_return = Screen::Launcher;
+            g_mods_page_return_row = g_selected;
+            g_screen = Screen::ModsPage;
+            g_selected = 0;
+        };
+        return r;
+    };
+    g_rows.push_back(mods_page("Choose Character", 3, "Player 1's and player 2's characters and forms."));
+    g_rows.push_back(mods_page("Co-op", 1, "Split-screen co-op, the screen split, player 2's controls and cameras."));
 
     Row options{"Options"};
     options.gap = true;
@@ -2246,9 +2414,41 @@ void build_problem() {
 
 // The frames' end, then the panel: the highlighted character's details (the
 // chosen one's while a row under the frames is).
+// The lines in view: the highlighted frame's line among them (when a frame is), and no blank line at the end.
+int roster_lines() {
+    return (roster_count() + kRosterColumns - 1) / kRosterColumns;
+}
+void roster_keep_in_view() {
+    if (g_selected < roster_count()) {
+        const int line = g_selected / kRosterColumns;
+        if (line < g_roster_top)
+            g_roster_top = line;
+        else if (line >= g_roster_top + kRosterLines)
+            g_roster_top = line - kRosterLines + 1;
+    }
+    g_roster_top = std::clamp(g_roster_top, 0, std::max(roster_lines() - kRosterLines, 0));
+}
+
+// The mouse wheel over the page: the frames move a line, and the highlight with them if it's left behind.
+void roster_wheel(int dy) {
+    g_roster_top = std::clamp(g_roster_top + dy, 0, std::max(roster_lines() - kRosterLines, 0));
+    if (g_selected < roster_count()) {
+        const int line = g_selected / kRosterColumns;
+        const int to = std::clamp(line, g_roster_top, g_roster_top + kRosterLines - 1);
+        g_selected = std::min(g_selected + (to - line) * kRosterColumns, roster_count() - 1);
+    }
+}
+
 std::string roster_panel_end() {
-    const int shown = g_selected < kRosterCount ? g_selected + 1 : chosen_character();
-    return "</div><div class=\"roster-details\">" + (shown > 0 ? character_details_rml(shown) : std::string()) +
+    const RosterTile shown = g_selected < roster_count() ? roster_tiles()[g_selected]
+                                                          : RosterTile{chosen_character(), form_on(g_characters_player, chosen_character())};
+    // The scroll bar: the lines in view, of all of them.
+    const int lines = roster_lines();
+    const std::string bar = "<div class=\"roster-bar\"><img class=\"roster-cap\" src=\"tome/mark.png\"/><div class=\"roster-rail\">"
+                            "<div class=\"roster-track\"></div><div class=\"roster-thumb\" style=\"top: " +
+                            std::to_string(g_roster_top * 100 / lines) + "%; height: " + std::to_string(std::min(kRosterLines, lines) * 100 / lines) +
+                            "%;\"></div></div><img class=\"roster-cap bottom\" src=\"tome/mark.png\"/></div>";
+    return "</div>" + bar + "</div><div class=\"roster-details\">" + character_details_rml(shown) +
            "</div></div>";
 }
 
@@ -2319,16 +2519,35 @@ void render() {
         const Row& r = g_rows[i];
         if (slot_list && static_cast<int>(i) < slot_rows && static_cast<int>(i) / kSlotsShown != g_slots_page)
             continue;
+        if (r.card != 0) {
+            if (r.card == 1)
+                rml[0] += "<div class=\"pcards\">";
+            rml[0] += player_card_rml(r.card - 1, static_cast<int>(i) == g_selected, i);
+            rml[0] += r.card == 1 ? "<div class=\"pcards-mid\"><div class=\"pcards-line\"></div><img class=\"pcards-mark\" "
+                                    "src=\"tome/mark.png\"/><div class=\"pcards-line\"></div></div>"
+                                  : "</div>";
+            continue;
+        }
         if (r.tile) {
-            // A portrait frame and the name under it, four to a line.
+            // A portrait frame and the name and form under it, four to a line, kRosterLines of them in view.
             if (!in_roster)
-                rml[0] += "<div class=\"roster-wrap\"><div class=\"roster\">";
+                roster_keep_in_view();
+            const int line = static_cast<int>(i) / kRosterColumns;
+            if (line < g_roster_top || line >= g_roster_top + kRosterLines) {
+                if (!in_roster)
+                    rml[0] += "<div class=\"roster-wrap\"><div class=\"roster-scroll\"><div class=\"roster\">";
+                in_roster = true;
+                continue;
+            }
+            if (!in_roster)
+                rml[0] += "<div class=\"roster-wrap\"><div class=\"roster-scroll\"><div class=\"roster\">";
             in_roster = true;
-            rml[0] += "<div class=\"tile" + std::string(static_cast<int>(i) == g_selected ? " selected" : "") +
+            rml[0] += "<div class=\"tile" + std::string(roster_tiles()[i].character == 0 ? " default" : "") +
+                      std::string(static_cast<int>(i) == g_selected ? " selected" : "") +
                       (r.chosen ? " chosen" : "") + "\" id=\"row" + std::to_string(i) +
                       "\"><div class=\"portrait\">" + r.value_rml + "</div><div class=\"name\">" + escape(r.label) +
                       "</div><div class=\"tile-form\">" +
-                      (forms_of(static_cast<int>(i) + 1) > 0 ? std::string("&#8249; ") + form_name(g_characters_player, static_cast<int>(i) + 1) + " &#8250;" : std::string("&nbsp;")) +
+                      escape(tile_form_name(roster_tiles()[i])) +
                       "</div></div>";
             continue;
         }
@@ -2371,9 +2590,8 @@ void render() {
     g_doc->GetElementById("hint")->SetInnerRML(
         g_screen == Screen::InGame    ? "Up/Down choose &#183; Left/Right change &#183; A select &#183; B resume"
         : g_screen == Screen::Problem ? "Up/Down choose &#183; A select"
-        : g_screen == Screen::Characters ? (g_selected < kRosterCount && forms_of(g_selected + 1) > 0
-                                               ? "Arrows choose &#183; A select &#183; LB, RB or C change form &#183; B back"
-                                               : "Arrows choose &#183; A select &#183; B back")
+        : g_screen == Screen::Characters ? "Arrows choose &#183; Right stick scrolls &#183; A select &#183; B back"
+        : g_screen == Screen::ModsPage && g_mods_section == 3 ? "Left/Right choose the player &#183; A choose their character &#183; B back"
         : slot_list                   ? "Up/Down choose &#183; LB/RB page &#183; A select &#183; B back"
                                       : "Up/Down choose &#183; Left/Right change &#183; A select &#183; B back");
     g_doc->SetClass("spread", spread);
@@ -2386,6 +2604,8 @@ void render() {
     g_doc->SetClass("dense", g_screen == Screen::Controls || g_screen == Screen::Mapping);
     // Character select: one wide page, every frame at once.
     g_doc->SetClass("roster", g_screen == Screen::Characters);
+    // Choose Character: the two players' cards on one wide page.
+    g_doc->SetClass("cards", g_screen == Screen::ModsPage && g_mods_section == 3);
     // Over the game the page lies on the dimmed, paused frame.
     g_doc->SetClass("overlay", g_screen == Screen::InGame || g_screen == Screen::Problem ||
                                    g_screen == Screen::States ||
@@ -2493,9 +2713,7 @@ void go_back() {
         g_selected = g_characters_return_row;
         break;
     case Screen::ModsPage:
-        settings_save();
-        g_screen = Screen::Mods;
-        g_selected = g_mods_row;
+        mods_page_back();
         break;
     case Screen::InGame:
         g_close = true;
@@ -2510,6 +2728,15 @@ void go_back() {
 class MenuListener final : public Rml::EventListener {
 public:
     void ProcessEvent(Rml::Event& event) override {
+        if (event.GetId() == Rml::EventId::Mousescroll) {
+            const float wheel = event.GetParameter<float>("wheel_delta_y", 0.f);
+            if (g_screen == Screen::Characters && wheel != 0.f) {
+                roster_wheel(wheel > 0.f ? 1 : -1);
+                render();
+                event.StopPropagation();
+            }
+            return;
+        }
         Rml::Element* e = event.GetTargetElement();
         bool on_prev = false;
         while (e != nullptr && e->GetId().rfind("row", 0) != 0) {
@@ -2599,6 +2826,7 @@ bool ensure_ui() {
     // Mousemove, not mouseover: rebuilt rows would otherwise grab the
     // selection from the keyboard whenever the pointer rests over the menu.
     menu->AddEventListener(Rml::EventId::Mousemove, &g_listener);
+    menu->AddEventListener(Rml::EventId::Mousescroll, &g_listener);
     return true;
 }
 
@@ -2709,11 +2937,9 @@ bool run_menu() {
                                pressed[kUp] ? -1 : pressed[kDown] ? 1 : 0);
                 dirty = true;
             }
-            // A frame with another form: LB or RB (or C) swaps it, the body only.
-            if ((pressed[kCostume] || pressed[kPageLeft] || pressed[kPageRight]) && g_selected < kRosterCount &&
-                forms_of(g_selected + 1) > 0) {
-                form_swap(g_selected + 1, pressed[kPageLeft] ? -1 : +1);
-                settings_save();
+            // The right stick scrolls the frames, a line at a time, the highlight carried along.
+            if (pressed[kScrollUp] != pressed[kScrollDown]) {
+                roster_wheel(pressed[kScrollDown] ? 1 : -1);
                 dirty = true;
             }
         } else {
@@ -2726,7 +2952,16 @@ bool run_menu() {
                 dirty = true;
             }
         }
-        if (g_screen != Screen::Characters && (pressed[kLeft] || pressed[kRight]) &&
+        // Choose Character: left and right go between the two players' cards.
+        if (g_screen == Screen::ModsPage && (pressed[kLeft] || pressed[kRight]) && g_selected < static_cast<int>(g_rows.size()) &&
+            g_rows[g_selected].card != 0) {
+            for (size_t i = 0; i < g_rows.size(); i++)
+                if (g_rows[i].card != 0 && g_rows[i].card != g_rows[g_selected].card) {
+                    g_selected = static_cast<int>(i);
+                    break;
+                }
+            dirty = true;
+        } else if (g_screen != Screen::Characters && (pressed[kLeft] || pressed[kRight]) &&
             g_selected < static_cast<int>(g_rows.size())) {
             Row& r = g_rows[g_selected];
             if (r.change && (r.enabled || r.browse)) {

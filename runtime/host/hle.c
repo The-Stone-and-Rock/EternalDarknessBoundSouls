@@ -7161,19 +7161,30 @@ static Costume kCostumes[] = {
     {70, 1, 1, "Ellia", 13, -1, 142, 142, 5, -1, 1},
     {70, 1, 2, "Ellia", 0, 25, 37, 114, -1, -1},       // rotten, in the last scene of Lindsey's chapter (script L06/906)
     {85, 2, 1, "Anthony", 13, -1, 143, 143, 6, -1, 1},
-    {85, 2, 2, "Anthony", 7, -1, 137, 137, -1, -1},    // rotten, the enemy in room 104 of Paul's chapter (character 132)
+    {85, 2, 2, "Anthony", 0, 13, 39, 136, -1, -1},     // cursed: the curse's last stage (U_Tony4's 122), the end scene of his chapter
+    {85, 2, 3, "Anthony", 7, -1, 137, 137, -1, -1},    // rotten, the enemy in room 104 of Paul's chapter (character 132)
     {150, 3, 1, "Karim", 13, -1, 144, 144, 14, -1, 1},
     {18, 4, 1, "Max", 0, -1, 140, 140, -1, -1, 1},      // his blue spirit: script 1438 makes it, at MaxGhostMkr
     {74, 6, 1, "Paul", 13, -1, 146, 146, 5, -1, 1},
     {74, 6, 2, "Paul", 7, 30, 38, 126, -1, -1},        // the Bishop, in his red robe
-    {74, 6, 3, "Paul", 7, 30, 40, 127, -1, -1},        // a monk
+    {74, 6, 3, "Paul", 7, 108, 38, 127, -1, -1},       // the Custodian of the bell tower (room 107's scene 46, L07/1929)
     {74, 6, 4, "Paul", 7, 30, 37, 129, -1, -1},        // one of the men in black robes
     {76, 7, 1, "Roberto", 13, -1, 147, 147, 14, -1, 1},
     {69, 9, 1, "Edward", 17, 77, 39, 113, -1, -1, 1},   // a scene's body: 62 bones to his 72
     // Chandra: forms worn by Alex, on Alex's moves, and listed on Karim's screen. From the scenes of his chapter.
     {9, 11, 2, "Chandra", 4, 14, 36, 115, -1, -1, 0, 4},
     {9, 11, 3, "Chandra's ghost", 0, 15, 38, 116, -1, -1, 1, 4},
-    {9, 11, 4, "Mutated Chandra", 0, 15, 37, 130, -1, -1, 1, 4},
+    {9, 11, 4, "Mutilated Chandra", 0, 15, 37, 130, -1, -1, 1, 4},
+    // Others from the story, each on a character's bones and stats (and listed with the others on the character
+    // screens). Max's household are placed in his chapter (U_Level05, character 68 the maid, 108/109 the men).
+    // Legrasse is the police inspector of Alex's opening scene.
+    {74, 6, 5, "Inspector Legrasse", 0, 5, 37, 131, -1, -1, 0},  // Alex's opening scene (cin0005, LEGRASSE_ lines), on Paul's bones for his coat
+    {70, 1, 3, "The Maid", 5, -1, 107, 132, -1, -1, 0},
+    {69, 9, 2, "The Servant", 5, -1, 108, 133, -1, -1, 0},
+    // Charlemagne is /levels/level00/cin0013.bin body 37 (the end of Anthony's chapter), but a body of 1 bone: worn,
+    // he slides as a statue. Left out until his mesh can be given a skeleton (docs/coop-next-session.md).
+    {69, 9, 3, "The Footman", 5, -1, 109, 135, -1, -1, 0},
+    {70, 1, 4, "The Maid's spirit", 0, -1, 154, 138, -1, -1, 1},  // Alex's ghost maid (L00/583, character 68), the maid's skeleton
 };
 #define COSTUMES ((int)(sizeof kCostumes / sizeof kCostumes[0]))
 #define COSTUME_PLACES 12

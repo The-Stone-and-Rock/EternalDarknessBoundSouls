@@ -334,12 +334,70 @@ body.roster .note {
 	align-items: flex-start;
 }
 
+/* The frames, three lines in view; the rest come a line at a time (frontend.cpp roster_keep_in_view), with
+   a bar beside them showing where the view is. The details panel beside them stays. */
+.roster-scroll {
+	display: flex;
+	flex-shrink: 0;
+	height: 56vh;
+}
+
 .roster-wrap .roster {
 	display: flex;
 	flex-wrap: wrap;
-	justify-content: center;
+	align-content: flex-start;
+	justify-content: flex-start;
 	width: 70vh;
-	flex-shrink: 0;
+	padding: 0.4vh 0;
+}
+
+/* The scroll bar: a thin ink rail between two of the Tome's diamond marks, and on it a red slider edged in
+   gold, as long as the part of the list in view. */
+.roster-bar {
+	position: relative;
+	width: 2vh;
+	margin: 0 0 0 1vh;
+}
+
+.roster-cap {
+	position: absolute;
+	left: 0.1vh;
+	top: 0;
+	width: 1.8vh;
+	height: 1.8vh;
+}
+
+.roster-cap.bottom {
+	top: auto;
+	bottom: 0;
+}
+
+.roster-rail {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 2.2vh;
+	bottom: 2.2vh;
+}
+
+.roster-track {
+	position: absolute;
+	left: 0.8vh;
+	width: 0.4vh;
+	top: 0;
+	bottom: 0;
+	background-color: #5a3a2070;
+	border-radius: 0.2vh;
+}
+
+.roster-thumb {
+	position: absolute;
+	left: 0.3vh;
+	width: 1.4vh;
+	border: 1dp #d9b56a;
+	border-radius: 0.7vh;
+	decorator: vertical-gradient(#b3301f #6a130c);
+	box-shadow: #00000066 0 0.3vh 0.7vh 0;
 }
 
 .tile {
@@ -355,8 +413,9 @@ body.roster .note {
    ensure_portraits), the chapter pictures' 126x89 shape. */
 .portrait {
 	height: 10.6vh;
-	border: 1dp #7a201266;
+	border: 1dp #5a3a20;
 	background-color: #3a24120f;
+	box-shadow: #00000059 0 0.4vh 0.9vh 0;
 }
 
 .portrait img {
@@ -364,9 +423,23 @@ body.roster .note {
 	height: 100%;
 }
 
+/* Default's frame: the game's emblem, whole, on the dark of the night it shows. */
+.portrait img.emblem {
+	width: auto;
+	height: 100%;
+}
+
+.tile.default .portrait {
+	text-align: center;
+	background-color: #0b0d12;
+}
+
+/* One line always, so every frame is the same height ("The Custodian" fits at this size). */
 .name {
 	margin-top: 0.2vh;
-	font-size: 2.7vh;
+	font-size: 2.3vh;
+	white-space: nowrap;
+	overflow: hidden;
 }
 
 /* Which form they're in, on each frame with more than one. */
@@ -384,11 +457,24 @@ body.roster .note {
 	box-shadow: #6ec4ff 0 0 22dp 6dp, #9fdcffd0 0 0 10dp 2dp inset;
 }
 
-/* The character in force: their name in red ink, under a red rule. */
+/* The character in force: a glowing gold frame, their name in red ink. When it's also the highlighted one,
+   the highlight's blue glow is inside the gold. */
+.tile.chosen {
+	border-width: 3dp;
+	border-color: #ffd24a;
+	background-color: #ffd24a3a;
+	box-shadow: #ffc21f 0 0 30dp 9dp, #ffe48a 0 0 14dp 4dp inset;
+}
+
+.tile.chosen.selected {
+	border-color: #fff4c8;
+	background-color: #ffe9a040;
+	box-shadow: #ffc21f 0 0 34dp 11dp, #bfe6ff 0 0 12dp 4dp inset;
+}
+
 .tile.chosen .name,
 .row.chosen .label {
 	color: #8e1b12;
-	text-decoration: underline;
 }
 
 body.roster .row {
@@ -409,16 +495,29 @@ body.roster .gap {
 	height: 0.8vh;
 }
 
+/* The details: a card laid on the page, with a band of the Tome's leather behind the name and a lighter
+   leaf of parchment under it, edged in gold, with a shadow under the whole, so it stands off the page. */
 .roster-details {
 	flex: 1;
-	margin: 0.6vh 0 0 1.6vh;
-	padding: 1.6vh 5vh 1.6vh 2vh;
-	background-color: #3a24120f;
-	border-radius: 8dp;
+	margin: 0.6vh 0 0 2vh;
+	border: 2dp #2a170c;
+	border-radius: 10dp;
+	box-shadow: #00000080 0 0.8vh 2.4vh 0;
+	decorator: image(tome/parchment.png fill);
 }
 
 .bio-name {
+	padding: 1.2vh 2.4vh 1vh 2.4vh;
 	font-size: 4.6vh;
+	color: #ecdcb4;
+	font-effect: shadow(0 2dp #000000c0);
+	border-bottom: 2dp #b08a45;
+	border-radius: 8dp 8dp 0 0;
+	decorator: image(tome/leather.png cover);
+}
+
+.bio-body {
+	padding: 1.2vh 2.6vh 1.8vh 2.6vh;
 }
 
 .bio-year {
@@ -427,10 +526,10 @@ body.roster .gap {
 	margin-bottom: 1vh;
 }
 
-/* A character with other forms: a heading in the Tome, in red ink between its ornaments
-   (res/ui/tome), so it stands out by being written on the page rather than laid over it. */
+/* The form, in red ink between the Tome's ornaments (res/ui/tome): every frame has one, "Original form" for
+   their own body, so every character's panel is laid out the same. */
 .bio-form {
-	margin-bottom: 1vh;
+	margin-bottom: 0.6vh;
 	text-align: center;
 }
 
@@ -440,41 +539,21 @@ body.roster .gap {
 }
 
 .bio-form-name {
-	margin-top: 0.3vh;
-	font-size: 4.6vh;
+	margin: 0.2vh 0;
+	font-size: 3.4vh;
 	color: #7a1616;
 }
 
-.bio-form-marks {
-	margin-top: 0.2vh;
-	height: 2.4vh;
-	font-size: 2vh;
-	line-height: 2.4vh;
-}
-
-.form-mark {
-	width: 1.7vh;
-	height: 1.7vh;
-	margin: 0 0.35vh;
-	vertical-align: middle;
-	opacity: 0.28;
-}
-
-.form-mark.on {
-	width: 2vh;
-	height: 2vh;
-	opacity: 1;
-}
-
-.bio-form-keys {
-	margin: 0.4vh 0 0.4vh 0;
-	font-size: 2.5vh;
-	color: #4a3018;
+/* Whose stats the meters are (a form's are its character's). */
+.bio-plays {
+	margin-top: 0.8vh;
+	font-size: 2.3vh;
+	color: #5a3a20;
 }
 
 .bio-about {
-	font-size: 2.6vh;
-	height: 11.5vh;
+	font-size: 2.5vh;
+	height: 15vh;
 	overflow: hidden;
 }
 
@@ -628,4 +707,185 @@ body.pause .row {
 	font-size: 26dp;
 	padding: 1dp 2dp;
 	color: #2a1810;
+}
+
+/* Choose Character: each player's card, side by side on a wide page. A card is a leaf of parchment laid on
+   the page with a shadow under it; at its top the player in small capitals between the Tome's rules, then
+   their chosen character in a leather mount edged in gold that glows in the player's colour (gold for the
+   first, blue for the second), their name, form, meters and stats. The highlighted card glows all round. */
+body.cards #book {
+	width: 150vh;
+	max-width: 97vw;
+	height: 95vh;
+	margin-bottom: 3vh;
+	padding: 5vh 0 5vh 0;
+}
+
+body.cards #heading {
+	font-size: 6vh;
+}
+
+body.cards .page {
+	padding: 0 8vh;
+}
+
+body.cards .note {
+	display: none;
+}
+
+body.cards .row {
+	width: 40vh;
+	margin: 0 auto;
+	justify-content: center;
+}
+
+.pcards {
+	display: flex;
+	justify-content: center;
+	align-items: flex-start;
+	margin: 1.6vh 0 1.2vh 0;
+}
+
+.pcard {
+	width: 48vh;
+	padding: 1.6vh 2.6vh 1.6vh 2.6vh;
+	border: 2dp #2a170c;
+	border-radius: 12dp;
+	text-align: center;
+	decorator: image(tome/parchment.png fill);
+	box-shadow: #00000080 0 1vh 2.6vh 0;
+}
+
+.pcard.p1.selected {
+	border-width: 3dp;
+	border-color: #ffd24a;
+	box-shadow: #ffc21f 0 0 44dp 14dp, #ffe48a90 0 0 16dp 4dp inset;
+}
+
+.pcard.p2.selected {
+	border-width: 3dp;
+	border-color: #c8ecff;
+	box-shadow: #3aa8ff 0 0 44dp 14dp, #bfe6ff90 0 0 16dp 4dp inset;
+}
+
+.pcard.off {
+	opacity: 0.6;
+}
+
+.pcard-head {
+	display: flex;
+	align-items: center;
+}
+
+.pcard-rule {
+	flex: 1;
+	height: 2vh;
+	decorator: image(tome/divider.png fill);
+}
+
+.pcard-who {
+	margin: 0 1.4vh;
+	font-family: "IM FELL English SC";
+	font-size: 3.6vh;
+	color: #7a1616;
+	font-effect: glow(1dp 5dp #ffcf6a);
+}
+
+.pcard.p2 .pcard-who {
+	color: #1f3f7a;
+	font-effect: glow(1dp 5dp #9fd8ff);
+}
+
+.pcard-frame {
+	width: 35vh;
+	height: 24.7vh;
+	margin: 1.2vh auto 0.8vh auto;
+	padding: 0.9vh;
+	border: 2dp #c79a4a;
+	border-radius: 8dp;
+	decorator: image(tome/leather.png cover);
+	box-shadow: #ffb43a 0 0 26dp 6dp, #000000b0 0 0 12dp 3dp inset;
+}
+
+.pcard.p2 .pcard-frame {
+	border-color: #8fc8f0;
+	box-shadow: #4fb4ff 0 0 26dp 6dp, #000000b0 0 0 12dp 3dp inset;
+}
+
+.pcard-portrait {
+	width: 100%;
+	height: 100%;
+	text-align: center;
+	border: 1dp #00000099;
+}
+
+.pcard-portrait img {
+	width: 100%;
+	height: 100%;
+}
+
+.pcard-frame.default .pcard-portrait {
+	background-color: #0b0d12;
+}
+
+.pcard-portrait img.emblem {
+	width: auto;
+	height: 100%;
+}
+
+.pcard-name {
+	font-size: 4.8vh;
+	color: #1a0f08;
+}
+
+.pcard-form {
+	height: 3.4vh;
+	font-size: 3vh;
+	color: #7a1616;
+}
+
+.pcard-meters {
+	margin: 0.8vh 1vh 0 1vh;
+	text-align: left;
+}
+
+.pcard-default {
+	height: 12.2vh;
+	margin: 0.8vh 2vh 0 2vh;
+	font-size: 2.6vh;
+	color: #4a3018;
+}
+
+.pcard-foot {
+	margin-top: 0.8vh;
+	font-size: 2.3vh;
+	color: #5a3a20;
+}
+
+.pcard-press {
+	height: 2.8vh;
+	margin-top: 0.4vh;
+	font-size: 2.3vh;
+	color: #8e1b12;
+}
+
+/* Between the cards: a thin red line, the Tome's diamond, and the line again. */
+.pcards-mid {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	width: 7vh;
+	margin-top: 16vh;
+}
+
+.pcards-line {
+	width: 2dp;
+	height: 13vh;
+	background-color: #7a161670;
+}
+
+.pcards-mark {
+	width: 3.2vh;
+	height: 3.2vh;
+	margin: 1vh 0;
 }

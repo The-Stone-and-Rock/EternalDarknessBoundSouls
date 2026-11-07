@@ -48,6 +48,14 @@ Every save holds the same in both, so only the code tells them apart. `0x801F5F8
 
 **Forms from Paul's chapter:** Anthony's rotten body is 137 in `U_Level07.bin`, the enemy in room 104 (character 132), with his bones under 56 of 70 names. In `/levels/level07/cin0030.bin`, 38 is the Bishop in red, 40 a monk and 37 a man in black, all Paul's forms. `cin0107.bin` body 36 and others with no names in common are Paul himself in those scenes.
 
+**Forms added 2026-11-06 (found from cold Jump to Game runs with `ED_COSTUME_TRY`, each checked by picture):**
+- The Custodian (Paul's form 3) is `/levels/level07/cin0108.bin` body 38, the bell tower scene (room 107, scene 46 of `L07/1929`). The old "monk" row, `cin0030` body 40, was Paul himself.
+- Max's household is placed in his chapter, `U_Level05.bin`, as character 68: the Maid is body 107 (Ellia's form 3, 61 of 73 bones by name), and the two men are 108 (the Servant) and 109 (the Footman), Edward's forms 2 and 3 (55 of 70 by name, 13 loose bones). Alex's ghost maid, body 154 of `U_Level00.bin` (`L00/583`), has the maid's skeleton and is Ellia's form 4, the Maid's spirit.
+- Anthony's curse has four stages the game swaps in from `/U_Tony1.bin` to `/U_Tony4.bin` (bodies 119 to 122, scripts `L03/2205-2208`). Only scene copies can be worn: `/levels/level03/cin0136.bin` body 36 is stage 2, and `/levels/level00/cin0013.bin` body 39 is the last stage (53 of 62 bones by name, 6 loose), Anthony's form 2, Cursed. His corpse moved to form 3.
+- Inspector Legrasse is `/levels/level00/cin0005.bin` body 37, Alex's opening scene (its subtitles are tagged `LEGRASSE_`). He is Paul's form 5, on Paul's bones, as his long coat looked wrong on Pius's.
+- Charlemagne is `/levels/level00/cin0013.bin` body 37 (the end of Anthony's chapter, room 149; `cin0088`/`cin0089` the same), but his body has 1 bone: worn, he slides as a statue in the corpse's pose. He is left out until his mesh can be given a skeleton.
+- The others from the story (Legrasse, the Maid, her spirit, the Servant, the Footman) are listed together at the end of the character screens (`kForms` `other`), each on a character's bones, moves and stats.
+
 **Max's straitjacket isn't a form, because it can't free its arms.** `/levels/level00/cin0020.bin` body 40, the last scene of his chapter (`L05/2034`, `ed55(25)`). 55 of its 58 bones are Max's by name, and it walks on his moves, but its mesh has 5 groups to his 16: arms and body are one piece. So its arms stay bound while their bones move, and what he holds is held by a hand that isn't drawn. The user had it taken out for that.
 
 **A loose bone becomes the head's twin.** A scene's body has bones with no parent and no track, and `costume_loose_bones` gives each the head's place as made, its parent and its track. The map is made again each time a player is made, on the same body, so a bone already made a twin is kept as one. This isn't what fixed the eyes.

@@ -19,7 +19,7 @@ FORMS = {
     'Ellia-1': (2, 1, 195, 110),
     'Ellia-2': (2, 2, 195, 110),
     'Anthony-1': (3, 1, 215, 120),
-    'Anthony-2': (3, 2, 215, 120),
+    'Anthony-3': (3, 3, 215, 120),  # the corpse (form 2 is the cursed body since 2026-11-06)
     'Karim-1': (4, 1, 215, 120),
     'Max-1': (5, 1, 200, 130),
     'Paul-1': (7, 1, 205, 120),
