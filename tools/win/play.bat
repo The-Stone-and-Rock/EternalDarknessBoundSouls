@@ -22,4 +22,5 @@ rem Keep the last session's log: it is the only record of what went wrong.
 if exist logs\play.log move /y logs\play.log logs\play-prev.log >nul
 rem generated/main.dol with a forward slash: the first start makes the folder
 rem from the path's last "/" (b453381) before it writes main.dol there.
-EternalDarkness.exe generated/main.dol --iso "%iso%" --max-blocks 1000000000000000 > logs\play.log 2>&1
+rem By its own folder's path: run with NoDefaultCurrentDirectoryInExePath set, the bare name wasn't found.
+"%~dp0EternalDarkness.exe" generated/main.dol --iso "%iso%" --max-blocks 1000000000000000 > logs\play.log 2>&1
