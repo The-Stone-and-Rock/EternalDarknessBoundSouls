@@ -9284,6 +9284,39 @@ static void wpn_check(CPUState* cpu, u32 node, bool p2) {
     if (!guest_ram_range_valid(cpu, object + 580u, 152u) || cpu->ram_size < SCRATCH_WPN_P1 + 2u * P2_MOVES_SLOT - GC_RAM_BASE)
         return;
     const int model = (s32)mem_read32(cpu, object + 580u), part = (s32)mem_read32(cpu, object + 660u);
+    // Player 1's moves made again with nothing in them: the game's remake (0x80131CF8: every slot let go, 0x801323A8
+    // zeroing the id-to-set table at 0x80582010, then 0x80118D98(player, part, 1)) asked once, and its ask
+    // (0x801322C0 -> 0x80132970) gave nothing back, so the table stayed empty for good: every move passed over and the
+    // body drawn flat. Seen after Anthony's Tome film (L03/1599, cinematic 112) with player 2 the one who took the Tome
+    // (logs/run-20261108-163231-cheat-story-tome, frame 3397). The same ask again, the game's own, as the equip makes;
+    // the moves memory's owner (r13-23696, its kind r13-23700: 0x80132D04 lets a kind 1 ask in only when free or its
+    // own) is logged, as what held it is not yet known.
+    if (!p2 && coop_playable(model) && mem_read32(cpu, object + 648u) == 0x80582010u) {
+        bool empty = true;
+        for (u32 i = 0u; i < 64u && empty; i++)
+            empty = mem_read32(cpu, 0x80582010u + i * 4u) == 0u;
+        static u32 empty_object;
+        static int empty_tries;
+        if (!empty) {
+            empty_object = 0u;
+        } else {
+            if (empty_object != object)
+                empty_object = object, empty_tries = 0;
+            if (empty_tries < 6) {
+                empty_tries++;
+                const u32 owner = mem_read32(cpu, cpu->gpr[13] - 23696u), owner_kind = mem_read32(cpu, cpu->gpr[13] - 23700u);
+                const u32 ask[3] = {object, (u32)part, 1u};
+                u32 got = 0u;
+                hle_guest_call(cpu, WPN_ASK, ask, 3, 0.0, &got);
+                bool filled = false;
+                for (u32 i = 0u; i < 64u && !filled; i++)
+                    filled = mem_read32(cpu, 0x80582010u + i * 4u) != 0u;
+                fprintf(stderr, "[player] player 1's moves were empty (part %d, the moves memory's owner 0x%08X kind %u): asked again, %s (frame %llu)\n",
+                        part, owner, owner_kind, filled ? "made" : "still none", (unsigned long long)(cpu->timebase / 675000ull));
+                return;
+            }
+        }
+    }
     if (!coop_playable(model) || part < 7)
         return;
     for (int i = 0; i < 2; i++)
@@ -18841,6 +18874,15 @@ static volatile bool g_cheat_on[HLE_CHEATS];  // asked for by the menu
 static bool g_cheat_made[HLE_CHEATS];         // as made in the game
 static u8 g_magick_kept[MAGICK_RECORD_SIZE];   // the record and flags before All magick
 static bool g_magick_flags_kept[MAGICK_FLAGS];
+// What the Tome's Magick page teaches once, each with the flag that says it's taught (0x8010AAF0, as it opens; each
+// script sets its own): the circles and runes (2020: 500, 847, 990, 992), the spell list (887: 622), making a spell
+// (2219, 2032: 59, 60, 470), the Five-Point Circle (2791: 169) and Pargon runes (1306: 170). A finished game has all of
+// them taught. All magick gave what they teach without them: the page set itself to wait for the script (r13-24380 16)
+// and asked for 2791, which only levels 04 to 11 have, so in Anthony's chapter nothing taught it, and every opening of
+// the Tome or the quick spells went to the Magick page waiting (logs/run-20261108-161946-cheat-magick-tome2).
+static const u16 kMagickTaught[] = {500u, 847u, 990u, 992u, 622u, 59u, 60u, 470u, 169u, 170u};
+#define MAGICK_TAUGHT (sizeof kMagickTaught / sizeof kMagickTaught[0])
+static bool g_magick_taught_kept[MAGICK_TAUGHT];
 
 void hle_cheat_set(int which, bool on) {
     if (which > 0 && which < HLE_CHEATS)
@@ -18875,71 +18917,12 @@ static void cheat_all_magick(CPUState* cpu) {
     }
     for (u32 i = 0; i < MAGICK_FLAGS; i++)
         cheat_flag(cpu, MAGICK_FLAG_FIRST + i, true);
+    for (u32 i = 0; i < MAGICK_TAUGHT; i++)
+        cheat_flag(cpu, kMagickTaught[i], true);
 }
 
-// The Tome first: the magick page is only the Tome's. What a character
-// carries is a list (their node's +48: +4 the first entry, each +4 the next,
-// +8 the thing's id), each thing a node whose stats' +24 is its kind (733
-// the Tome). Without it, the chapter's Tome is given as the game gives what is
-// found (0x80024528(text, script, to, thing, 0, 0, 0), as the script's
-// acquire does: its words from 0x801DB374(r13 - 26492, the thing's two text
-// numbers 0x80150B2C / 0x80150B5C of its info, 0, 1, 0x8023C1B4)): the
-// message, then it is theirs. Once for each Tome node (a chapter with none
-// says so).
-#define TOME_KIND 733u
+// The game giving what is found: 0x80024528(text, script, to, thing, 0, 0, 0), as a script's acquire does.
 #define ACQUIRE 0x80024528u
-#define ACQUIRE_TEXT 0x801DB374u
-#define ACQUIRE_TEXT_ARG 0x8023C1B4u
-#define ITEM_TEXT_A 0x80150B2Cu
-#define ITEM_TEXT_B 0x80150B5Cu
-
-static u32 cheat_kind(CPUState* cpu, u32 node) {
-    const u32 stats = guest_ram_range_valid(cpu, node, 40u) ? mem_read32(cpu, node + 36u) : 0u;
-    return guest_ram_range_valid(cpu, stats, 28u) ? mem_read32(cpu, stats + 24u) : 0u;
-}
-
-static bool cheat_carries(CPUState* cpu, u32 who, u32 kind) {
-    const u32 list = guest_ram_range_valid(cpu, who, CARRY_LIST + 4u) ? mem_read32(cpu, who + CARRY_LIST) : 0u;
-    u32 entry = guest_ram_range_valid(cpu, list, 8u) ? mem_read32(cpu, list + 4u) : 0u;
-    for (int i = 0; i < 64 && guest_ram_range_valid(cpu, entry, 12u); i++, entry = mem_read32(cpu, entry + 4u))
-        for (u32 n = 0u, k = 0u; k < 1024u && (n = coop_next(cpu, n)) != 0u; k++)
-            if (mem_read32(cpu, n + 16u) == mem_read32(cpu, entry + 8u)) {
-                if (cheat_kind(cpu, n) == kind)
-                    return true;
-                break;
-            }
-    return false;
-}
-
-static void cheat_tome(CPUState* cpu) {
-    static u32 tried;  // the Tome node given (or looked for) last
-    const u32 player = mem_read32(cpu, cpu->gpr[13] - 21492u);
-    if (!guest_ram_range_valid(cpu, player, 56u) || cheat_carries(cpu, player, TOME_KIND))
-        return;
-    u32 tome = 0u;
-    for (u32 n = 0u, k = 0u; k < 1024u && (n = coop_next(cpu, n)) != 0u; k++)
-        if (cheat_kind(cpu, n) == TOME_KIND) {
-            tome = n;
-            break;
-        }
-    if (tome == tried)
-        return;
-    tried = tome;
-    if (tome == 0u) {
-        frontend_toast("No Tome in this chapter");
-        fprintf(stderr, "[cheat] no Tome to give in this chapter\n");
-        return;
-    }
-    u32 info = 0u, text_a = 0u, text_b = 0u, text = 0u, ignore = 0u;
-    hle_guest_call(cpu, 0x801F6398u, &tome, 1, 0.0, &info);
-    hle_guest_call(cpu, ITEM_TEXT_A, &info, 1, 0.0, &text_a);
-    hle_guest_call(cpu, ITEM_TEXT_B, &info, 1, 0.0, &text_b);
-    const u32 text_args[6] = {mem_read32(cpu, cpu->gpr[13] - 26492u), text_a, text_b, 0u, 1u, ACQUIRE_TEXT_ARG};
-    hle_guest_call(cpu, ACQUIRE_TEXT, text_args, 6, 0.0, &text);
-    const u32 args[7] = {text, 0u, mem_read32(cpu, player + 16u), mem_read32(cpu, tome + 16u), 0u, 0u, 0u};
-    hle_guest_call(cpu, ACQUIRE, args, 7, 0.0, &ignore);
-    fprintf(stderr, "[cheat] the Tome (node %u) given to player 1\n", mem_read32(cpu, tome + 16u));
-}
 
 // The Tome is the players' together. Casting asks whether the player has it
 // (0x80109A68(), "<name> cannot cast spells without the Tome" when not):
@@ -20490,20 +20473,25 @@ static void cheat_apply(CPUState* cpu) {
         memcpy(g_magick_kept, cpu->ram + (MAGICK_RECORD - GC_RAM_BASE), MAGICK_RECORD_SIZE);
         for (u32 i = 0; i < MAGICK_FLAGS; i++)
             g_magick_flags_kept[i] = cheat_has_flag(cpu, MAGICK_FLAG_FIRST + i);
+        for (u32 i = 0; i < MAGICK_TAUGHT; i++)
+            g_magick_taught_kept[i] = cheat_has_flag(cpu, kMagickTaught[i]);
         frontend_toast("All magick on");
         fprintf(stderr, "[cheat] all magick on\n");
     } else if (!magick && g_cheat_made[HLE_CHEAT_MAGICK]) {
         memcpy(cpu->ram + (MAGICK_RECORD - GC_RAM_BASE), g_magick_kept, MAGICK_RECORD_SIZE);
         for (u32 i = 0; i < MAGICK_FLAGS; i++)
             cheat_flag(cpu, MAGICK_FLAG_FIRST + i, g_magick_flags_kept[i]);
+        for (u32 i = 0; i < MAGICK_TAUGHT; i++)
+            cheat_flag(cpu, kMagickTaught[i], g_magick_taught_kept[i]);
         frontend_toast("All magick off");
         fprintf(stderr, "[cheat] all magick off\n");
     }
     g_cheat_made[HLE_CHEAT_MAGICK] = magick;
-    if (magick) {
-        cheat_tome(cpu);
+    // The Tome is the story's to give (taken at its place): given here as soon as it was there, the Tome room's own
+    // taking was passed over, its transition's sound (892's 33) played on and its way back came at the next cinematic
+    // (the user, 2026-11-08). All magick is in it as soon as it's taken.
+    if (magick)
         cheat_all_magick(cpu);
-    }
     const bool full = g_cheat_on[HLE_CHEAT_FULL];
     if (full != g_cheat_made[HLE_CHEAT_FULL]) {
         frontend_toast(full ? "Full stats on" : "Full stats off");
