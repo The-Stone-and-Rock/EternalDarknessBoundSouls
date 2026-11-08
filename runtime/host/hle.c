@@ -10385,6 +10385,7 @@ static bool g_coop_room_asked;
 static bool g_coop_room_asked_now;  // and for coop_menu_input
 static bool g_coop_entered_p2;  // player 2 asked for the room: the first zone's scene there is theirs
 static s32 g_coop_arrival_scene;
+static s32 g_coop_p1_own_camera;  // player 2's arrival scene began: its script, to run once as player 1's (coop_script_timers)
 // The one brought along by coop_follow (1 player 1, 2 player 2), until their first look at the zones with them on
 // (coop_follow_look). The way back they were brought into counts as come into, as the one who opened the door
 // arrives in it: the look marks them inside it (0x80134684), and what its script asks for there, the way back's
@@ -10448,6 +10449,7 @@ static void notify_room_ticket(CPUState* cpu) {
     if (exit_p2 && getenv("ED_COOP_LOG") != NULL)
         fprintf(stderr, "[coop] the room player 2's way out asks for is theirs (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
     g_coop_arrival_scene = 0;
+    g_coop_p1_own_camera = 0;
     g_follow_fresh = 0;
     g_trace_ticket_frame = cpu->timebase / 675000ull;
     if (getenv("ED_ROOM_LOG") != NULL)
@@ -13365,6 +13367,28 @@ static void coop_cameras_own(CPUState* cpu) {
         }
 }
 
+// The game's camera set (player 2's, lent) as player 1's too: the words naming player 2's body name player 1's.
+static void coop_p1_scene_end_camera(CPUState* cpu) {
+    if (!sda_ready(cpu) || g_coop_p2 == 0u)
+        return;
+    const u32 p1_object = mem_read32(cpu, cpu->gpr[13] - 26524u), them = mem_read32(cpu, g_coop_p2 + 52u);
+    if (p1_object == 0u || p1_object == them)
+        return;
+    coop_camera_set_io(cpu, g_coop_cameras.p1, true);
+    for (u32 at = 0u; at + 4u <= COOP_ZONE_CAMERAS_SIZE && at + 4u <= COOP_CAMERA_BYTES; at += 4u) {
+        u8* w = g_coop_cameras.p1 + at;
+        if (((u32)w[0] << 24 | (u32)w[1] << 16 | (u32)w[2] << 8 | w[3]) == them) {
+            w[0] = (u8)(p1_object >> 24);
+            w[1] = (u8)(p1_object >> 16);
+            w[2] = (u8)(p1_object >> 8);
+            w[3] = (u8)p1_object;
+        }
+    }
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] player 2's arrival scene over: player 1 takes the camera it ended on (frame %llu)\n",
+                (unsigned long long)(cpu->timebase / 675000ull));
+}
+
 static void coop_camera_step(CPUState* cpu) {
     if (g_coop_cameras.lent)
         return;
@@ -13977,6 +14001,8 @@ static void coop_scene_set(CPUState* cpu, u32 function) {
         } else if (p2_acts && !g_coop_p2_scene && function == 0x80042974u) {  // fn22's hold; fn139's isn't the player's
             g_coop_p2_scene = true;
             g_coop_p2_scene_tickets = g_coop_tickets;
+            if (g_coop_entered_p2 && g_coop_arrival_scene > 0)
+                g_coop_p1_own_camera = g_coop_arrival_scene;
             if (getenv("ED_COOP_LOG") != NULL)
                 fprintf(stderr, "[coop] player 2's own scene begins (0x%08X, frame %llu): their presses start nothing in it\n", function,
                         (unsigned long long)(cpu->timebase / 675000ull));
@@ -14987,16 +15013,35 @@ static void coop_run_script(CPUState* cpu) {
         const u32 object = mem_read32(cpu, g_coop_p2 + 52u);
         u32 info = 0u;
         const bool zones = hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) && guest_ram_range_valid(cpu, info, 184u);
+        // The arrival scene's word is in their table when its timers ran it as theirs (coop_script_timers). From the
+        // game's, with none, Anthony's first Tome room scene (L03/1351) ended in state 0 at its camera's arriving, not 4:
+        // player 2 stood held in it for good (logs/run-20261108-133922-p2-tome-room-first, frame 3026).
+        const bool scene_was = g_coop_p2_scene;
+        bool words = false;
+        for (u32 i = 0u; arrival_scene && i < 10u; i++)
+            words = words || (s16)(g_coop_states.p2[i * 8u] << 8 | g_coop_states.p2[i * 8u + 1u]) == (s32)cpu->gpr[3];
         coop_be_player2(cpu, true, was);
         g_coop_turn_p1 = was[1];  // the Tome is player 1's (coop_has_tome)
         g_coop_tome_cast = true;
         if (zones)
             coop_zones_swap(cpu, info, true);  // "is the player in this zone" (0x8016A7DC) is theirs
+        if (words)
+            coop_states_swap(cpu, true);
         hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ignore);
+        if (words)
+            coop_states_swap(cpu, false);
         if (zones)
             coop_zones_swap(cpu, info, false);
+        // The scene's end sets the room's camera at the arrival spot (L03/1351 state 4: Camera01) for the player, player 2,
+        // their cameras lent. Player 1, put beside them on it, kept the room's start camera, the scene's (IntroCam02),
+        // for good (logs/run-20261108-134549-fix4-tome-room-p2). The same for them, its records following their body.
+        if (arrival_scene && getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] arrival scene %d's end ran as player 2's: scene %d -> %d, cameras lent %d, words %d\n", (s32)args[0],
+                    scene_was, g_coop_p2_scene, g_coop_cameras.lent, words);
         g_coop_tome_cast = false;
         coop_be_player2(cpu, false, was);
+        if (arrival_scene && scene_was && !g_coop_p2_scene && g_coop_cameras.lent && g_coop_p1_own_camera != -1)
+            coop_p1_scene_end_camera(cpu);  // player 1 the player again: their body
         cpu->lr = ran;
         g_hle_passthrough = false;
         g_hle_tail_call = false;
@@ -16372,6 +16417,28 @@ static void coop_script_timers(CPUState* cpu) {
     }
     if (g_coop_use.active || g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu))
         return;
+    // Player 2's arrival scene is theirs; player 1, put beside them, plays on with their own camera. The scene's shots frame
+    // the arrival spot, player 2's, and player 1's half showed player 2 through it (Anthony's Tome room, L03/1351). The
+    // room's camera script is the arrival zone's own, which picks the camera for whoever is not in its box once its
+    // first-time flag is set (1351: CameraRgn01, else Camera02): run once as player 1's, their zones and cameras in.
+    if (g_coop_p1_own_camera > 0 && !g_coop_turn && !g_coop_cameras.lent &&
+        mem_read32(cpu, cpu->gpr[13] - 21492u) != g_coop_p2) {
+        const s32 script = g_coop_p1_own_camera;
+        g_coop_p1_own_camera = -1;  // done: their camera is their own (coop_p1_scene_end_camera stays out)
+        bool going = false;  // a word of the game's for it: it would go on from there, not choose a camera
+        for (u32 i = 0u; i < 10u; i++)
+            going = going || (s16)mem_read16(cpu, SCRIPT_STATES + i * 8u) == script;
+        if (!going) {
+            const u32 args[3] = {(u32)script, 0u, 0u};
+            const u32 lr = cpu->lr;
+            u32 ignore = 0u;
+            hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ignore);
+            cpu->lr = lr;
+            if (getenv("ED_COOP_LOG") != NULL)
+                fprintf(stderr, "[coop] player 2's arrival scene %d: run as player 1's for their own camera (frame %llu)\n", script,
+                        (unsigned long long)(cpu->timebase / 675000ull));
+        }
+    }
     if (g_coop_found_word.pending) {
         g_coop_found_word.pending = false;
         u8 game[SCRIPT_STATES_SIZE];
