@@ -1,7 +1,7 @@
 """form_portraits.py [NAME...]: a picture of each character's other form for the character screens, by photo mode.
 Each form walks to where slot 5's room camera is close and faces it, in a run on a copy of the settings. Photo mode takes
 their head and shoulders (ED_PHOTO_PORTRAIT), and it's cut to the size of the portraits the menu writes from the disc. They go
-in res/ui/portraits/ beside those, as NAME-FORM.png, and aren't committed, as those aren't. Closes any running copy of the
+in build/portraits/ as NAME-FORM.png; the forms' portraits the game shows are the project's own art in res/ui/portraits/. Closes any running copy of the
 game. A form with no picture shows the normal one. The photos stay in build/portraits, to look at."""
 import os
 import re
@@ -78,7 +78,9 @@ def main():
         if not os.path.exists(photo):
             print(name, 'no photo')
             continue
-        cut(photo, os.path.join(ROOT, 'res', 'ui', 'portraits', name + '.png'))
+        # Beside the photos, not over the forms' portraits in res/ui/portraits: those are the project's own art now
+        # (the user's, 2026-11-08), and ship.
+        cut(photo, os.path.join(ROOT, 'build', 'portraits', name + '.png'))
         print(name, photo, flush=True)
 
 

@@ -1,7 +1,9 @@
 # Your disc image and everything translated from it stay on your machine.
 dump/
-# Character portraits, written from the disc by the menu.
-res/ui/portraits/
+# Character portraits: the twelve characters' are written from the disc by the menu (NAME.png) and stay out.
+res/ui/portraits/*
+# The forms' (NAME-FORM.png) are the project's own art: they ship.
+!res/ui/portraits/*-*.png
 # The launcher's music, converted from the disc (tools/launcher_music.py).
 res/music/
 # The title menu's video folder: the Options picture there is taken from the disc as the game runs (options.rgba).
