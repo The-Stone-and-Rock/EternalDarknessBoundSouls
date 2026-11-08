@@ -4,8 +4,10 @@ dump/
 res/ui/portraits/
 # The launcher's music, converted from the disc (tools/launcher_music.py).
 res/music/
-# The title menu's video, converted from yours (tools/title_video.py).
-res/video/
+# The title menu's video folder: the Options picture there is taken from the disc as the game runs (options.rgba).
+res/video/*
+# The title video itself is the project's own (an AI-made video, no game asset): it ships.
+!res/video/title.mpg
 # Your own video to convert from.
 Background video/
 generated/

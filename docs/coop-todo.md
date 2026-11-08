@@ -28,3 +28,7 @@ frame, not confirmed to be the effect).
   seen once, just after "the game's collision test ran on".
 - `OSCheckActiveThreads` crash seconds after loading a save: seen once, cause unknown.
 - Barrels in room `0x72` set aside: the co-op run may just have missed the right one.
+
+## The launcher's music for everyone (requested 2026-11-08, later)
+
+The launcher plays res/music/launcher.wav, a loop of the game's Options song recorded from the game as it plays (MusyX, built from note data, so no file on the disc to copy; `tools/launcher_music.py` cuts it from an `ED_PCM_OUT` recording). It's the game's own music, so it can't ship. The user's wish: on first play, once the launcher has found the right disc, the recomp makes it itself, as games cache their shaders: run the game unseen to the title Options, record a loop and keep it, then the launcher plays it from then on. Other things the recomp needs from the disc can be made the same way at first run.
