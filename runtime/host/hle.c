@@ -8929,6 +8929,18 @@ static int wpn_gun_mover(CPUState* cpu, u32 node, int model, u32 item) {
     return -1;
 }
 
+#include "weapon_lists.inc"
+// A sword-list weapon (kSwordListItems) and the holder's own file has a part of a sword-list seven at its place.
+static bool wpn_own_sword_part(CPUState* cpu, int model, u32 item, u32 place) {
+    bool sword = false;
+    for (size_t i = 0; i < sizeof kSwordListItems / sizeof kSwordListItems[0] && !sword; i++)
+        sword = (u32)kSwordListItems[i] == item;
+    for (size_t i = 0; sword && i < sizeof kSwordListSevens / sizeof kSwordListSevens[0]; i++)
+        if (moves_file_has(cpu, model, kSwordListSevens[i] + (int)place))
+            return true;
+    return false;
+}
+
 // The part to play for a part asked by a player's object (InvU's for the weapon in their hand), from its home's file
 // (*home), or -1: as before (-2: no weapon held whose ask it is, so nothing to judge by).
 static int wpn_part(CPUState* cpu, u32 node, int model, int part, int* home_out) {
@@ -8950,8 +8962,10 @@ static int wpn_part(CPUState* cpu, u32 node, int model, int part, int* home_out)
     // Player 2's copy (coop_weapon_copy) has type -1: its original's type.
     const u32 item = (s32)mem_read32(cpu, info + 12u) >= 0 ? mem_read32(cpu, info + 12u) : (u32)wpn_copy_item(cpu, thing);
     bool its = false;
+    u32 place = 0u;
     for (u32 i = 0; i < 7u && !its; i++)
-        its = (int)mem_read16(cpu, inv + 54u + i * 2u) == part;
+        if ((int)mem_read16(cpu, inv + 54u + i * 2u) == part)
+            its = true, place = i;
     if (!its)
         return -2;  // not the held weapon's ask
     int home = -1;
@@ -8978,6 +8992,12 @@ static int wpn_part(CPUState* cpu, u32 node, int model, int part, int* home_out)
     if (moves_file_has(cpu, model, part)) {
         if (moves_same_kind(cpu, model, home, part))
             return -1;  // theirs is that kind's
+    } else if (wpn_own_sword_part(cpu, model, item, place)) {
+        // A weapon that swings from the swords' attack list (the same move for each direction, InvS template 0's),
+        // held by one whose own file has a part of that list at its place: their own moves, as before W1. With the
+        // home's (Anthony's 42 for Pius with the Scramasax) 18 of Pius's bones held still and his own moves 17 and 19
+        // weren't in it (logs/run-20261108-144446-fix4-p2-enchant, 16997). The Torch's list is its own: home's still.
+        return -1;
     } else if (!moves_file_has(cpu, model, 14 + part % 7)) {
         const int instead = moves_instead(cpu, model, part);
         if (instead >= 0 && moves_file_has(cpu, model, instead))
@@ -11569,6 +11589,8 @@ static void coop_cast(CPUState* cpu) {
     if (!g_coop_next_cast_p2 && cpu->gpr[4] == COOP_NEXT_CAST && cpu->lr == COOP_NEXT_CAST_CALL && sda_ready(cpu) &&
         mem_read32(cpu, COOP_SPELL_ITEM) != 0u)
         g_coop_p1_cast_words = COOP_CAST_WORDS_WAIT;
+    if (getenv("ED_COOP_CAST_LOG") != NULL && cpu->lr == COOP_NEXT_CAST_CALL && !g_coop_next_cast_p2 && mem_read32(cpu, COOP_SPELL_ITEM) != 0u)
+        fprintf(stderr, "[coop] player 1's cast on %u\n", mem_read32(cpu, COOP_SPELL_ITEM));
     if (!g_coop_next_cast_p2 || cpu->gpr[4] != COOP_NEXT_CAST || cpu->lr != COOP_NEXT_CAST_CALL || g_coop_p2 == 0u ||
         !sda_ready(cpu) || !coop_listed(cpu, g_coop_p2)) {
         g_hle_passthrough = true;
@@ -11579,12 +11601,14 @@ static void coop_cast(CPUState* cpu) {
     // hold is their copy (the cast asks that their equipment lists it, and
     // what it enchants is theirs alone).
     const u32 item = mem_read32(cpu, COOP_SPELL_ITEM);
-    const u32 copy = coop_weapon_copy(cpu, item, false);
-    if (copy != 0u) {
-        mem_write32(cpu, COOP_SPELL_ITEM, mem_read32(cpu, copy + 16u));
-        g_coop_cast_words = COOP_CAST_WORDS_WAIT;
-    }
     const u32 args[2] = {cpu->gpr[3], cpu->gpr[4]};
+    const u32 copy = coop_weapon_copy(cpu, item, false);
+    if (copy != 0u)
+        mem_write32(cpu, COOP_SPELL_ITEM, mem_read32(cpu, copy + 16u));
+    // The words it shows (repaired, enchanted) are theirs whatever it's on: only for a copy of theirs, the
+    // repaired urn's words came in player 1's half, held player 2, and waited for player 1's B.
+    if (item != 0u)
+        g_coop_cast_words = COOP_CAST_WORDS_WAIT;
     u32 was[5], result = 0u;
     coop_be_player2(cpu, true, was);
     g_coop_turn_p1 = was[1];  // the Tome is player 1's (coop_has_tome)
@@ -11756,6 +11780,44 @@ static void coop_enchanted_look(CPUState* cpu) {
     g_hle_tail_call = false;
 }
 
+// A move's sound keys (0x8019E240(object, event), the animation's sound callback, set by 0x80121C08) play the swing,
+// then, for an enchanted weapon, its alignment's sound (533, 534: GS_Query_Weapon_Sound 0x8004DA58, type 77): only if
+// the object is the player (0x8019E48C: r13-26524), the player's node holds an enchanted thing (0x801F9D98) and the
+// attack block's weapon (+104, 0x8004D8A0) is one. Player 2's moves play outside their turn, player 1 the player:
+// their enchanted sword swung silent (logs/run-20261108-152216-enchant-sound-trace: 533 only at player 1's object).
+// Their object's keys are the game's call again with them the player and their attack block's weapon in.
+#define COOP_MOVE_SOUND 0x8019E240u
+static bool g_coop_tome_p2;  // their Tome has them the player (coop_tome_player)
+#define COOP_AIM_WEAPON 104u
+
+static void coop_move_sound(CPUState* cpu) {
+    static bool running;
+    const u32 object = cpu->gpr[3];
+    if (running || g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu) || g_coop_turn || g_coop_tome_p2 ||
+        object != mem_read32(cpu, g_coop_p2 + 52u) || !coop_listed(cpu, g_coop_p2)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    const u32 aim = mem_read32(cpu, COOP_INPUT + 176u + 3u * 32u + 12u);  // channel 3's context, as coop_state
+    const u8* saved = g_coop_state[1].aim + COOP_AIM_WEAPON;
+    const u32 theirs = (u32)saved[0] << 24 | (u32)saved[1] << 16 | (u32)saved[2] << 8 | saved[3];
+    const bool weapon = guest_ram_range_valid(cpu, aim, COOP_AIM_SIZE) && theirs != 0u;
+    const u32 kept = weapon ? mem_read32(cpu, aim + COOP_AIM_WEAPON) : 0u;
+    const u32 args[2] = {cpu->gpr[3], cpu->gpr[4]};
+    u32 was[5], ignore = 0u;
+    if (weapon)
+        mem_write32(cpu, aim + COOP_AIM_WEAPON, theirs);
+    coop_be_player2(cpu, true, was);
+    running = true;
+    hle_guest_call(cpu, COOP_MOVE_SOUND, args, 2, 0.0, &ignore);
+    running = false;
+    coop_be_player2(cpu, false, was);
+    if (weapon)
+        mem_write32(cpu, aim + COOP_AIM_WEAPON, kept);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
 // An enchant's close-up (0x80024528, as the thing is shown) stops play for
 // both players. The spell shows it only if its caster is the controlled
 // character (0x801F6258, asked at 0x801C6DC8, and at 0x801C6990 to tie the
@@ -11808,16 +11870,17 @@ static void coop_controlled_id(CPUState* cpu) {
         g_hle_passthrough = true;
         return;
     }
-    // A broken thing (its template's bit 0, 0x801507F0: the Broken Blue Urn, Broken Green Urn, Broken Short Sword) is
-    // mended by the game's own branch for a controlled caster ("That which is broken, shall be fixed": 0x801C6E24
-    // marks it mended and shows it, REPAIRED_ITEM, given back through 0x80024528 as a find, hle_coop_found). The other
-    // branch only puts runes on it. So for those the game's own answer stands; weapons go on as below.
+    // A broken thing (the Broken Blue Urn, Broken Green Urn, Broken Short Sword) is mended by the game's own branch for a
+    // controlled caster ("That which is broken, shall be fixed"). Its template's bit 0 (0x801507F0) is clear: set, the
+    // branch puts runes on it (0x801C6E24, a weapon); clear, it mends it (0x801C6EF0: 0x801F96E8, event 57). The other
+    // caster's branch only puts runes on it. So for those the game's own answer stands; weapons go on as below. Read as
+    // set for broken, the urn went on as a weapon and stayed broken (logs/run-20261108-142023-coop-repair-p1, 14539).
     if (cpu->lr == COOP_ENCHANT_ASKS) {
         const u32 id = mem_read32(cpu, cpu->gpr[31] + 188u);
         const u32 node = coop_enchant_node(cpu, id);
         u32 record = 0u, flags = 0u;
         if (node != 0u && hle_guest_call(cpu, COOP_NODE_RECORD, &node, 1, 0.0, &record) && record != 0u &&
-            hle_guest_call(cpu, 0x801507F0u, &record, 1, 0.0, &flags) && (flags & 1u) != 0u) {
+            hle_guest_call(cpu, 0x801507F0u, &record, 1, 0.0, &flags) && (flags & 1u) == 0u) {
             cpu->lr = COOP_ENCHANT_ASKS;
             if (getenv("ED_COOP_CAST_LOG") != NULL)
                 fprintf(stderr, "[coop] an enchant mends a broken thing (id %u): the game's own way\n", id);
@@ -15229,6 +15292,24 @@ static int coop_name_choice(bool p2) {
     return choice - 1;
 }
 
+// A thing's name as the Tome shows it (0x8010482C): its InvU record's words, group 0x80150B5C and entry 0x80150B44, from
+// the names made from the disc (item_names.inc). The game's own words (0x801DB864) for them, asked from here, hung: the
+// group's words weren't in, and the unpacking (0x801559D8) went round for good (saves/reports/hang-20261108-143841.txt).
+#include "item_names.inc"
+static void coop_thing_name(CPUState* cpu, u32 id, char* out, size_t size) {
+    out[0] = 0;
+    u32 node = 0u, record = 0u, group = 0u, entry = 0u;
+    if (id == 0u || !hle_guest_call(cpu, 0x801F5F88u, &id, 1, 0.0, &node) || node == 0u ||
+        !hle_guest_call(cpu, 0x801F6398u, &node, 1, 0.0, &record) || record == 0u ||
+        !hle_guest_call(cpu, 0x80150B5Cu, &record, 1, 0.0, &group) || !hle_guest_call(cpu, 0x80150B44u, &record, 1, 0.0, &entry))
+        return;
+    for (size_t i = 0u; i < sizeof kItemNames / sizeof kItemNames[0]; i++)
+        if (kItemNames[i].group == (group & 0xFFu) && kItemNames[i].entry == (entry & 0xFFu)) {
+            snprintf(out, size, "%s", kItemNames[i].name);
+            return;
+        }
+}
+
 static void coop_found_notice(CPUState* cpu, bool p2) {
     if (!guest_ram_range_valid(cpu, cpu->gpr[3] + WORDS_AT, 200u))
         return;
@@ -15265,8 +15346,16 @@ static void coop_found_notice(CPUState* cpu, bool p2) {
         return;
     }
     char notice[256];
+    // An enchant's words name no thing ("This Item has been repaired!", "This Item is now enchanted!"): the thing it
+    // gives (0x80024528's r6) by its name. Told as worded, player 1 read "Pius has been repaired".
+    char thing[64];
+    coop_thing_name(cpu, cpu->gpr[6], thing, sizeof thing);
+    const bool repaired = item == NULL && strstr(words, "has been repaired") != NULL;
+    const bool enchanted = item == NULL && strstr(words, "is now enchanted") != NULL;
     if (item != NULL)
         snprintf(notice, sizeof notice, "%s has found %s", kCharacterWords[who][0], item);
+    else if ((repaired || enchanted) && thing[0] != 0)
+        snprintf(notice, sizeof notice, "%s has %s the %s", kCharacterWords[who][0], repaired ? "repaired" : "enchanted", thing);
     else
         snprintf(notice, sizeof notice, "%s%s", kCharacterWords[who][0], as_worded);
     n = (u32)strlen(notice);
@@ -20626,13 +20715,18 @@ static void coop_equip_record(CPUState* cpu) {
     u32 p1 = 0u, own = 0u, ignore = 0u;
     const u32 find1[2] = {mem_read32(cpu, player + 16u), 0u};
     const u32 find2[2] = {mem_read32(cpu, g_coop_p2 + 16u), 0u};
-    if (!hle_guest_call(cpu, EQUIP_FIND, find1, 2, 0.0, &p1) || p1 == 0u ||
-        !hle_guest_call(cpu, EQUIP_FIND, find2, 2, 0.0, &own) || own != 0u)
+    if (!hle_guest_call(cpu, EQUIP_FIND, find1, 2, 0.0, &p1) || p1 == 0u || !hle_guest_call(cpu, EQUIP_FIND, find2, 2, 0.0, &own))
+        return;
+    // Or one that's there with no hands set up and nothing in it (a save made solo, loaded in co-op): no slot was free
+    // for anything (0x801512F8 asks +392), and player 2 could take up no weapon (logs/run-20261108-145356-test-p2-take).
+    if (own != 0u && (!guest_ram_range_valid(cpu, own, 396u) || mem_read32(cpu, own + 392u) != 0u || mem_read32(cpu, own + 388u) != 0u))
         return;
     const u32 make[2] = {find2[0], 1u};
-    if (!hle_guest_call(cpu, EQUIP_FIND, make, 2, 0.0, &own) || own == 0u)
+    if (own == 0u && (!hle_guest_call(cpu, EQUIP_FIND, make, 2, 0.0, &own) || own == 0u))
         return;
-    const u32 set_up[4] = {own, mem_read32(cpu, p1 + 392u), mem_read32(cpu, p1 + 400u), mem_read32(cpu, p1 + 404u)};
+    // As the game sets up every record it makes (0x80007BAC, 0x8004280C, 0x800B8EE4): two hands (6) and its hold and
+    // let-go (docs/game/research/use-mix.md). Player 1's are the same only when the game set theirs up.
+    const u32 set_up[4] = {own, 6u, 0x800C994Cu, 0x800C9DD4u};
     hle_guest_call(cpu, EQUIP_SET_UP, set_up, 4, 0.0, &ignore);
     fprintf(stderr, "[coop] player 2's own equipment (id %u) at 0x%08X\n", find2[0], own);
 }
@@ -20683,19 +20777,56 @@ static int wpn_copy_item(CPUState* cpu, u32 thing) {
     return -1;
 }
 
+// The holder a thing to be held is given as it's made (0x80042338's held making, 0x8004269C..0x80042770): a type 3
+// record (0x8014FD08(3, 0)) with the held thing's calls, naming the node (+56, 0x8014F880). The hold finds it by
+// 0x8014ED1C(node); the torch's flame (0x8014C104) and light (0x8014DD1C) and an enchant's aura (0x80141824) are made
+// on it, and with none they made nothing: player 2's torch was held unlit (logs/run-20261108-152216-enchant-sound-trace,
+// page-0058). The copies were made as the area's "how 1" making does, which makes none. A copy without one gets one.
+static void coop_copy_holder(CPUState* cpu, u32 node) {
+    u32 holder = 0u, ignore = 0u;
+    if (node == 0u || (hle_guest_call(cpu, 0x8014ED1Cu, &node, 1, 0.0, &holder) && holder != 0u))
+        return;
+    const u32 object = mem_read32(cpu, node + 52u);
+    const u32 kind3[2] = {3u, 0u};
+    u32 h = 0u, shown = 0u;
+    if (!guest_ram_range_valid(cpu, object, 64u) || !hle_guest_call(cpu, 0x8014FD08u, kind3, 2, 0.0, &h) || h == 0u)
+        return;
+    hle_guest_call(cpu, 0x80118E10u, &object, 1, 0.0, &shown);
+    const u32 draw = shown != 0u ? 0x800271B4u : 0x8002723Cu;
+    const u32 calls[4] = {h, draw, 0x8002790Cu, 0x800276C4u};
+    hle_guest_call(cpu, 0x8014F830u, calls, 4, 0.0, &ignore);
+    const u32 a[2] = {h, 0x800276C4u}, b[2] = {h, 0x80027174u}, c[2] = {h, node}, d[2] = {h, 0x80027400u}, e[2] = {h, 0x800271B4u},
+              f[2] = {h, draw}, g[2] = {h, 0x8002790Cu};
+    hle_guest_call(cpu, 0x8014F864u, a, 2, 0.0, &ignore);
+    hle_guest_call(cpu, 0x8014F874u, b, 2, 0.0, &ignore);
+    hle_guest_call(cpu, 0x8014F880u, c, 2, 0.0, &ignore);
+    hle_guest_call(cpu, 0x8014F86Cu, d, 2, 0.0, &ignore);
+    hle_guest_call(cpu, 0x8014F828u, e, 2, 0.0, &ignore);
+    hle_guest_call(cpu, 0x8014F828u, f, 2, 0.0, &ignore);
+    hle_guest_call(cpu, 0x8014F820u, g, 2, 0.0, &ignore);
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] player 2's copy 0x%08X given its holder 0x%08X, as a held thing is made\n", node, h);
+}
+
 static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make) {
     coop_copies_reset();
     // A copy asked for by its own id (equipment saved while it was so
     // listed) is itself, not the original to copy again.
     for (int i = 0; i < 32; i++)
         if (g_coop_copies[i].node != 0u && mem_read32(cpu, g_coop_copies[i].node + 16u) == id &&
-            coop_listed(cpu, g_coop_copies[i].node))
+            coop_listed(cpu, g_coop_copies[i].node)) {
+            if (make)
+                coop_copy_holder(cpu, g_coop_copies[i].node);  // one made before copies had theirs
             return g_coop_copies[i].node;
+        }
     int free_at = -1;
     for (int i = 0; i < 32; i++) {
         if (g_coop_copies[i].node != 0u && g_coop_copies[i].id == id) {
-            if (coop_listed(cpu, g_coop_copies[i].node))
+            if (coop_listed(cpu, g_coop_copies[i].node)) {
+                if (make)
+                    coop_copy_holder(cpu, g_coop_copies[i].node);
                 return g_coop_copies[i].node;
+            }
             g_coop_copies[i].node = 0u;
         }
         if (g_coop_copies[i].node == 0u && free_at < 0)
@@ -20749,6 +20880,7 @@ static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make) {
     // (0x80118D98(object, part, 1)).
     const u32 moves_args[3] = {made_object, 0u, 1u};
     hle_guest_call(cpu, 0x80118D98u, moves_args, 3, 0.0, &ignore);
+    coop_copy_holder(cpu, made);
     g_coop_copies[free_at].id = id;
     g_coop_copies[free_at].node = made;
     fprintf(stderr, "[coop] player 2's copy of %u: node 0x%08X (id %u)\n", id, made, mem_read32(cpu, made + 16u));
@@ -22013,10 +22145,10 @@ static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* s
         // As coop_cast: an item chosen is the original, as it shows; the one they hold is their copy.
         const u32 item = mem_read32(cpu, COOP_SPELL_ITEM);
         const u32 copy = coop_weapon_copy(cpu, item, false);
-        if (copy != 0u) {
+        if (copy != 0u)
             mem_write32(cpu, COOP_SPELL_ITEM, mem_read32(cpu, copy + 16u));
-            g_coop_cast_words = COOP_CAST_WORDS_WAIT;
-        }
+        if (item != 0u)
+            g_coop_cast_words = COOP_CAST_WORDS_WAIT;  // its words are theirs, as coop_cast
         const u32 args[2] = {1u, COOP_NEXT_CAST};
         u32 result = 0u;
         coop_be_player2(cpu, true, was);
@@ -22160,7 +22292,7 @@ bool tome_copy_hook_off(HleHandler fn) {
     } kOff[] = {
 #define OFF(f) {f, #f}
         OFF(hle_coop_controller), OFF(coop_sighting), OFF(coop_events), OFF(coop_grab_events), OFF(coop_character_step), OFF(hle_coop_found), OFF(coop_bar_frame),
-        OFF(coop_find_node), OFF(coop_stat_most), OFF(coop_thing_look), OFF(coop_talk_check), OFF(coop_script_timers), OFF(coop_door_motion),
+        OFF(coop_find_node), OFF(coop_stat_most), OFF(coop_thing_look), OFF(coop_talk_check), OFF(coop_move_sound), OFF(coop_script_timers), OFF(coop_door_motion),
         OFF(coop_script_go_to_room), OFF(coop_cast), OFF(tw_mode_change), OFF(tw_tome_start), OFF(coop_controlled_id), OFF(coop_play_hold),
         OFF(coop_enchanted_look), OFF(coop_sign_follow), OFF(coop_lasting_find), OFF(coop_spells_update),
         OFF(coop_game_camera), OFF(hle_moves_let_go), OFF(hle_moves_want), OFF(hle_find_by_id), OFF(coop_position_copy),
@@ -22750,6 +22882,14 @@ static void find_coop(CPUState* cpu) {
         talk_check->intercept = coop_talk_check;
     } else {
         fprintf(stderr, "[coop] the look for someone to talk to not found: player 2 cannot talk\n");
+    }
+    // A move's sound keys (stwu r1,-112(r1); ... or r29,r3,r3 at +0x10), player 2's as theirs.
+    HleDispatchEntry* move_sound = hle_dispatch_entry(COOP_MOVE_SOUND);
+    if (mem_read32(cpu, COOP_MOVE_SOUND) == 0x9421FF90u && mem_read32(cpu, COOP_MOVE_SOUND + 0x10u) == 0x7C7D1B78u &&
+        move_sound != NULL && move_sound->intercept == NULL && move_sound->notify == NULL) {
+        move_sound->intercept = coop_move_sound;
+    } else {
+        fprintf(stderr, "[coop] a move's sound keys not found: player 2's enchanted weapon swings silent\n");
     }
     // The game's script timers (stwu r1,-16(r1); ... lha r0,0(r31) at +0x20), for
     // player 2's in step with them.

@@ -634,3 +634,31 @@ Swapping the Flintlock's own reload (Max's move 10) onto Ellia, with name matche
 ### Turning a reload's keys by the difference in each bone's place as made (2026-11-07, off the same day)
 
 `L' = C(parent)^T L C(bone)`, `C = R(home) R(holder)^T` (`g_fin[k].fix`, now only with ED_RELOAD_TURN=1). It keeps each bone as far from the holder's own pose as made as the home's is from his. Ellia's arms are made out to the sides and Max's are not, so with Max's reload she stretched her arms wide and moved her hands up and down: "that is not the animation at all" (the user; logs/run-20261107-122607-rt-ellia, -123051-len-ellia). The same bone has to be posed as the home poses it: the home's turns as they are, with the holder's own lengths (`g_fin[k].length`), logs/run-20261107-123406-len2-ellia.
+
+## The Tome room's swirl in co-op: the split off while the screen effect runs (2026-11-08, reverted)
+
+The swirl into Anthony's Tome room is the game's screen effect: L03/892 turns it on with `ed284(1)` and centres it with `ed285(EntryMkr02, 1200, 0.5)`, and each frame `0x800081D8` runs `0x801E9534` while `0x80044254` (r13-25684) counts. That copies the picture out of the frame buffer (`GXSetTexCopySrc`, `GXSetTexCopyDst`, `GXCopyTex`) and draws it back warped. In co-op it runs (173 calls traced with `ED_TRACE_FN=0x801E9534`, logs/run-20261108-140221-swirl-trace), but both halves showed only the fade. Solo shows the ripple (logs/run-20261108-130144-solo-anthony-ref, 2040-2110).
+
+Tried: the split off while r13-25684 > 0, as for a cutscene:
+
+```c
+// hle.c
+bool hle_screen_effect_on(CPUState* cpu) {
+    return sda_ready(cpu) && (s32)mem_read32(cpu, cpu->gpr[13] - 25684u) > 0;
+}
+// camera.c, camera_split_update, after the cutscene's split_off
+    if (hle_screen_effect_on(cpu)) {
+        split_off(frame, "a screen effect");
+        return;
+    }
+```
+
+Shown whole, there was still no ripple, only player 1's view fading (logs/run-20261108-140351-swirl-whole), and the split stayed off into the Tome room's first scene. So it's co-op's rendering of the copy, not the split alone: look at what differs from solo for an EFB copy drawn back the same frame (co-op's 60 cap and recording for the split, `interp::recording()`, the copy at BP 0x52 in `command_processor.cpp`). Not looked into further.
+
+## A held melee weapon from another chapter: the holder's own moves when their file has part 14 + part % 7 (2026-11-08, reverted)
+
+For Pius with the Scramasax (Anthony's part 42; the log said "of their part 14's moves not in it (table[15]): 17 19"), `wpn_part` returned -1 for any non-gun when the holder's file had `14 + part % 7`. That isn't "the same kind": the Torch asks part 7, and 14 + 7 % 7 is 14 too, so Pius held the Torch with his sword moves (the user, 2026-11-08). Don't group parts by `part % 7`; find how the game groups a weapon's moves (InvU +54, its seven) before changing whose moves a held weapon plays. What moves 17 and 19 are, and whether they're the aimed swings, wasn't looked up.
+
+## Equipping player 2's weapon at cast time (`coop_cast_item_theirs`, 2026-11-08, removed)
+
+To get past "This Item cannot be enchanted." for a weapon player 2 hadn't taken up, the cast was preceded by a hand-copy of the Tome's choose-to-equip (copy made, EQUIP_TAKE with hands from player 1's equipment, then from 0x801512F8). It was invented: the game's own choose-to-equip (0x80103F70..0x80104070) already runs for player 2 through their Tome copy and `tome_copy_equips`. The real cause was player 2's equipment record with no hands set up (+392 = 0), fixed in `coop_equip_record` with the game's set-up values. With player 1's hands it also broke whenever player 1 held something else; without a copy made first it enchanted player 1's original.
