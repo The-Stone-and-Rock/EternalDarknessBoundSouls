@@ -11697,6 +11697,147 @@ static void coop_lasting_find(CPUState* cpu) {
 // with a record player 2 cast stepped with them the player, the controlled
 // character and the one casting (coop_be_player2): its end clears what they
 // are casting, not what player 1 is.
+// Each player's own lit torch, and their enchanted weapon's glow. The game keeps one: the record 0x8030AA98 (120 bytes,
+// filled by 0x80079318 for a held torch and 0x800DA554 for an enchanted weapon; its light made from it by the queue's
+// op 20, 0x80026EE4), the torch's crackle (sound 413) in one slot at r13-25468 that its light's frame callback
+// (0x80078E2C) keeps at the torch, the flame and light handles at r13-24992 and r13-24988 (0x80044C0C), and flag 1127,
+// "a torch is lit", which 0x80044D48 returns on. Player 2's are kept here, as coop_kinds keeps their counts, and are
+// the game's while the game holds, lets go of or enchants a thing of theirs. Player 1's torch lit, theirs never was;
+// either one's letting go put out the other's (the user, 2026-11-08).
+#define TORCH_RECORD 0x8030AA98u
+#define TORCH_RECORD_SIZE 120u
+#define TORCH_SOUND 25468u     // r13 -: 8 bytes, the voice, its sound and volume
+#define TORCH_HANDLES 24992u   // r13 -: the light's handle, then the flame's (r13 - 24988)
+#define TORCH_LIT_FLAG 1127u
+#define TORCH_FRAME 0x80078E2Cu  // the torch light's frame callback (record +72)
+
+static struct {
+    u8 record[TORCH_RECORD_SIZE];
+    u8 sound[8];
+    u8 handles[8];
+    bool lit;
+} g_coop_torch;  // player 2's while player 1's are the game's, and the other way round
+
+static void coop_torch_bytes(CPUState* cpu, u32 at, u8* kept, u32 size) {
+    u8 now[TORCH_RECORD_SIZE];
+    coop_bytes(cpu, at, now, size, true);
+    coop_bytes(cpu, at, kept, size, false);
+    memcpy(kept, now, size);
+}
+
+// The flag 1127 bit in the game's flag set (r13-26528: +4, a word per 32, low bit first, as 0x801DC22C reads it).
+static u32 coop_torch_flag_word(CPUState* cpu) {
+    const u32 set = mem_read32(cpu, cpu->gpr[13] - 26528u);
+    return guest_ram_range_valid(cpu, set, 4u + 4u * (TORCH_LIT_FLAG / 32u + 1u)) ? set + 4u + TORCH_LIT_FLAG / 32u * 4u : 0u;
+}
+
+// Player 2's torch state in for the game's, or back out: the same call both ways.
+static void coop_torch_swap(CPUState* cpu) {
+    coop_torch_bytes(cpu, TORCH_RECORD, g_coop_torch.record, TORCH_RECORD_SIZE);
+    coop_torch_bytes(cpu, cpu->gpr[13] - TORCH_SOUND, g_coop_torch.sound, 8u);
+    coop_torch_bytes(cpu, cpu->gpr[13] - TORCH_HANDLES, g_coop_torch.handles, 8u);
+    const u32 word = coop_torch_flag_word(cpu);
+    if (word != 0u) {
+        const u32 bit = 1u << (TORCH_LIT_FLAG % 32u), v = mem_read32(cpu, word);
+        const bool game = (v & bit) != 0u;
+        mem_write32(cpu, word, g_coop_torch.lit ? v | bit : v & ~bit);
+        g_coop_torch.lit = game;
+    }
+}
+
+// What the queue's op 20 does with the record next frame (0x80026EE4: its light made on its holder, 0x801458A0), done
+// now while it's player 2's, its queued entry let go as the game's sanity door does (0x8006F1E8: 0x801DCD8C, then
+// 0x801DCC60). Left queued, it ran on player 1's record. Not when one was queued before player 2's call: that's player
+// 1's, and the hold queues none over it.
+static bool coop_torch_queued(CPUState* cpu, u32* entry) {
+    const u32 at = (cpu->gpr[1] - 0x200u) & ~15u;
+    mem_write32(cpu, at, 0u);
+    const u32 ask[3] = {20u, TORCH_RECORD, at};
+    u32 found = 0u;
+    hle_guest_call(cpu, 0x801DCD8Cu, ask, 3, 0.0, &found);
+    *entry = mem_read32(cpu, at);
+    return found != 0u && *entry != 0u;
+}
+
+static void coop_torch_light_now(CPUState* cpu, bool queued_before) {
+    u32 entry = 0u, ignore = 0u;
+    if (queued_before || !coop_torch_queued(cpu, &entry))
+        return;
+    hle_guest_call(cpu, 0x801DCC60u, &entry, 1, 0.0, &ignore);
+    u32 id = mem_read32(cpu, TORCH_RECORD + 100u), node = 0u, holder = 0u;
+    if (!hle_guest_call(cpu, 0x801F5F88u, &id, 1, 0.0, &node) || node == 0u ||
+        !hle_guest_call(cpu, 0x8014ED1Cu, &node, 1, 0.0, &holder) || holder == 0u)
+        return;
+    const u32 make[2] = {holder, TORCH_RECORD};
+    hle_guest_call(cpu, 0x801458A0u, make, 2, 0.0, &ignore);
+}
+
+// The game's call again with player 2's torch state in (r3.. as it was called).
+static void coop_torch_call(CPUState* cpu, u32 function, int args) {
+    static bool running;
+    if (running)
+        return;
+    u32 a[4];
+    for (int i = 0; i < args && i < 4; i++)
+        a[i] = cpu->gpr[3 + i];
+    u32 result = 0u, entry = 0u;
+    const bool queued_before = coop_torch_queued(cpu, &entry);
+    coop_torch_swap(cpu);
+    running = true;
+    hle_guest_call(cpu, function, a, args, 0.0, &result);
+    running = false;
+    coop_torch_light_now(cpu, queued_before);
+    coop_torch_swap(cpu);
+    cpu->gpr[3] = result;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+static u32 coop_p2_equipment(CPUState* cpu) {
+    u32 own = 0u;
+    const u32 find[2] = {g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + 16u) : 0u, 0u};
+    if (find[0] == 0u || !hle_guest_call(cpu, 0x80151500u, find, 2, 0.0, &own))
+        return 0u;
+    return own;
+}
+
+static bool g_coop_torch_running;
+
+// The hold (0x800C994C(equipment, id)) and let go (0x800C9DD4) of a thing in player 2's equipment.
+static void coop_torch_hold(CPUState* cpu, u32 function) {
+    if (g_coop_torch_running || g_coop_p2 == 0u || !g_settings.mod_coop || !sda_ready(cpu) || cpu->gpr[3] == 0u ||
+        cpu->gpr[3] != coop_p2_equipment(cpu)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    g_coop_torch_running = true;
+    coop_torch_call(cpu, function, 2);
+    g_coop_torch_running = false;
+}
+static void coop_torch_held(CPUState* cpu) { coop_torch_hold(cpu, 0x800C994Cu); }
+static void coop_torch_let_go(CPUState* cpu) { coop_torch_hold(cpu, 0x800C9DD4u); }
+
+// The torch light's frame callback (0x80078E2C(light)): it keeps the one crackle at the torch, and restarts it when it
+// ends. For player 2's light (its handle at their record's +0), with their crackle in.
+static void coop_torch_frame(CPUState* cpu) {
+    const u32 theirs = (u32)g_coop_torch.record[0] << 24 | (u32)g_coop_torch.record[1] << 16 | (u32)g_coop_torch.record[2] << 8 |
+                       g_coop_torch.record[3];
+    static bool running;
+    if (running || g_coop_torch_running || g_coop_p2 == 0u || !sda_ready(cpu) || theirs == 0u || cpu->gpr[3] != theirs) {
+        g_hle_passthrough = true;
+        return;
+    }
+    const u32 light = cpu->gpr[3];
+    u32 ignore = 0u;
+    coop_torch_bytes(cpu, cpu->gpr[13] - TORCH_SOUND, g_coop_torch.sound, 8u);
+    running = true;
+    hle_guest_call(cpu, TORCH_FRAME, &light, 1, 0.0, &ignore);
+    running = false;
+    coop_torch_bytes(cpu, cpu->gpr[13] - TORCH_SOUND, g_coop_torch.sound, 8u);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
 #define COOP_SPELLS_UPDATE 0x801C5994u
 #define COOP_SPELLS_PAUSED 0x80157364u
 #define COOP_SPELL_RUNS 0x80155450u
@@ -11739,12 +11880,24 @@ static void coop_spells_update(CPUState* cpu) {
             fprintf(stderr, "[coop] spell 0x%08X (0x%08X) cast by 0x%X: %s (frame %llu)\n", spell,
                     mem_read32(cpu, spell + 4u), mem_read32(cpu, spell + 12u), theirs ? "player 2's" : "not player 2's",
                     (unsigned long long)(cpu->timebase / 675000ull));
-        u32 was[5];
+        u32 was[5], entry = 0u;
+        // Their steps with their torch state in (coop_torch_swap): an enchant's glow goes on their record, not player 1's.
+        const bool steps = theirs && due > done;
+        const bool queued_before = steps && coop_torch_queued(cpu, &entry);
         if (theirs)
             coop_be_player2(cpu, true, was);
+        if (steps) {
+            coop_torch_swap(cpu);
+            g_coop_torch_running = true;
+        }
         for (u32 k = 0; due > done && k < due - done; k++) {
             hle_guest_call(cpu, mem_read32(cpu, spell + 28u), &spell, 1, 0.0, &ignore);
             mem_write16(cpu, spell + 4084u, (u16)(mem_read16(cpu, spell + 4084u) + 1u));
+        }
+        if (steps) {
+            g_coop_torch_running = false;
+            coop_torch_light_now(cpu, queued_before);
+            coop_torch_swap(cpu);
         }
         if (theirs)
             coop_be_player2(cpu, false, was);
@@ -22292,7 +22445,7 @@ bool tome_copy_hook_off(HleHandler fn) {
     } kOff[] = {
 #define OFF(f) {f, #f}
         OFF(hle_coop_controller), OFF(coop_sighting), OFF(coop_events), OFF(coop_grab_events), OFF(coop_character_step), OFF(hle_coop_found), OFF(coop_bar_frame),
-        OFF(coop_find_node), OFF(coop_stat_most), OFF(coop_thing_look), OFF(coop_talk_check), OFF(coop_move_sound), OFF(coop_script_timers), OFF(coop_door_motion),
+        OFF(coop_find_node), OFF(coop_stat_most), OFF(coop_thing_look), OFF(coop_talk_check), OFF(coop_move_sound), OFF(coop_torch_held), OFF(coop_torch_let_go), OFF(coop_torch_frame), OFF(coop_script_timers), OFF(coop_door_motion),
         OFF(coop_script_go_to_room), OFF(coop_cast), OFF(tw_mode_change), OFF(tw_tome_start), OFF(coop_controlled_id), OFF(coop_play_hold),
         OFF(coop_enchanted_look), OFF(coop_sign_follow), OFF(coop_lasting_find), OFF(coop_spells_update),
         OFF(coop_game_camera), OFF(hle_moves_let_go), OFF(hle_moves_want), OFF(hle_find_by_id), OFF(coop_position_copy),
@@ -23255,6 +23408,20 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* take = hle_dispatch_entry(EQUIP_TAKE);
             if (take != NULL && take->intercept == NULL && take->notify == NULL)
                 take->intercept = coop_equip_take;
+            // Each player's own torch (coop_torch_hold, coop_torch_frame): stwu r1,-80(r1) / -48(r1) / -80(r1), then
+            // or r31,r4,r4 / or r31,r4,r4 / or r28,r3,r3 at +0x10.
+            static const struct { u32 at, first, tenth; void (*fn)(CPUState*); } kTorch[3] = {
+                {0x800C994Cu, 0x9421FFB0u, 0x7C9F2378u, coop_torch_held},
+                {0x800C9DD4u, 0x9421FFD0u, 0x7C9F2378u, coop_torch_let_go},
+                {TORCH_FRAME, 0x9421FFB0u, 0x7C7C1B78u, coop_torch_frame}};
+            for (int i = 0; i < 3; i++) {
+                HleDispatchEntry* e = hle_dispatch_entry(kTorch[i].at);
+                if (mem_read32(cpu, kTorch[i].at) == kTorch[i].first && mem_read32(cpu, kTorch[i].at + 0x10u) == kTorch[i].tenth &&
+                    e != NULL && e->intercept == NULL)
+                    e->intercept = kTorch[i].fn;
+                else
+                    fprintf(stderr, "[coop] the torch's 0x%08X not found: one torch lit for both players\n", kTorch[i].at);
+            }
             for (int i = 0; getenv("ED_ITEM_TRACE") != NULL && i < 2; i++) {
                 HleDispatchEntry* e = hle_dispatch_entry(i == 0 ? 0x80150FA0u : 0x800C9DD4u);
                 if (e != NULL && e->notify == NULL)
