@@ -14615,8 +14615,16 @@ static void hle_coop_found(CPUState* cpu) {
     g_coop_found_word.p2 = g_coop_use.active && g_coop_use.p2;
     // Player 2's find shows only in their half from its first frame: the
     // split held player 1's view with the words in it a frame later.
-    if (g_coop_use.active && g_coop_use.p2)
+    if (g_coop_use.active && g_coop_use.p2) {
         g_coop_use.found = true;
+        // In a scene of theirs the hold is their script's own (fn22, busy 0x32), which isn't a close-up of theirs, and its
+        // words went to the game's pad, player 1's, in player 1's half: the sword after Anthony's casket (L03/1939 state 4,
+        // logs/run-20261108-131047-fix-casket-p2). Theirs, as the monk's key below is.
+        if (g_coop_script_hold) {
+            g_coop_script_hold = false;
+            g_coop_assist_at = 1u;
+        }
+    }
     // A thing given as a scene of theirs ends (the monk's key: the script goes on
     // as the game's, after the cutscene, with player 1 the player): theirs too, in
     // their half with their pad. It showed in both.
@@ -14859,6 +14867,32 @@ static void coop_script_sends(CPUState* cpu) {
 static bool g_coop_p1_scan;  // their zones' look is running, with their prompts in (coop_scan_player1)
 #define COOP_PROMPT_RUNS 0x8000704Cu  // a prompt's press running its script
 #define COOP_ZONE_RUNS 0x80134B38u    // a zone's look running its script
+#define CINEMATIC_END_RAN_A 0x80026FACu  // a cinematic's end running its script (0x80026F94: +464)
+#define CINEMATIC_END_RAN_B 0x80026FE4u  // (0x80026FB8: the cinematic table's +14)
+
+static void coop_cutscene_over(CPUState* cpu);  // below: the cutscene's end for co-op
+// The scripts that last ran as player 2's (coop_run_script).
+static s32 g_coop_p2_scripts[8];
+
+static bool coop_p2_script_is(s32 script) {
+    for (u32 i = 0u; i < 8u; i++)
+        if (g_coop_p2_scripts[i] == script)
+            return true;
+    return false;
+}
+
+static void coop_p2_script_mark(s32 script, bool theirs) {
+    for (u32 i = 0u; i < 8u; i++)
+        if (g_coop_p2_scripts[i] == script) {
+            if (!theirs)
+                g_coop_p2_scripts[i] = 0;
+            return;
+        }
+    if (!theirs)
+        return;
+    memmove(g_coop_p2_scripts + 1, g_coop_p2_scripts, 7u * sizeof g_coop_p2_scripts[0]);
+    g_coop_p2_scripts[0] = script;
+}
 static void coop_run_script(CPUState* cpu) {
     // What's being found, for either finder: the other player's word was copied as it was found, at the
     // find, and goes on when the find ends (coop_script_timers). Walking into its zone, or pressing on it,
@@ -14967,6 +15001,40 @@ static void coop_run_script(CPUState* cpu) {
         g_hle_passthrough = false;
         g_hle_tail_call = false;
         return;
+    }
+    // Who a script is: one that ran as player 2's (their use, or a script it ran on to with fn73, run inside it at
+    // 0x80164488) is theirs until a press or zone of player 1's runs it.
+    if ((s32)cpu->gpr[3] > 0 && g_coop_p2 != 0u && sda_ready(cpu)) {
+        if (g_coop_use.active && g_coop_use.p2)
+            coop_p2_script_mark((s32)cpu->gpr[3], true);
+        else if ((cpu->lr == COOP_PROMPT_RUNS || cpu->lr == COOP_ZONE_RUNS) && !g_coop_turn && !g_coop_prompt_look)
+            coop_p2_script_mark((s32)cpu->gpr[3], false);
+    }
+    // The game going on with a script of player 2's from its own calls: a cinematic it played ending (0x80026FA8 and
+    // 0x80026FE0 run the cinematic's script), a walk it waited on done (fn17, 0x80168388), a find or window of it
+    // closed. Anthony's casket (L03/1587, run on to L03/1939) by player 2: 1939 played cinematic 128 as theirs, and
+    // its end ran 1939 as player 1's, from the game's table with no word for it, so the cinematic played again, then
+    // the sword was found by player 1, player 1 was walked to Anthony's mark and player 2 stood held for good
+    // (logs/run-20261108-130550-coop-casket-p2, frames 3069, 3303, 4386). Solo, 1939 is called from 0x80164488,
+    // 0x80026FE4, 0x80163E5C, 0x800244C0 and 0x80168388 (logs/run-20261108-130307-solo-anthony-sword). Run as
+    // theirs, as their use, with their word.
+    if ((cpu->lr == CINEMATIC_END_RAN_A || cpu->lr == CINEMATIC_END_RAN_B || cpu->lr == COOP_SCRIPT_WAIT_RAN ||
+         cpu->lr == FOUND_CLOSE_RAN || cpu->lr == WINDOW_CLOSE_RAN) &&
+        (s32)cpu->gpr[3] > 0 && coop_p2_script_is((s32)cpu->gpr[3]) && !g_coop_use.active && !g_coop_turn &&
+        !g_coop_prompt_look && g_coop_p2 != 0u && sda_ready(cpu)) {
+        const u32 ran = cpu->lr;
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] script %d goes on as player 2's (lr 0x%08X)\n", (s32)cpu->gpr[3], ran);
+        // The cinematic's end runs this before the pad's read ends the cutscene for co-op (coop_cutscene_over): its
+        // cameras put back after their use had lent them, player 1's half kept the casket's camera (Camera06).
+        if (g_coop_cutscene_pending && (ran == CINEMATIC_END_RAN_A || ran == CINEMATIC_END_RAN_B))
+            coop_cutscene_over(cpu);
+        coop_use_start(cpu, (s32)cpu->gpr[3], true);
+        if (g_coop_use.active) {
+            g_coop_use.resume = ran;
+            g_coop_use.at_press = true;
+            return;
+        }
     }
     // A thing a script of player 2's sent on its way (coop_script_sends) calling that script back: the
     // bookshelf's lever, which ends the scene from there. Run as player 1's, from their word, it began
