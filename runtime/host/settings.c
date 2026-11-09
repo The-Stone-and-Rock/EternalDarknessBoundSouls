@@ -34,6 +34,7 @@ Settings g_settings = {
     .volumetric = 50,
     .skin_scatter = true,
     .spell_rim = true,
+    .spell_fx = false,  // paused: the user tested it and didn't like it (docs/runes-3d.md)
     .hdr_peak = 1000,
 #if defined(__APPLE__)
     .hdr_paper = 100,  // macOS's own SDR white (EDR 1.0)
@@ -168,6 +169,8 @@ void settings_load(void) {
             g_settings.skin_scatter = n != 0;
         else if (strcmp(key, "spell_rim") == 0)
             g_settings.spell_rim = n != 0;
+        else if (strcmp(key, "spell_fx") == 0)
+            g_settings.spell_fx = n != 0;
         else if (strcmp(key, "contact_shadows") == 0)
             g_settings.contact_shadows = n != 0;
         else if (strcmp(key, "anti_aliasing") == 0)
@@ -284,6 +287,7 @@ void settings_save(void) {
     fprintf(f, "haze = %d\n", g_settings.volumetric);
     fprintf(f, "skin_scatter = %d\n", g_settings.skin_scatter ? 1 : 0);
     fprintf(f, "spell_rim = %d\n", g_settings.spell_rim ? 1 : 0);
+    fprintf(f, "spell_fx = %d\n", g_settings.spell_fx ? 1 : 0);
     fprintf(f, "anti_aliasing = %d\n", g_settings.anti_aliasing);
     fprintf(f, "anisotropy = %d\n", g_settings.anisotropy);
     fprintf(f, "hdr_peak = %d\n", g_settings.hdr_peak);

@@ -1730,9 +1730,9 @@ Row vibration_row() {
 // Graphics enhancements: the options' rows and photo mode change the same
 // values, applied at once.
 namespace enhancement {
-enum { kGlow, kOcclusion, kHdr, kShadows, kHdTextures, kOcclusionQuality, kPerPixel, kSmaa, kSharpen, kShafts, kCharShadows, kShadowEdges, kContact, kVolumetric, kSkin, kSpellRim, kCount };
+enum { kGlow, kOcclusion, kHdr, kShadows, kHdTextures, kOcclusionQuality, kPerPixel, kSmaa, kSharpen, kShafts, kCharShadows, kShadowEdges, kContact, kVolumetric, kSkin, kSpellRim, kSpellFx, kCount };
 const char* const kNames[kCount] = {"Glow", "Ambient occlusion", "HDR", "Baked shadows", "HD textures", "Occlusion quality",
-                                    "Per-pixel lighting", "SMAA", "Sharpening", "Light shafts", "Character shadows", "Shadow edges", "Contact shadows", "Haze", "Skin scattering", "Spell glow"};
+                                    "Per-pixel lighting", "SMAA", "Sharpening", "Light shafts", "Character shadows", "Shadow edges", "Contact shadows", "Haze", "Skin scattering", "Spell glow", "Remastered spells"};
 const char* const kLevels[] = {"Off", "Soft", "Strong"};
 
 bool available(int which) {
@@ -1771,6 +1771,7 @@ std::string value(int which) {
     case kVolumetric: return g_settings.volumetric == 0 ? "Off" : std::to_string(g_settings.volumetric) + "%";
     case kSkin: return on_off(g_settings.skin_scatter);
     case kSpellRim: return on_off(g_settings.spell_rim);
+    case kSpellFx: return on_off(g_settings.spell_fx);
     default: return "";
     }
 }
@@ -1793,6 +1794,7 @@ void change(int which, int dir) {
     case kVolumetric: g_settings.volumetric = std::clamp(g_settings.volumetric + dir * 5, 0, 100); break;
     case kSkin: g_settings.skin_scatter = !g_settings.skin_scatter; break;
     case kSpellRim: g_settings.spell_rim = !g_settings.spell_rim; break;
+    case kSpellFx: g_settings.spell_fx = !g_settings.spell_fx; break;
     default: return;
     }
     settings_apply_graphics();
@@ -1815,6 +1817,7 @@ const char* const kNotes[kCount] = {
     "Hazy air round the room's lamps and spells, with the characters' shadows through it.",
     "A warm glow where light turns to shade on skin.",
     "Spells shine, and the edges of their shapes glow.",
+    "A spell's runes as 3D stones glowing in its colour, lighting what's round them, its sparks in its colour.",
 };
 
 }  // namespace enhancement
@@ -1979,7 +1982,7 @@ void build_options_rows() {
                 r.section = section;
             first = false;
             r.toggle = which == kHdTextures || which == kPerPixel || which == kSmaa || which == kContact ||
-                       which == kSkin || which == kSpellRim;
+                       which == kSkin || which == kSpellRim || which == kSpellFx;
             if (which == kVolumetric)
                 r.slider = g_settings.volumetric;
             r.enabled = available(which);
@@ -2026,7 +2029,7 @@ void build_options_rows() {
                                          enhancement::kContact});
     graphics_rows("VIII \u00b7 Lighting", {enhancement::kPerPixel, enhancement::kSkin, enhancement::kOcclusion,
                                            enhancement::kOcclusionQuality});
-    graphics_rows("IX \u00b7 Effects", {enhancement::kGlow, enhancement::kSpellRim, enhancement::kVolumetric,
+    graphics_rows("IX \u00b7 Effects", {enhancement::kGlow, enhancement::kSpellRim, enhancement::kSpellFx, enhancement::kVolumetric,
                                         enhancement::kShafts});
 
     // Controls: the layout here, everything else (vibration, hold or toggle,

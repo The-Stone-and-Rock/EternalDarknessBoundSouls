@@ -30,6 +30,7 @@ typedef struct {
     int volumetric;       // the haze, the air lit by lamps and spells: 0 off to 100 percent
     bool skin_scatter;    // light through skin, with per-pixel lighting
     bool spell_rim;       // spells' meshes with glowing edges, and their sparks shining
+    bool spell_fx;        // remastered spells: 3D runes, their light and colours (hle.c runes_frame)
     int anti_aliasing;    // 1: 4x multisampling (from the next start)
     int anisotropy;       // texture filtering: 1x, 2x, 4x, 8x, 16x (0-4, from the next start)
     // HDR calibration (Graphics enhancements > Calibrate HDR): the display's

@@ -231,6 +231,9 @@ void build_mips(Loaded& img) {
 // kept the process alive after quitting on Linux).
 struct Shared {
     std::unordered_map<Key, std::string, KeyHash> files;  // read-only after init
+    // Remastered spells' textures (textures-spellfx/, beside the pack): used in place of the pack's own while the
+    // option is on (g_settings.spell_fx), so with it off every spell texture is the original. Read-only after init.
+    std::unordered_map<Key, std::string, KeyHash> spell;
     std::mutex mutex;
     std::condition_variable cv;
     std::deque<Key> queue;
@@ -272,6 +275,15 @@ bool parse_name(const std::string& name, Key* key) {
     return true;
 }
 
+// Which file a texture comes from: the remastered spells' while they're on, else the pack's.
+const std::string& texture_path(const Key& key) {
+    if (g_settings.spell_fx) {
+        if (auto it = g.spell.find(key); it != g.spell.end())
+            return it->second;
+    }
+    return g.files.at(key);
+}
+
 void loader() {
     // Below the game's own threads: decoding waits, a frame does not.
     SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
@@ -284,7 +296,7 @@ void loader() {
             g.queue.pop_front();
         }
         Loaded img;
-        const std::string& path = g.files.at(key);
+        const std::string& path = texture_path(key);
         bool ok = is_dds(path) ? load_dds(path, &img)
                                : load_png_rgba(path, &img.rgba, &img.width, &img.height);
         // A GPU without BC textures (none this runs on, so far) keeps the original.
@@ -314,7 +326,7 @@ void loader() {
             g.failed.insert(key);
         if (g_log)
             std::fprintf(stderr, "[texpack] %s %s\n", ok ? "loaded" : "FAILED",
-                         g.files.at(key).c_str());
+                         texture_path(key).c_str());
     }
 }
 
@@ -343,7 +355,13 @@ int lookup(uint32_t format, uint32_t width, uint32_t height, uint64_t hash, uint
     return 2;
 }
 
-uint64_t generation() { return g_settings.hd_textures && !g.files.empty() ? 1u : 0u; }
+// The pack's generation: a new one makes the renderer drop and ask again for what it has, so turning HD textures or
+// Remastered spells on or off swaps them at once.
+uint64_t generation() {
+    if (!g_settings.hd_textures || g.files.empty())
+        return 0u;
+    return g_settings.spell_fx && !g.spell.empty() ? 2u : 1u;
+}
 
 std::string pack_dir() {
     if (const char* env = std::getenv("ED_TEXTURE_PACK"); env != nullptr && env[0] != '\0')
@@ -391,6 +409,18 @@ extern "C" void texpack_init(void) {
     }
     std::fprintf(stderr, "[texpack] %zu textures in %s (%zu skipped)\n", g.files.size(),
                  g_dir.c_str(), skipped);
+    // The remastered spells' (only those the pack has too: they replace, never add).
+    const std::string spell_dir = g_dir + "-spellfx";
+    if (std::filesystem::is_directory(spell_dir, ec)) {
+        for (auto it = std::filesystem::recursive_directory_iterator(
+                 spell_dir, std::filesystem::directory_options::skip_permission_denied, ec);
+             !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+            Key key;
+            if (it->is_regular_file(ec) && parse_name(it->path().filename().string(), &key) && g.files.count(key) != 0)
+                g.spell[key] = it->path().string();
+        }
+        std::fprintf(stderr, "[texpack] %zu remastered spell textures in %s\n", g.spell.size(), spell_dir.c_str());
+    }
     if (g.files.empty())
         return;
     // PNG decoding is the slow part and must not hold up a frame: two loaders,

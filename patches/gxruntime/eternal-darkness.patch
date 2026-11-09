@@ -10,7 +10,7 @@ index 7b681e5..59382b6 100644
 +  [iryoku/smaa](https://github.com/iryoku/smaa), MIT licence, its notice in that file. `post.cpp`'s
 +  shaders follow SMAA, AMD FidelityFX CAS and GTAO (`ssao.cpp`), written for this renderer.
 diff --git a/backends/aurora/aurora_backend.cpp b/backends/aurora/aurora_backend.cpp
-index d94f811..9d8255d 100644
+index d94f811..804ea51 100644
 --- a/backends/aurora/aurora_backend.cpp
 +++ b/backends/aurora/aurora_backend.cpp
 @@ -19,9 +19,25 @@
@@ -2386,7 +2386,7 @@ index d94f811..9d8255d 100644
          std::getenv("DOL_AURORA_RECOMP_FRONTEND_SHADOW") != nullptr ||
          g_shadow_transform_log_enabled || g_trace_armed || g_gx_core_enabled;
      if (g_gx_core_enabled) {
-@@ -1055,69 +2953,447 @@ bool dol_aurora_initialize(int argc, char** argv,
+@@ -1055,69 +2953,455 @@ bool dol_aurora_initialize(int argc, char** argv,
          std::fprintf(stderr, "[audio] SDL audio initialization failed: %s\n", SDL_GetError());
      }
  
@@ -2668,6 +2668,14 @@ index d94f811..9d8255d 100644
 +#endif
 +}
 +
++void dol_aurora_set_spell_lights(const float* lights, int count) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    aurora::gfx::shadow::set_spell_lights(lights, count);
++#else
++    (void)lights, (void)count;
++#endif
++}
++
 +void dol_aurora_set_skin_scatter(bool on) {
 +#if GXRUNTIME_HAS_AURORA_RECOMP
 +    gxruntime::gxcore::set_skin_scatter(on);
@@ -2887,7 +2895,7 @@ index d94f811..9d8255d 100644
          aurora::gfx::efb_readback::set_continuous(true);
          aurora_request_framebuffer_readback();
      }
-@@ -1169,8 +3445,11 @@ void aurora_backend_present(void) {
+@@ -1169,8 +3453,11 @@ void aurora_backend_present(void) {
      // gxcore accumulates the frame's draws as their spans complete; the final
      // pending draw is only planned at the frame boundary. Submit it into the
      // still-open Aurora frame before end_frame flushes the command list.
@@ -2900,7 +2908,7 @@ index d94f811..9d8255d 100644
      // TEMP DIAG: per-frame gxcore gap-counter deltas so a live
      // goal celebration reveals which skip reason dominates (missing_vcd /
      // "projection never captured" vertex_decode_failures / cull_all_draws vs.
-@@ -1197,12 +3476,21 @@ void aurora_backend_present(void) {
+@@ -1197,12 +3484,21 @@ void aurora_backend_present(void) {
      }
  #endif
      if (g_frame_open) {
@@ -2924,7 +2932,7 @@ index d94f811..9d8255d 100644
          const std::uint8_t* rgba = nullptr;
          std::uint32_t w = 0;
          std::uint32_t h = 0;
-@@ -1212,6 +3500,124 @@ void aurora_backend_present(void) {
+@@ -1212,6 +3508,124 @@ void aurora_backend_present(void) {
          }
      }
      ++g_present_count;
@@ -3049,7 +3057,7 @@ index d94f811..9d8255d 100644
      if (g_frame_pacing_log &&
          (g_present_count <= 10 || (g_present_count % 60) == 0)) {
          const AuroraStats* stats = aurora_get_stats();
-@@ -1432,6 +3838,7 @@ void aurora_backend_present(void) {
+@@ -1432,6 +3846,7 @@ void aurora_backend_present(void) {
      const unsigned long long present_fifo = g_fifo_bytes;
      g_fifo_bytes = 0;
      poll_events();
@@ -3057,7 +3065,7 @@ index d94f811..9d8255d 100644
      if (!g_should_quit) {
          g_frame_open = aurora_begin_frame();
  #if GXRUNTIME_HAS_AURORA_RECOMP
-@@ -1482,7 +3889,13 @@ void aurora_backend_gx_write(u64 value, u8 size) {
+@@ -1482,7 +3897,13 @@ void aurora_backend_gx_write(u64 value, u8 size) {
          return;
      g_fifo_bytes += size;
  #if GXRUNTIME_HAS_AURORA_RECOMP
@@ -3072,7 +3080,7 @@ index d94f811..9d8255d 100644
      // Record AFTER the shadow write so MEM_UPDATEs its resolves emitted
      // precede this GX_WRITE in the trace (replay reads them first), and
      // BEFORE the live-Aurora forwarding below so the pristine value is
-@@ -1673,6 +4086,7 @@ void aurora_backend_set_guest_address_resolver(
+@@ -1673,6 +4094,7 @@ void aurora_backend_set_guest_address_resolver(
              &frontend_resolver, frontend_guest_address_resolver_bridge,
              nullptr);
          g_shadow_frontend.reset(&frontend_resolver);
@@ -3080,7 +3088,7 @@ index d94f811..9d8255d 100644
          g_shadow_frontend.set_packet_drain_enabled(g_shadow_frontend_enabled);
          g_shadow_packet_sink.reset();
          // Resolve packet guest addresses to host bytes through the frontend's
-@@ -1737,6 +4151,7 @@ void aurora_backend_set_xfb_black(bool black) {
+@@ -1737,6 +4159,7 @@ void aurora_backend_set_xfb_black(bool black) {
  }
  
  bool aurora_backend_pad_init(void) {
@@ -3088,7 +3096,7 @@ index d94f811..9d8255d 100644
      if (PADInit() == FALSE)
          return false;
  
-@@ -1780,6 +4195,7 @@ bool aurora_backend_pad_init(void) {
+@@ -1780,6 +4203,7 @@ bool aurora_backend_pad_init(void) {
  }
  
  u32 aurora_backend_pad_read(DolPadState state[4]) {
@@ -3096,7 +3104,7 @@ index d94f811..9d8255d 100644
      PADStatus status[4]{};
      const u32 motor_mask = PADRead(status);
      for (u32 i = 0; i < 4; i++) {
-@@ -1796,22 +4212,41 @@ u32 aurora_backend_pad_read(DolPadState state[4]) {
+@@ -1796,22 +4220,41 @@ u32 aurora_backend_pad_read(DolPadState state[4]) {
              .error = status[i].err,
          };
      }
@@ -3138,7 +3146,7 @@ index d94f811..9d8255d 100644
      PADSetSpec(spec);
  }
  
-@@ -1841,13 +4276,16 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1841,13 +4284,16 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
          return;
      const int bytes_per_second =
          static_cast<int>(g_audio_sample_rate) * 2 * static_cast<int>(sizeof(s16));
@@ -3157,7 +3165,7 @@ index d94f811..9d8255d 100644
      while (queued > max_queued_bytes && waited_ms < 20u) {
          g_audio_throttle_count++;
          if (g_audio_queue_log &&
-@@ -1860,11 +4298,51 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1860,11 +4306,51 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
                           max_queued_bytes);
          SDL_Delay(1);
          waited_ms++;
@@ -3209,7 +3217,7 @@ index d94f811..9d8255d 100644
      if (g_audio_queue_log &&
          (g_audio_push_count <= 16 || (g_audio_push_count % 4000) == 0 ||
           (low_queue && g_audio_push_count - g_audio_low_log_push >= 4000))) {
-@@ -1876,6 +4354,21 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1876,6 +4362,21 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
                       g_audio_push_count, queued, queued + bytes,
                       g_audio_playing ? 1u : 0u, g_audio_throttle_count);
      }
@@ -3231,7 +3239,7 @@ index d94f811..9d8255d 100644
      if (!SDL_PutAudioStreamData(g_audio_stream, samples, bytes))
          std::fprintf(stderr, "[audio] failed to queue samples: %s\n", SDL_GetError());
      else if (!g_audio_playing && queued + bytes >= prebuffer_bytes) {
-@@ -1886,10 +4379,492 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1886,10 +4387,492 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
      }
  }
  
@@ -3724,7 +3732,7 @@ index d94f811..9d8255d 100644
      const DolPlatformOps ops = {
          .should_quit = aurora_backend_should_quit,
          .present = aurora_backend_present,
-@@ -1918,6 +4893,7 @@ void install_platform_ops() {
+@@ -1918,6 +4901,7 @@ void install_platform_ops() {
          .audio_set_sample_rate = aurora_backend_audio_set_sample_rate,
          .audio_push = aurora_backend_audio_push,
      };
@@ -7673,7 +7681,7 @@ index 0000000..64bd328
 +
 +} // namespace aurora::gfx::glow
 diff --git a/graphics/aurora/lib/gfx/gxcore_draw.cpp b/graphics/aurora/lib/gfx/gxcore_draw.cpp
-index 71136b9..ce453e8 100644
+index 71136b9..dcbee6f 100644
 --- a/graphics/aurora/lib/gfx/gxcore_draw.cpp
 +++ b/graphics/aurora/lib/gfx/gxcore_draw.cpp
 @@ -1,4 +1,14 @@
@@ -8202,7 +8210,7 @@ index 71136b9..ce453e8 100644
    if (data.tev) {
      // group 2 = PS uniform (same dynamic-uniform bind group, its own offset);
      // group 3 = texture.
-@@ -591,18 +951,609 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+@@ -591,18 +951,628 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
  
  void reset_texture_cache() {
    g_textureCache.clear();
@@ -8346,6 +8354,22 @@ index 71136b9..ce453e8 100644
 +constexpr int kMoveMemory = 120;  // and they count as on the move for this long
 +// How far a shadow's strength can change in a frame.
 +constexpr float kShownStep = 0.05f;
++
++// Spells' lights in the air (shadow.hpp set_spell_lights): put in view space after the room's lamps, in what room is left.
++template <typename M>
++static void add_spell_lights(gfx::shadow::Frame& f, const M& V) {
++  float spell[gfx::shadow::kMaxSpellLights * 7];
++  const int n = gfx::shadow::spell_lights(spell);
++  for (int s = 0; s < n && f.volCount < gfx::shadow::kMaxVolLights; ++s) {
++    const float* l = spell + s * 7;
++    auto& out = f.vol[f.volCount++];
++    for (int i = 0; i < 3; ++i) {
++      out.pos[i] = V[i][0] * l[0] + V[i][1] * l[1] + V[i][2] * l[2] + V[i][3];
++      out.color[i] = l[3 + i];
++    }
++    out.radius = l[6];
++  }
++}
 +
 +static void fill_shadow(gfx::ssao::Scene& scene) {
 +  auto& f = scene.shadow;
@@ -8738,8 +8762,10 @@ index 71136b9..ce453e8 100644
 +
 +  // What the air's lit by (shadow.cpp's volumetric): the room's lamps, whoever is near them. Going by the
 +  // characters, one player walking turned lamps on and off in the other's half, several at once.
-+  if (gfx::shadow::volumetric() <= 0.f)
++  if (gfx::shadow::volumetric() <= 0.f) {
++    add_spell_lights(f, V);
 +    return;
++  }
 +  // The lamps nearest anyone, by how far each carries, fading in and out: a room can have 57, and the air takes 12.
 +  if (casterCount > 0) {
 +    float score[kMaxLamps];
@@ -8774,6 +8800,7 @@ index 71136b9..ce453e8 100644
 +      out.color[i] = lamp.color[i] * lamp.weight;
 +    }
 +  }
++  add_spell_lights(f, V);
 +}
 +
 +void set_room_lights(const float* lamps, int count, const float origin[3], const float size[3], const int dims[3], const uint8_t* cells) {
@@ -8812,7 +8839,7 @@ index 71136b9..ce453e8 100644
  // Resolve the current EFB region into a texture the guest-identity path can bind
  // later, keyed by the copy's destination address (63/S16). Mirrors aurora
  // lib/dolphin/gx/GXFrameBuffer.cpp copy_tex on the same substrate: map the EFB
-@@ -612,6 +1563,8 @@ const TextureCacheStats& texture_cache_stats() { return g_textureCacheStats; }
+@@ -612,6 +1582,8 @@ const TextureCacheStats& texture_cache_stats() { return g_textureCacheStats; }
  // color/Z afterwards. The bound draw's geometry is already in the pass (the
  // sink flushed the pending draw before firing this).
  void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
@@ -8821,7 +8848,7 @@ index 71136b9..ce453e8 100644
    // Mirror the copy-clear color/Z (BP 0x4F-0x51 at this copy) into the gx
    // state GXSetCopyClear would have written: begin_frame's pass-0 EFB clear
    // reads g_gxState.clearColor/clearDepth, and in gxcore mode the live gx
-@@ -635,11 +1588,25 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -635,11 +1607,25 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
    const auto fmt = is_xfb ? GX_TF_RGBA8 : static_cast<GXTexFmt>(cmd.format);
    // Dual dims: EFB source rect stays cmd.height; XFB dest height from
    // byte_size/stride (or cmd.xfb_height if gxcore latched it).
@@ -8848,7 +8875,7 @@ index 71136b9..ce453e8 100644
    });
    // U8: half_scale halves destination dims (TextureEncoder box 2:1).
    const uint32_t scaleShift = cmd.half_scale ? 1u : 0u;
-@@ -660,8 +1627,9 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -660,8 +1646,9 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
        dstHeight = xfb_h;
    }
  
@@ -8860,7 +8887,7 @@ index 71136b9..ce453e8 100644
        it->second->size.width != dstWidth || it->second->size.height != dstHeight) {
      TextureHandle handle;
      if (!is_xfb && gfx::tex_copy_conv::needs_conversion(fmt)) {
-@@ -670,7 +1638,7 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -670,7 +1657,7 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
        handle = gfx::new_render_texture(dstWidth, dstHeight, GX_TF_RGBA8,
                                         is_xfb ? "GXCore XFB" : "GXCore Copy");
      }
@@ -8869,7 +8896,7 @@ index 71136b9..ce453e8 100644
    }
    if (!it->second) {
      return;
-@@ -709,11 +1677,49 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -709,11 +1696,49 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
    // XFB YUYV into guest RAM from this readback on every display copy, so it
    // must stay armed in product runs too (cost: one EFB readback per display
    // copy, ~1-2/frame).
@@ -8920,7 +8947,7 @@ index 71136b9..ce453e8 100644
    gfx::resolve_pass(it->second, srcRect, do_clear && cmd.color_update,
                      do_clear && cmd.alpha_update,
                      do_clear && cmd.depth_update,
-@@ -723,73 +1729,697 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -723,73 +1748,697 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
                                  static_cast<float>(cmd.clear_a) / 255.f},
                      clearDepthValue, fmt, &filter);
  
@@ -9675,7 +9702,7 @@ index 71136b9..ce453e8 100644
      const float sx = plan.viewport[0];
      const float sy = plan.viewport[1];
      const float sz = plan.viewport[2];
-@@ -799,13 +2429,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -799,13 +2448,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const float width = sx * 2.0f;
      const float height = -sy * 2.0f;
      gx::set_logical_viewport({
@@ -9693,7 +9720,7 @@ index 71136b9..ce453e8 100644
    }
  
    // U4: apply DrawPlan scissor as a logical render-pass scissor. Multi-rect
-@@ -827,7 +2459,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -827,7 +2478,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
        [&](uint32_t address, uint32_t tsize, uint32_t format, uint32_t width,
            uint32_t height, const void* data, uint32_t available, bool has_tlut,
            uint32_t tlut_address, uint32_t tlut_format, uint32_t tlut_entries,
@@ -9702,7 +9729,7 @@ index 71136b9..ce453e8 100644
      auto efbIt = g_efbCopyTextures.find(address);
      if (efbIt != g_efbCopyTextures.end() && efbIt->second) {
        ++g_textureCacheStats.hits;
-@@ -839,23 +2471,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -839,23 +2490,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const uint32_t size = std::min(tsize, available);
      // Hash the actual source texels (+ TLUT for CI) so a content change under an
      // unchanged guest identity is a distinct cache entry — see TextureKey.
@@ -9985,7 +10012,7 @@ index 71136b9..ce453e8 100644
      // gxcore owns the decode for every format: produce tightly-packed RGBA8 and
      // upload it as a pre-decoded PC texture (no substrate re-conversion).
      std::vector<uint8_t> decoded;
-@@ -868,8 +2752,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -868,8 +2771,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      } else {
        decoded = gxc::decode_texture(format, width, height, bytes, size);
      }
@@ -10037,7 +10064,7 @@ index 71136b9..ce453e8 100644
        handle = new_static_texture_2d(
            width, height, 1, GX_TF_RGBA8_PC,
            ArrayRef<uint8_t>{decoded.data(), decoded.size()}, false,
-@@ -892,7 +2818,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -892,7 +2837,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    };
  
    BindGroupRef textureBindGroup = 0;
@@ -10136,7 +10163,7 @@ index 71136b9..ce453e8 100644
      if (plan.texmap_mask == 0u) {
        // Single-texmap fast path: primary texture + plan.sampler at binding 0/1.
        if (plan.has_texture) {
-@@ -903,7 +2920,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -903,7 +2939,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
              plan.tlut_data, plan.tlut_available);
          if (bound) {
            const auto sampler =
@@ -10145,7 +10172,7 @@ index 71136b9..ce453e8 100644
            const std::array entries{
                WGPUBindGroupEntry{.binding = 0,
                                   .textureView =
-@@ -919,6 +2936,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -919,6 +2955,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            textureBindGroup = bind_group_ref(descriptor);
          }
        }
@@ -10153,7 +10180,7 @@ index 71136b9..ce453e8 100644
      } else {
        // Multi-texmap: bind each used texmap at 2t (texture) / 2t+1 (sampler),
        // matching the WGSL declarations. Per-texmap PlanSampler from
-@@ -932,12 +2950,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -932,12 +2969,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          if ((plan.texmap_mask & (1u << t)) == 0u)
            continue;
          const gxc::PlanTexture& pt = plan.textures[t];
@@ -10170,7 +10197,7 @@ index 71136b9..ce453e8 100644
          if (!bound) {
            complete = false;
            break;
-@@ -945,14 +2966,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -945,14 +2985,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          held.push_back(bound);
          const gxc::PlanSampler& ps =
              pt.sampler.valid ? pt.sampler : plan.samplers[t];
@@ -10189,7 +10216,7 @@ index 71136b9..ce453e8 100644
        const WGPUBindGroupDescriptor descriptor{
            .label = {"GXCore Texture Bind Group", WGPU_STRLEN},
            .layout = texture_bind_group_layout(plan.texmap_mask).Get(),
-@@ -960,6 +2983,371 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -960,6 +3002,371 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            .entries = entries.data(),
        };
        textureBindGroup = bind_group_ref(descriptor);
@@ -10561,7 +10588,7 @@ index 71136b9..ce453e8 100644
      }
    }
  
-@@ -969,31 +3357,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -969,31 +3376,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    const auto idxRange = push_indices(
        reinterpret_cast<const uint8_t*>(plan.indices.data()),
        plan.indices.size() * sizeof(uint16_t), 4);
@@ -10598,7 +10625,7 @@ index 71136b9..ce453e8 100644
      });
    };
  
-@@ -1006,6 +3383,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -1006,6 +3402,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      }
    } else {
      issue_draw();
@@ -12494,10 +12521,10 @@ index 0000000..9d3c383
 +} // namespace aurora::gfx::post
 diff --git a/graphics/aurora/lib/gfx/shadow.cpp b/graphics/aurora/lib/gfx/shadow.cpp
 new file mode 100644
-index 0000000..ee6824e
+index 0000000..6554d41
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/shadow.cpp
-@@ -0,0 +1,935 @@
+@@ -0,0 +1,1010 @@
 +#include "shadow.hpp"
 +
 +#include "gxcore_draw.hpp"
@@ -12505,6 +12532,8 @@ index 0000000..ee6824e
 +
 +#include <gxruntime/gxcore/shader.hpp>
 +
++#include <algorithm>
++#include <cstring>
 +#include <array>
 +#include <atomic>
 +#include <cmath>
@@ -12706,6 +12735,29 @@ index 0000000..ee6824e
 +  }
 +  return 0.0;
 +}
++// Is the way from a surface to a spell's light blocked (a character, a pillar)? Marched through the depth, as contact()
++// is, up to most of the way there: 1 blocked near, fading to 0 as what blocks it is further along.
++fn spell_shadow(in: VOut, c: vec3f, light: vec3f, noise: f32) -> f32 {
++  let to = light - c;
++  let far = min(length(to) - 40.0, 260.0);
++  if (far <= 4.0) { return 0.0; }
++  let l = normalize(to);
++  for (var i = 0; i < 10; i++) {
++    let t = (f32(i) + noise) / 10.0;
++    let s = vec4f(c + l * (4.0 + far * t), 1.0);
++    let w = dot(in.m3, s);
++    if (w <= 0.0) { return 0.0; }
++    let n = vec2f(dot(in.m0, s), dot(in.m1, s)) / w;
++    let px = vec2f(P.vp.x + (n.x + 1.0) * 0.5 * P.vp.z, P.vp.y + (1.0 - n.y) * 0.5 * P.vp.w);
++    if (px.x < 0.0 || px.y < 0.0 || px.x >= P.size.y || px.y >= P.size.z) { return 0.0; }
++    let d = textureLoad(depthTex, vec2i(px), 0);
++    if (d <= 1e-7) { continue; }
++    let there = view_at(in, px + vec2f(0.5), d);
++    let gap = there.z - s.z;  // view z is negative ahead: more is nearer
++    if (gap > 3.0 && gap < 90.0) { return 1.0 - t * 0.6; }
++  }
++  return 0.0;
++}
 +@fragment fn shade(in: VOut) -> @location(0) vec4f {
 +  let px = vec2i(in.pos.xy);
 +  let d = textureLoad(depthTex, px, 0);
@@ -12741,6 +12793,11 @@ index 0000000..ee6824e
 +@fragment fn vol(in: VOut) -> @location(0) vec4f {
 +  let px = in.pos.xy * 4.0;
 +  let d = textureLoad(depthTex, clamp(vec2i(px), vec2i(0), vec2i(P.size.yz) - vec2i(1)), 0);
++  // The surface here and which way it faces (from its neighbours), for a spell's light on it: before any return.
++  let surface = view_at(in, px, max(d, P.depth.x + 2e-5));
++  var facing = cross(dpdx(surface), dpdy(surface));
++  facing = facing / max(length(facing), 1e-6);
++  if (dot(facing, -surface) < 0.0) { facing = -facing; }
 +  let start = view_at(in, px, P.depth.y);
 +  let ray = view_at(in, px, max(d, P.depth.x + 2e-5)) - start;
 +  let full = length(ray);
@@ -12766,11 +12823,34 @@ index 0000000..ee6824e
 +    }
 +    for (var n = 0; n < i32(P.misc.y); n++) {
 +      let to = P.vol[n * 2].xyz - p;
-+      sum = sum + mix(P.vol[n * 2 + 1].rgb, vec3f(dot(P.vol[n * 2 + 1].rgb, vec3f(0.33))), 0.35) / (1.0 + dot(to, to) / (P.vol[n * 2].w * P.vol[n * 2].w)) * open;
++      let reach = abs(P.vol[n * 2].w);
++      let air = select(1.0, 0.25, P.vol[n * 2].w < 0.0);  // a spell's light (radius below 0) is mostly on what it lights
++      sum = sum + air * mix(P.vol[n * 2 + 1].rgb, vec3f(dot(P.vol[n * 2 + 1].rgb, vec3f(0.33))), 0.35) / (1.0 + dot(to, to) / (reach * reach)) * open;
 +    }
 +  }
++  // A spell's light on the surfaces round it (a rune's: radius below 0, its falloff past the rune's own size), from
++  // all of the rune, not its middle: the distance is from its edge (64, half a glyph). Soft, lit by which way a
++  // surface faces, with a little shine.
++  var lit = vec3f(0.0);
++  let eye = normalize(-surface);
++  for (var n = 0; n < i32(P.misc.y); n++) {
++    if (P.vol[n * 2].w >= 0.0) { continue; }
++    let reach = -P.vol[n * 2].w;
++    let to = P.vol[n * 2].xyz - surface;
++    let dist = length(to);
++    let l = to / max(dist, 1e-3);
++    let edge = max(dist - 64.0, 0.0);
++    let fall = (1.0 / (1.0 + edge * edge / (reach * reach))) * (1.0 - smoothstep(reach * 2.5, reach * 4.0, edge));
++    let diffuse = clamp(dot(facing, l) * 0.6 + 0.4, 0.0, 1.0);
++    let shine = pow(max(dot(facing, normalize(l + eye)), 0.0), 24.0) * 0.45;
++    let shade = 1.0 - 0.8 * spell_shadow(in, surface, P.vol[n * 2].xyz, noise);
++    lit = lit + P.vol[n * 2 + 1].rgb * fall * (diffuse + shine) * shade;
++    // Its bloom: a soft bright pool right round the rune, whichever way things face (blurred with the pass).
++    lit = lit + P.vol[n * 2 + 1].rgb * exp(-edge / 36.0) * 1.3;
++  }
 +  // However near a lamp the eye goes it only tends to white, and it takes a lot: haze doesn't hide things.
-+  return vec4f((vec3f(1.0) - exp(-sum * len / 12.0 * 0.00045 * P.misc.x)) * 0.6, 1.0);
++  let haze = (vec3f(1.0) - exp(-sum * len / 12.0 * 0.00045 * P.misc.x)) * 0.6;
++  return vec4f(min(haze + (vec3f(1.0) - exp(-lit * 0.6)), vec3f(1.0)), 1.0);
 +}
 +@fragment fn vol_soften(in: VOut) -> @location(0) vec4f {
 +  let q = vec2i(in.pos.xy);
@@ -13069,7 +13149,11 @@ index 0000000..ee6824e
 +    p[4] = l.color[0], p[5] = l.color[1], p[6] = l.color[2];
 +  }
 +  float* misc = tail + kMaxVolLights * 8;
-+  misc[0] = volumetric();
++  static const float s_spellHaze = [] {  // AURORA_SPELL_HAZE: the spells' air's strength (testing)
++    const char* e = std::getenv("AURORA_SPELL_HAZE");
++    return e != nullptr ? static_cast<float>(std::atof(e)) : kSpellHaze;
++  }();
++  misc[0] = std::max(volumetric(), spell_lit() ? s_spellHaze : 0.f);
 +  misc[1] = static_cast<float>(frame.volCount);
 +  misc[2] = 1.f;
 +  g_queue.WriteBuffer(g_params, 0, params, sizeof params);
@@ -13118,6 +13202,24 @@ index 0000000..ee6824e
 +    g_vol.store(strength, std::memory_order_relaxed);
 +}
 +float volumetric() noexcept { return g_vol.load(std::memory_order_relaxed); }
++static std::mutex g_spellMutex;
++static float g_spell[kMaxSpellLights * 7];
++static std::atomic<int> g_spellCount{0};
++void set_spell_lights(const float* lights, int count) noexcept {
++  count = count < 0 ? 0 : count > kMaxSpellLights ? kMaxSpellLights : count;
++  std::lock_guard<std::mutex> lock(g_spellMutex);
++  if (count > 0)
++    std::memcpy(g_spell, lights, sizeof(float) * 7u * static_cast<size_t>(count));
++  g_spellCount.store(count, std::memory_order_relaxed);
++}
++int spell_lights(float out[kMaxSpellLights * 7]) noexcept {
++  std::lock_guard<std::mutex> lock(g_spellMutex);
++  const int n = g_spellCount.load(std::memory_order_relaxed);
++  if (n > 0)
++    std::memcpy(out, g_spell, sizeof(float) * 7u * static_cast<size_t>(n));
++  return n;
++}
++bool spell_lit() noexcept { return g_spellCount.load(std::memory_order_relaxed) > 0; }
 +void set_hard(bool on) noexcept {
 +  if (!g_hardEnv)
 +    g_hard.store(on, std::memory_order_relaxed);
@@ -13200,7 +13302,7 @@ index 0000000..ee6824e
 +void apply_volumetric(const wgpu::CommandEncoder& cmd, const Frame& frame, const float viewport[4], float minDepth, float maxDepth,
 +                      const wgpu::TextureView& color, const wgpu::TextureView& resolve, const wgpu::TextureView& depth,
 +                      const wgpu::TextureView& resolved, const wgpu::Extent3D& size, uint32_t msaaSamples) {
-+  if (frame.volCount == 0 || volumetric() <= 0.f || !g_atlas || !depth || !resolved || viewport[2] <= 0.f || viewport[3] <= 0.f)
++  if (frame.volCount == 0 || (volumetric() <= 0.f && !spell_lit()) || !g_atlas || !depth || !resolved || viewport[2] <= 0.f || viewport[3] <= 0.f)
 +    return;
 +  const auto format = webgpu::g_graphicsConfig.surfaceConfiguration.format;
 +  if (g_s.samples != msaaSamples || g_s.format != format)
@@ -13435,10 +13537,10 @@ index 0000000..ee6824e
 +} // namespace aurora::gfx::shadow
 diff --git a/graphics/aurora/lib/gfx/shadow.hpp b/graphics/aurora/lib/gfx/shadow.hpp
 new file mode 100644
-index 0000000..79a42ec
+index 0000000..0dc4a22
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/shadow.hpp
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,106 @@
 +#pragma once
 +
 +// GXRuntime recomp patch: character shadows from the game's own lights, and contact shadows.
@@ -13510,7 +13612,14 @@ index 0000000..79a42ec
 +// The air lit by the room's lamps and spells, cut by the characters' shadows. 0 off.
 +void set_volumetric(float strength) noexcept;
 +float volumetric() noexcept;
-+inline bool wanted() noexcept { return strength() > 0.f || contact() > 0.f || volumetric() > 0.f; }
++// Spells' lights (the host's: a rune's glow while it's cast), in world space, 7 floats each: x, y, z, r, g, b (0-1, its
++// brightness in them), radius. They light the air at kSpellHaze whatever the haze setting; the room's lamps only with it.
++inline constexpr int kMaxSpellLights = 8;
++inline constexpr float kSpellHaze = 0.6f;
++void set_spell_lights(const float* lights, int count) noexcept;
++int spell_lights(float out[kMaxSpellLights * 7]) noexcept;
++bool spell_lit() noexcept;
++inline bool wanted() noexcept { return strength() > 0.f || contact() > 0.f || volumetric() > 0.f || spell_lit(); }
 +
 +// The frame for the moment being drawn: a moment between frames has the game camera blended too, and places
 +// here are in the view space of the frame's own. Else a moving camera's shadows jumped on every moment between.
@@ -25108,7 +25217,7 @@ index 9c2f7bb..6dd6411 100644
 +
  #endif
 diff --git a/include/gxruntime/aurora_backend.h b/include/gxruntime/aurora_backend.h
-index 6ef4cf4..16482c5 100644
+index 6ef4cf4..cc54d9a 100644
 --- a/include/gxruntime/aurora_backend.h
 +++ b/include/gxruntime/aurora_backend.h
 @@ -5,6 +5,7 @@
@@ -25156,7 +25265,7 @@ index 6ef4cf4..16482c5 100644
  
  // C2: walk nonzero gxcore GapCounters into the process-global gap_report.
  // Call once before gap_report_write_json on the live Strikers path so
-@@ -40,6 +59,210 @@ void dol_aurora_set_efb_frame_fill(DolAuroraEfbFrameFillFn fn, void* user);
+@@ -40,6 +59,212 @@ void dol_aurora_set_efb_frame_fill(DolAuroraEfbFrameFillFn fn, void* user);
  // from shutdown (second call only bumps if counters grew).
  void dol_aurora_flush_gap_report(void);
  
@@ -25327,6 +25436,8 @@ index 6ef4cf4..16482c5 100644
 +void dol_aurora_set_contact_shadows(float strength);
 +void dol_aurora_set_shadow_hard(bool on);
 +void dol_aurora_set_volumetric(float strength);
++// Spells' lights in the air: count lights of 7 floats (x, y, z, r, g, b, radius), world space; 0 none.
++void dol_aurora_set_spell_lights(const float* lights, int count);
 +// The room's lamps (7 floats each: place, colour 0 to 1, power) and its grid's 3 lamps a cell, x fastest.
 +void dol_aurora_set_room_lights(const float* lamps, int count, const float origin[3], const float size[3], const int dims[3], const uint8_t* cells);
 +void dol_aurora_set_skin_scatter(bool on);

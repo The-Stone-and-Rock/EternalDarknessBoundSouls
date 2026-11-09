@@ -9373,6 +9373,664 @@ static void wpn_check(CPUState* cpu, u32 node, bool p2) {
 
 static u32 coop_next(CPUState* cpu, u32 node);
 
+// ED_ITEM_SPAWN=FRAME,FIRST,LAST[,EVERY[,WHO]] (testing): from game frame FRAME, every EVERY frames (240), the next
+// item type from FIRST to LAST is put on the ground at a player's feet, to pick up as any find: WHO 1 player 1,
+// 2 player 2, 3 (the default) both, player 2's half an interval after player 1's. Made as the game's own spawn,
+// ed3(chr, model, -1, type, -1, -1, -1, 30, 0, position, 4) (0x8000E4A4: arguments, then 0x8000E6CC on), with
+// each type's world model from where the game places one (item_spawn.inc). A model this level doesn't place (another
+// chapter's, or a type never placed) isn't loaded: the item is made with a stand-in, the first item model the level
+// places (item_spawn_levels.inc), and is still found as its own type. Levels with no placings (12 to 15) make none.
+static const struct {
+    int type, chr, model;
+    const char* name;
+} kItemSpawn[] = {
+#include "item_spawn.inc"
+};
+static const struct {
+    int level, chr, model;
+} kItemSpawnLevel[] = {
+#include "item_spawn_levels.inc"
+};
+
+static u32 item_spawn_at(CPUState* cpu, int type, const float at[3]) {
+    int i = 0;
+    while (i < (int)(sizeof kItemSpawn / sizeof kItemSpawn[0]) && kItemSpawn[i].type != type)
+        i++;
+    if (i == (int)(sizeof kItemSpawn / sizeof kItemSpawn[0]))
+        return 0u;
+    const int level = (s32)mem_read32(cpu, cpu->gpr[13] - 30472u);
+    int chr = -1, model = -1;
+    for (size_t k = 0; k < sizeof kItemSpawnLevel / sizeof kItemSpawnLevel[0]; k++)
+        if (kItemSpawnLevel[k].level == level && (chr < 0 || kItemSpawnLevel[k].model == kItemSpawn[i].model)) {
+            chr = kItemSpawnLevel[k].chr;
+            model = kItemSpawnLevel[k].model;
+            if (model == kItemSpawn[i].model)
+                break;
+        }
+    if (model < 0) {
+        fprintf(stderr, "[items] type %d (%s): level %d places no items to borrow a model from, skipped\n", type,
+                kItemSpawn[i].name, level);
+        return 0u;
+    }
+    const bool own = model == kItemSpawn[i].model;
+    const u32 rec = (cpu->gpr[1] - 0x200u) & ~15u;  // the spawn record, below the caller's stack (as coop_spawn)
+    const u32 words = rec + 0x100u;                    // 0x80125A70's three words
+    u32 made = 0u, object = 0u, ignore = 0u;
+    if (!hle_guest_call(cpu, COOP_SPAWN_INIT, &rec, 1, 0.0, &ignore))
+        return 0u;
+    for (u32 k = 0; k < 3u; k++)
+        guest_write_f32(cpu, rec + k * 4u, at[k]);
+    guest_write_f32(cpu, rec + 12u, 0.0f);  // facing
+    mem_write32(cpu, rec + 16u, (u32)chr);
+    mem_write32(cpu, rec + 20u, (u32)model);
+    mem_write32(cpu, rec + 24u, (u32)type);
+    mem_write32(cpu, rec + 40u, 30u);  // an item
+    mem_write32(cpu, rec + 48u, 4u);   // effect 4, as ed3 makes finds
+    if (!hle_guest_call(cpu, COOP_SPAWN_CREATE, &rec, 1, 0.0, &made) || made == 0u) {
+        fprintf(stderr, "[items] type %d (%s): the game made nothing\n", type, kItemSpawn[i].name);
+        return 0u;
+    }
+    hle_guest_call(cpu, 0x801F633Cu, &made, 1, 0.0, &object);
+    hle_guest_call(cpu, 0x8003392Cu, &made, 1, 0.0, &ignore);
+    u32 has = 0u;
+    if (object != 0u && hle_guest_call(cpu, 0x80118AB0u, &object, 1, 0.0, &has) && has != 0u)
+        hle_guest_call(cpu, 0x80124BE4u, &object, 1, 0.0, &ignore);
+    const u32 room = mem_read32(cpu, rec + 44u);
+    const u32 room_args[] = {made, room};
+    hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, room_args, 2, 0.0, &ignore);
+    hle_guest_call(cpu, COOP_SPAWN_REGISTER, &made, 1, 0.0, &ignore);
+    hle_guest_call(cpu, 0x800CA8D8u, &made, 1, 0.0, &ignore);
+    if (object != 0u && room == mem_read32(cpu, cpu->gpr[13] - 23276u))
+        hle_guest_call(cpu, 0x8011F460u, &object, 1, 0.0, &ignore);
+    // Effect 4.
+    u32 list = 0u;
+    hle_guest_call(cpu, 0x801F9220u, NULL, 0, 0.0, &list);
+    const u32 add_args[] = {1u, made};
+    hle_guest_call(cpu, COOP_SPAWN_ADD, add_args, 2, 0.0, &ignore);
+    if (object != 0u) {
+        hle_guest_call(cpu, 0x8011F460u, &object, 1, 0.0, &ignore);
+        mem_write32(cpu, words + 0u, mem_read32(cpu, cpu->gpr[2] - 32620u));
+        mem_write32(cpu, words + 4u, mem_read32(cpu, cpu->gpr[2] - 32624u));
+        mem_write32(cpu, words + 8u, mem_read32(cpu, cpu->gpr[2] - 32628u));
+        const u32 effect_args[] = {object, 15u, words + 8u, words + 4u, words, 4u};
+        hle_guest_call(cpu, 0x80125A70u, effect_args, 6, 0.0, &ignore);
+    }
+    const u32 list_args[] = {made, list};
+    hle_guest_call(cpu, 0x801F9478u, list_args, 2, 0.0, &ignore);
+    fprintf(stderr, "[items] type %d (%s) on the ground at %.0f %.0f %.0f, room %u: node 0x%08X, %s model %d\n", type,
+            kItemSpawn[i].name, at[0], at[1], at[2], room, made, own ? "its own" : "stand-in", model);
+    if (getenv("ED_ITEM_SPAWN_LOG") != NULL)  // testing: the made node beside the game's other items
+        for (u32 node = 0u, n = 0u; n < 1024u && (node = coop_next(cpu, node)) != 0u; n++)
+            if (mem_read32(cpu, node + 8u) == 30u)
+                fprintf(stderr, "[items]   %s 0x%08X +8 %u +12 %u +16 %u +24 %u +28 %u +32 %08X +36 %u +40 %08X +44 %08X +48 %08X +52 %08X +56 %08X +60 %08X\n",
+                        node == made ? "made" : "item", node, mem_read32(cpu, node + 8u), mem_read32(cpu, node + 12u),
+                        mem_read32(cpu, node + 16u), mem_read32(cpu, node + 24u), mem_read32(cpu, node + 28u),
+                        mem_read32(cpu, node + 32u), mem_read32(cpu, node + 36u), mem_read32(cpu, node + 40u),
+                        mem_read32(cpu, node + 44u), mem_read32(cpu, node + 48u), mem_read32(cpu, node + 52u),
+                        mem_read32(cpu, node + 56u), mem_read32(cpu, node + 60u));
+    return made;
+}
+
+// ED_QUICK_SET=FRAME,SLOT,SPELL (testing): at FRAME, player 1's quick spell SLOT (0-4, the magick record's 0x80334DE8..)
+// holds SPELL (a quick slot's word, as `[coop] ... casts their quick spell` logs one: 0x00010481), for Y to cast it.
+static void quick_test_set(CPUState* cpu) {
+    static int on = -1;
+    static unsigned long long at;
+    static unsigned slot, spell;
+    if (on < 0) {
+        const char* e = getenv("ED_QUICK_SET");
+        on = e != NULL && sscanf(e, "%llu,%u,%x", &at, &slot, &spell) == 3 && slot < 5u;
+    }
+    if (on != 1 || cpu->timebase / 675000ull < at)
+        return;
+    on = 0;
+    mem_write32(cpu, 0x80334DE8u + slot * 4u, spell);
+    fprintf(stderr, "[test] player 1's quick spell %u is 0x%08X\n", slot, spell);
+}
+
+// 3D runes (ED_RUNES_3D=1, testing; docs/runes-3d.md): while a spell is cast, each flat rune glyph on the floor's circle
+// is shown as that rune's own item model, tinted in the spell's alignment colour, glowing and turning, and the flat glyph
+// isn't drawn. The glyphs: effect objects drawn by 0x8017F9D4 (+16..+20 their place as s16, +332 their update: 0x8018F9AC
+// the circle's, 0x80184C2C the spell's), the circle's kept on the spell at +616.. (the spells: r13-22324, +20 the next,
+// +4 the word). Glyph k shows the word's noun (& 0x1F0), Pargon on a circle of 5 or more, the verb (& 0x1E00), then the
+// alignment (& 0xF). The model is made as the vortex's visual thing is (ed187): machine 62, effect 1, never picked up;
+// tinted with 0x801C7B24's colour (0x80125A70) and given its glow bit (0x80118BEC(obj, 0, 0x01000000)). A rune whose model
+// the level hasn't loaded (0x801DCED0) keeps its flat glyph.
+#define RUNE_GLYPH_DRAW 0x8017F9D4u
+#define RUNE_MAX 16
+static int g_runes_on = -1;
+static struct {
+    u32 spell, glyph, node, object;
+    s16 x, y;
+    u32 word;                 // the spell's: it goes on in another record (the circle's, then the spell's)
+    u32 colour;               // the alignment's (0x801C7B24: RGBA, its alpha the most it shows)
+    u32 align;                // 1 Chattur'gha, 2 Ulyaoth, 3 Xel'lotath, 4 Mantorok
+    s16 z;                    // the glyph's height
+    u8 alpha;                 // how far it has faded in, 0-255
+    s8 fade;                  // frames of its fade out once the spell is gone, -1 while it's cast
+    unsigned long long flame; // the frame of its last rising flame
+    u32 fire;                 // its torch flame (rune_fire), 0 none
+} g_runes[RUNE_MAX];
+static int g_rune_count;
+static unsigned long long g_rune_glyph_seen;
+
+static int rune_model(u32 bit) {
+    static const struct {
+        u32 bit;
+        int model;
+    } kModels[] = {{0x1u, 18},   {0x2u, 20},   {0x4u, 19},   {0x8u, 21},    {0x10u, 17},   {0x20u, 16},  {0x40u, 15},
+                   {0x80u, 14},  {0x100u, 13}, {0x200u, 22}, {0x400u, 23},  {0x800u, 24},  {0x1000u, 25}, {0x2000u, 12}};
+    for (size_t i = 0; i < sizeof kModels / sizeof kModels[0]; i++)
+        if (kModels[i].bit == bit)
+            return kModels[i].model;
+    return -1;
+}
+
+static bool rune_glyph(CPUState* cpu, u32 obj) {
+    if (!guest_ram_range_valid(cpu, obj, 0x150u) || mem_read32(cpu, obj + 328u) != RUNE_GLYPH_DRAW)
+        return false;
+    const u32 update = mem_read32(cpu, obj + 332u);
+    return update == 0x8018F9ACu || update == 0x80184C2Cu;
+}
+
+static void rune_glyph_draw(CPUState* cpu) {
+    const u32 obj = cpu->gpr[3];
+    if (rune_glyph(cpu, obj)) {
+        g_rune_glyph_seen = cpu->timebase / 675000ull;
+        const s16 x = (s16)mem_read16(cpu, obj + 16u), y = (s16)mem_read16(cpu, obj + 18u);
+        for (int i = 0; g_runes_on == 2 && i < g_rune_count; i++)
+            if (abs(g_runes[i].x - x) <= 4 && abs(g_runes[i].y - y) <= 4)
+                return;  // ED_RUNES_3D=2: shown as its model alone, not drawn
+    }
+    g_hle_passthrough = true;
+}
+
+static u32 rune_spawn(CPUState* cpu, int model, const float at[3], u32 alignment) {
+    const u32 rec = (cpu->gpr[1] - 0x200u) & ~15u;
+    const u32 words = rec + 0x100u;
+    u32 made = 0u, object = 0u, ignore = 0u;
+    if (!hle_guest_call(cpu, COOP_SPAWN_INIT, &rec, 1, 0.0, &ignore))
+        return 0u;
+    for (u32 k = 0; k < 3u; k++)
+        guest_write_f32(cpu, rec + k * 4u, at[k]);
+    guest_write_f32(cpu, rec + 12u, 0.0f);
+    mem_write32(cpu, rec + 16u, 25u);
+    mem_write32(cpu, rec + 20u, (u32)model);
+    mem_write32(cpu, rec + 40u, 62u);  // the vortex's machine: only drawn
+    mem_write32(cpu, rec + 48u, 1u);
+    if (!hle_guest_call(cpu, COOP_SPAWN_CREATE, &rec, 1, 0.0, &made) || made == 0u)
+        return 0u;
+    hle_guest_call(cpu, 0x801F633Cu, &made, 1, 0.0, &object);
+    hle_guest_call(cpu, 0x8003392Cu, &made, 1, 0.0, &ignore);
+    const u32 room = mem_read32(cpu, rec + 44u);
+    const u32 room_args[] = {made, room};
+    hle_guest_call(cpu, COOP_SPAWN_SET_ROOM, room_args, 2, 0.0, &ignore);
+    hle_guest_call(cpu, COOP_SPAWN_REGISTER, &made, 1, 0.0, &ignore);
+    hle_guest_call(cpu, 0x800CA8D8u, &made, 1, 0.0, &ignore);
+    if (object != 0u && room == mem_read32(cpu, cpu->gpr[13] - 23276u))
+        hle_guest_call(cpu, 0x8011F460u, &object, 1, 0.0, &ignore);
+    const u32 add_args[] = {1u, made};
+    hle_guest_call(cpu, COOP_SPAWN_ADD, add_args, 2, 0.0, &ignore);
+    (void)words;
+    if (object != 0u) {  // its colour comes each frame, from nothing (rune_colour)
+        const u32 glow[] = {object, 0u, 0x01000000u};
+        hle_guest_call(cpu, 0x80118BECu, glow, 3, 0.0, &ignore);
+    }
+    fprintf(stderr, "[runes] model %d at %.0f %.0f %.0f, alignment %u: node 0x%08X\n", model, at[0], at[1], at[2], alignment,
+            made);
+    return made;
+}
+
+// A rune's model laid on its back, face up, its top toward +y as the glyph's (the object's turn, a quaternion at +44:
+// x, y, z, w, as 0x80124BE4 writes it): a quarter turn about x.
+// ED_RUNES_TURN (testing) picks the lie: 0 back down, top toward +y; 1 the same turned half round; 2 face down, top
+// toward -y; 3 face down turned half round. rune_lie_ahead says which way along y the model reaches from its base.
+static int rune_turn(void) {
+    static int turn = -1;
+    if (turn < 0)
+        turn = getenv("ED_RUNES_TURN") != NULL ? atoi(getenv("ED_RUNES_TURN")) & 3 : 2;  // 2 matches the glyph (logs/run-20261109-021337: same shape, same way)
+    return turn;
+}
+static float rune_lie_ahead(void) {
+    return rune_turn() == 1 || rune_turn() == 2 ? -1.0f : 1.0f;
+}
+static void rune_lie(CPUState* cpu, u32 object) {
+    if (object == 0u || !guest_ram_range_valid(cpu, object, 64u))
+        return;
+    u32 ignore = 0u;
+    hle_guest_call(cpu, 0x80124BE4u, &object, 1, 0.0, &ignore);
+    const float s = 0.70710678f;
+    static const float kTurns[4][4] = {{-s, 0.0f, 0.0f, s}, {0.0f, -s, s, 0.0f}, {s, 0.0f, 0.0f, s}, {0.0f, s, s, 0.0f}};
+    for (u32 i = 0; i < 4u; i++)
+        guest_write_f32(cpu, object + 44u + i * 4u, kTurns[rune_turn()][i]);
+}
+
+// A rune's colour and how much it shows, set as the Tome sets its runes' (0x80126234(obj, 15, &rgba, 1)). Chattur'gha's
+// smoulder: a red ember with orange in it, its brightness flickering.
+static void rune_colour(CPUState* cpu, int i, unsigned long long frame) {
+    const u32 object = g_runes[i].object;
+    if (object == 0u || !guest_ram_range_valid(cpu, object, 64u))
+        return;
+    const u32 c = g_runes[i].colour;
+    float r = (float)(c >> 24), g = (float)((c >> 16) & 0xFFu), b = (float)((c >> 8) & 0xFFu);
+    float a = 255.0f * (float)g_runes[i].alpha / 255.0f;
+    if (g_runes[i].align == 1u) {
+        const float t = (float)frame * 0.31f + (float)i * 1.7f;
+        const float flick = 0.82f + 0.12f * sinf(t) + 0.06f * sinf(t * 2.9f + 0.6f);
+        r = 255.0f;
+        g = (18.0f + 22.0f * sinf(t * 1.3f)) * flick + 10.0f;  // a deep red ember (orange read as orange)
+        b = 24.0f * flick;
+        a = 255.0f * (float)g_runes[i].alpha / 255.0f;
+    }
+    const u32 rgba = (u32)(r < 255.0f ? r : 255.0f) << 24 | (u32)(g > 0.0f ? g : 0.0f) << 16 | (u32)b << 8 | (u32)a;
+    const u32 at = (cpu->gpr[1] - 0x300u) & ~15u;
+    mem_write32(cpu, at, rgba);
+    u32 ignore = 0u;
+    const u32 args[] = {object, 0xFFu, at, 1u};  // every part (15, the first four, left one rune pale grey)
+    hle_guest_call(cpu, 0x80126234u, args, 4, 0.0, &ignore);
+}
+
+// A flame rising from a rune: the game's own rising wisp, as a spell makes one at each rune when it ends (0x801D10B4..
+// 0x801D11F4: a 32-byte block from 0x801776C0, its +28 the colour, then 0x8014152C(place, r2-16268's six bytes, block,
+// 0x80177588)), here made all the while the rune burns. Chattur'gha's are fire-coloured.
+static void rune_flame(CPUState* cpu, int i) {
+    const u32 base = (cpu->gpr[1] - 0x400u) & ~31u;
+    const u32 block = base, place = base + 64u;
+    u32 ignore = 0u;
+    if (!hle_guest_call(cpu, 0x801776C0u, &block, 1, 0.0, &ignore))
+        return;
+    // Faint: the wisp is the spell's end smoke, a big cloud; many at full made a red fog over the circle
+    // (logs/run-20261109-024529-jtg-chat-3d-fire). ED_RUNES_FLAME_A (testing) sets their alpha.
+    static u32 alpha = 0u;
+    if (alpha == 0u)
+        alpha = getenv("ED_RUNES_FLAME_A") != NULL ? (u32)strtoul(getenv("ED_RUNES_FLAME_A"), NULL, 0) & 0xFFu : 0x48u;
+    const u32 colour = ((g_runes[i].align == 1u ? 0xFF6A1E00u : g_runes[i].colour & 0xFFFFFF00u) | alpha);
+    mem_write32(cpu, block + 28u, colour);
+    const float jx = (float)((g_runes[i].flame * 37u) % 41u) - 20.0f, jy = (float)((g_runes[i].flame * 53u) % 41u) - 20.0f;
+    guest_write_f32(cpu, place, (float)g_runes[i].x + jx);
+    guest_write_f32(cpu, place + 4u, (float)g_runes[i].y + jy);
+    guest_write_f32(cpu, place + 8u, (float)g_runes[i].z + 8.0f);
+    const u32 args[] = {place, cpu->gpr[2] - 16268u, block, 0x80177588u};
+    hle_guest_call(cpu, 0x8014152Cu, args, 4, 0.0, &ignore);
+}
+
+// The torch's flame (the room's fire, 0x80197690 a 30-frame flipbook): its 144-byte block, kept as a room's torch spawns
+// one (0x8014152C(origin, r4, block, 0x80197690) from the room emitter 0x8014E0C0), to make the same flame at a rune.
+#define FIRE_CREATOR 0x80197690u
+#define FIRE_BLOCK 144u
+static u8 g_fire_block[FIRE_BLOCK];
+static u32 g_fire_args[2];  // the origin and r4 pointers it was given
+static bool g_fire_have;
+static void fire_watch(CPUState* cpu) {
+    if (cpu->gpr[6] != FIRE_CREATOR || g_fire_have || !guest_ram_range_valid(cpu, cpu->gpr[5], FIRE_BLOCK))
+        return;
+    for (u32 i = 0u; i < FIRE_BLOCK; i++)
+        g_fire_block[i] = mem_read8(cpu, cpu->gpr[5] + i);
+    g_fire_args[0] = cpu->gpr[3];
+    g_fire_args[1] = cpu->gpr[4];
+    g_fire_have = true;
+    if (getenv("ED_RUNES_LOG") != NULL) {
+        fprintf(stderr, "[runes] a torch's flame: origin 0x%08X (%.1f %.1f %.1f) r4 0x%08X, block:", cpu->gpr[3],
+                guest_read_f32(cpu, cpu->gpr[3]), guest_read_f32(cpu, cpu->gpr[3] + 4u), guest_read_f32(cpu, cpu->gpr[3] + 8u),
+                cpu->gpr[4]);
+        for (u32 o = 0u; o < FIRE_BLOCK; o += 4u) {
+            const u32 w = mem_read32(cpu, cpu->gpr[5] + o);
+            float f;
+            memcpy(&f, &w, 4);
+            fprintf(stderr, " +%X:%08X(%.1f)", o, w, f);
+        }
+        fprintf(stderr, "\n");
+    }
+}
+
+// A torch's flame on a rune: the block a torch was made from (fire_watch), its place (+0, +2, +4 as s16) the rune's.
+static u32 rune_fire(CPUState* cpu, int i) {
+    if (!g_fire_have)
+        return 0u;
+    const u32 block = (cpu->gpr[1] - 0x600u) & ~31u;
+    for (u32 b = 0u; b < FIRE_BLOCK; b++)
+        mem_write8(cpu, block + b, g_fire_block[b]);
+    mem_write16(cpu, block + 0u, (u16)g_runes[i].x);
+    mem_write16(cpu, block + 2u, (u16)g_runes[i].y);
+    mem_write16(cpu, block + 4u, (u16)(g_runes[i].z + 4));
+    u32 made = 0u;
+    const u32 args[] = {g_fire_args[0], g_fire_args[1], block, FIRE_CREATOR};
+    hle_guest_call(cpu, 0x8014152Cu, args, 4, 0.0, &made);
+    if (getenv("ED_RUNES_LOG") != NULL)
+        fprintf(stderr, "[runes] fire on rune %d at %d %d %d: 0x%08X\n", i, g_runes[i].x, g_runes[i].y, g_runes[i].z, made);
+    return made;
+}
+
+// The spell's spirit streaks and sparkles round the caster (0x80147ED4(record, place, n, texture, &colour, 16, 4, kind),
+// from the spell's update, 0x801D0CEC..0x801D0ECC) are given white (0x80301208): in the remaster, the spell's
+// alignment's colour, from a word the host keeps (SPELL_COLOUR, past the Tome's scratch and short of SCRATCH_FINISH).
+#define SPELL_WHITE 0x80301208u
+#define SPELL_COLOUR 0x82300000u
+static void streak_watch(CPUState* cpu) {
+    if (getenv("ED_STREAK_ARGS") != NULL) {  // testing: every call
+        static int shown;
+        if (shown++ < 12)
+            fprintf(stderr, "[runes] 0x80147ED4 r3 %08X r4 %08X r5 %u r6 %u r7 %08X (%08X) r8 %u r9 %u r10 %u on %d\n", cpu->gpr[3], cpu->gpr[4], cpu->gpr[5], cpu->gpr[6], cpu->gpr[7], guest_ram_range_valid(cpu, cpu->gpr[7], 4u) ? mem_read32(cpu, cpu->gpr[7]) : 0u, cpu->gpr[8], cpu->gpr[9], cpu->gpr[10], g_runes_on);
+    }
+    if (g_runes_on <= 0 || cpu->gpr[7] != SPELL_WHITE || !guest_ram_range_valid(cpu, SPELL_COLOUR, 4u) || !sda_ready(cpu))
+        return;
+    const u32 spell = mem_read32(cpu, cpu->gpr[13] - 22324u);
+    if (!guest_ram_range_valid(cpu, spell, 8u))
+        return;
+    const u32 word = mem_read32(cpu, spell + 4u);
+    static const u32 kColour[5] = {0u, 0xFF3020FFu, 0x80DCFFFFu, 0x70FF78FFu, 0xC070FFFFu};
+    const u32 align = word & 1u ? 1u : word & 2u ? 2u : word & 4u ? 3u : word & 8u ? 4u : 0u;
+    if (align == 0u)
+        return;
+    mem_write32(cpu, SPELL_COLOUR, kColour[align]);
+    cpu->gpr[7] = SPELL_COLOUR;
+    static int wide = -1;  // ED_STREAK_ARGS=R8,R9 (testing): the call's 16 and 4, to find what they size
+    static int a8 = 0, a9 = 0;
+    if (wide < 0)
+        wide = getenv("ED_STREAK_ARGS") != NULL && sscanf(getenv("ED_STREAK_ARGS"), "%d,%d", &a8, &a9) == 2;
+    if (wide) {
+        fprintf(stderr, "[runes] streak r5 %u r6 %u r8 %u r9 %u r10 %u -> r8 %d r9 %d\n", cpu->gpr[5], cpu->gpr[6], cpu->gpr[8], cpu->gpr[9], cpu->gpr[10], a8, a9);
+        cpu->gpr[8] = (u32)a8;
+        cpu->gpr[9] = (u32)a9;
+    }
+}
+
+static void runes_frame(CPUState* cpu) {
+    // On with Options > Graphics > Remastered spells (spell_fx); ED_RUNES_3D=0, 1 or 2 (testing) overrides it.
+    static int hooked = 0;
+    const char* forced = getenv("ED_RUNES_3D");
+    g_runes_on = forced != NULL ? (atoi(forced) == 2 ? 2 : atoi(forced) != 0 ? 1 : 0) : g_settings.spell_fx ? 1 : 0;
+    if (g_runes_on && !hooked) {
+        hooked = 1;
+        HleDispatchEntry* e = hle_dispatch_entry(RUNE_GLYPH_DRAW);
+        if (e != NULL && e->intercept == NULL && e->notify == NULL)
+            e->intercept = rune_glyph_draw;
+    }
+    if (!g_runes_on && g_rune_count == 0) {  // off: nothing new; what's showing goes as its spell ends
+        dol_aurora_set_spell_lights(NULL, 0);
+        return;
+    }
+    if (!sda_ready(cpu))
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    // New glyphs on a spell's circle.
+    for (u32 spell = g_runes_on ? mem_read32(cpu, cpu->gpr[13] - 22324u) : 0u, n = 0u; spell != 0u && n < 64u; spell = mem_read32(cpu, spell + 20u), n++) {
+        if (!guest_ram_range_valid(cpu, spell, 640u))
+            break;
+        const u32 word = mem_read32(cpu, spell + 4u);
+        const u32 circle = (word >> 16) & 0xFu;
+        const u32 points = circle == 1u ? 3u : circle == 2u ? 5u : circle == 4u ? 7u : circle == 8u ? 9u : 0u;
+        u32 order[4], count = 0u;
+        if (word & 0x1F0u)
+            order[count++] = word & 0x1F0u;
+        if (points >= 5u)
+            order[count++] = 0x2000u;
+        if (word & 0x1E00u)
+            order[count++] = word & 0x1E00u;
+        if (word & 0xFu)
+            order[count++] = word & 0xFu;
+        const u32 align = word & 1u ? 1u : word & 2u ? 2u : word & 4u ? 3u : word & 8u ? 4u : 0u;
+        for (u32 k = 0; k < points && k < count && k < 9u; k++) {
+            const u32 glyph = mem_read32(cpu, spell + 616u + k * 4u);
+            if (!rune_glyph(cpu, glyph) || g_rune_count >= RUNE_MAX)
+                continue;
+            bool known = false;
+            const s16 gx = (s16)mem_read16(cpu, glyph + 16u), gy = (s16)mem_read16(cpu, glyph + 18u);
+            for (int i = 0; i < g_rune_count && !known; i++)  // one per place: the circle's and the spell's records share them
+                known = g_runes[i].glyph == glyph || (g_runes[i].node != 0u && abs(g_runes[i].x - gx) <= 4 && abs(g_runes[i].y - gy) <= 4);
+            if (known)
+                continue;
+            const int model = rune_model(order[k]);
+            g_rune_glyph_seen = frame;  // kept until its glyphs are gone
+            if (getenv("ED_RUNES_LOG") != NULL)
+                fprintf(stderr, "[runes] glyph %u of spell 0x%08X: rune 0x%X at %d %d %d\n", k, spell, order[k],
+                        (s16)mem_read16(cpu, glyph + 16u), (s16)mem_read16(cpu, glyph + 18u), (s16)mem_read16(cpu, glyph + 20u));
+            u32 loaded = 0u;
+            const u32 have[] = {mem_read32(cpu, cpu->gpr[13] - 26448u), (u32)model};
+            if (model < 0 || !hle_guest_call(cpu, 0x801DCED0u, have, 2, 0.0, &loaded) || loaded == 0u) {
+                fprintf(stderr, "[runes] rune 0x%X's model %d isn't loaded here: its flat glyph stays\n", order[k], model);
+                g_runes[g_rune_count] = (__typeof__(g_runes[0])){spell, glyph, 0u, 0u, -32768, -32768, word, 0u, 0u, 0, 0, -1, 0ull, 0u};
+                g_rune_count++;
+                continue;
+            }
+            const s16 x = (s16)mem_read16(cpu, glyph + 16u), y = (s16)mem_read16(cpu, glyph + 18u);
+            // On the glyph: a 128 by 128 square on the floor, square to the world, its top toward +y, 10 above the floor
+            // (its corners at +80: logs/run-*-jtg-runes-pts). The model lies on it face up (rune_lie).
+            // The rune models stand on their base, their middle 50 up (object +620); laid with their top toward +y, the
+            // shape sits about 25 past the glyph centre (seen: logs/run-20261109-015932, -020108), so they.re made 25 back.
+            const float dy = getenv("ED_RUNES_DY") != NULL ? (float)atof(getenv("ED_RUNES_DY")) : rune_turn() == 2 ? -10.0f : -25.0f * rune_lie_ahead();  // testing: the shift; -10 lies on the glyph (logs/run-20261109-021119)
+            const float at[3] = {x, (float)y + dy, (float)(s16)mem_read16(cpu, glyph + 20u) + 2.0f};
+            if (getenv("ED_RUNES_LOG") != NULL) {  // testing: the glyph object's words, for its turn
+                fprintf(stderr, "[runes] glyph 0x%08X k %u:", glyph, k);
+                for (u32 o = 0u; o < 0x60u; o += 4u)
+                    fprintf(stderr, " %X:%08X", o, mem_read32(cpu, glyph + o));
+                const u32 points = mem_read32(cpu, glyph + 80u);
+                fprintf(stderr, "\n[runes]   points at 0x%08X:", points);
+                for (u32 v = 0u; v < 8u && guest_ram_range_valid(cpu, points + v * 6u, 6u); v++)
+                    fprintf(stderr, " (%d %d %d)", (s16)mem_read16(cpu, points + v * 6u), (s16)mem_read16(cpu, points + v * 6u + 2u),
+                            (s16)mem_read16(cpu, points + v * 6u + 4u));
+                fprintf(stderr, "\n");
+            }
+            const u32 node = rune_spawn(cpu, model, at, align);
+            u32 object = 0u;
+            if (node != 0u)
+                hle_guest_call(cpu, 0x801F633Cu, &node, 1, 0.0, &object);
+            if (object != 0u && getenv("ED_RUNES_LOG") != NULL)
+                fprintf(stderr, "[runes]   object 0x%08X at %.0f %.0f %.0f, middle %.1f radius %.1f %.1f\n", object,
+                        guest_read_f32(cpu, object), guest_read_f32(cpu, object + 4u), guest_read_f32(cpu, object + 8u),
+                        guest_read_f32(cpu, object + 620u), guest_read_f32(cpu, object + 624u), guest_read_f32(cpu, object + 628u));
+            rune_lie(cpu, object);
+            u32 colour = 0u;
+            hle_guest_call(cpu, 0x801C7B24u, &align, 1, 0.0, &colour);
+            g_runes[g_rune_count] = (__typeof__(g_runes[0])){spell, glyph, node, object, node != 0u ? x : (s16)-32768, y,
+                                                             word, colour, align, (s16)mem_read16(cpu, glyph + 20u), 0, -1, frame, 0u};
+            rune_colour(cpu, g_rune_count, frame);
+            g_rune_count++;
+        }
+    }
+    // Lying on their glyphs while their spell is cast, gone with it (0x8017F9D4 is called through the effect's +328, so
+    // its hook isn't reached: the spell's place in the list says, not the glyph's drawing).
+    for (int i = 0; i < g_rune_count;) {
+        bool listed = false;
+        for (u32 spell = mem_read32(cpu, cpu->gpr[13] - 22324u), n = 0u; spell != 0u && n < 64u && !listed;
+             spell = mem_read32(cpu, spell + 20u), n++)
+            listed = spell == g_runes[i].spell || mem_read32(cpu, spell + 4u) == g_runes[i].word;
+        if (g_runes[i].object == 0u) {  // a flat glyph left as it is
+            if (!listed)
+                g_runes[i] = g_runes[--g_rune_count];
+            else
+                i++;
+            continue;
+        }
+        // Fading in with its glyph (whose alpha, +43 of the record at +76, the glyph's draw gives every corner: 18 frames
+        // up to full), held at full, then out over 40 frames once the spell is gone.
+        if (listed) {
+            const u32 glyph = g_runes[i].glyph, record = rune_glyph(cpu, glyph) ? mem_read32(cpu, glyph + 76u) : 0u;
+            const u8 shown = guest_ram_range_valid(cpu, record, 48u) ? mem_read8(cpu, record + 43u) : 255u;
+            if (shown > g_runes[i].alpha)
+                g_runes[i].alpha = shown;
+            if (getenv("ED_RUNES_LOG") != NULL && frame % 10ull == 0ull)
+                fprintf(stderr, "[runes] rune %d: glyph alpha %u, shown %u (frame %llu)\n", i, shown, g_runes[i].alpha, frame);
+        } else if (g_runes[i].fade < 0) {
+            g_runes[i].fade = 40;
+        }
+        if (!listed && g_runes[i].fade > 0) {
+            g_runes[i].alpha = (u8)((unsigned)g_runes[i].alpha * (unsigned)(g_runes[i].fade - 1) / (unsigned)g_runes[i].fade);
+            g_runes[i].fade--;
+        }
+        if (listed || g_runes[i].fade > 0) {
+            rune_lie(cpu, g_runes[i].object);
+            rune_colour(cpu, i, frame);
+            // Burning: a flame rising from it every so often while it shows in full.
+            const unsigned every = 30u;
+            static int flames = -1;
+            if (flames < 0)
+                flames = getenv("ED_RUNES_FLAMES") == NULL || atoi(getenv("ED_RUNES_FLAMES")) != 0;  // testing: 0 none
+            // A torch's flame here (rune_fire, ED_RUNES_TORCH=1, testing) didn't work: its place isn't in the block's first
+            // six bytes, and it drew a cyan block on the room's torch that stayed (logs/run-20261109-030312-jtg-chat-torch).
+            if (getenv("ED_RUNES_TORCH") != NULL && listed && g_runes[i].alpha >= 200u && g_runes[i].fire == 0u)
+                g_runes[i].fire = rune_fire(cpu, i) | 1u;
+            if (getenv("ED_RUNES_LOG") != NULL && (g_runes[i].fire & ~1u) != 0u && frame % 30ull == 0ull) {
+                const u32 f = g_runes[i].fire & ~1u;
+                fprintf(stderr, "[runes] fire 0x%08X: +0C %08X +10 %08X +14 %08X +328 %08X +332 %08X\n", f, mem_read32(cpu, f + 12u),
+                        mem_read32(cpu, f + 16u), mem_read32(cpu, f + 20u), mem_read32(cpu, f + 328u), mem_read32(cpu, f + 332u));
+            }
+            if (flames && listed && g_runes[i].alpha >= 200u && frame - g_runes[i].flame >= every) {
+                g_runes[i].flame = frame;
+                rune_flame(cpu, i);
+            }
+            i++;
+            continue;
+        }
+        if (g_runes[i].node != 0u) {
+            u32 ignore = 0u;
+            const u32 args[] = {28u, g_runes[i].node};
+            hle_guest_call(cpu, COOP_SPAWN_ADD, args, 2, 0.0, &ignore);
+        }
+        g_runes[i] = g_runes[--g_rune_count];
+    }
+    // ED_RUNES_LOG (testing): the upright cards round the runes (the beams?): effect objects 0x150 apart from a glyph's,
+    // each with its four corners at +80 (as a glyph has), standing over 60 tall.
+    if (getenv("ED_RUNES_LOG") != NULL && g_rune_count > 0 && frame % 30ull == 0ull) {
+        const u32 from = g_runes[0].glyph;
+        for (int k = -400; k <= 400; k++) {
+            const u32 obj = from + (u32)(k * 0x150);
+            if (!guest_ram_range_valid(cpu, obj, 0x150u) || mem_read32(cpu, obj + 328u) < 0x80000000u ||
+                mem_read32(cpu, obj + 328u) > 0x80400000u)
+                continue;
+            const u32 pts = mem_read32(cpu, obj + 80u);
+            const bool has_pts = guest_ram_range_valid(cpu, pts, 24u);
+            s16 lo = 32767, hi = -32768;
+            for (u32 v = 0u; has_pts && v < 4u; v++) {
+                const s16 z = (s16)mem_read16(cpu, pts + v * 6u + 4u);
+                lo = z < lo ? z : lo, hi = z > hi ? z : hi;
+            }
+            const u32 upd = mem_read32(cpu, obj + 332u);
+            if (upd == 0x80175D08u || upd == 0x8018D3B4u) {  // the spirit streaks: their fields, for size and colour
+                static int dumped;
+                if (dumped++ < 6) {
+                    fprintf(stderr, "[runes] streak 0x%08X upd %08X draw %08X:", obj, upd, mem_read32(cpu, obj + 328u));
+                    for (u32 o = 0u; o < 0x150u; o += 4u) {
+                        const u32 w = mem_read32(cpu, obj + o);
+                        float f;
+                        memcpy(&f, &w, 4);
+                        fprintf(stderr, " %X:%08X", o, w);
+                        if (f > 0.5f && f < 2000.0f)
+                            fprintf(stderr, "(%.2f)", f);
+                    }
+                    fprintf(stderr, "\n");
+                }
+                continue;
+            }
+            if (!has_pts || hi - lo < 60)
+                continue;
+            fprintf(stderr, "[runes] card 0x%08X draw %08X upd %08X tex %d:", obj, mem_read32(cpu, obj + 328u), mem_read32(cpu, obj + 332u),
+                    (s16)mem_read16(cpu, obj + 14u));
+            for (u32 v = 0u; v < 4u; v++)
+                fprintf(stderr, " (%d %d %d)", (s16)mem_read16(cpu, pts + v * 6u), (s16)mem_read16(cpu, pts + v * 6u + 2u),
+                        (s16)mem_read16(cpu, pts + v * 6u + 4u));
+            fprintf(stderr, " frame %llu\n", frame);
+        }
+    }
+    // Their light in the air (the renderer's haze, at its own strength whatever the haze setting): each rune lit from
+    // 40 above, its alignment's colour (Chattur'gha's an ember), as bright as it shows, flickering with it.
+    float lights[8 * 7];
+    int lit = 0;
+    for (int i = 0; i < g_rune_count && lit < 8; i++) {
+        if (g_runes[i].object == 0u || g_runes[i].alpha == 0u)
+            continue;
+        const float t = (float)frame * 0.31f + (float)i * 1.7f;
+        const float flick = 0.8f + 0.12f * sinf(t) + 0.08f * sinf(t * 2.9f + 0.6f);
+        static float bright = -1.0f, reach = 0.0f;
+        if (bright < 0.0f) {  // ED_RUNE_LIGHT=BRIGHTNESS,RADIUS (testing)
+            bright = 1.8f, reach = 95.0f;  // the pictures' (logs/run-20261109-032951-jtg-chat-shadow)
+            if (getenv("ED_RUNE_LIGHT") != NULL)
+                sscanf(getenv("ED_RUNE_LIGHT"), "%f,%f", &bright, &reach);
+        }
+        // Breathing, as the original's glow pulses: a slow swell about once a second, each rune a little apart.
+        const float pulse = 0.72f + 0.5f * (0.5f + 0.5f * sinf((float)frame * 0.105f + (float)i * 0.9f));
+        const float k = (float)g_runes[i].alpha / 255.0f * flick * pulse * bright;
+        const u32 c = g_runes[i].colour;
+        const float r = g_runes[i].align == 1u ? 1.0f : (float)(c >> 24) / 255.0f;
+        const float g = g_runes[i].align == 1u ? 0.1f : (float)((c >> 16) & 0xFFu) / 255.0f;  // Chattur'gha: red, not orange
+        const float b = g_runes[i].align == 1u ? 0.04f : (float)((c >> 8) & 0xFFu) / 255.0f;
+        float* l = lights + lit * 7;
+        l[0] = g_runes[i].x, l[1] = g_runes[i].y, l[2] = (float)g_runes[i].z + 40.0f;
+        l[3] = r * k, l[4] = g * k, l[5] = b * k;
+        l[6] = -reach;  // below 0: a spell's light, on the surfaces round it (the renderer's haze pass)
+        lit++;
+    }
+    dol_aurora_set_spell_lights(lights, lit);
+}
+
+// ED_RUNE_SHOW=FRAME,MODEL,ALIGNMENT (testing): one rune model, made as runes_frame makes them, 60 ahead of player 2.
+static void rune_test_show(CPUState* cpu) {
+    static int on = -1, model, align;
+    static unsigned long long at;
+    static u32 object;
+    if (on < 0) {
+        const char* e = getenv("ED_RUNE_SHOW");
+        on = e != NULL && sscanf(e, "%llu,%d,%d", &at, &model, &align) == 3;
+    }
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    rune_lie(cpu, object);
+    if (on != 1 || frame < at || g_coop_p2 == 0u)
+        return;
+    on = 0;
+    const u32 body = mem_read32(cpu, g_coop_p2 + 52u);
+    if (!guest_ram_range_valid(cpu, body, 64u))
+        return;
+    const float qz = guest_read_f32(cpu, body + 52u), qw = guest_read_f32(cpu, body + 56u);
+    const float ahead = 2.0f * atan2f(qz, qw);
+    const float where[3] = {guest_read_f32(cpu, body) + 60.0f * cosf(ahead), guest_read_f32(cpu, body + 4u) + 60.0f * sinf(ahead),
+                            guest_read_f32(cpu, body + 8u) + 35.0f};
+    const u32 node = rune_spawn(cpu, model, where, (u32)align);
+    if (node != 0u)
+        hle_guest_call(cpu, 0x801F633Cu, &node, 1, 0.0, &object);
+}
+
+static void item_test_spawn(CPUState* cpu, u32 player) {
+    quick_test_set(cpu);
+    runes_frame(cpu);
+    rune_test_show(cpu);
+    static int on = -1, first, last, every = 240, who = 3, next_p1, next_p2;
+    static unsigned long long start;
+    if (on < 0) {
+        const char* e = getenv("ED_ITEM_SPAWN");
+        on = e != NULL && sscanf(e, "%llu,%d,%d,%d,%d", &start, &first, &last, &every, &who) >= 3;
+        every = every > 0 ? every : 240;
+        next_p1 = next_p2 = first;
+    }
+    if (!on || player == 0u || mem_read32(cpu, cpu->gpr[13] - 23228u) != 0u)  // not while a script runs
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (frame < start)
+        return;
+    const unsigned long long step = (frame - start) / (unsigned long long)every;
+    const bool half = (frame - start) % (unsigned long long)every >= (unsigned long long)every / 2u;
+    for (int p = 0; p < 2; p++) {
+        int* next = p == 0 ? &next_p1 : &next_p2;
+        const u32 node = p == 0 ? player : g_coop_p2;
+        if (!(who & (1 << p)) || node == 0u || *next > last || (p == 1 && !half) ||
+            (unsigned long long)(*next - first) > step)
+            continue;
+        const u32 object = mem_read32(cpu, node + 52u);
+        if (!guest_ram_range_valid(cpu, object, 12u))
+            continue;
+        float at[3];
+        for (u32 k = 0; k < 3u; k++)
+            at[k] = guest_read_f32(cpu, object + k * 4u);
+        // A short step in front of them (the scan wants it near and ahead): the way they face, as coop_place_try
+        // takes it, 2 atan2(qz, qw) from the object's +52, +56.
+        const float qz = guest_read_f32(cpu, object + 52u), qw = guest_read_f32(cpu, object + 56u);
+        const float ahead = isfinite(qz) && isfinite(qw) ? 2.0f * atan2f(qz, qw) : 0.0f;
+        at[0] += 40.0f * cosf(ahead);
+        at[1] += 40.0f * sinf(ahead);
+        fprintf(stderr, "[items] for player %d: ", p + 1);
+        item_spawn_at(cpu, (*next)++, at);
+    }
+}
+
 // ED_WPN_EQUIP=FRAME,HANDLE,HANDS[;FRAME,HANDLE,HANDS...] (testing): player 1 equips a carried thing at that frame, as
 // the Tome's EQUIP does (0x800C9FD4(holder id, handle, 0, hands, 0)), for a weapon no save has in hand (the Chakrams: 2).
 static void wpn_test_equip(CPUState* cpu, u32 player) {
@@ -15527,19 +16185,36 @@ static void coop_found_notice(CPUState* cpu, bool p2) {
     for (int i = 0; who < 0 && i < 12; i++)
         if (kPlayerModel[i] == g_chapter_model)
             who = i;
-    if ((item == NULL && as_worded == NULL) || who < 0 || who >= 12) {
-        fprintf(stderr, "[coop] no notice for the find's words: %s\n", words);
-        return;
-    }
-    char notice[256];
     // An enchant's words name no thing ("This Item has been repaired!", "This Item is now enchanted!"): the thing it
     // gives (0x80024528's r6) by its name. Told as worded, player 1 read "Pius has been repaired".
     char thing[64];
     coop_thing_name(cpu, cpu->gpr[6], thing, sizeof thing);
+    // Words that are only a name ("Blowgun") or a letter's own text: the thing by its name, or short words as they are
+    // (the item sweep: 28 finds of 488 told nothing, logs/item-sweep-20261109-002957-report.md).
+    // A letter's words open with what it is, then a colon ("A letter, written with some precision, in longhand: ..."):
+    // that much, its first letter lowered.
+    char lead[96] = "";
+    const char* const colon = strchr(words, ':');
+    if (thing[0] == 0 && colon != NULL && colon > words && (size_t)(colon - words) < sizeof lead) {
+        memcpy(lead, words, (size_t)(colon - words));
+        lead[colon - words] = 0;
+        if (lead[0] >= 'A' && lead[0] <= 'Z' && lead[1] == ' ')
+            lead[0] = (char)(lead[0] - 'A' + 'a');
+    }
+    const char* const bare = item == NULL && as_worded == NULL
+                                 ? (thing[0] != 0 ? thing : lead[0] != 0 ? lead : n > 0u && n < 48u ? words : NULL)
+                                 : NULL;
+    if ((item == NULL && as_worded == NULL && bare == NULL) || who < 0 || who >= 12) {
+        fprintf(stderr, "[coop] no notice for the find's words: %s\n", words);
+        return;
+    }
+    char notice[256];
     const bool repaired = item == NULL && strstr(words, "has been repaired") != NULL;
     const bool enchanted = item == NULL && strstr(words, "is now enchanted") != NULL;
     if (item != NULL)
         snprintf(notice, sizeof notice, "%s has found %s", kCharacterWords[who][0], item);
+    else if (bare != NULL)
+        snprintf(notice, sizeof notice, "%s has found %s", kCharacterWords[who][0], bare);
     else if ((repaired || enchanted) && thing[0] != 0)
         snprintf(notice, sizeof notice, "%s has %s the %s", kCharacterWords[who][0], repaired ? "repaired" : "enchanted", thing);
     else
@@ -15595,8 +16270,11 @@ static void hle_words_layout(CPUState* cpu) {
     for (int i = 0; i < 12; i++)
         if (kPlayerModel[i] == g_chapter_model)
             chapter = i;
+    // In their close-up too, and in a script run for them (their PICK UP, script 2246: its find's words came a frame
+    // before their close-up and named player 1's character, logs/run-20261109-001519-items-l7), as hle_coop_found tells.
     const bool p2 = g_settings.mod_coop && g_coop_p2 != 0u &&
-                    (g_coop_tome_p2 || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 || coop_close_up_p2s());  // in their close-up too
+                    (g_coop_tome_p2 || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 || coop_close_up_p2s() ||
+                     (g_coop_use.active && g_coop_use.p2));
     const int choice = coop_name_choice(p2);
     if (chapter < 0 || choice < 0 || choice >= 12 || choice == chapter)
         return;
@@ -22641,6 +23319,7 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
     characters_reload(cpu, player);
     costume_moves(cpu, player);
     wpn_test_equip(cpu, player);
+    item_test_spawn(cpu, player);
     wpn_check(cpu, player, false);
     costume_size(cpu, player);
     const u32 standing = mem_read32(cpu, player + 52u);
@@ -23281,6 +23960,21 @@ static void find_coop(CPUState* cpu) {
         lasting->intercept = coop_lasting_find;
     } else {
         fprintf(stderr, "[coop] the things' find not found: one lasting spell for both players\n");
+    }
+    // 3D runes: a torch's flame block, as the room's emitter spawns one at the room's load (fire_watch).
+    if (getenv("ED_RUNES_3D") != NULL) {
+        HleDispatchEntry* fe = hle_dispatch_entry(0x8014152Cu);
+        if (fe != NULL && fe->notify == NULL && fe->intercept == NULL)
+            fe->notify = fire_watch;
+        else
+            fprintf(stderr, "[runes] the effects' spawn 0x8014152C is taken: no flames on the runes\n");
+    }
+    // The remastered spells' streaks in their alignment's colour (streak_watch; it acts only while they're on).
+    {
+        HleDispatchEntry* se = hle_dispatch_entry(0x80147ED4u);
+        if (se != NULL && se->notify == NULL && se->intercept == NULL)
+            se->notify = streak_watch;
+        fprintf(stderr, "[runes] streak watch %s\n", se == NULL ? "has no entry" : se->notify == streak_watch ? "on" : "taken");
     }
     // The spells' update (stwu r1,-32(r1); ... lwz r30,-22324(r13) at +0x1C),
     // player 2's spells stepped as theirs.
