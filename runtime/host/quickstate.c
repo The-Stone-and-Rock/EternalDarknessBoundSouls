@@ -121,6 +121,7 @@ static const QsBlob k_blobs[] = {
     {"COSP", hle_coop_spells_size, hle_coop_spells_save, hle_coop_spells_load, false},
     {"COKN", hle_coop_kinds_size, hle_coop_kinds_save, hle_coop_kinds_load, false},
     {"COPR", hle_coop_prompt_size, hle_coop_prompt_save, hle_coop_prompt_load, false},
+    {"COFM", hle_costume_size, hle_costume_save, hle_costume_load, false},
 #endif
 };
 #define QS_BLOB_COUNT (sizeof k_blobs / sizeof k_blobs[0])

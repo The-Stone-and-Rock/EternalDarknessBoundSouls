@@ -13,6 +13,32 @@ frame, not confirmed to be the effect).
 
 ## Open issues
 
+- **Next fix (the user, 2026-11-09, room 183, Pius's chapter, Karim's spirit and corpse Ellia; new save state 1):**
+  - Player 1's controls become backwards when player 2's scene (the block holes, L01/419) starts after both enter the room.
+  - Each player's camera stays focused on whoever triggered the scene, rather than going back to its own player.
+  Start from a run of the user's slot 1 (`sh tools/ed/run.sh saves/slot1.state NAME`) and `ed timeline`. Their cameras
+  through the scene's end are `coop_camera_step`, `coop_run_script`'s `p2_scene_end` and `coop_p1_scene_end_camera`
+  (the arrival-scene copy, which re-points records naming player 2 to player 1).
+- Fixed 2026-11-09, played and confirmed by the user, committed: room 183's block-holes
+  scene (L01/419, SKPlane01) begun by player 2 held them for good on Camera24, player 1 in "close-up". Two causes, both in
+  `runtime/host/hle.c`:
+  - `coop_scene_set` took any scene of player 2's in the 600 frames after their door for their arrival scene
+    (`g_coop_p1_own_camera`, from 98660d1) and ran the arrival zone's script (119, the way back) as player 1's. Now only
+    when the running script (r13-23228) is the arrival scene.
+  - Player 2's camera is stepped only in their turn (`coop_camera_step`), which a scene of theirs skips (busy), so 419's
+    Camera24 path never arrived and its fn11 end never ran. Now stepped while their own scene holds them, and its end
+    runs as theirs (`p2_scene_end` in `coop_run_script`, the arrival scene's path). logs/run-20261109-124544-s1-p2plane-fix2:
+    scene over at 8540, both free. To repeat: `ED_COOP_P2_PUT=7800,300,2300,177`, player 1 aside, player 2 `lleft`.
+  After it the room's two zombies go for player 2 (the game's own; with test input they killed her).
+  Not checked: Anthony's Tome room arrival scene by player 2 (its test save, slot 2, is gone); `mod_p2_camera` other than 2
+  (player 2's own camera isn't stepped there at all, so such a scene would still hold them).
+- Fixed 2026-11-09, played and confirmed by the user, committed: corpse Ellia (player 2's form, rotten body cin0025 37) lost her legs at her door press after
+  a save state was loaded. The form's map (`g_costume_plain`, `g_costume_kept`) was host memory, not in save states, so after
+  a load no new move was fitted (logs/run-20261109-124830-s1-legs-fitlog: no fit for the door's part 18). Save states now
+  carry it (section COFM, `hle_costume_save`). Saves made before this build don't have it and log "this save has no forms'
+  own bodies": remake them from Jump to Game. `ED_MOVES_LOG=1` logs each form fit. Checked: a cold save loaded, every new
+  move fitted, legs whole (logs/run-20261109-125158-cofm-load).
+  (The earlier note here had the two mixed up: Karim's spirit form is the blue ghost, corpse Ellia the dark red figure.)
 - Item sweep (2026-11-09, uncommitted): every item type spawned for both players and picked up, `sh tools/ed/item_sweep.sh SAVE FIRST LAST BATCH`, report by tools/ed/item_sweep_report.py (logs/item-sweep-20261109-002957-report.md). From the fresh slot 1 (chapter 1, room 341): 453 of 488 finds as a normal player's. Fixed since, uncommitted: finds whose words are a bare name or a letter's text now tell the other player ("Pius has found Letter #4", "...a letter, written with some precision, in longhand"). Not bugs: the Staff (128) and Binding Hall Keys (189, 190) lost B to the dais's EXAMINE (L01/349) in room 341; in chapter 7's room 103 they pass. Not bugs either, the game's own rules in the pickup scan 0x800DA688 (no PICK UP in their own chapters too, logs/run-20261109-010048-jtg-own-188, -010150-jtg-own-127): the Sapphire Effigy (127) has record flag 0x80, which the scan skips (0x800DAA00-0x800DAA08: never a ground pickup); the Piece of Green Urn (188) is offered only when 0x801F901C(105) says so (0x800DA9B8-0x800DA9D8), 105 being the Torch. So every type the game lets a player pick up from the ground went right for both players.
 - Fixed 2026-11-09, uncommitted (hle_words_layout counts a script run for player 2, as hle_coop_found does; their words now read "Pius has found a Sheet of Music!", logs/run-20261109-002712-name-fix). Was: a find's words name the chapter's character, not the finder: in slot 7 (chapter 7, player 1 Paul, player 2 Pius, model 0), player 2 picked up a spawned Sheet of Music; the close-up was rightly in player 2's half and player 1's notice rightly said "Pius has found a Sheet of Music", but the game's own words in player 2's close-up said "Paul has found". The find went on player 1's list (hle_coop_found, by design). Repeat: `ED_ITEM_SPAWN=2400,113,115,300,1` with ED_PAD_SCRIPT pressing east, which these settings give to player 2: logs/run-20261109-001519-items-l7 (`[coop] player 2's pad` at 2431), picture shots/000016.jpg.
 - The Cheats menu's all-magick option (fixed 2026-11-08, uncommitted): it gave the circles and runes without the flags that say the Tome's Magick page has taught them (`kMagickTaught`); the page then waited on a teaching script (2791, 1306) that Anthony's chapter (level 03) doesn't have, and went to the Magick page on every opening. Checked by script: logs/run-20261108-162124-cheat-magick-fix. It no longer gives the Tome (`cheat_tome` removed): given as soon as it was there, the Tome room's own taking was passed over, its transition's sound played on and its way back came at the casket's cinematic (the user). The Tome is the story's; all magick is in it once taken.

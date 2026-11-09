@@ -662,3 +662,13 @@ For Pius with the Scramasax (Anthony's part 42; the log said "of their part 14's
 ## Equipping player 2's weapon at cast time (`coop_cast_item_theirs`, 2026-11-08, removed)
 
 To get past "This Item cannot be enchanted." for a weapon player 2 hadn't taken up, the cast was preceded by a hand-copy of the Tome's choose-to-equip (copy made, EQUIP_TAKE with hands from player 1's equipment, then from 0x801512F8). It was invented: the game's own choose-to-equip (0x80103F70..0x80104070) already runs for player 2 through their Tome copy and `tome_copy_equips`. The real cause was player 2's equipment record with no hands set up (+392 = 0), fixed in `coop_equip_record` with the game's set-up values. With player 1's hands it also broke whenever player 1 held something else; without a copy made first it enchanted player 1's original.
+
+## Room 183's block-holes scene by player 2 (2026-11-09)
+
+**Only keying `g_coop_p1_own_camera` to the running script** (`running == g_coop_arrival_scene` in `coop_scene_set`): the
+wrong run of script 119 stopped, but player 2 was still held on Camera24 for good (logs/run-20261109-124229-s1-p2plane-fix).
+Their camera's path never moved: `coop_player_turn` returns at busy before `coop_camera_step`. Kept, with the step added.
+
+**Testing it:** walking player 2 down room 183's corridor with test input from slot 1, they walk into player 1 standing in
+it, then into the room's zombies at about y 2350, which hold and kill them (state 7, health falling): neither is this bug.
+`ED_COOP_P2_PUT` to y 2000 skips the plane (no scene); y 2300 is before it.

@@ -10201,6 +10201,14 @@ static bool continue_tracks_load(CPUState* cpu) {
     const u32 count = guest_ram_range_valid(cpu, record, 8u) ? mem_read16(cpu, record + 4u) : 0u;
     g_costume_map = &g_costume_maps[g_tracks_load.place];
     const u32 bones = g_costume_map->bones, theirs = g_costume_map->plain_bones;
+    static int log_fits = -1;  // ED_MOVES_LOG (testing): each move a form's body is fitted to
+    if (log_fits < 0)
+        log_fits = getenv("ED_MOVES_LOG") != NULL;
+    if (log_fits)
+        fprintf(stderr, "[moves] form fit: object 0x%08X record 0x%08X tracks 0x%08X count %u, wearer's bones %u, form's %u%s (frame %llu)\n",
+                g_tracks_load.object, record, tracks, count, theirs, bones,
+                count < theirs || count > COSTUME_MAX_BONES ? ": NOT FITTED" : tracks >= SCRATCH_TRACKS && tracks < SCRATCH_TRACKS + SCRATCH_TRACKS_SIZE ? ": already in the form's list" : "",
+                (unsigned long long)(cpu->timebase / 675000ull));
     if (count < theirs || count > COSTUME_MAX_BONES || !guest_ram_range_valid(cpu, tracks, count * 16u))
         return true;
     // More bones than they have (the Liche's 75 to Pius's 72), or keys to add: the list goes where
@@ -11464,10 +11472,13 @@ static void costume_strip(CPUState* cpu, const Costume* c, u32 body, u32 plain) 
 // made, so what's filed under their number as a player is made is what they wear.
 // Their own entry is kept, to put back for the other player or with their own form.
 // `player` is who is being made as `model`; nothing for a character with no other body.
+// Each wearer's own entry, kept (costume_file); in save states with g_costume_plain (hle_costume_save).
+static struct {
+    u32 list, plain[2];
+} g_costume_kept[COSTUME_PLACES];
+
 static void costume_file(CPUState* cpu, int model, int player) {
-    static struct {
-        u32 list, plain[2];
-    } kept[COSTUME_PLACES];
+#define kept g_costume_kept
     int place = -1;
     for (int i = 0; i < COSTUMES && place < 0; i++)
         if (kCostumes[i].wearer == model)
@@ -11506,6 +11517,51 @@ static void costume_file(CPUState* cpu, int model, int player) {
         mem_write32(cpu, entry, kept[place].plain[0]);
         mem_write32(cpu, entry + 4u, kept[place].plain[1]);
     }
+#undef kept
+}
+
+// Quick state: each wearer's own body (g_costume_plain, g_costume_kept). They're made only as a character is (costume_file),
+// so a state loaded without them had no form to fit to: every move streamed in after it played the wearer's own tracks on
+// the form's body. Corpse Ellia (player 2, the user's slot 1, room 180) lost her legs at her first new move, the door's
+// (motion 25, part 18), with no fit logged (logs/run-20261109-124830-s1-legs-fitlog). The maps are made again from them.
+typedef struct {
+    u32 plain[COSTUME_PLACES];
+    u32 kept[COSTUME_PLACES][3];
+} HleCostumeState;
+
+size_t hle_costume_size(void) { return sizeof(HleCostumeState); }
+
+void hle_costume_save(void* out) {
+    HleCostumeState s;
+    memset(&s, 0, sizeof s);
+    for (int i = 0; i < COSTUME_PLACES; i++) {
+        s.plain[i] = g_costume_plain[i];
+        s.kept[i][0] = g_costume_kept[i].list;
+        s.kept[i][1] = g_costume_kept[i].plain[0];
+        s.kept[i][2] = g_costume_kept[i].plain[1];
+    }
+    memcpy(out, &s, sizeof s);
+}
+
+void hle_costume_load(const void* in) {
+    HleCostumeState s;
+    memset(&s, 0, sizeof s);
+    if (in != NULL)
+        memcpy(&s, in, sizeof s);
+    bool any = false;
+    for (int i = 0; i < COSTUME_PLACES; i++) {
+        g_costume_plain[i] = s.plain[i];
+        g_costume_kept[i].list = s.kept[i][0];
+        g_costume_kept[i].plain[0] = s.kept[i][1];
+        g_costume_kept[i].plain[1] = s.kept[i][2];
+        g_costume_maps[i].body = 0u;  // made again from these at the next fit
+        any = any || s.plain[i] != 0u;
+    }
+    if (in == NULL)
+        fprintf(stderr, "[player] this save has no forms' own bodies (made before they were kept): a player in a form loses "
+                        "their shape at their next new move. Make the save again from Jump to Game.\n");
+    else if (any)
+        fprintf(stderr, "[player] the forms' own bodies from the save\n");
 }
 
 // The form an object wears: its body (+60) is that form's, as a player. The game's own Liche,
@@ -14874,6 +14930,7 @@ static bool coop_scene_player1s(CPUState* cpu) {
 // for good (logs/run-20261106-004651-jtg-ov-c2-r2). Off as any scene ends, or with a room asked for.
 static bool g_coop_p2_scene;
 static unsigned g_coop_p2_scene_tickets;
+static s32 g_coop_p2_scene_script;  // the script whose fn22(1) began it (r13-23228)
 static bool coop_p2_scene_on(void) {
     if (g_coop_p2_scene && g_coop_p2_scene_tickets != g_coop_tickets)
         g_coop_p2_scene = false;
@@ -14908,8 +14965,18 @@ static void coop_scene_set(CPUState* cpu, u32 function) {
         } else if (p2_acts && !g_coop_p2_scene && function == 0x80042974u) {  // fn22's hold; fn139's isn't the player's
             g_coop_p2_scene = true;
             g_coop_p2_scene_tickets = g_coop_tickets;
-            if (g_coop_entered_p2 && g_coop_arrival_scene > 0)
+            // Only the arrival scene's own fn22 (the running script, r13-23228, is it). Any scene of player 2's in the
+            // arrival's 600 frames was taken for it: room 183's block-holes scene (L01/419, SKPlane01) 446 frames after
+            // their door, the arrival zone's script being the way back (119), ran 119 as player 1's, its camera set
+            // cleared 419's camera end (fn11), and the scene never ended: player 2 held for good on Camera24, player 1
+            // in the door's close-up (logs/run-20261109-124032-s1-p2plane2, frame 8007).
+            const s32 running = (s16)mem_read32(cpu, cpu->gpr[13] - 23228u);
+            g_coop_p2_scene_script = running;
+            if (g_coop_entered_p2 && g_coop_arrival_scene > 0 && running == g_coop_arrival_scene)
                 g_coop_p1_own_camera = g_coop_arrival_scene;
+            if (g_coop_entered_p2 && g_coop_arrival_scene > 0 && getenv("ED_COOP_LOG") != NULL)
+                fprintf(stderr, "[coop] player 2's scene by script %d, their arrival scene %d: %s\n", running, g_coop_arrival_scene,
+                        running == g_coop_arrival_scene ? "player 1 gets their own camera" : "not it");
             if (getenv("ED_COOP_LOG") != NULL)
                 fprintf(stderr, "[coop] player 2's own scene begins (0x%08X, frame %llu): their presses start nothing in it\n", function,
                         (unsigned long long)(cpu->timebase / 675000ull));
@@ -15912,7 +15979,13 @@ static void coop_run_script(CPUState* cpu) {
     // (logs/run-20261106-075150-jtg-dh6-c4p2climb, frame 3416; Camera01 with this, run-20261106-085728-jtg-dc1-c4p2climb).
     const bool arrival_scene = g_coop_entered_p2 && (s32)cpu->gpr[3] == g_coop_arrival_scene && cpu->lr == ARRIVAL_END_RAN &&
                                !g_coop_prompt_look && !g_coop_turn && sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 21492u) != g_coop_p2;
-    if ((tome_item || arrival_scene) && g_coop_p2 != 0u && !g_coop_use.active && sda_ready(cpu) &&
+    // The same for any scene of player 2's own whose camera arrives (fn11): their camera's step (coop_camera_step, kept
+    // going while the scene holds them) runs it with player 1 the player and the game's table. Room 183's L01/419, begun
+    // by player 2 crossing SKPlane01, would have found state 0 there, not its 1 (Camera01, fn22(0), let go).
+    const bool p2_scene_end = !arrival_scene && cpu->lr == ARRIVAL_END_RAN && coop_p2_scene_on() && (s32)cpu->gpr[3] > 0 &&
+                              (s32)cpu->gpr[3] == g_coop_p2_scene_script && !g_coop_prompt_look && !g_coop_turn && sda_ready(cpu) &&
+                              mem_read32(cpu, cpu->gpr[13] - 21492u) != g_coop_p2;
+    if ((tome_item || arrival_scene || p2_scene_end) && g_coop_p2 != 0u && !g_coop_use.active && sda_ready(cpu) &&
         coop_listed(cpu, g_coop_p2)) {
         const u32 args[3] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5]};
         const u32 ran = cpu->lr;
@@ -15925,7 +15998,7 @@ static void coop_run_script(CPUState* cpu) {
         // player 2 stood held in it for good (logs/run-20261108-133922-p2-tome-room-first, frame 3026).
         const bool scene_was = g_coop_p2_scene;
         bool words = false;
-        for (u32 i = 0u; arrival_scene && i < 10u; i++)
+        for (u32 i = 0u; (arrival_scene || p2_scene_end) && i < 10u; i++)
             words = words || (s16)(g_coop_states.p2[i * 8u] << 8 | g_coop_states.p2[i * 8u + 1u]) == (s32)cpu->gpr[3];
         coop_be_player2(cpu, true, was);
         g_coop_turn_p1 = was[1];  // the Tome is player 1's (coop_has_tome)
@@ -15942,9 +16015,9 @@ static void coop_run_script(CPUState* cpu) {
         // The scene's end sets the room's camera at the arrival spot (L03/1351 state 4: Camera01) for the player, player 2,
         // their cameras lent. Player 1, put beside them on it, kept the room's start camera, the scene's (IntroCam02),
         // for good (logs/run-20261108-134549-fix4-tome-room-p2). The same for them, its records following their body.
-        if (arrival_scene && getenv("ED_COOP_LOG") != NULL)
-            fprintf(stderr, "[coop] arrival scene %d's end ran as player 2's: scene %d -> %d, cameras lent %d, words %d\n", (s32)args[0],
-                    scene_was, g_coop_p2_scene, g_coop_cameras.lent, words);
+        if ((arrival_scene || p2_scene_end) && getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] %s scene %d's end ran as player 2's: scene %d -> %d, cameras lent %d, words %d\n",
+                    arrival_scene ? "arrival" : "their own", (s32)args[0], scene_was, g_coop_p2_scene, g_coop_cameras.lent, words);
         g_coop_tome_cast = false;
         coop_be_player2(cpu, false, was);
         if (arrival_scene && scene_was && !g_coop_p2_scene && g_coop_cameras.lent && g_coop_p1_own_camera != -1)
@@ -17725,6 +17798,12 @@ static void coop_player_turn(CPUState* cpu) {
     const bool room_other = coop_room_change_other(cpu, true);
     if (coop_busy(cpu) && !coop_door_turns(cpu) && !room_other) {
         coop_p2_press_held(cpu);
+        // Their own scene's camera goes on, as the game's goes on in player 1's: its path is in their set, which only their
+        // turn's step moves, so it stayed on its first place and its end (fn11, run at its arriving: coop_run_script) never
+        // came. Room 183's block-holes scene (L01/419, Camera24 then Camera01 and fn22(0)) held player 2 on Camera24 for
+        // good (logs/run-20261109-124229-s1-p2plane-fix, frame 8006 on).
+        if (g_coop_p2_is_player && coop_p2_scene_on() && coop_p2_holds(cpu))
+            coop_camera_step(cpu);
         return;
     }
     g_coop_turn = true;
