@@ -28,3 +28,4 @@ Screenshots for Claude/
 textures/
 .DS_Store
 .build-commit
+/textures-backup-nomips/
