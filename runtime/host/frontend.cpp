@@ -295,7 +295,7 @@ std::string region_name(const std::string& id) {
 
 // --- Menu model -------------------------------------------------------------
 
-enum class Screen { Launcher, Play, States, Slot, SlotDelete, Options, OptionsPage, Graphics, Controls, Mapping, InGame,
+enum class Screen { Launcher, Play, States, Slot, SlotDelete, SlotOverwrite, Options, OptionsPage, Graphics, Controls, Mapping, InGame,
                     Problem, Mods, ModsPage, Characters };
 
 struct Row {
@@ -1536,8 +1536,11 @@ void build_slot() {
     const int slot = g_slot_chosen;
     if (g_slot_from_states) {
         Row save{"Save here"};
-        save.note = "Replaces this save.";
-        save.activate = [slot] { save_slot(slot); };
+        save.note = "Replaces this save. You are asked first.";
+        save.activate = [] {
+            g_screen = Screen::SlotOverwrite;
+            g_selected = 0;
+        };
         g_rows.push_back(save);
     }
 
@@ -1601,6 +1604,23 @@ void build_slot_delete() {
         }
     };
     g_rows.push_back(del);
+}
+
+// Saving over a used slot, asked first: keeping it is the first choice.
+void build_slot_overwrite() {
+    const int slot = g_slot_chosen;
+    Row keep{"No, keep it"};
+    keep.note = "Slot " + std::to_string(slot) + " · " + slot_time(slot) + " stays.";
+    keep.activate = [] {
+        g_screen = Screen::Slot;
+        g_selected = 0;
+    };
+    g_rows.push_back(keep);
+
+    Row save{"Yes, overwrite slot " + std::to_string(slot)};
+    save.note = "The save in this slot is replaced by the game as it is now.";
+    save.activate = [slot] { save_slot(slot); };
+    g_rows.push_back(save);
 }
 
 Row layout_row() {
@@ -2512,6 +2532,7 @@ void render() {
                           : g_screen == Screen::States   ? "Save States"
                           : g_screen == Screen::Slot     ? slot_heading.c_str()
                           : g_screen == Screen::SlotDelete ? "Delete Save?"
+                          : g_screen == Screen::SlotOverwrite ? "Do you want to overwrite this save?"
                           : g_screen == Screen::Options  ? "Options"
                           : g_screen == Screen::OptionsPage ? options_page_name()
                           : g_screen == Screen::Graphics ? "Graphics"
@@ -2534,7 +2555,8 @@ void render() {
     // A list of slots shows ten at a time, the chosen one's, with Back under them.
     const bool slot_list = g_screen == Screen::States || g_screen == Screen::Play;
     // The plain lists of actions: their rows centred, no controls.
-    const bool centered = g_screen == Screen::Slot || g_screen == Screen::SlotDelete || g_screen == Screen::Problem;
+    const bool centered = g_screen == Screen::Slot || g_screen == Screen::SlotDelete ||
+                          g_screen == Screen::SlotOverwrite || g_screen == Screen::Problem;
     const bool settings_page = !centered && !slot_list && g_screen != Screen::Launcher && g_screen != Screen::InGame &&
                                g_screen != Screen::Characters;
     const int slot_rows = static_cast<int>(g_rows.size()) - 1;
@@ -2649,7 +2671,8 @@ void render() {
     // Over the game the page lies on the dimmed, paused frame.
     g_doc->SetClass("overlay", g_screen == Screen::InGame || g_screen == Screen::Problem ||
                                    g_screen == Screen::States ||
-                                   ((g_screen == Screen::Slot || g_screen == Screen::SlotDelete) && g_slot_from_states) ||
+                                   ((g_screen == Screen::Slot || g_screen == Screen::SlotDelete ||
+                                     g_screen == Screen::SlotOverwrite) && g_slot_from_states) ||
                                    ((g_screen == Screen::Options || g_screen == Screen::OptionsPage ||
                                      g_screen == Screen::Graphics || g_screen == Screen::Mods || g_screen == Screen::ModsPage ||
                                      g_screen == Screen::Characters ||
@@ -2666,6 +2689,7 @@ void build_rows() {
     case Screen::States: build_states(); break;
     case Screen::Slot: build_slot(); break;
     case Screen::SlotDelete: build_slot_delete(); break;
+    case Screen::SlotOverwrite: build_slot_overwrite(); break;
     case Screen::Options: build_options(); break;
     case Screen::OptionsPage: build_options_page(); break;
     case Screen::Graphics: build_graphics(); break;
@@ -2727,6 +2751,10 @@ void go_back() {
     case Screen::SlotDelete:
         g_screen = Screen::Slot;
         g_selected = delete_row();
+        break;
+    case Screen::SlotOverwrite:
+        g_screen = Screen::Slot;
+        g_selected = 0;
         break;
     case Screen::Controls:
         controls::set_menu_player(0);
@@ -3125,7 +3153,7 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
     g_selected = launcher_main_row();
     // ED_MENU_OPEN=options, graphics, display, sound, image, shadows, lighting, effects, game,
     // controls, mapping, mods, coop, challenge, characters-page, cheats, characters, load,
-    // states, slotN or deleteN[,row] (testing): the launcher opens on that page, at that
+    // states, slotN, deleteN or overwriteN[,row] (testing): the launcher opens on that page, at that
     // row; controls2 and mapping2 show player 2's, slotN and deleteN slot N's.
     if (const char* page = std::getenv("ED_MENU_OPEN"); page != nullptr) {
         g_options_return = Screen::Launcher;
@@ -3138,6 +3166,7 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
                    : std::strncmp(page, "states", 6) == 0  ? Screen::States
                    : std::strncmp(page, "slot", 4) == 0    ? Screen::Slot
                    : std::strncmp(page, "delete", 6) == 0  ? Screen::SlotDelete
+                   : std::strncmp(page, "overwrite", 9) == 0 ? Screen::SlotOverwrite
                                                            : Screen::Options;
         static const struct {
             const char* name;
@@ -3154,8 +3183,10 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
                 g_screen = p.screen;
                 (p.screen == Screen::ModsPage ? g_mods_section : g_options_section) = p.section;
             }
-        if (g_screen == Screen::Slot || g_screen == Screen::SlotDelete)
-            g_slot_chosen = std::atoi(page + (g_screen == Screen::Slot ? 4 : 6));
+        if (g_screen == Screen::SlotOverwrite)
+            g_slot_from_states = true;
+        if (g_screen == Screen::Slot || g_screen == Screen::SlotDelete || g_screen == Screen::SlotOverwrite)
+            g_slot_chosen = std::atoi(page + (g_screen == Screen::Slot ? 4 : g_screen == Screen::SlotDelete ? 6 : 9));
         const char* digit = page + std::strcspn(page, "2,");
         controls::set_menu_player(*digit == '2' ? 1 : 0);
         const char* comma = std::strchr(page, ',');
