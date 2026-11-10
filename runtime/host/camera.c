@@ -1617,7 +1617,10 @@ void camera_split_update(CPUState* cpu) {
         return;
     }
 #ifdef ED_AURORA
-    if (hle_coop_screen()) {
+    // Or the cameras lent to them with no close-up on the screen (their scene from a Tome item while player 1 is in a
+    // scene of their own): the game's camera is still theirs, and player 1's half showed it, player 2's block scene in
+    // both halves until it ended (the user, 2026-11-10, logs/run-20261110-151526-scenes-user5 13470 to 13794).
+    if (hle_coop_screen() || hle_coop_cameras_lent()) {
         // Theirs in their half at its shape, as player 1's close-up is: the
         // game's camera is theirs, and player 1's half is drawn from player 1's,
         // following them, as player 2's half is at other times.

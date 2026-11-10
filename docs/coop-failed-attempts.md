@@ -676,3 +676,7 @@ it, then into the room's zombies at about y 2350, which hold and kill them (stat
 ## Player 2's own words from a zone (2026-11-10)
 
 **Standing player 2 by the focus pass-over.** With the words a close-up of theirs, player 2 ran on in their last motion (logs/run-20261110-134509-statue-look5). Re-running the pad update (0x8013E518) inside their turn with the window's channel as the focus (r13-23556/-23552), so 0x8013E1A0 would pass the controller's channel over, changed nothing (statue-look6, player 2 still from y 753 to 1928): the stick the controller moves them by isn't a channel's. What works: the game's own hold of the control channels, 0x80199EA0(0), with their copy in, and 0x80199EA0(1) there after the words (statue-look7).
+
+## Player 2's pickup beside player 1's block scene (2026-11-10)
+
+Player 1's scene stood still through player 2's find. Two guesses before reading the code, each built and played once: (1) running the script timers (0x80163E00) from `coop_script_timers` with the find's words cleared: never reached, the main loop skips that call before any hook runs; (2) masking busy 16, r13-25932 and r13-24048 bit 2 around the camera step in `coop_player1_camera`: the step reads none of them. The gate was the main loop's own ask of the find flag (0x8011727C(2) at 0x80008490) before the timers. Read first: `read-gates-before-building` in memory.
