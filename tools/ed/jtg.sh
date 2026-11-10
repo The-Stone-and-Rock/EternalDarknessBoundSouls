@@ -54,7 +54,8 @@
 #   JTG_FRAMES=N closes the game N frames after JTG_BASE (default 600). ED_RUN_FRAMES=N (absolute) wins if set.
 # Absolute ED_INPUT_SCRIPT / ED_PAD2_SCRIPT / ED_PUT given as well are kept (added after the relative ones); any other
 # env (ED_RUN_SCRIPT, ED_COOP_P2_PUT, ED_ANIM_TRACE, ED_CAM_LOG...) passes straight through to the game.
-# Those are NOT shifted: ED_COOP_P2_PUT=frame,... is an absolute frame; ED_RUN_SCRIPT=DELAY:SCRIPT counts DELAY from the
+# Those are NOT shifted: ED_COOP_P2_PUT=frame,... is an absolute frame; ED_SET_FLAG=DELAY:FLAG (a door's flag, before its
+# ED_RUN_SCRIPT) and ED_RUN_SCRIPT=DELAY:SCRIPT count DELAY from the
 # first pad read after boot (hle.c test_run_script), i.e. about the absolute frame, so give it a delay past control.
 # Reading a run: both.tsv's p1sx/p1sy (and so `ed timeline`'s "PUSHES, STILL") do NOT show ED_INPUT_SCRIPT's stick:
 # player 1 pushing a wall shows as "stands". Player 2's scripted stick is recorded. jtg-report.txt in the run has the

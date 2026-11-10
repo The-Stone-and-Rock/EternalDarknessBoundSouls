@@ -672,3 +672,7 @@ Their camera's path never moved: `coop_player_turn` returns at busy before `coop
 **Testing it:** walking player 2 down room 183's corridor with test input from slot 1, they walk into player 1 standing in
 it, then into the room's zombies at about y 2350, which hold and kill them (state 7, health falling): neither is this bug.
 `ED_COOP_P2_PUT` to y 2000 skips the plane (no scene); y 2300 is before it.
+
+## Player 2's own words from a zone (2026-11-10)
+
+**Standing player 2 by the focus pass-over.** With the words a close-up of theirs, player 2 ran on in their last motion (logs/run-20261110-134509-statue-look5). Re-running the pad update (0x8013E518) inside their turn with the window's channel as the focus (r13-23556/-23552), so 0x8013E1A0 would pass the controller's channel over, changed nothing (statue-look6, player 2 still from y 753 to 1928): the stick the controller moves them by isn't a channel's. What works: the game's own hold of the control channels, 0x80199EA0(0), with their copy in, and 0x80199EA0(1) there after the words (statue-look7).

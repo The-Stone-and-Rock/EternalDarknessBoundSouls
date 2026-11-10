@@ -4,11 +4,20 @@ Written 2026-11-02. Read this first, then update it at the end of the session.
 
 ## Start here (updated 2026-11-03)
 
+**2026-11-10 afternoon: room 183 played and confirmed by the user** (the scene camera, player 1's block with player 2 walking; a fifth cause, the hide rule, in `docs/coop-todo.md`). **Then room 182's statue words** crossed into by player 2 went to player 1's half with nobody held: a window opened inside player 2's own look lived in their input copy. Now a close-up of theirs (`coop_prompt_look`, `coop_window_to_game`), their body held by the game's own channel hold in their copy; script-checked (statue-look7), the user's second play pending: `docs/coop-todo.md`. Also there: a block from player 1's Tome in the copy ran as player 2's (fixed, unplayed), and player 1's copy item waits for player 2's scene to end (by design, to decide). Then (the user's third play): the cameras stayed lent after player 2's block scene and player 1's examine went to their half; now one rule at every pad read gives them back when nothing of player 2's is up (unplayed), and the lend carries each player's live view both ways (both halves jumped as player 2's block scene ended, blocks-user3 8676). The user asks for different examines and uses at the same time by both players: the game has one words window, one close-up stepper and one scene flag; see the note at the end of `docs/coop-todo.md`'s open issues. New test hook `ED_SET_FLAG=DELAY:FLAG` (the `ed` skill) for doors a save hasn't unlocked.
+
+**2026-11-10: every glitch the user reported from 2026-11-07 on is checked against HEAD in `docs/coop-glitch-todo.md`:** open, partial, fixed-unplayed and confirmed, with the first step for each and the four whole-game rules behind most of the open ones. The kit's saves and `ed test` scenarios are outdated: only `saves/slot1.state` (2026-11-09) is current.
+
 **2026-11-09: room 183 (Pius's chapter, the block holes) fixed and played by the user.** Player 2 starting the scene no
 longer holds them for good, and a form keeps its shape after a save state is loaded (save states now carry the forms' own
 bodies, section COFM: saves made before this don't, so remake them from Jump to Game). Details in `docs/coop-todo.md`.
-**Next (the user):** in that room, player 1's controls go backwards when player 2's scene starts, and each player's camera
-stays on whoever triggered it. The user's new save state 1 is at the room 180 door.
+**2026-11-10, uncommitted, not yet played by the user:** in that room, player 1's camera stayed on player 2 through player
+2's scene (player 2's scene turns the game's zones off, and player 1's look with them off only clears: now on for player
+1's look, as in player 2's close-up), player 1's stick went by a view kept from player 2's last close-up, player 2 was held
+through player 1's block scene (a hold set with player 1 the player is player 1's, whatever else is up), and a block used
+from player 2's Tome played in player 1's half (now a use of theirs). Under all of it one owner for the camera set
+(`g_coop_set_in`, `coop_cameras_in`, `coop_script_cameras`): a script runs with the set of whoever is the player, whatever
+route reached it. All in `docs/coop-todo.md`, with what to play. The user's save state 1 is at the room 180 door.
 
 **Status on 2026-11-08: everything below up to f2b2565 is committed and released as v0.1.0 (pre-release).** The entries below are a dated log. Their "uncommitted" and "not yet played" were true when written, and many aren't any more. Played and confirmed by the user: the dream (camera, Shotgun in and out, no Tome), player 2's reload and the Dual Flintlocks, Anthony's and Ellia's gun moves (hair and reload), the fireplace puzzle, its flare and icons, and the menus. Also fine as far as the user knows (2026-11-08): E1 enemies seeing player 2, the monk's bell rung by player 2, player 1 vanishing after the fireplace. Not played yet: Summon Trapper's switch, W2 FINISH prompt. **Next (the user, game-breaking): I2/I4, Enchant Item mending Anthony's chapter's broken urns.** The user will make a save with the spells, where they can mix and enchant the urns, and trace solo first. The Cheats menu's all-spells option is bugged (not looked into; the user will get the spells another way). Still open:
 
