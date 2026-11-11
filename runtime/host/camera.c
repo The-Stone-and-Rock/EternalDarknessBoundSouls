@@ -1545,6 +1545,7 @@ bool hle_coop_player2_held(void);
 bool hle_coop_screen(void);                                    // hle.c
 bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* zoom);  // hle.c
 bool hle_coop_dream_shift(CPUState* cpu, float shift[3]);                              // hle.c
+bool hle_coop_player2_close_up(void);  // hle.c: player 2's own close-up is up (ED_COOP_OWN_CLOSEUP), its camera their view
 bool hle_coop_player1_copy_up(void);                             // hle.c: their Tome's in a copy, the real world plays on
 bool hle_game_menu_open(CPUState* cpu);                         // hle.c
 bool hle_coop_tome_shares(void);                                // hle.c
@@ -1719,7 +1720,8 @@ void camera_split_update(CPUState* cpu) {
     Vec3 eye2, focus;
     // The game's own camera, as its zones set it for player 2 (Original).
     float own_eye[3], own_target[3], own_up[3], zoom2 = 1.0f;
-    if (g_settings.mod_p2_camera == 2) {
+    // And in any mode while their own close-up is up (hle.c, step B): its camera is in their own set, stepped as Original's.
+    if (g_settings.mod_p2_camera == 2 || hle_coop_player2_close_up()) {
         // Before their first step (the game's opening pan, a new room), the
         // game's as it is.
         const bool own = hle_coop_player2_camera(own_eye, own_target, own_up, &zoom2);

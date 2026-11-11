@@ -680,3 +680,21 @@ it, then into the room's zombies at about y 2350, which hold and kill them (stat
 ## Player 2's pickup beside player 1's block scene (2026-11-10)
 
 Player 1's scene stood still through player 2's find. Two guesses before reading the code, each built and played once: (1) running the script timers (0x80163E00) from `coop_script_timers` with the find's words cleared: never reached, the main loop skips that call before any hook runs; (2) masking busy 16, r13-25932 and r13-24048 bit 2 around the camera step in `coop_player1_camera`: the step reads none of them. The gate was the main loop's own ask of the find flag (0x8011727C(2) at 0x80008490) before the timers. Read first: `read-gates-before-building` in memory.
+
+## Player 2's own close-up (step B, 2026-11-10 night)
+
+**Zones off round their scan while their words are up, under their own close-up.** Step A zeroes r13-23040 round player 2's
+scan while their own words are up (its guard against a second zone's ed12 opening a second window). Under their own kind-2
+close-up (ed219's DETAIL words) a scan with the zones off cleared their inside words (0x80134BE8), so the look after their
+words closed re-entered the camera zone they stood in and ran its ed219 again (script 90 at 15621 in
+logs/run-20261110-212651-stepB-run2b-p2first): it asked EXAMINE over the stepper's RETURN and refilled the look record, and
+player 2 stood held for good with EXAMINE as their only prompt, which the close-up refuses. The game's stepper hold turns
+no zones off, and player 1's own close-up (the game's own words hold) never re-enters: now no zones-off while their own
+close-up is up (`coop_prompt_look`), and RETURN comes (logs/run-20261110-213050-stepB-run2-p2first). Whether the game's
+words hold really turns the zones off for the player, as step A assumed, is not read; player 1's close-up in co-op says
+the game's scan doesn't clear inside words then.
+
+**Test spots in room 183.** CameraRgn05's centre (1433, 1661) has no floor: put there (ED_PUT, collided to z 130) player 1
+fell for ever (logs/run-20261110-211939-stepB-run1-p1alone). Puzzle_Mkr04 (1305, 1508, 185) is inside the zone and on the
+floor. Player 2 at CameraRgn03's centre (-114, 2004) stands at z 178; walking the stick up from there (toward the wall)
+drops them off the floor's edge (both with and without a close-up: run1b and run2): walk them down (ldown) after a test.

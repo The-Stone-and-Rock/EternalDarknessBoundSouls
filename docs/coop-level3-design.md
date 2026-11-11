@@ -873,3 +873,43 @@ WATCH, NOT SCRIPTED (REVIEW 1): the refusal-branch ease (B6) cannot be scripted 
 - CONFIRMED [read asm 33234-33330 (0x80024B24)]: kind 2/3 (+0 == 2 or 4): +0 := 0 first (0x80024B98-0x80024B9C); count (+8) <= 0 -> skip everything to 0x80024C14; count == 2 -> 0x80024384 (the words' cancel) first; then 0x80199EA0(1) at 0x80024BC8, 0x801ECCEC at 0x80024BCC, 0x801EEA9C at 0x80024BF0 unless +24&1, 0x80043C88(1) at 0x80024C0C if +24&4, 0x8002576C at 0x80024C10; r3 (the arg) != 0 -> 0x80163C6C + 0x801642D4(+4, 0, 0) at 0x80024C58; the design's guest call with r3 = 0 skips the script. With PROMPT_LOOKS+64 := .index, their looks in, and the identity/copy/set swaps listed in B12, the cancel's calls land in their tables; its 0x80043C88(1) show (owner by coop_p2_words_call(), set true by g_coop_p2_words_tick = true in the cancel) and 0x8002576C (lr 0x80024C14, in the intercept's list) are covered.
 - NOTED [read + inf]: the stepper sets the player object's flag 4 (0x801223B8 at 0x80024E84 press 0, 0x800250D0 press 2; kind 3 at 0x800251E0/0x800253C4/0x80025510) and the kind-2 RETURN path (0x80025114-0x80025198) has no 0x801223B8: whatever clears flag 4 on player 1's object after a RETURN is outside the stepper and was not read in this pass. On the own route the flag is set on player 2's object (r13-26524 swapped) exactly as today's lend route sets it (coop_be_player2 in the use), so this is today's behaviour, not a step-B regression; log the object's flags at the open and after RETURN in RUN 2 to see where it clears.
 - NOTED [read]: the design's statement that the stepper's 0x801EE8E0 for record 10 does not count as a room choice holds: coop_camera_chosen's CAMERA_CHOOSE path requires gpr[3] == CAMERA_EYES + CAMERA_ROOM_RECORD * CAMERA_RECORD (record 2's eye, 15534), and 0x801EE8E0(hash, TB[10], ...) passes TB[10]'s eye; its own by-hash lookup has an lr inside 0x801EE8E0, not 0x801F0670/0x801F07C0, so only the two camera TESTS (0x801F0638 at 0x80024EF0, 0x801F077C at 0x80024F18, and the walk's) reach the p2_bare clear: the g_coop_p2_stepper_in exemption's scope (round the look's guest call, the tick's step while .up, the cancel) is the right one.
+
+# Step B build record (2026-11-10 night)
+
+Built from the text above with its two corrections, behind `ED_COOP_OWN_CLOSEUP=1` (only with `ED_COOP_OWN_WORDS=1`; unset,
+every new branch is off and the two intercepts aren't registered). What the build is, site by site, is in the comments at
+`g_coop_p2_look` (above `coop_play_hold`), `coop_own_closeup`, `coop_p2_own_cancel`, `coop_words_tick`, `coop_prompt_look`'s
+press and choice, `coop_hide_others`, `coop_show_asked`, `coop_p2_cameras_rest`, `coop_player_turn`'s refusal and mask loop,
+`coop_p2_press_held`, and camera.c's own-view branch. Two small departures from the text: `coop_camera_p2_in`'s and the
+scene-over `rest` are true whenever the switch is unset (today's path kept byte for byte), and the hide intercepts are
+registered only with the switch on; the per-owner hide bookkeeping (B10) keeps one flag's behaviour when unset. Two
+changes the text keys on step A's switch alone (ED_COOP_OWN_WORDS=1, the close-up switch unset) and so change step A's
+path: B5 (the words' close script's use takes no assist and tests only what the script itself set busy) and
+tome_copy_p1_left's wait on their own words.
+
+What the scripted check found and the build changed: step A's zones-off round their scan while their words are up cleared
+their inside words under the close-up, and the look after the words re-entered the zone and ran ed219 again over RETURN
+(docs/coop-failed-attempts.md, "Player 2's own close-up"): no zones-off while their own close-up is up.
+
+The runs (saves/slot2.state loads in room 183 at frame 14872; player 2 put at CameraRgn03's centre, player 1 at
+Puzzle_Mkr04 inside CameraRgn05; presses 100 frames apart, three pages scrolled, ED_FIN_LOG=1 ED_SHOW_TRACE=1):
+- run1-p1alone (logs/run-20261110-213017-...): player 1's own close-up as today ("player 1's close-up holds them alone",
+  hidden from their own view, words with no hold, RETURN, script 92), player 2 walking through it, the intercepts passing
+  through.
+- run2-p2first (-213050-) and run3-p1first (-213123-): both close-ups at once in both orders. Player 2's: "own close-up
+  held in their copy (the game's word kept 0 / 2)", "player 2 is hidden from their own view alone", "hides 0 of the room's
+  others (0 seen)", DETAIL in their half, "own words open in their copy", their stick under the hold moves them nothing,
+  their B closes the words in their tick and press 2 runs there ("after their words: look 1 kind 2 count 3; slots 4:7/-2/4"),
+  RETURN shown and pressed ("let go in their copy", the show for owner 1, "shows the room's others again"), "closed with
+  script 90: it runs as theirs at the controller", "script 90 runs for player 2", EXAMINE back. Player 1's half untouched
+  by any of it. Sheets: sheet-15010-15960.jpg in each run (both halves on their own hole's camera at 15110, each player's
+  words in their own half, both back on Camera01 at 15960).
+- run2m0-p2first (-213156-, ED_SETTINGS with mod_p2_camera = 0): the same, their close-up camera in their half in mode 0,
+  the third-person camera back the frame RETURN ends it (the known cost).
+- run4-roomchange (-213228-, ED_RUN_SCRIPT=400:119,460:119 under their open close-up): "own close-up cancelled: a new
+  room's zones (look 1, words closed)" with the show and the hide-end intercept first, player 2 brought to room 180 and
+  walking, no hang.
+Not checked by script (the text's watch list): the refusal-branch ease (needs player 1's busy word refusing the turn:
+log line "own close-up camera stepped in a refused turn"), player 1 standing inside player 2's close-up frame (counted,
+not hidden: "player 1 in view" in the hide line), a Tome during their close-up (step D), real controllers, the feel of
+the hold. `ed test` was not run (its saves are outdated, docs/coop-next-session.md).
