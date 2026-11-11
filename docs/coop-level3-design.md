@@ -1549,3 +1549,158 @@ ED_ITEM_SPAWN=15000,113,113,300,2 at (982,1231), picked up through the world's o
 on: today's lend route line for line, 'player 2's find opens: theirs', 'close-up for player 2', 'placement: player 2's thing
 placed by the lent camera, the game's own', the close at 15551 'theirs', its after-script 1495 as player 1's with their cameras
 in, player 2 walking after).
+
+# Step D: the Tome beside player 2's own words, close-up and find (2026-11-11)
+
+## The build record
+
+The user's decision (option A): player 1 opening, using and closing their Tome must not touch player 2's own words,
+close-up or find at all, player 2's Tome must not touch player 1's examine, and nothing of either is closed because the
+other opened a Tome ("no co-op game would disrupt a function of another player because they checked their inventory").
+
+## What six readers found on HEAD 16b844e (the whole text in the session's scratch, stepd/reports.md)
+
+Most of option A was already true by construction. Player 1's Tome is the game's mode 3, and the host alternates the
+frames strictly, world, Tome, world (`tw_mode_change`, TW_WORLD_FRAMES 1). The world's frame 0x800083C8 runs everything
+of play: the controller (so `coop_player_turn`, whose gate has no Tome test), the script timers, the event pump, the
+stepper 0x80117628, the words tick 0x80024AF0 at lr 0x80008500 (`coop_words_tick` runs there: `game_menu_open()` is
+`!tw_world_turn()` under sharing), the placement pass, the draw. The Tome's frame 0x80111234 runs 0x80024AF0 at lr
+0x80111488 (the game's own window only; the tick refuses that lr), the Tome's own channels, `0x8014FDB8` on the Tome's
+own behaviour list (r13-23456 objects off: the world's drawables are never placed in a Tome frame) and the text pool's
+draw. Player 2's pad under player 1's Tome keeps their action bindings, Start stripped, A/B/PICK UP into their copy on
+world turns. Player 1's Start is gated by the game alone on player 1's own state (0x80006CDC: r13-25696, the control
+channels' +16, event 135, the casting word; the in-play channel is passed over while a words window holds the focus
+r13-23552); nothing of player 2's own set is in those words, and the host never refuses player 1's Start. The Tome's open
+costs 13-27 frames of Tome-only frames (the book's load, before `tw_tome_start` sets `have_world`): the whole world
+stands then, player 2's presses in that window are dropped (the two-Tome work's behaviour, not step D's).
+
+The gaps: player 2's Start opened their copy over their own window (their pad then went to the copy while their window
+ticked with no input); a Tome item used by player 2 (`tome_copy_left`) ran its script in the game's words with the old
+screen route (g_coop_screen, the cameras lent, player 1's pad taken) when words or busy were up after, and its busy test
+read player 1's own close-up as the script's; the deferred close script's consumer tested neither the game's words window
+(the mode-2 enter runs ed9's left script with no hold test) nor player 1's Tome (its frames step the one -25960 with
+player 1's pad: logs/run-20261106-044758); a state load didn't reset `g_coop_p2_words`; a save with their window up
+wasn't held.
+
+## Refuted before the build (five refuters on the design, stepd/refute.md)
+
+- D1, clearing the Tome's prompt bit 0x10 of r13-24048 in the world's frames for player 2's own prompts: unnecessary and
+  harmful. Player 2's own prompts are chosen and drawn by the host (`coop_prompt_look`'s tail, `coop_prompt_show`), never
+  by the game's chooser 0x80117628, whose one caller is the world frame with the GAME's slots in; with the bit cleared the
+  chooser would make player 1's zone prompt ("B EXAMINE") and the Tome's frame would draw it over the page. The bit stays
+  (the existing clear is the lend route's); logs/run-20261111-061558-stepD-pre-R1 and its sheet-3900-4340.jpg (today's
+  code) already show player 2's PICK UP prompt under player 1's Tome.
+- D7, the placement intercepts passing through on a Tome frame: dead code. 0x8014EE5C picks the behaviour list by
+  r13-23456 (1: the Tome's r13-23432), so the found thing's placement never runs in a Tome frame.
+- D3 as first written would have frozen player 1: `coop_states_swap` swaps only the script table; the words' open
+  registers its channel (0x8013DB3C, the table at 0x80588150 inside COOP_INPUT) and focus (0x8013DB1C, r13-23556) in
+  whatever INPUT copy is in, and `tome_copy_left` never put player 2's in. Built with `coop_state(&g_coop_state[1])` in
+  round the run, as `coop_words_tick` does.
+- D4 as first written waited on the game's words only; under player 1's Tome the one -25960 is stepped by the Tome's
+  frame with player 1's pad, so a script of theirs that opens words behind the Tome would have taken player 1's B (the
+  2026-11-06 fault). Built to wait for the Tome too.
+- The cast's ask (hle.c 12324) needs no refusal: 0x80006CDC refuses the quick cast's Tome ask on their held channels in
+  their own copy. The copy's open needed its own guard for the frame where their Start is read before the look that
+  opens their window.
+
+## What was built (behind the A-C switches; unset, nothing changes)
+
+- `coop_p2_own_up()`: their own words, close-up or find is up. Their Start is refused with it (both ask sites in
+  `coop_menu_input`, one log per press) and `tome_copy_step` refuses the copy's open with it (the same-frame case), as
+  the game refuses the player's Start while words or a close-up hold play.
+- `tome_copy_left`: their input copy (`coop_state(&g_coop_state[1])`) and their words set (`coop_words_own_io`) in round
+  the item script's two runs, with `g_coop_p2_left_run` taken as a call of theirs by `coop_words_hold`'s own branch and
+  `hle_words_layout`'s +4096 only (`coop_p2_words_open_call()`; a scene's hold, a find's hold and `hle_coop_found` keep
+  today's route). Words the script opened are recorded as their own (`.up/.channel/.script`, closed by their B in their
+  tick) with no screen route and the cameras given back; the old route stays for a close-up or scene the script set, told
+  by the busy word CHANGING over the run (`busy_was`), not by player 1's own busy.
+- The deferred script's consumer waits while the game's words window is up or player 1's Tome is open (one log per
+  wait; g_coop_close.script and g_coop_use_script wait with it).
+- A state load zeroes `g_coop_p2_words`; `hle_save_held` holds a save while their own window is up (quickstate.c says
+  so once); `coop_player_held` counts their find's hold; two WARNING logs at the mode switch (their set in memory there,
+  or the old words split on beside their set), never expected.
+
+## The runs (saves/jtg-ch1-room183.state, fresh from Jump to Game, loads at 3652; the chain in the scratch's
+stepd/runs-d.sh; ED_SHOW_TRACE=1 ED_FIN_LOG=1; the picker at (360,340) in BlockRegion01)
+
+- r0-unset-behind (logs/run-20261111-063818-): switches unset, player 1's Tome at 3700 and player 2's PICK UP behind it:
+  the 2026-11-06 lend route line for line ('player 2's close-up behind player 1's Tome: the world's pad is theirs', the
+  words split, 'their cameras are theirs again'), no step D line.
+- r1-tome-over-words (-063842-): their words open 3880, player 1's Start 3930 ('player 1 has the screen', 'the world
+  goes on behind the Tome' by ~3957), their B 4080 closes their words under it, PICK UP 4180 ('own find from lr
+  0x800254F4', flags kept 0x10: the Tome's bit, harmless), their B 4331 closes the find, 'own script 1181 waits: player
+  1's Tome is open' 4332, player 1's Start 4400 ('play goes on: the pad is player 1's again'), 1181 as theirs 4404,
+  player 1 walks 4507-4613. sheet-3900-4420.jpg: the Tome page alone in player 1's half; their text, their PICK UP
+  prompt, the floating block with "Ellia has picked up a Granite Block." in player 2's half; the room again after.
+- r2-tome-first (-063904-): the Tome at 3700, the whole PICK UP under it: the same lines.
+- r3-closeup-tome-twice (-063927-): their hole close-up (kind 2) with player 1's Tome opened and closed twice inside it
+  (3850/4000, 4150/4300): their words open 3880 and close 4130 between, RETURN 4380 ('press id 7', script 90 as theirs).
+- r4-p2start (-063949-, and the corrected run): their Start at 3930 during their own words refused (the log line), at
+  4150 and 4350 refused again while their kind-3 close-up stayed up (PICK UP asked, by the rule); the corrected run: see
+  below.
+- r4b-script-waits (-064012-): player 1's hole words up from 3950; their find's close queues 1181 at 4332, 'waits: the
+  game's words are up'; player 1's B 4500; 1181 as theirs 4501.
+- r5-item-leaves (-064036-): the block picked up, player 2 at the wrong hole, the block used from their Tome (start
+  4400, a 4550, a 4700): the copy closes its own way out, 'item leaves script 2116', 'ran as theirs: words 0, busy 0,
+  cameras lent 0', 2116 as theirs 4761, player 1 walking through all of it.
+- r5b-item-leaves-p1hole (-064103-): the same with player 1 in a hole close-up: FAILED on the first build ('busy 1,
+  cameras lent 1': the screen route took player 1's pad, their RETURN never came, 'player 1's prompt 7 in player 2's
+  close-up'); the busy test made relative (`busy_was`), rebuilt, rerun: see below.
+- r6-tome-over-find (-064131-): player 1's Start at 4182 right after their PICK UP: the placement's ten traced frames
+  4185-4195 run on world turns behind the Tome ('the world goes on' before them), the find closes under it 4332, 1181
+  waits, runs at 4354 after the Tome's close.
+- r7-save-waits: the first run asked the save with their close-up still up to the end (my presses): nothing saved, as
+  held; the corrected run: see below.
+- The corrected runs: r4 (logs/run-20261111-064433-stepD-r4-p2start): their Start at 3930 during their own words refused (one
+  line), their RETURN closed the close-up, the Start at 4200 opened their copy beside player 1's hole close-up and the one at
+  4400 closed it, player 1's RETURN ended theirs. r7 (-064524-stepD-r7-save-waits): the save asked at 3950 with their words up
+  waited ('the save of saves/tmp-stepd-held.state waits for player 2's Tome, words, close-up or find to close', once) and was
+  written once their PICK UP had closed. r5 (-064649-stepD-r5-item-leaves): as above, player 1 walking through all of it.
+- r5b, three builds and HEAD: FAILED the same way every time, and HEAD (16b844e, step C, built as build-win/var-head.exe from
+  the reversed diff: logs/run-20261111-064940-stepD-r5b-HEAD) shows the same lines at the same frames: 'script 1103 runs as
+  player 2's with player 1's cameras in' 4701, 'item script 2116 ran as theirs: words 0, busy 1' 4702 (HEAD: cameras lent 1
+  at once; build 3: lent 0 there, lent at 4765), 'script 2116 runs for player 2' 4761/4765 with 'controller took player 1's
+  turn in player 2's screen: busy 2 ... screen 1 ... lent 1' and '[trace] busy r3 2 r4 0 lr 0x80199F28 who 1' (the use's end
+  clears hold bit 2 of the game's one busy word, which is player 1's close-up's hold too), 'player 1's prompt 7 in player 2's
+  close-up', and after player 1's RETURN at 4950 ('look stage 2 script 90 count 1') nothing more of player 1: on HEAD the
+  game ran on to frame 575908 with 'lent 1' in every gate line (the run's frame limit didn't close a variant exe:
+  tools/ed/.run_exe_tmp.sh now kills the RUN_EXE's own name). So the fault is step C's and older, not step D's: the use
+  route (`coop_use_start`'s end, `busy_new = coop_busy(cpu)` for a use that isn't a close one) takes player 1's close-up's
+  busy for the use's own and goes the screen route, and the game's one busy word has one bit 2 for both players' holds. The
+  whole-game fix is the busy word per player (the 'Half' row of docs/coop-todo.md's table), not a step D guard. Step D's two
+  changes on the way (`busy_was`, the plain branch's `g_coop_assist_at = 0`) stay: they take `tome_copy_left`'s own screen
+  route out of this case (build 3's 'cameras lent 0' at 4702), and docs/coop-failed-attempts.md has them as attempts at r5b.
+
+## The build's review (2026-11-11 morning, three refuters: the swaps, the gates, the Tome frames)
+
+The user agreed to a lighter pass than step C's 21 agents. Three findings held, all fixed in build 4:
+
+- **(gates) The unset route was no longer HEAD's.** `tome_copy_left`'s screen-route test read the busy word CHANGING over the
+  run (`busy_was`) whether or not the own run was on, so with the three switches unset a Tome item of player 2's beside player
+  1's close-up took the plain branch where HEAD took the screen route. A fix of the logged fault, but ungated, and r0 never
+  reached the Tome item. Now `own_run ? busy != busy_was : coop_busy(cpu)`: the unset route is HEAD's again, fault and all.
+- **(gates) Player 2 unlisted with their own window up.** An area change (`coop_pad_read`'s 'player 2 is gone') zeroes
+  `g_coop_p2` and nothing then clears their own set: the tick and the cancel return at the same gate, the spawn and the adopt
+  set `g_coop_p2` again without touching it. With step D that meant `hle_save_held` true for good (every save waiting) and
+  their Start refused for good once they were back; from step A on, `tome_copy_p1_left` was blocked by the same `.up`. Now
+  one `coop_p2_own_clear()` (the three sets and `g_coop_p2_left_run`), called at the 'player 2 is gone' site (logged when a
+  window was up) and by `hle_coop_state_load` in place of its four lines. Not scripted (an area exit with their window up).
+- **(gates) Their cast's Tome ask dropped without a back-out.** `coop_quick_cast` runs in their turn, which their own hold
+  never refuses, so a D-pad spell needing an item asked for their Tome (state 64, `g_tome_copy_spell_set`), and step D's
+  refusal in `tome_copy_step` cleared the ask and returned: neither the cast nor `tome_copy_left`'s back-out ran, and player
+  2 stayed in state 64, where every later cast is refused. Now no cast begins under their own words, close-up or find
+  (`coop_quick_cast`, as the game's controller begins none under a hold; logged with ED_COOP_LOG), and the refusal backs an
+  asked cast out (`tome_copy_cast_back_out`, the branch `tome_copy_left` had, shared). Not scripted (chapter 1's room 183
+  has no spell for player 2 to cast; the user's play of a D-pad cast during their own text is the check).
+
+Pre-existing and left: `tome_copy_step`'s not-world_stays branch (a cutscene or a mode change as their cast asks) clears the
+ask with `tome_copy_left(cpu, 0, ...)` and `g_tome_copy_spell_open` false, so that cast isn't backed out either; in
+docs/coop-todo.md's open issues.
+
+Refuted by the same pass (not real): the two COOP_RUN_SCRIPT calls leave no swap in on any path (the room-change case skips
+only `.up`, and no Tome item both opens words and asks for a room); the deferred script's wait ends with the game's words or
+the Tome, which player 1 closes, and the waited script never is the one that closes them; the Tome's frame can't see their
+set in memory (the three flags are set and cleared inside world-frame calls, so the WARNING logs stay silent); the memset at
+a state load leaves no registered channel (the load replaces the input table too).
+
+The recheck of build 4: `saves/jtg-ch1-room183.state` remade on it from Jump to Game (logs/run-20261111-094915-jtg-stepD4-state, the door chain 101, 105, 111, 29 twice each; loads at 3650), then the whole chain (logs/run-20261111-0950*..0954*-stepD-r0..r7): r0 today's lend route line for line with no step D line; r1, r2, r3, r4b, r6 as in the build record; r4 the Start at 3930 refused, then 'player 2's Tome opens in the copy' after their RETURN; r5 'ran as theirs: words 0, busy 0, cameras lent 0', player 1 walking; r7 the save held once and written (35.6 MB) after their PICK UP; r5b failing as at HEAD (the busy word). New in every run with a D-pad page turn under their words: 'player 2's quick cast refused: their own words, close-up or find is up' (the page still turns in their tick; the cast is the game's refusal under a hold). The D-pad cast with a spell and the area change under their window stay for the user's play.

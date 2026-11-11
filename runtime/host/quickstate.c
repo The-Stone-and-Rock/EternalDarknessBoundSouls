@@ -820,8 +820,13 @@ bool quickstate_service(CPUState* cpu) {
         return false;
     }
 #ifdef ED_AURORA
-    if (g_queue[0].kind == QS_SAVE && hle_save_held())
-        return false;  // player 2's Tome open: saved once it closes
+    if (g_queue[0].kind == QS_SAVE && hle_save_held()) {  // player 2's Tome, words, close-up or find open: saved once over
+        static int said;
+        if (!said)
+            fprintf(stderr, "[quick] the save of %s waits for player 2's Tome, words, close-up or find to close\n", g_queue[0].path);
+        said = 1;
+        return false;
+    }
 #endif
     if (!at_safe_point()) {
         if (++g_idle_wait < QS_IDLE_PATIENCE)

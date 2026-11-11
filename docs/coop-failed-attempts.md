@@ -718,3 +718,23 @@ before the placement pass 0x800084D0) copies the live block and has 0x801E4BDC r
 rule made the point's offsets carry one frame of player 1's camera motion (x -7..-5 and z 163..154 in
 logs/run-20261110-235512-stepC-run2-p2find where the first call, with no previous frame, gave x 0 and z 139): the build's
 review. Now the block as the placement finds it (this frame's), `g_coop_place_view1` alone.
+
+## The Tome item used by player 2 beside player 1's close-up (step D, 2026-11-11)
+
+The scenario (stepd/runs-d.sh r5b): the Granite Block picked up by player 2, used from their Tome at the wrong hole (L01/1103 ->
+ed9(2116), the item leaves the Tome) while player 1 is in a hole close-up. Player 1's half goes to the screen route, their pad is
+taken ('controller took player 1's turn in player 2's screen'), 'player 1's prompt 7 in player 2's close-up', and their RETURN
+never ends their close-up. Two attempts in `tome_copy_left`, both kept (they are right on their own) and neither enough:
+
+- **The busy test made relative (`busy_was`):** the old screen route was chosen by `coop_busy(cpu)` after the run, which read
+  player 1's close-up's hold as the script's. Now the busy word CHANGING over the run. Build 2: the route at 4702 gone
+  ('cameras lent 0'), the same take at 4765 from `coop_use_start`'s end (`busy_new = coop_busy(cpu)`, a use that isn't a close
+  one) when the timers ran 2116 as a use of theirs.
+- **`g_coop_assist_at = 0` in the plain branch:** a lingering 1 from an earlier route kept player 1's half on player 2's view.
+  Build 3: the same take at 4765.
+
+Not step D's: HEAD 16b844e (step C) fails the same way at the same frames (logs/run-20261111-064940-stepD-r5b-HEAD, built as
+build-win/var-head.exe), and worse (the cameras lent at 4702 already, and for the rest of the run). The cause under both is the
+game's one busy word: the use's end clears hold bit 2 ('[trace] busy r3 2 r4 0 lr 0x80199F28 who 1'), which is player 1's
+close-up's hold too, and the use route reads that word as its own. The fix is the busy word kept per player (the 'Half' row of
+docs/coop-todo.md's table), a rule of its own, not a guard in step D. Open in docs/coop-todo.md.
