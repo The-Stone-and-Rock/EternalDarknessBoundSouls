@@ -86,6 +86,26 @@ Make a fresh state from Jump to Game for each check and throw it away when the c
 | | Each player's own torch | 13bb558 | both lit at once in the user's play (2026-11-08) |
 | | Forms lose their shape after a save-state load | 61c05c0 (COFM) | "That fixed it. Commit to that." (2026-11-09) |
 
+## The path to full co-op, by code (2026-11-10 night)
+
+Every open or partial code above, against the piece of work that resolves it. The levels are the plan in
+`docs/coop-todo.md` ("Both players acting at once"); their design and record are `docs/coop-level3-design.md`.
+
+| Work | Codes it resolves or unblocks | State |
+|---|---|---|
+| Level 1, two scenes at once (per-player scene records, `coop_scene_set`) | C2 (a scene plays only for its player, everywhere), C13, the scene halves of C1, C5 | Built and played 2026-11-10 (C13, C1); C2's general rule is this one, to be played across chapters |
+| Level 3 step A, a words window per player (`ED_COOP_OWN_WORDS=1`) | T2's words half, T3 (the second player's words no longer wait), T4 (words of player 2's in their own window), the words half of C3 | Built, script-verified both ways, unplayed |
+| Level 3 step B, a close-up per player (DETAIL, RETURN, PICK UP in player 2's own set and copy) | T2's examine half, C3 (the statue examine beside the Tome), E2 (enemies hidden only from the examiner's view: the hide-others rule), the rest of C9 to C12's route | Design pass running (readers, design, refuters) |
+| Level 3 step C, a find per player | T2's pickup half, U1 (a long item's words held player 2: an item's words are a window of the user's), the pickup half of T1 | After B |
+| Level 3 steps D and E (the Tome copy's interplay, save states, room changes, cutscenes while a window or close-up is up) | M4 and M2 (hangs and the menu after them, where a load or a reload meets an open window), U2 (the crash after a load), U3's open items | After C |
+| Level 3 step F (cleanup: one owner rule, the lend and the screen flag gone) | the "camera on the wrong player" family: C4, C7, C11, C12, U5's co-op part | After E |
+| Scene rule across chapters (level 1 played in chapters 2 to 12) | C2, C5, C6 | Play, with `ed chapters` |
+| Sanity per player (design first: which effects count) | S1, E5, C7's rune pads, E6 and E7 (the Trapper dimension is a sanity effect) | A design pass of its own |
+| Enemies and bodies | E3 (injured moves), E4 (stretched models), W1's leftovers, E8 (Summon Trapper's switch) | Each a reading pass on its function |
+| Items and Tomes | I5, I6 (the lists and counts), I8's leftovers, T5 (the Tome book's zone bit), U6 | Each a reading pass on its function |
+| Graphics | G1, G2, G4, G5 (the spells redo), U4 (particles facing each camera), C8 (the swirl) | The graphics review page first (`docs/graphics-review.md`), then one change at a time judged on the whole game in pictures |
+| Sound and menu | A1 (the pop), M1 (the title's press) | Each a reading pass on its function |
+
 ## The rules behind most of the open items
 
 Most open rows above are one of four rules not yet written once for the whole game:
