@@ -1704,3 +1704,98 @@ set in memory (the three flags are set and cleared inside world-frame calls, so 
 a state load leaves no registered channel (the load replaces the input table too).
 
 The recheck of build 4: `saves/jtg-ch1-room183.state` remade on it from Jump to Game (logs/run-20261111-094915-jtg-stepD4-state, the door chain 101, 105, 111, 29 twice each; loads at 3650), then the whole chain (logs/run-20261111-0950*..0954*-stepD-r0..r7): r0 today's lend route line for line with no step D line; r1, r2, r3, r4b, r6 as in the build record; r4 the Start at 3930 refused, then 'player 2's Tome opens in the copy' after their RETURN; r5 'ran as theirs: words 0, busy 0, cameras lent 0', player 1 walking; r7 the save held once and written (35.6 MB) after their PICK UP; r5b failing as at HEAD (the busy word). New in every run with a D-pad page turn under their words: 'player 2's quick cast refused: their own words, close-up or find is up' (the page still turns in their tick; the cast is the game's refusal under a hold). The D-pad cast with a spell and the area change under their window stay for the user's play.
+
+
+# Step E: a room change, a cutscene and a save/load under player 2's own words, close-up and find (2026-11-11)
+
+## What four readers found on fcbf71d (the whole text in the session's scratch, stepe/report-*.md)
+
+- A cutscene start (fn22 0x80042974, read whole) cancels nothing of a close-up or words: it holds the control channels,
+  sets busy 32, hides the prompts (bit 1 of r13-24048: the shown record wiped each frame, no slot let-go), zeroes the camera
+  stack OF THE SET IN MEMORY and puts record 2 on; its end lets go and clears bit 32. A full cinematic (ed55) adds mode 6
+  (its own input channel, the stack zeroed again, the player hidden, the actor list the cin pack's). Player 2's own window
+  pauses by itself: their tick refuses while cutscene_playing, their turn while busy; their set and copy are host memory, so
+  nothing of the game's is left inconsistent, and after a scene in the same room their window resumes. No cancel at a
+  cutscene start. Left: the close-scripts consumer ran mid-cutscene, and coop_show_asked's cutscene passthrough skipped the
+  clearing of their kept hide when their own cancel showed them.
+- A room change (0x80152298 -> 0x80151FDC -> 0x801172B0, the prompt slots' reset with callback 0x80024CDC -> 0x80024B24(0))
+  cancels PLAYER 1's close-up through its slot's script -2: at stage 1 (DETAIL asked) and stage 3 (RETURN asked), not at
+  stage 2 with the words showing (the DETAIL press cleared the slot's -2; the RETURN's -2 is asked only as the words close:
+  the review). Nothing closes plain words (a script's ed12, a door's): the window survived into the new room, player 1's B
+  there closed it and ran its script in a dead room, r13-25696 at 1 till then (the failed-attempt freeze). The game never
+  touches r13-25960 in the change. The element pool is not reset by a room change (0x801DA600 runs only from the pool's own
+  fade step; the pool is cleared at the start of play alone), so the host's cancel of player 2's own words in the NEW room
+  frees their own element rightly. coop_follow's memset of their look/find at the pad read lands AFTER coop_zones_new's cancel
+  in the normal order (both runs' logs), but FIRST when player 2's turn was refused in the change's frame (a cutscene's or a
+  menu's): their copy's channels then stay held with nobody to let go.
+- Save: every save is a queued request serviced at the main loop behind hle_save_held: a state can't hold their own window.
+  Not held: a use's script mid-run (g_coop_use.active: the state's lr is HLE_USE_RETURN, a stop on load: pre-existing),
+  look.held without .up, a queued close script, and the lend route's words of theirs (g_coop_p2_words_held: their channels
+  held in their copy, in the blob). Load: coop_p2_own_clear is right (the loaded RAM holds nothing of theirs); stale after a
+  load: g_coop_use, g_coop_assist_at, g_coop_screen and coop_menu_input's static owner (which rewrote both at the next pad
+  read), g_coop_p2_scripts, g_coop_close, g_coop_p2_words_held, g_coop_look_window_script, g_coop_words_theirs,
+  g_coop_cutscene.pending, the scene's and the sent thing's script, what player 1's Tome left for the world, their cast's Tome
+  ask, the found trio (cleared only with the find switch), and the flags of the game's own words/close-up (words_free,
+  find_free, p1_look, script_hold).
+
+## Refuted or corrected in the design (three refuters, stepe/refute results)
+
+- E2 as written tested the look record's kind == 0 and left a kind 2/3 to the slot reset: wrong at stage 2 (above). Now
+  the game's own 0x80024B24(0) for a kind 2 or 3, the bare 0x80024384 for plain words.
+- notify_room_change was never installed: tw_keep holds 0x80152298's intercept and the install needed intercept == NULL
+  (and ED_ROOM_LOG). Installed always now (tw_keep passes the world's own call through; the notify runs before the body).
+  The game's own prompt reset is skipped for a change with flag 4 (the Tome giving the room back, event 57's reload):
+  E2 too.
+- 0x80024384 closes nothing when the element isn't closable (flags +16: 0x4000 on, 0x8 off: a page not scrolled to its
+  end, or still typing): made closable first, and the log says "closed" only when r13-25960 is 0 after.
+- E4's reset of g_coop_p2_words_held regressed a load of a state saved on the OLD route with player 2's zone words up
+  (not held then): hle_save_held now holds on g_coop_p2_words_held and g_coop_words_theirs too.
+- E4's g_coop_screen/g_coop_tome_owner resets were overwritten at the next pad read by coop_menu_input's static owner:
+  g_coop_menu_reset makes its statics start over (owner, the waits, pad_held, quick_press, closeup_grace).
+- ED_LOAD_STATE moves the frame back: ED_RUN_SCRIPT's unsigned delay test then ran every script at once. The delays count
+  from the load's frame now (logged). ED_SAVE/LOAD_STATE entries are absolute and re-arm after a load: put a load last.
+- E6's rationale was wrong (the cancel's show always goes through the game's main word by design; the passthrough skipped
+  only the clearing of their kept hide): the change stands, the comment says so.
+- E1's wording: the find's cancel in the new room ends the float if its thing still has a node (47 and 190), else sends
+  nothing; the normal order (cancel before the arrival) is already proven by the step B/C runs.
+
+## What was built
+
+E1 coop_follow leaves a live own set (words/close-up/find up, or the close-up's hold) for coop_zones_new's cancel at their
+  next look in the new room, logged. E2 coop_room_change_words at the change itself: player 1's close-up and its words
+  (kind 2/3) by 0x80024B24(0), plain words by 0x80024384, a find window left (open note), logged with "closed" or "LEFT
+  OPEN". E3 hle_save_held: + a use's script mid-run, their close-up's hold, a queued close script, the lend route's held
+  words. E4 hle_coop_state_load resets the host's in-flight words (above) and coop_state_loaded(cpu) derives player 1's
+  close-up from the loaded RAM (the look record's kind 2/3 with busy bit 2), clears words_free/find_free/script_hold.
+  E5 the close-scripts consumer waits through a cutscene. E6 coop_show_asked tests g_coop_p2_stepper_in before its cutscene
+  passthrough. E7 ED_LOAD_STATE=FRAME:PATH.
+
+Two more from the build's first runs: E2 is kept off the lend route (g_coop_screen or g_coop_words_theirs: the game's one record
+and window are player 2's there; the unset run r0 had it try the game's cancel on player 2's close-up), and ED_PUT's list
+starts over after a load, as the pad scripts' windows do (the puts for after a load can't be given otherwise: every frame of
+the second pass was passed in the first).
+
+## The runs (saves/jtg-ch1-room183.state remade on the build from Jump to Game, logs/run-20261111-1119*-jtg-stepE-state; the
+chain in the scratch's stepe/runs-e.sh; a door script run twice by ED_RUN_SCRIPT is its zone's enter then its press)
+
+- r1-door-words (logs/run-20261111-113357-): player 2's own words up (3880, the block's EXAMINE: a kind-3 close-up's), player
+  1's door 119 at 3952/4012, the room change at 4073 to room 180, 'player 2's own close-up cancelled: a new room's zones
+  (look 1, words up)' at 4074 (the cancel ran in the change's frame, before the arrival: no 'room change found ... still up'
+  line), both walk after.
+- r2-door-closeup (-112608-): their hole close-up (kind 2) with DETAIL's words: cancelled at 4073; both walk.
+- r3-door-find (-112630-): their find floating (PICK UP at 4180), the door at 4231/4291: 'own find cancelled: a new room's
+  zones; its thing floated: 47 and 190 sent' and the close-up's cancel at 4353; both walk.
+- r4-scene-words (-112918-): scene 419 (fn22 in-world, as player 1's) at 3952 with their words up: their B at 4080 closed
+  them under it ('the game's word kept 34'), the scene over at 4613, their PICK UP at 4700 and its B at 4851, both walk.
+- r5-load-words-closeup (-113306-): a load of the fresh state at 3960 with their words up and player 1 in a hole close-up:
+  'a load moved the frame back to 3650: the puts start over', their words open again at 4000, player 1's close-up at 4050,
+  their words closed 4100, their find 4200, no hang, no stale line.
+- r6b-p1words-door (logs/run-20261111-112722-jtg-stepE-r6b-): chapter 1's start, player 1's examine at (100,0) (a close-up's
+  words, 349), script 101 twice (2163, 2223): the game's own room ask ended the look at the ticket (2223, 'player 1's look
+  over'), the window gone before the change (2284): E2 had nothing to do; player 1 walks and opens their Tome after. E2 is
+  NOT reached by any scripted check: a words window of player 1's that survives to the change needs a script of player 2's
+  changing the room under player 1's stage-2 words (the fourth Granite Block, L01/1100 state 5): the user's play, and the
+  log line ('player 1's ... closed by the room change' or 'LEFT OPEN') tells.
+- r0-unset-door-words (-113334-): switches unset, player 2's lend-route close-up (the game's) up at player 1's door: no step
+  E line; after the change the game's record stays 'close-up' and player 2 can't walk in room 180: the old route's own
+  (HEAD's), an open note for step F's cleanup.

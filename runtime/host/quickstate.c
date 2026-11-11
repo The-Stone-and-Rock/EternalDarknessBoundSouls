@@ -823,7 +823,7 @@ bool quickstate_service(CPUState* cpu) {
     if (g_queue[0].kind == QS_SAVE && hle_save_held()) {  // player 2's Tome, words, close-up or find open: saved once over
         static int said;
         if (!said)
-            fprintf(stderr, "[quick] the save of %s waits for player 2's Tome, words, close-up or find to close\n", g_queue[0].path);
+            fprintf(stderr, "[quick] the save of %s waits for player 2's Tome, words, close-up, find or a use's script to end\n", g_queue[0].path);
         said = 1;
         return false;
     }
