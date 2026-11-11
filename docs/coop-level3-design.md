@@ -913,3 +913,9 @@ Not checked by script (the text's watch list): the refusal-branch ease (needs pl
 log line "own close-up camera stepped in a refused turn"), player 1 standing inside player 2's close-up frame (counted,
 not hidden: "player 1 in view" in the hide line), a Tome during their close-up (step D), real controllers, the feel of
 the hold. `ed test` was not run (its saves are outdated, docs/coop-next-session.md).
+
+The build's review (four readers on the diff against this text, each finding verified by a refuter): 11 findings, 10
+refuted (behaviour the text orders), one real and fixed: the cancel at a room change runs inside player 2's turn, where
+their input copy is in memory already, and swapped the turn-start snapshot in round the game's cancel, so the hold's
+let-go landed in a copy the turn's end discarded; now no copy swap in the turn (`coop_p2_own_cancel`, `copy_in`), the
+swap kept for a use or cast of theirs. Re-checked by the room-change run after the fix.

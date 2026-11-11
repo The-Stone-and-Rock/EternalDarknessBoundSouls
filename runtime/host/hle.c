@@ -14527,11 +14527,17 @@ static void coop_p2_own_cancel(CPUState* cpu, const char* why) {
     const bool look = coop_own_closeup() && (g_coop_p2_look.up || g_coop_p2_look.held);
     if (!g_coop_p2_words.up && !look)
         return;
+    // Their input copy in: from their look (coop_zones_new inside coop_prompt_look, in their turn) it is in memory already,
+    // and the turn's end saves it; swapping the turn-start snapshot in here put the let-go in a copy the turn then discarded
+    // (the step B review). From a use or a cast of theirs (coop_zones_swap) the game's is in: swapped round the cancel.
+    const bool copy_in = g_coop_turn;
     static CoopWordsOwn p1w;
     u32 ignore = 0u;
-    coop_state(cpu, &g_coop_events_p1, true);
+    if (!copy_in)
+        coop_state(cpu, &g_coop_events_p1, true);
     coop_words_own_io(cpu, &p1w, true);
-    coop_state(cpu, &g_coop_state[1], false);
+    if (!copy_in)
+        coop_state(cpu, &g_coop_state[1], false);
     coop_words_own_io(cpu, &g_coop_p2_words, false);
     const u32 busy_kept = mem_read32(cpu, cpu->gpr[13] - 23344u), go = 1u;
     mem_write32(cpu, cpu->gpr[13] - 23344u, 0u);
@@ -14582,9 +14588,11 @@ static void coop_p2_own_cancel(CPUState* cpu, const char* why) {
                     (unsigned long long)(cpu->timebase / 675000ull));
     }
     coop_words_own_io(cpu, &g_coop_p2_words, true);
-    coop_state(cpu, &g_coop_state[1], true);
+    if (!copy_in)
+        coop_state(cpu, &g_coop_state[1], true);
     coop_words_own_io(cpu, &p1w, false);
-    coop_state(cpu, &g_coop_events_p1, false);
+    if (!copy_in)
+        coop_state(cpu, &g_coop_events_p1, false);
     coop_words_own_empty(cpu, &g_coop_p2_words);
 }
 // Their window's per-frame step, at the game's own tick (0x80024AF0 at 0x800084FC, which steps the window at r13-25960:
