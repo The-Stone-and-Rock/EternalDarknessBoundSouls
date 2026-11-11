@@ -698,3 +698,23 @@ the game's scan doesn't clear inside words then.
 fell for ever (logs/run-20261110-211939-stepB-run1-p1alone). Puzzle_Mkr04 (1305, 1508, 185) is inside the zone and on the
 floor. Player 2 at CameraRgn03's centre (-114, 2004) stands at z 178; walking the stick up from there (toward the wall)
 drops them off the floor's edge (both with and without a close-up: run1b and run2): walk them down (ldown) after a test.
+
+
+## Player 2's own find (step C, 2026-11-11 night)
+
+Nothing failed in the build: the eight runs matched the design's expectations at the first build (docs/coop-level3-design.md,
+"Step C build record"). **A test spot that can't be reached:** the cancel of their find inside the two frames between the
+PICK UP press and the thing's state 35 (event 71's delay). Through a door the room's zones change about 60 frames after the
+door script (119 at load+640: the zones at 15634), and inside that the look refuses every press of theirs (the game's busy word
+carries the room): the PICK UP pressed at 15631 or 15633 never opened the find (logs/run-20261110-235926-stepC-run5b-delay31,
+-235950-stepC-run5b-delay33). The before-it-floats branch of `coop_p2_find_cancel` is untested. The block's zone: put at
+(360,340) by ED_PUT the picker stands on the dais at z 22, inside BlockRegion01, with EXAMINE up.
+
+**The placement's unproject against the previous frame's view (step C's first build).** The design read the draw's
+matrices (0x8060234C, 0x8060244C, 0x806024BC, what 0x801EB15C unprojects through) as built by the previous frame's draw, so
+`coop_found_unproject` kept the camera block from the intercept's previous call and decomposed the unprojected point against
+it. The matrices are this frame's: the main loop's 0x801E1164 (at 0x8000843C, right after the camera step 0x801EB9A0 and
+before the placement pass 0x800084D0) copies the live block and has 0x801E4BDC rebuild all three from it. The previous-frame
+rule made the point's offsets carry one frame of player 1's camera motion (x -7..-5 and z 163..154 in
+logs/run-20261110-235512-stepC-run2-p2find where the first call, with no previous frame, gave x 0 and z 139): the build's
+review. Now the block as the placement finds it (this frame's), `g_coop_place_view1` alone.
