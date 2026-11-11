@@ -1545,7 +1545,7 @@ bool hle_coop_player2_held(void);
 bool hle_coop_screen(void);                                    // hle.c
 bool hle_coop_player2_camera(float eye[3], float target[3], float up[3], float* zoom);  // hle.c
 bool hle_coop_dream_shift(CPUState* cpu, float shift[3]);                              // hle.c
-bool hle_coop_player2_close_up(void);  // hle.c: player 2's own close-up is up (ED_COOP_OWN_CLOSEUP), its camera their view
+bool hle_coop_player2_close_up(void);  // hle.c: player 2's own close-up is up (step B), its camera their view
 bool hle_coop_player1_copy_up(void);                             // hle.c: their Tome's in a copy, the real world plays on
 bool hle_game_menu_open(CPUState* cpu);                         // hle.c
 bool hle_coop_tome_shares(void);                                // hle.c

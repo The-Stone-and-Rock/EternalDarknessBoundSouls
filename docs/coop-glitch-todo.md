@@ -94,11 +94,11 @@ Every open or partial code above, against the piece of work that resolves it. Th
 | Work | Codes it resolves or unblocks | State |
 |---|---|---|
 | Level 1, two scenes at once (per-player scene records, `coop_scene_set`) | C2 (a scene plays only for its player, everywhere), C13, the scene halves of C1, C5 | Built and played 2026-11-10 (C13, C1); C2's general rule is this one, to be played across chapters |
-| Level 3 step A, a words window per player (`ED_COOP_OWN_WORDS=1`) | T2's words half, T3 (the second player's words no longer wait), T4 (words of player 2's in their own window), the words half of C3 | Built, script-verified both ways, unplayed |
+| Level 3 step A, a words window per player | T2's words half, T3 (the second player's words no longer wait), T4 (words of player 2's in their own window), the words half of C3 | Built, script-verified both ways, unplayed |
 | Level 3 step B, a close-up per player (DETAIL, RETURN, PICK UP in player 2's own set and copy) | T2's examine half, C3 (the statue examine beside the Tome), E2 (enemies hidden only from the examiner's view: the hide-others rule), the rest of C9 to C12's route | Design pass running (readers, design, refuters) |
 | Level 3 step C, a find per player | T2's pickup half, U1 (a long item's words held player 2: an item's words are a window of the user's), the pickup half of T1 | After B |
 | Level 3 steps D and E (the Tome copy's interplay, save states, room changes, cutscenes while a window or close-up is up) | M4 and M2 (hangs and the menu after them, where a load or a reload meets an open window), U2 (the crash after a load), U3's open items | After C |
-| Level 3 step F (cleanup: one owner rule, the lend and the screen flag gone) | the "camera on the wrong player" family: C4, C7, C11, C12, U5's co-op part | After E |
+| Level 3 step F (the switches gone; the look's windows one route; the lend and the screen flag stay as the use route: a script of player 2's run as a use, a Tome item's, cast words) | the "camera on the wrong player" family: C4, C7, C11, C12, U5's co-op part, for the look's windows; the use route's cases stay | Built 2026-11-11 afternoon, script-verified, unplayed |
 | Scene rule across chapters (level 1 played in chapters 2 to 12) | C2, C5, C6 | Play, with `ed chapters` |
 | Sanity per player (design first: which effects count) | S1, E5, C7's rune pads, E6 and E7 (the Trapper dimension is a sanity effect) | A design pass of its own |
 | Enemies and bodies | E3 (injured moves), E4 (stretched models), W1's leftovers, E8 (Summon Trapper's switch) | Each a reading pass on its function |

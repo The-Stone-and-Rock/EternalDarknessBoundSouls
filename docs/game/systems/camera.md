@@ -16,7 +16,7 @@
 
 Also: `ed camera NAME`, and `ed door ROOM` for a door's arrival camera. Evidence: `docs/game/research/arguments.md`.
 
-**For two players:** each half has its own: `coop_camera_step`, `g_coop_cameras` (the game's lent to player 2 in their close-up), `coop_player1_camera`, `camera_split_update`. Zone scripts set the cameras, so whoever's zone look is running must have their own in: `coop_scan_player1`.
+**For two players:** each half has its own: `coop_camera_step`, `g_coop_cameras` (player 2's own set 2: their look's close-up camera, record 10, is pushed on it; the game's set is lent to them, `coop_cameras_lend`, only for a script of theirs run as a use: a door's, a Tome item's, their cast words), `coop_player1_camera`, `camera_split_update`. Zone scripts set the cameras, so whoever's zone look is running must have their own in: `coop_scan_player1`.
 
 ## How to look at a camera bug
 
@@ -54,7 +54,7 @@ A scene's end camera is often chosen after its fn22(0) (1538: Camera04 by fn8; 1
 - Finishcam01-03 are in the finisher's body model (object+60 -> +132 count, +136 entries of 120 bytes, +52 hash, +56 name), not in rooms. `0x80051D48` tests the line of sight and `0x80051E28` -> `0x801ECE90` puts it on. Forms are scene bodies with no cameras (Chandra's ghost and rotten Ellia have 0).
 - Co-op: each player has their own count, flag, rotation and camera set (`coop_finish_camera`; player 2's words are in `g_fin_p2_words`). A form uses its wearer's own body's cameras for the test and the put only (`coop_finish_body`); this works in solo too. Player 2's events 1 and 2 arrive in `coop_events`: event 1 while the cameras are lent (FINISH HIM runs script 2244 as their use), event 2 after.
 - Known limit: if player 2's finisher ends without its event 2, their flag stays -1 until the next play start (`0x80021648`), and they get no close-ups until then. The shared flag had the same problem before.
-- Not tested: player 1's events while player 2 has the cameras lent; both players finishing close together; a finisher right before a room change; states 74 and 84; other chapters; player 2 cameras other than the game's own (`mod_p2_camera` 0 or 1).
+- Not tested: player 1's events while player 2 has the cameras lent (a use's script of theirs); both players finishing close together; a finisher right before a room change; states 74 and 84; other chapters; player 2 cameras other than the game's own (`mod_p2_camera` 0 or 1).
 
 ## A camera's end script in co-op (2026-11-06)
 

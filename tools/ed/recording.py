@@ -11,7 +11,7 @@ import disc
 STICK = 40  # a stick pushed this far means they asked to walk
 BOOK_EYE = (200.0, 1100.0, 100.0)
 INT = {'ticket', 'fade', 'p1anim', 'p2anim', 'camidx', 'p1carry', 'p2carry', 'frame', 'ms', 'room', 'p1st', 'p1hp', 'p1m', 'p2st', 'p2hp', 'p2m', 'p1sx', 'p1sy', 'p2sx', 'p2sy', 'script', 'mode', 'mode2',
-       'screen', 'owner', 'shares', 'copy', 'copyp1', 'lent', 'cutscene', 'menu'}
+       'screen', 'owner', 'shares', 'copy', 'copyp1', 'lent', 'cutscene', 'menu', 'own2'}
 HEX = {'camhash', 'p1b', 'p2b', 'busy', 'hold', 'focus', 'focus2', 'window', 'who', 'ctl', 'entry'}
 
 
@@ -83,9 +83,11 @@ def tome_of(r, p):
 
 
 def own_close_up(r, p):
-    """Whether this player's own close-up or words are up: they stand, and that's right."""
+    """Whether this player's own close-up or words are up: they stand, and that's right.
+    Player 2's: the use route's screen (the game's window theirs), or their own words, close-up or find (own2, since step F;
+    older recordings have no column)."""
     if p == 'p2':
-        return bool(r['screen'])
+        return bool(r['screen']) or bool(r.get('own2', 0))
     return bool(r['busy'] or r['window']) and not r['screen']
 
 

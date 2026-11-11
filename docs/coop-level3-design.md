@@ -1799,3 +1799,96 @@ chain in the scratch's stepe/runs-e.sh; a door script run twice by ED_RUN_SCRIPT
 - r0-unset-door-words (-113334-): switches unset, player 2's lend-route close-up (the game's) up at player 1's door: no step
   E line; after the change the game's record stays 'close-up' and player 2 can't walk in room 180: the old route's own
   (HEAD's), an open note for step F's cleanup.
+
+
+# Step F: the switches gone, one route for the look's windows, the use route named (2026-11-11 afternoon)
+
+## What five readers found on 1bc19f3 (the whole text in the session's scratch, stepf/readers.md)
+
+- The design's step F ("delete g_coop_screen, g_coop_assist_at, coop_cameras_lend, coop_their_close_up, ...") rested on a wrong
+  premise: those are not the lend route of player 2's look words alone. With the three switches always on, g_coop_screen is still
+  set through coop_menu_input (24789) from g_coop_assist_at, which coop_use_start (16927) sets for EVERY script of player 2's run
+  as a use at the controller (a door's or exit's script, a zone's use prompt whose script > 0, a locked door's words, a passed-over
+  examine's script, their script timers, FINISH HIM), coop_look_prompt (a script's hold asking a prompt), coop_door_proxy, the Tome's
+  cast words (24549), tome_copy_left (a Tome item's script that opened a close-up or scene, 25064), hle_coop_found (a thing given as
+  a scene of theirs ends), and the close-up behind player 1's Tome (24488). camera.c's 1624 branch (player 1's half from the kept
+  view while the game's camera is theirs) is reached by hle_coop_screen() with the cameras not lent too (coop_door_proxy, the
+  cutscene branch). A find that is not in their look (a spawned item's world PICK UP prompt, script 2246: stepC2 run6-lendfind, with
+  every switch on) goes through g_coop_screen, the lend and hle_coop_found "theirs". Steps A-E replaced only what is PRESSED IN THEIR
+  LOOK (coop_prompt_look / coop_words_tick). Taking the use route onto the own sets is a step of its own, not a cleanup.
+- The one dead cluster with the switches on: coop_prompt_look's window_began (`!own && ...`, 15718) and what only it reaches:
+  in_was/pad_was/window_was, g_coop_look_window_script (set in hle_message_open), coop_window_to_game("look") and the forward
+  declaration, the hold in their copy + g_coop_p2_words_held (its let-go block in coop_player_turn, the hle_save_held term, the
+  load reset), g_coop_assist_at = 1 and the g_coop_screen/lend at the look's end. Plus coop_scene_player1s (no caller), the unset
+  arms of coop_found_for_finder (the one pair), coop_show_asked (the one kept flag), coop_camera_p2_in (rest), tome_copy_left (the
+  game's -25960 and busy arms), and the three switch functions.
+- Still reaching coop_close_up_start (the lend close-up at the controller's B, script -2) with the switches on: a -2 prompt not
+  g_coop_p2_prompt_own: a kind-0 look record, a press in a refused turn (coop_p2_press_held's keep), ED_COOP_SHARED_LOOKS.
+- The kit read the lend's flags: both.tsv's 'screen' column (g_coop_screen) is what recording.own_close_up(p2), scenarios'
+  `during: screen` and words_p2 mean by "player 2's window is up"; on the own route it stays 0 through their windows.
+- The regression set: steps D and E's chains (the scratch's runs-d.sh, runs-e.sh), the fresh state remade on each build; `ed test`'s
+  states predate the save section (docs/coop-glitch-todo.md 7-9) and slot7.state is gone: not run, as steps C-E recorded.
+
+## Refuted or corrected in the design (three refuters, stepf/refute.md)
+
+- Deleting the switch functions by line span would have taken `#define COOP_CLOSE_UP_CANCEL` (14644) with them: the build applies
+  exact text, the define stays.
+- coop_prompt_look's `own` had a ternary use the list missed (own_focus/own_checked, 15684: both reads now unconditional);
+  tome_copy_left's `words_up` is read by its log: it stays as own_words_up.
+- F3's "left behind" rationale was wrong: coop_prompt_look clears the prompt while player 2 is left behind (15538-15542) before the
+  controller's B could see it; step E's r0 stranded because the switches were unset. What reaches the controller's -2 is a kind-0
+  look or a press in a refused turn. And refusing -2 at the controller would have lost a kind-1 EXAMINE (a sign) B'd in a refused
+  turn, which coop_p2_press_held kept today and fired as the lend close-up: now coop_p2_press_held keeps ANY look's prompt
+  (script -2, own looks) as g_coop_p2_look.b_kept, pressed at their next look (the look's loop already matches b_kept_id for kind
+  1); the controller's B refuses a -2 with a log line; coop_close_up_start stays for ED_COOP_SHARED_LOOKS.
+- F4 as "widen the 'screen' column" was refuted: recording.own_close_up(p1) and scenarios' words_p1 SUBTRACT 'screen' (on the
+  lend route the game's window is player 2's), so with both players' windows up player 1 would have read as free (false FROZEN and
+  LOST findings). A new last column `own2` instead; 'screen' stays the use route's; own_close_up(p2) = screen or own2.
+- hle_save_held's comment "g_coop_p2_words_held is in the state's blob" was false: no blob holds it (HleCoopState 26297-26312, COPR,
+  COKN, COMG, COSP); the state layout is unchanged.
+- The regression plan missed tome_copy_left's edited arms: step D's r5 (the Tome item's leave route) added as r10; r5b is the known
+  busy-word fail and not counted.
+
+## What was built (runtime/host/hle.c, camera.c's comment, tools/ed/recording.py)
+
+F1 the three switch functions and their forward declarations deleted; every caller reduced to its state test (the switches-on
+  arm), a refuter having checked each of the 71 sites. F2 the dead cluster above deleted; the redundant tentative definitions of
+  g_coop_assist_at and g_coop_words_theirs collapsed to one each. F3 coop_own_looks() (ED_COOP_SHARED_LOOKS unset) replaces the three
+  getenv reads; coop_player_turn's B block refuses a look's prompt (script -2) under own looks, logged "[coop] player 2's B on a
+  look's prompt N at the controller: refused, their look presses it"; coop_p2_press_held keeps any look's prompt B'd in a refused turn
+  for their next look ("player 2's B on a look's prompt N in a refused turn: pressed at their next look"). F4 both.tsv's last column
+  `own2` (coop_p2_own_up() || g_coop_p2_look.held), recording.py's INT set and own_close_up(p2). The comments at the sites name the
+  use route for what it is.
+Checked by script from a fresh state (saves/jtg-ch1-room183.state remade on the build, logs/run-20261111-132837-jtg-stepF-state), NO switch set anywhere: steps D and E's recipes give their recorded lines (a door under their words, their find and a load; their words and find under player 1's Tome; their Start refused in their close-up and their copy after RETURN; the save that waits; scene 419 under their words; the Tome item's leave route), none of the old route's lines ("[trace] close-up for player 2", "cameras lent" outside a use's script, "zone opened words in their look") in any look-pressed run, and the use route still runs: a Sheet of Music spawned at player 2's feet, their B on the world's PICK UP (script 2246), "close-up for player 2", "cameras lent", "find opens: theirs", the thing drawn for them alone, "a window of player 2's use took the input" (logs/run-20261111-13*-stepF-r1..r8, r10c). Not reached by script: the controller's refusal of a look's prompt and the kept B of a refused turn (their log lines tell in play). `ed test` not run (its states predate the save section, as steps C-E recorded).
+
+## The runs (logs/run-20261111-13*-stepF-*; the chain in the scratch's stepf/runs-f.sh; the machine was loaded during the chain:
+## the game ran at 60 frames a second for r1-r2 and 31-50 after, the claude app at 100% CPU; step D's and E's references ran at 60)
+
+- r1-door-words (-132949-): no switch set, stepE r1's recipe: "own words open" 3881, player 1's door, the change at 4099,
+  "own close-up cancelled: a new room's zones (look 1, words up)" 4103, both walk in room 180. No old-route line.
+- r2-door-find (-133015-): their find floating (4180), the door, "own find cancelled: a new room's zones; its thing floated:
+  47 and 190 sent" 4359, both walk.
+- r3-load-words-closeup (-133043-): the load at 3960 under their words and player 1's hole close-up ("a load moved the frame
+  back to 3650: the puts start over"), their words open again 4000, player 1's close-up, their find 4200; no hang.
+- r4-tome-over-words (-133113-): their words and find under player 1's Tome: "own script 1181 waits: player 1's Tome is
+  open" 4370, runs at 4408 ("cameras lent" there is the use's: the close script run as a use, as in step D's r1).
+- r5-p2start (-133139-): "Start refused: their own words, close-up or find is up" 3931; RETURN's script 90 "waits: the
+  game's words are up" (player 1's hole DETAIL), runs 4151; "player 2's Tome opens in the copy" after, and closes.
+- r6-save-waits (-133205-): "the save of saves/tmp-stepf-held.state waits for player 2's Tome, words, close-up, find or a use's
+  script to end" at 3950; the file written after their PICK UP (35 MB at 13:32).
+- r7-scene-words (-133226-): scene 419 at 3952 under their words, their B closed them under it ("the game's word kept 34"),
+  their PICK UP at 4700 and its script at 4902.
+- r8-usefind (-133259-): the use route: "[items] type 113 (Sheet of Music)" at player 2's feet 3851, "player 2's B: prompt 19
+  script 2246", "cameras lent", "script 2246 runs for player 2", "notice for player 1: Ellia has found a Sheet of Music",
+  "drawn for player 2 alone", "player 2's find opens: theirs", "a window of player 2's use took the input: 6 words to the
+  game's input", "[trace] close-up for player 2: assist 1 busy 16", "placement: player 2's thing placed by the lent camera",
+  script 1495 after their B; player 1 free.
+- r10-item-leaves (-133328-) and r10b (-133746-): stepD r5's recipe at 36 frames a second: the find's B at 4280 closed it only
+  at 4370-4377, AFTER the test's put of player 2 into the hole's zone (4350); the hole's ed219 refilled their look record under
+  the floating find, a kind-2 close-up began as the find closed (DETAIL asked, nobody pressed it), their Start was refused
+  under it. A test artifact (a put teleports; a floating find holds the player in play), not a line of code of step F's:
+  r10c (-133821-, the put at 4500, after the close, the Start at 4550) gives step D's lines: "own pick up's script 1181 runs
+  as theirs" 4377, "player 2's Tome opens in the copy", "script 1103 runs as player 2's with player 1's cameras in: theirs
+  put in", "player 2's item leaves script 2116 for the real game", "item script 2116 ran as theirs: words 0, busy 0, their
+  hold 0, room 0, cameras lent 0", "script 2116 runs for player 2" 4957.
+- The kit: `ed check` read every run with the new `own2` column (the timelines show "P2 close-up" through their own windows).
