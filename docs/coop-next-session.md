@@ -1,25 +1,32 @@
-# HANDOFF 2026-11-11 night (written for the next session, any model): separate rooms R1-R5 committed, R6 next
+# HANDOFF 2026-11-12: separate rooms R1-R6 (+R4b, R4c) committed; played by the user in Pius's and Karim's chapters
 
-**Where things stand.** The separate-rooms work is COMMITTED on `tools/game-kit` (this commit): two resident room slots
-(R1), the stayer (R2), each half its player's room (R3, plus the effects by room), doors from either side (R4), sound (R5:
-player 1 holds the music, the stayer's room keeps its sounds, a track in player 2's room is heard as theirs, player 2's copy
-Tome's sounds live). The user PLAYED it (2026-11-11 night): doors and sounds work through several rooms. It runs only with
-two environment switches: `ED_ROOM_SLOTS=2` (56 MB; a state made without it is refused) and `ED_COOP_STAY=1`. Records:
-`docs/coop-level3-design.md` from "Separate rooms" on (readers' facts, what was built, every run), `docs/coop-todo.md` (the
-step paragraphs with what is not yet done), `docs/coop-failed-attempts.md` (the fade's denormal marks, the launcher's title
-state), `docs/research/separate-rooms/` (the readers', refuters' and design files of every step, the run scripts, the R5
-patch script). `runtime/host/controls.cpp` holds the user's uncommitted test edits: never commit it.
+**Where things stand.** Committed on `tools/game-kit` and pushed to the fork (2026-11-12, the user: "very happy so far"): R6
+(hits by room), R6b (routes in player 2's room), R6c (player 2's room's creatures as that room's own game), R4b (player 2's
+door keeps player 1's running scene) and R4c (a player arriving during the other's scene keeps their own camera and plays
+on). `play.bat` now has the separate-rooms switches on (ED_ROOM_SLOTS=2, ED_COOP_STAY=1); `play-rooms-log.bat` plays the
+same with everything recorded (logs/run-*-rooms-play/). The user's play after R4c: "a few issues in Pius' chapter" (not yet
+described or read: their recordings are the newest logs/run-*-rooms-play), Karim's chapter got much farther than expected.
+Records: `docs/coop-level3-design.md` "R6", "R6b and R6c", "R4b", "R4c"; `docs/research/separate-rooms/` (enemy-readers*,
+waypoint-readers, behaviour-readers, arrival-readers, design-r6*, refute-r6, build-run-r6.sh); `docs/coop-todo.md`;
+`docs/coop-failed-attempts.md` (a JTG state made on a busy machine held player 2: check `hold 0x0`).
+`runtime/host/controls.cpp` holds the user's uncommitted test edits: never commit it.
 
-**How the user launches it to play (their shell is PowerShell, no `sh` on its path):**
+**NEXT:** the Pius issues the user saw (ask them, read their recordings), then R6's open list (FINISH HIM apart, a downed
+zombie's rise, the spawner, other enemy kinds apart) and the reverse of R4b/R4c (player 1's door into player 2's scene).
+
+**Together nothing changes** (every new path opens with the players apart by their own rooms; checked in every build).
+Apart: enemies of each room go after, chase (routes included), hit and are hit by that room's player only; player 2's own
+events and grabs run in their room. Not verified by script: FINISH HIM apart, a downed zombie getting up, the spawner, other
+enemy kinds (chapters 2-11).
+
+**How the user plays it (PowerShell):**
 ```
-$env:ED_ROOM_SLOTS = '2'; $env:ED_COOP_STAY = '1'
+$env:ED_ROOM_SLOTS = '2'; $env:ED_COOP_STAY = '1'; $env:ED_COOP_ENEMY_LOG = '1'
 & 'C:\Program Files\Git\bin\sh.exe' tools/ed/run.sh launcher NAME
 ```
-(logs/run-*-NAME/ gets both.tsv, page logs, EVENTS.log and shots; `ed check`/`ed timeline` read them.) The launcher's Skip
-intro uses `saves/title-rooms.state` under the switch (made the first time). Scripted checks: `docs/research/separate-rooms/
-build-run-r5.sh` and `build-run-r6.sh` (build, a fresh state from Jump to Game by `tools/ed/jtg.sh` with `env -u
-ED_COOP_STAY`, then `tools/ed/run.sh STATE NAME` with ED_PUT / ED_RUN_SCRIPT / ED_PAD2_SCRIPT / ED_INPUT_SCRIPT). States hold
-guest memory: a host-only change keeps them loadable; remake them when the memory layout changes.
+What to try: Pius's chapter, room 183 (the zombies' hall): player 1 leaves by a door, player 2 stays near the zombies: they
+should attack player 2 (also from across the hall: they climb to them) and player 2's swings should hurt and kill them;
+then the other way round; and together, as before.
 
 **How the user wants this worked (their method, in their words: "Let's not guess", "I'm going to let you drive"):** for
 each step, readers on the game's own code (the `ed` tool: `python -I tools/ed/ed.py keep`, `dis`, `fn`, `needs`, `host`,
@@ -29,7 +36,7 @@ and shots, then the user plays and reports. Commit only when told; never push. A
 `docs/coop-failed-attempts.md`; items seen to `docs/items-log.md`. The user's rules so far: player 2 has no music but all
 their in-game sounds (done); "Bring (character) to (character)" in the co-op menu later; the randomizer is the last step.
 
-**NEXT: R6, enemies and hits by room.** The user saw (2026-11-11): with the players in different rooms, enemies see player 2
+**R6 (done above) was briefed as:** The user saw (2026-11-11): with the players in different rooms, enemies see player 2
 in the other room and try to attack them (no damage lands); player 2's attacks on the other room's enemies aim but land
 nothing. Same-room hits while apart DO land (R2's runs: room 183's zombies hurt player 2 while player 1 was in 180). The
 host today: `coop_enemy_target` (hle.c ~24061, from `coop_character_step` on 0x80133434) retargets an enemy to the nearer

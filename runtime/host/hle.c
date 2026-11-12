@@ -11265,6 +11265,9 @@ static unsigned long long g_trace_ticket_frame;  // ED_COOP_TRACE: both players'
 static unsigned long long g_coop_exit_p2_until;
 static s32 g_coop_exit_p2_script;  // and its script: only a room that script asks for (the running script, r13-23228)
 static unsigned g_coop_tickets;  // rooms asked for: a look of player 2's that asked keeps the game busy (coop_prompt_look)
+// The rooms asked for that move player 1: all but a change of player 2's own that player 1 stays through (ED_COOP_STAY).
+// Player 1's scene is cut by these alone (coop_p1_scene_on): player 2's own door during it left the host taking it for over.
+static unsigned g_coop_p1_tickets;
 static bool g_coop_room_p2;  // the room change on its way is player 2's (asked with them the player, or their way out)
 
 // A room change on its way: the ticket written (0x80155770: busy 4 by 0x801556CC(4, 1), its countdown at +0 of
@@ -11305,6 +11308,8 @@ static void notify_room_ticket(CPUState* cpu) {
     g_coop_exit_p2_until = 0ull;
     g_coop_entered_p2 = g_coop_p2 != 0u && (exit_p2 || mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u));
     g_coop_room_p2 = g_coop_entered_p2;
+    if (!(coop_stay() && g_coop_room_p2))
+        g_coop_p1_tickets++;
     if (coop_stay() && g_coop_p2 != 0u)
         g_fade_mover = g_coop_room_p2 ? 2 : 1;  // (R4: the other stays; their half keeps its picture through the fade)
     if (coop_room_change_log())
@@ -12971,6 +12976,7 @@ static void coop_controlled_id(CPUState* cpu) {
 // transition showed in their half at their cameras, with player 1's view held.
 #define SCRIPT_HOLD_FROM 0x8016820Cu
 #define SCRIPT_HOLD_TO 0x801682A8u
+static int coop_stay(void);  // (below, ED_COOP_STAY)
 #define COOP_BUSY_SCRIPT 1u  // the busy word's bit a script's busy_set (fn91(1), 0x801556CC) sets
 static bool g_coop_script_hold;
 // Player 1 looking closely at a thing they pressed on, held with no words or find up yet (the circle:
@@ -13063,9 +13069,14 @@ static void coop_play_hold(CPUState* cpu) {
     // A close-up's let-go (0x80199EA0(1) from the stepper: RETURN, a PICK UP's end) while the other player's scene holds
     // them: the game has one hold, and the let-go would free the scene's player too (as a scene's end did, coop_scene_set).
     // What it lets go of is kept as it stood: the hold's channels, the busy word, r13-25696, the zones word, r13-24048.
-    if (cpu->gpr[3] == 1u && cpu->lr >= CLOSE_UP_STEP_FROM && cpu->lr < CLOSE_UP_STEP_TO && g_settings.mod_coop && g_coop_p2 != 0u &&
-        sda_ready(cpu)) {
-        const bool theirs = coop_use_theirs() || g_coop_screen;  // player 2's close-up
+    // R4c (ED_COOP_STAY): a script step's let-go too (0x8016820C's 0x80199EA0(1), a door that asks first: L01/103's fn21(1) at
+    // frame 2390 of the user's logs/run-20261111-222138-rooms-play let go of player 1's zombie scene's hold, the one bit 2,
+    // and player 2's turns stopped: rooms/arrival-readers.md). Whose step: whoever is the player as it runs.
+    const bool script_step = cpu->lr >= SCRIPT_HOLD_FROM && cpu->lr < SCRIPT_HOLD_TO && coop_stay();
+    if (cpu->gpr[3] == 1u && ((cpu->lr >= CLOSE_UP_STEP_FROM && cpu->lr < CLOSE_UP_STEP_TO) || script_step) && g_settings.mod_coop &&
+        g_coop_p2 != 0u && sda_ready(cpu)) {
+        const bool theirs = script_step ? mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u)
+                                        : coop_use_theirs() || g_coop_screen;  // player 2's close-up
         const bool other_scene = theirs ? coop_p1_scene_on() : (coop_p2_scene_on() || coop_scene_p2s_on());
         if (other_scene) {
             static const u16 kChannels[3] = {23060u, 23052u, 23056u};
@@ -13086,9 +13097,12 @@ static void coop_play_hold(CPUState* cpu) {
                     mem_write32(cpu, channel[i] + 16u, counts[i]);
             for (int i = 0; i < 4; i++)
                 mem_write32(cpu, cpu->gpr[13] - kWords[i], words[i]);
+            if (script_step)
+                g_coop_script_hold = false;  // (as the let-go below would have set it)
             if (getenv("ED_COOP_LOG") != NULL)
-                fprintf(stderr, "[coop] player %d's close-up lets go; player %d's scene goes on: hold kept (busy %u, lr 0x%08X, frame %llu)\n",
-                        theirs ? 2 : 1, theirs ? 1 : 2, words[0], lr, (unsigned long long)(cpu->timebase / 675000ull));
+                fprintf(stderr, "[coop] player %d's %s lets go; player %d's scene goes on: hold kept (busy %u, lr 0x%08X, frame %llu)\n",
+                        theirs ? 2 : 1, script_step ? "script" : "close-up", theirs ? 1 : 2, words[0], lr,
+                        (unsigned long long)(cpu->timebase / 675000ull));
             g_hle_passthrough = false;
             g_hle_tail_call = false;
             return;
@@ -13598,6 +13612,11 @@ static void notify_room_unpack_post(CPUState* cpu) {
 static bool coop_stay_apart(CPUState* cpu);  // (below)
 static s32 coop_object_room(CPUState* cpu, u32 node);
 static int room_slot_of(CPUState* cpu, s32 room);
+static bool r6_apart(CPUState* cpu);                // (R6, below: the players apart in two resident rooms)
+static u32 r6_node_of_id(CPUState* cpu, u32 id);
+static u32 r6_player1_node(CPUState* cpu);
+static void r6_enemy_roster(CPUState* cpu);
+static void r6b_frame(CPUState* cpu);
 static int g_stay_bracket;  // (R4: a change of player 2's running as theirs)
 static unsigned long long g_stay_log;
 static void room_slots_frame(CPUState* cpu) {
@@ -13616,6 +13635,7 @@ static void room_slots_frame(CPUState* cpu) {
             g_room_slot_b43[i] = (u8)b43;
         }
     }
+    r6b_frame(cpu);  // R6b: the second route graph's room still in its slot (after the slots' rooms are read above)
     // (A record the change's tail marked dead is put back at the tail for a slot a player is in, room_slots_tail, and at a
     // return into its room, room_slots_return: not here, or a room nobody is in stays drawn under the live one.)
     if (coop_stay_apart(cpu) && frame >= g_stay_log + 120ull) {
@@ -13625,6 +13645,7 @@ static void room_slots_frame(CPUState* cpu) {
         fprintf(stderr, "[stay] frame %llu: player 2 stays in room %d (slot %d) at %.0f %.0f %.0f; the room in play is %d (slot %d)\n", frame,
                 coop_object_room(cpu, g_coop_p2), room_slot_of(cpu, coop_object_room(cpu, g_coop_p2)), guest_read_f32(cpu, o2), guest_read_f32(cpu, o2 + 4u),
                 guest_read_f32(cpu, o2 + 8u), (s32)mem_read32(cpu, cpu->gpr[13] - 23276u), (s32)mem_read32(cpu, ROOM_SLOT_TABLE));
+        r6_enemy_roster(cpu);
     }
     const s32 other = (s32)mem_read32(cpu, ROOM_SLOT_TABLE + 4u);
     const u32 po = room_slot_record(cpu, other);
@@ -13831,6 +13852,7 @@ static bool coop_stay_spared(CPUState* cpu, u32 node) {
     return room != -1 && room != (s32)mem_read32(cpu, cpu->gpr[13] - 23276u) && room_slot_of(cpu, room) >= 0;
 }
 static void coop_cameras_in(CPUState* cpu, int who);  // (below)
+static void stay_scene_look_again(CPUState* cpu);    // (below: R4c)
 static s32 g_stay_bracket_room;
 static u8 g_stay_bracket_slots[7u * 28u];
 static void notify_ticket_run(CPUState* cpu) {  // 0x80152614(room, entry, camera, script, flags): the ticket's runner
@@ -13860,6 +13882,7 @@ static void coop_stay_change_end(CPUState* cpu) {  // the behaviour pass after t
     }
     g_stay_bracket = 0;
     g_coop_room_p2 = false;  // the change is done: player 2 is apart in their new room (coop_stay_apart)
+    stay_scene_look_again(cpu);  // R4c: player 1's scene still on: player 2 plays on beside it from here
     fprintf(stderr, "[stay] player 2's change done: they are in room %d (slot %d); the room in play is player 1's %d (slot %d) again (frame %llu)\n", new_room,
             new_slot, (s32)mem_read32(cpu, cpu->gpr[13] - 23276u), (s32)mem_read32(cpu, ROOM_SLOT_TABLE), (unsigned long long)(cpu->timebase / 675000ull));
 }
@@ -14132,7 +14155,7 @@ static void coop_sound_gain(CPUState* cpu) {
     static bool running;
     static u32 logged;
     float eye[3], target[3];
-    if (running || g_tome_copy_turn || (cpu->lr != 0x8019F230u && cpu->lr != 0x801A0310u) || !coop_stay_apart(cpu) || !camera_player2_view(eye, target)) {
+    if (running || g_tome_copy_turn || (cpu->lr != 0x8019F230u && cpu->lr != 0x801A0310u) || !r6_apart(cpu) || !camera_player2_view(eye, target)) {
         g_hle_passthrough = true;
         return;
     }
@@ -14234,20 +14257,24 @@ static void coop_sound_rooms_log(CPUState* cpu) {
     fprintf(stderr, "[sound] tracks playing: room %d (player 1's) %d, room %d (player 2's) %d, other rooms %d, free %d of 80 (frame %llu)\n", r1, n[0], r2, n[1],
             other, 80 - n[0] - n[1] - other, (unsigned long long)(cpu->timebase / 675000ull));
 }
-// Their slot current for a call of theirs (the turn): the room word and the table's two indices; back after.
-static bool coop_stay_room_in(CPUState* cpu, u32 keep[3]) {
-    if (!coop_stay_apart(cpu))
-        return false;
-    const s32 r2 = coop_object_room(cpu, g_coop_p2);
-    const int slot = room_slot_of(cpu, r2);
+// A resident room current for one call: the room word and the table's two indices (keep[] read live, so these nest);
+// coop_stay_room_out puts them back. The caller has checked the room is resident (room_slot_of >= 0).
+static void coop_room_in(CPUState* cpu, s32 room, u32 keep[3]) {
+    const int slot = room_slot_of(cpu, room);
     keep[0] = mem_read32(cpu, cpu->gpr[13] - 23276u);
     keep[1] = mem_read32(cpu, ROOM_SLOT_TABLE);
     keep[2] = mem_read32(cpu, ROOM_SLOT_TABLE + 4u);
-    mem_write32(cpu, cpu->gpr[13] - 23276u, (u32)r2);
+    mem_write32(cpu, cpu->gpr[13] - 23276u, (u32)room);
     if ((s32)keep[1] != slot) {
         mem_write32(cpu, ROOM_SLOT_TABLE, (u32)slot);
         mem_write32(cpu, ROOM_SLOT_TABLE + 4u, keep[1]);
     }
+}
+// Their slot current for a call of theirs (the turn): the room word and the table's two indices; back after.
+static bool coop_stay_room_in(CPUState* cpu, u32 keep[3]) {
+    if (!coop_stay_apart(cpu))
+        return false;
+    coop_room_in(cpu, coop_object_room(cpu, g_coop_p2), keep);
     return true;
 }
 static void coop_stay_room_out(CPUState* cpu, const u32 keep[3]) {
@@ -15908,8 +15935,25 @@ static void coop_words_tick(CPUState* cpu) {
     coop_state(cpu, &g_coop_events_p1, false);
 }
 
+// R4c: player 2 arrived through their own door during player 1's scene (coop_stay_change_end): their first look in the new
+// room keeps the camera their arrival chose (its script's fn8 in their set), not one remade from the game's, which is the
+// scene's (coop_camera_set_fresh): a scene the other player began never shows in their half (the user, 2026-11-11).
+static bool g_stay_arrival_camera;
 static void coop_zones_new(CPUState* cpu, u32 info) {
     const u32 zones = mem_read32(cpu, info + 180u);
+    if (zones != g_coop_zones.list && g_stay_arrival_camera) {
+        g_stay_arrival_camera = false;
+        coop_p2_own_cancel(cpu, "a new room's zones");
+        g_coop_zones.list = zones;
+        memset(g_coop_zones.p2, 0, sizeof g_coop_zones.p2);
+        coop_prompt_slots_clear();
+        memset(g_coop_p2_looks, 0, sizeof g_coop_p2_looks);
+        g_coop_p2_looks_set = true;
+        memset(g_coop_states.p2, 0, sizeof g_coop_states.p2);
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[stay] player 2's first look in the room they came to keeps their arrival's camera\n");
+        return;
+    }
     if (zones != g_coop_zones.list) {
         coop_p2_own_cancel(cpu, "a new room's zones");  // before their set is dropped below: the cancel pops it
         g_coop_zones.list = zones;
@@ -16838,7 +16882,7 @@ static struct {
 } g_coop_scene_camera;
 
 static bool coop_p1_scene_on(void) {
-    if (g_coop_scene_camera.on && g_coop_scene_camera.tickets != g_coop_tickets) {
+    if (g_coop_scene_camera.on && g_coop_scene_camera.tickets != g_coop_p1_tickets) {
         // Cut by a room change (its own script's fn66): no fn22(0) comes, and the next scene's on would have kept
         // this one's start camera.
         g_coop_scene_camera.on = false;
@@ -17055,7 +17099,7 @@ static void coop_scene_set(CPUState* cpu, u32 function) {
         g_coop_scene_camera.target = target;
         g_coop_scene_camera.eye = eye;
         g_coop_scene_camera.p2_fresh = false;
-        g_coop_scene_camera.tickets = g_coop_tickets;
+        g_coop_scene_camera.tickets = g_coop_p1_tickets;
     } else if (on == 0u && g_coop_scene_camera.on && (g_coop_scene_camera.overlapped || other_on)) {
         g_coop_scene_camera.on = false;
         g_coop_scene_camera.p2_fresh = false;
@@ -17101,6 +17145,28 @@ static void coop_scene_set(CPUState* cpu, u32 function) {
     g_hle_tail_call = false;
 }
 static void coop_scene_camera_set(CPUState* cpu) { coop_scene_set(cpu, SCENE_CAMERA_SET); }
+
+// R4c: the end of player 2's own room change (coop_stay_change_end) with player 1's in-world scene on (rooms/arrival-readers.md).
+// Their arrival keeps its own camera (g_stay_arrival_camera: their first look doesn't remake their set from the game's, the
+// scene's), and player 1's scene's look is armed again when the hold it rests on (bits 32 and 2, kept through the door by
+// coop_play_hold's script let-go and stay_busy_clear) is there: coop_p1_close_up holds it, the busy ask answers player 2's
+// turn "not busy" with the hold opened round it (hle_coop_controller), so their arrival motion and turns go on and their
+// camera is stepped, as when both were in the room as the scene began. Nothing with no scene of player 1's on.
+static void stay_scene_look_again(CPUState* cpu) {
+    if (!coop_scene_on_of(0))
+        return;
+    g_stay_arrival_camera = true;
+    const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u);
+    const bool armed = !g_coop_p1_look && g_coop_scene_of[0].function == 0x80042974u && (busy & 34u) == 34u && !cutscene_playing(cpu);
+    if (armed) {
+        g_coop_p1_look = true;
+        g_coop_p1_look_kind = 3;
+    }
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[stay] player 2 came in beside player 1's scene %d: their arrival's camera kept, the scene's look %s (busy %u, frame %llu)\n",
+                g_coop_scene_of[0].script, armed ? "armed again" : g_coop_p1_look ? "still on" : "not armed", busy,
+                (unsigned long long)(cpu->timebase / 675000ull));
+}
 
 // A camera chosen for the room's record (0x801EE764 on the eye record 2: the arrival's two, fn8's; fn10's path by hash,
 // 0x801EE998 from 0x801F066C / 0x801F07BC), only noted. The room's start is the room change's own (0x80152298 and
@@ -20983,6 +21049,19 @@ static void coop_send_event(CPUState* cpu) {
             return;
         }
     }
+    // R6 (D5): apart, nobody goes after a player in another room. Every way the enemies' quarry keeps or takes a target asks
+    // event 59 first (0x800326B0, 0x80032810, 0x800329DC, 0x80032A90), and its "other" path tests no room. A sender with no
+    // node or no room (a hazard's box, a damage field) asks as before. Together the players share the sender's room: never.
+    if (event == 59u && r6_apart(cpu)) {
+        const int k = coop_player_of_id(cpu, to);
+        const u32 sender = k >= 0 ? r6_node_of_id(cpu, from) : 0u;
+        const s32 sender_room = coop_object_room(cpu, sender), their_room = coop_object_room(cpu, k == 0 ? r6_player1_node(cpu) : g_coop_p2);
+        if (sender != 0u && sender_room != -1 && their_room != -1 && sender_room != their_room) {
+            cpu->gpr[3] = 0u;
+            cpu->gpr[4] = 0u;
+            return;
+        }
+    }
     // Is it one to go after (event 59: an enemy's threat search, 0x8003230C; a hazard's touch, 0x8014512C; a damage
     // field's, 0x801CB658)? Not a player the game holds while the other plays on (coop_player_held): alone, the world
     // stands still for them then. Player 1 read their chapter's first words with an enemy loose, was grabbed and died
@@ -21470,8 +21549,20 @@ static void coop_sighting(CPUState* cpu) {
     const u32 node = cpu->gpr[3];
     const u32 stats = guest_ram_range_valid(cpu, node, 56u) ? mem_read32(cpu, node + (u32)(s32)g_coop_stats_offset) : 0u;
     if (g_coop_sighting || g_coop_turn || !g_settings.mod_coop || g_coop_p2 == 0u || !g_coop_p2_state ||
-        !sda_ready(cpu) || !guest_ram_range_valid(cpu, stats, COOP_TARGET_B + 4u) ||
-        mem_read32(cpu, stats + COOP_TARGET_B) != mem_read32(cpu, g_coop_p2 + 16u)) {
+        !sda_ready(cpu) || !guest_ram_range_valid(cpu, stats, COOP_TARGET_B + 4u)) {
+        g_hle_passthrough = true;
+        return;
+    }
+    // Together (as always): as player 2 when it is after them. R6 (D3), apart: player 2 is "the player" for the enemies of their
+    // room, after them or after nobody, so these find them by the game's own look; an enemy of any other room looks as the
+    // game's, whoever it was after before they parted. (Seen: before this, room 183's zombies never chose player 2 apart,
+    // r6-c1/r6-c3. The look's sanity hit and its "seen" mark go to "the player" (0x800CA370, 0x8003B260). The first reason
+    // written here, the 0x1000 flag at 0x8003283C, was wrong: zombies don't carry it, rooms/behaviour-readers.md.) With the
+    // R6c creature bracket (r6c_creature) the look already runs with player 2 as the player; this stays for its own log.
+    const u32 after = mem_read32(cpu, stats + COOP_TARGET_B), theirs = mem_read32(cpu, g_coop_p2 + 16u);
+    const bool as_p2 = r6_apart(cpu) ? coop_object_room(cpu, node) == coop_object_room(cpu, g_coop_p2) && (after == theirs || after == 0u)
+                                     : after == theirs;
+    if (!as_p2) {
         g_hle_passthrough = true;
         return;
     }
@@ -21655,7 +21746,15 @@ static void coop_events(CPUState* cpu) {
         const bool counts = true;
         if (counts)
             coop_kinds(cpu, true);
+        // R6: apart, their events run with their room current, as their turn does (coop_stay_room_in: only when they stay
+        // apart; together nothing). Their state 1 tick's look for someone down to finish (0x800330E0 from 0x800C030C) takes
+        // only bodies of the room in play (0x800332E8): with player 1's in, FINISH HIM showed for the one frame of their turn.
+        // Not inside a room change (event 61 to the room left is sent with the new room's word in: the review, refute-r6c).
+        u32 room_keep[3];
+        const bool room_in = r6_apart(cpu) && !coop_camera_at_room_change(cpu) && coop_stay_room_in(cpu, room_keep);
         hle_guest_call(cpu, COOP_EVENTS, args, 8, cpu->fpr[1], &result);
+        if (room_in)
+            coop_stay_room_out(cpu, room_keep);
         if (counts)
             coop_kinds(cpu, false);
         if (asks)
@@ -21941,7 +22040,13 @@ static void coop_grab_events(CPUState* cpu) {
     }
     running = true;
     answering = message;
+    // R6c: apart, held in their own room, with their room current (the held behaviour's events 138/139/140 re-post
+    // themselves while the holder's room isn't the room in play: 0x800613C0, 0x800614FC, 0x80061624). Together: nothing.
+    u32 room_keep[3];
+    const bool room_in = r6_apart(cpu) && !coop_camera_at_room_change(cpu) && coop_stay_room_in(cpu, room_keep);
     hle_guest_call(cpu, COOP_GRAB_EVENTS, args, 8, cpu->fpr[1], &result);
+    if (room_in)
+        coop_stay_room_out(cpu, room_keep);
     answering = 0u;
     running = false;
     if (words) {
@@ -24058,6 +24163,409 @@ static float coop_distance(CPUState* cpu, u32 a, u32 b) {
     return sqrtf(d2);
 }
 
+// ---- R6: enemies and hits by room (docs/research/separate-rooms/design-r6.md; readers enemy-readers.md, enemy-readers-2.md;
+// refuters refute-r6.md). Nothing here acts while the players are together (r6_apart): together both are in the room in
+// play, and every path below returns at its first test. ED_COOP_ENEMY_LOG=1 tells each act with an [enemy] line. ----
+static bool r6_log(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_COOP_ENEMY_LOG") != NULL;
+    return on != 0;
+}
+static int g_r6c_depth;  // (R6c: inside a creature's event run as its room's game, r6c_creature)
+static u32 g_r6c_p1;     // player 1's node, kept by r6c_creature while player 2 is "the player" for it
+// Player 1's node, also inside player 2's turn or another swap (r13-21492 is player 2's then).
+static u32 r6_player1_node(CPUState* cpu) {
+    const u32 now = mem_read32(cpu, cpu->gpr[13] - 21492u);
+    if (now != g_coop_p2 && now != 0u)
+        return now;
+    if (g_r6c_depth > 0 && g_r6c_p1 != 0u)
+        return g_r6c_p1;
+    return g_coop_turn && g_coop_turn_p1 != 0u ? g_coop_turn_p1 : g_coop_p1_node;
+}
+// The players apart, each in a resident room (ED_COOP_STAY), outside a change of player 2's (R4's bracket).
+static bool r6_apart(CPUState* cpu) {
+    if (!g_settings.mod_coop || !coop_stay() || g_stay_bracket != 0 || g_coop_p2 == 0u || !sda_ready(cpu))
+        return false;
+    const s32 r1 = coop_object_room(cpu, r6_player1_node(cpu)), r2 = coop_object_room(cpu, g_coop_p2);
+    return r1 != -1 && r2 != -1 && r1 != r2 && room_slot_of(cpu, r1) >= 0 && room_slot_of(cpu, r2) >= 0;
+}
+// A node by its id, as the game's 0x801F5F88 finds it (its id the player's: r13-21492 directly; else the list by +16).
+static u32 r6_node_of_id(CPUState* cpu, u32 id) {
+    if (id == 0u || id == 0xFFFFFFFFu)
+        return 0u;
+    if (id == mem_read32(cpu, cpu->gpr[13] - 21496u))
+        return mem_read32(cpu, cpu->gpr[13] - 21492u);
+    u32 node = 0u;
+    for (int i = 0; i < 1024 && (node = coop_next(cpu, node)) != 0u; i++)
+        if (mem_read32(cpu, node + 16u) == id)
+            return node;
+    return 0u;
+}
+// A room resident in a slot whose record is loaded, as 0x80123F70 tests it (+0x8140 a halfword, +0x8142 and +0x8143 bytes).
+static bool r6_room_loaded(CPUState* cpu, s32 room) {
+    const u32 p = room_slot_record(cpu, room_slot_of(cpu, room));
+    if (room == -1 || p == 0u)
+        return false;
+    const u32 w = mem_read32(cpu, p + 0x8140u);
+    return (s32)(s16)(w >> 16) == room && ((w >> 8) & 0xFFu) != 0u && (w & 0xFFu) != 0u;
+}
+
+// D1, the hit's room. The game takes every hit in three functions, each refusing a victim whose room isn't the room in
+// play (r13-23276): 0x8006255C(block), event 11's hit (victim id block +152, attacker +156; gate 0x800625A4; it sends 53
+// or 230 and 39 to the victim synchronously, inside the call), 0x80061B9C(node, message, answer*), event 39's damage
+// (gate 0x80061BD0; its death event 8 synchronous), and 0x800637B8(node, message, answer*), event 53's hurt reaction (gate
+// 0x8006383C). Apart, each runs with the room it should see current (the word and the slot table, as player 2's turn has
+// theirs): the victim's when the attacker is in the victim's room or has none; the attacker's when they differ, so the
+// game's own gate refuses a hit across rooms (a target kept from before they parted, by coordinates). The call nested
+// inside finds that room already current and runs as the game's. Together: the victim's room is the room in play.
+#define R6_HIT_TAKER 0x8006255Cu
+#define R6_DAMAGE_TAKER 0x80061B9Cu
+#define R6_HURT_TAKER 0x800637B8u
+static int g_r6_depth;
+static void r6_hit_room(CPUState* cpu, u32 fn) {
+    g_hle_passthrough = true;
+    if (!r6_apart(cpu))
+        return;
+    u32 victim, attacker_id;
+    if (fn == R6_HIT_TAKER) {
+        const u32 block = cpu->gpr[3];
+        if (!guest_ram_range_valid(cpu, block, 160u))
+            return;
+        victim = r6_node_of_id(cpu, mem_read32(cpu, block + 152u));
+        attacker_id = mem_read32(cpu, block + 156u);
+    } else {
+        const u32 message = cpu->gpr[4];
+        if (!guest_ram_range_valid(cpu, message, 8u))
+            return;
+        victim = cpu->gpr[3];
+        attacker_id = mem_read32(cpu, message + 4u);
+    }
+    const s32 v = coop_object_room(cpu, victim);
+    if (v == -1)
+        return;
+    const u32 attacker = r6_node_of_id(cpu, attacker_id);
+    const s32 a = attacker != 0u ? coop_object_room(cpu, attacker) : -1;
+    const s32 t = a == -1 || a == v ? v : a;
+    if (t == (s32)mem_read32(cpu, cpu->gpr[13] - 23276u) || !r6_room_loaded(cpu, t))
+        return;
+    if (g_r6_depth >= 4) {
+        static bool said;
+        if (!said)
+            fprintf(stderr, "[enemy] hits nested 4 deep: this one goes as the game's (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+        said = true;
+        return;
+    }
+    u32 args[8], keep[3], result = 0u;
+    for (int i = 0; i < 8; i++)
+        args[i] = cpu->gpr[3 + i];
+    coop_room_in(cpu, t, keep);
+    g_r6_depth++;
+    hle_guest_call(cpu, fn, args, 8, cpu->fpr[1], &result);
+    g_r6_depth--;
+    coop_stay_room_out(cpu, keep);
+    if (r6_log())
+        fprintf(stderr, "[enemy] %s on %u (room %d) by %u (room %d): %s (frame %llu)\n",
+                fn == R6_HIT_TAKER ? "hit" : fn == R6_DAMAGE_TAKER ? "damage" : "hurt", mem_read32(cpu, victim + 16u), v, attacker_id, a,
+                t == v ? "taken in their room" : "refused: rooms differ", (unsigned long long)(cpu->timebase / 675000ull));
+    // The nested dispatch passed itself through: this call is done, its answer in r3 (coop_as_player2's way).
+    cpu->gpr[3] = result;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+static void r6_hit_taker(CPUState* cpu) { r6_hit_room(cpu, R6_HIT_TAKER); }
+static void r6_damage_taker(CPUState* cpu) { r6_hit_room(cpu, R6_DAMAGE_TAKER); }
+static void r6_hurt_taker(CPUState* cpu) { r6_hit_room(cpu, R6_HURT_TAKER); }
+
+// R6b, the enemies' routes in the room player 2 stays in (rooms/waypoint-readers.md, rooms/design-r6b.md). An enemy farther
+// than 550 units from its target walks a route, and the route is made by the game's background thread (0x800BB730, priority
+// 31), which runs while the main thread waits for the retrace: always with player 1's room in play. Its job (one enemy's id
+// from the queue 0x805B2AFC) builds the point graph r13-25060 (28000 bytes; r13-25064 the room it was built for) from the
+// current slot (0x800BA530 at 0x800BB914), finds the start and end points and their sight lines in the current slot's
+// collision (0x800B9EE4), searches (0x800BB1AC) and smooths (0x800BACEC), and keeps the path as POINTERS into the graph. So a
+// job for an enemy of player 2's room runs, apart, with their room current and a second graph for it, from the graph's build
+// (0x800BA530's entry, lr 0x800BB918; the job's node in r24) to the job's OSDisableInterrupts (0x8020102C, lr 0x800BB9E4),
+// reached on every path after it; the room word, slot table and graph pair go back there. Interrupts are held off inside
+// (MSR[EE]: the retrace is delivered only with it set, interrupt.c), so the main thread never runs a frame with them in.
+// The second graph sits in ED_ROOM_SLOTS's memory past slot 1's area, with its key (the room and slot it was built for)
+// beside it, so it rides save states with the RAM; it is emptied when its room leaves its slot (r6b_frame).
+#define R6B_GRAPH 0x83400000u
+#define R6B_GRAPH_BYTES 28000u
+#define R6B_KEY (R6B_GRAPH + R6B_GRAPH_BYTES)  // 'R6BG', room, slot
+#define R6B_MAGIC 0x52364247u
+#define R6B_GRAPH_BUILD 0x800BA530u
+#define R6B_JOB_BUILT 0x800BB918u  // lr of the job's graph build
+#define R6B_JOB_DONE 0x800BB9E4u   // lr of the job's OSDisableInterrupts after its search
+#define R6B_INTERRUPTS_OFF 0x8020102Cu
+#define R6B_EE 0x00008000u
+static struct {
+    bool open;
+    u32 keep[3], graph[2], ee;
+    s32 room;
+    int slot;
+} g_r6b;
+static bool r6b_memory(CPUState* cpu) { return cpu->ram_size >= R6B_KEY + 12u - GC_RAM_BASE; }
+static void r6b_job_open(CPUState* cpu) {
+    if (cpu->lr != R6B_JOB_BUILT || g_r6b.open || !r6b_memory(cpu) || !r6_apart(cpu))
+        return;
+    const s32 room = coop_object_room(cpu, cpu->gpr[24]);
+    if (room == -1 || room == (s32)mem_read32(cpu, cpu->gpr[13] - 23276u) || !r6_room_loaded(cpu, room))
+        return;
+    const int slot = room_slot_of(cpu, room);
+    const bool built = mem_read32(cpu, R6B_KEY) == R6B_MAGIC && (s32)mem_read32(cpu, R6B_KEY + 4u) == room && (s32)mem_read32(cpu, R6B_KEY + 8u) == slot;
+    coop_room_in(cpu, room, g_r6b.keep);
+    g_r6b.graph[0] = mem_read32(cpu, cpu->gpr[13] - 25060u);
+    g_r6b.graph[1] = mem_read32(cpu, cpu->gpr[13] - 25064u);
+    mem_write32(cpu, cpu->gpr[13] - 25060u, R6B_GRAPH);
+    mem_write32(cpu, cpu->gpr[13] - 25064u, built ? (u32)room : 0xFFFFFFFFu);  // not built: 0x800BA530 builds it now
+    g_r6b.ee = cpu->msr & R6B_EE;
+    cpu->msr &= ~R6B_EE;
+    g_r6b.open = true;
+    g_r6b.room = room;
+    g_r6b.slot = slot;
+    if (r6_log() && !built)
+        fprintf(stderr, "[enemy] room %d's route graph built for its enemies (slot %d; for %u; frame %llu)\n", room, slot, mem_read32(cpu, cpu->gpr[24] + 16u),
+                (unsigned long long)(cpu->timebase / 675000ull));
+}
+static void r6b_close(CPUState* cpu) {
+    const bool built = (s32)mem_read32(cpu, cpu->gpr[13] - 25064u) == g_r6b.room;
+    mem_write32(cpu, R6B_KEY, built ? R6B_MAGIC : 0u);
+    mem_write32(cpu, R6B_KEY + 4u, (u32)g_r6b.room);
+    mem_write32(cpu, R6B_KEY + 8u, (u32)g_r6b.slot);
+    mem_write32(cpu, cpu->gpr[13] - 25060u, g_r6b.graph[0]);
+    mem_write32(cpu, cpu->gpr[13] - 25064u, g_r6b.graph[1]);
+    coop_stay_room_out(cpu, g_r6b.keep);
+    cpu->msr |= g_r6b.ee;
+    g_r6b.open = false;
+}
+static void r6b_job_close(CPUState* cpu) {
+    if (g_r6b.open && cpu->lr == R6B_JOB_DONE)
+        r6b_close(cpu);
+}
+// Each frame (room_slots_frame): a bracket still open in the main thread is closed (never expected); the second graph is
+// emptied when its room is no longer in its slot (its +0 pointers point into that slot's record): a route into it then
+// reads an empty point, the enemy goes to state 1 and asks again.
+static void r6b_frame(CPUState* cpu) {
+    if (!coop_stay() || !r6b_memory(cpu))
+        return;
+    if (g_r6b.open) {
+        fprintf(stderr, "[enemy] WARNING: a route job of room %d was still open in the frame: closed (frame %llu)\n", g_r6b.room,
+                (unsigned long long)(cpu->timebase / 675000ull));
+        r6b_close(cpu);
+    }
+    if (mem_read32(cpu, R6B_KEY) != R6B_MAGIC)
+        return;
+    const s32 room = (s32)mem_read32(cpu, R6B_KEY + 4u), slot = (s32)mem_read32(cpu, R6B_KEY + 8u);
+    if (slot >= 0 && slot <= 1 && g_room_slot_room[slot] == room)
+        return;
+    for (u32 i = 0u; i < R6B_GRAPH_BYTES; i += 4u)
+        mem_write32(cpu, R6B_GRAPH + i, 0u);
+    mem_write32(cpu, R6B_KEY, 0u);
+    if (r6_log())
+        fprintf(stderr, "[enemy] room %d left slot %d: its route graph emptied (frame %llu)\n", room, slot, (unsigned long long)(cpu->timebase / 675000ull));
+}
+
+// R6c, the creatures of the room player 2 stays in, as that room's own game (rooms/behaviour-readers.md, rooms/design-r6c.md).
+// Every event reaches a node's handler through 0x801F5294(node, state, message, answer*) (its bctrl at 0x801F52F4, the
+// type's function from 0x806068A8). Apart, a creature (actor +158 class 2, the actor at node +40) or a spawner (type 78; its
+// room in its record, actor +124 -> +28) of a resident room that isn't the room in play gets its event with its room current
+// (the word and the slot table) and that room's player as "the player" (r13-26524, -21492, -21496): player 2 for theirs.
+// So their behaviours' 29 room-in-play tests see their room (a downed one gets up: 0x8003D97C; a death plays: 0x80038ED4;
+// the spawner spawns: 0x80030140) and every kind's look, sanity hit and "the player" reads find player 2 (types 5-8, 42,
+// 44, 53, 74, 89...: their looks take only "the player"). Not the players' own nodes (type 2: coop_events; 19, the held
+// one: coop_grab_events), not event 4 (no creature kind has a case for it), not inside a room change (event 61 to the room
+// left, sent in the change with the slot table mid-way: coop_camera_at_room_change), not 4 deep. A node of the other room
+// reached inside (an event it sends there) runs with its own room by the same rule. Together: r6_apart, nothing.
+// R4b: player 2's door beside a scene of player 1's (the user's play, 2026-11-11 night, logs/run-20261111-221141-rooms-play:
+// player 1's zombie scene L01/779 in room 342, player 2 down the ladder into 342 during it; at the arrival both halves
+// stayed on its Camera06 for good). The arrival 0x80151FDC, inside player 2's change (R4's bracket), clears the script
+// waits (0x80163F04(1) at 0x8015213C: every entry not marked kept, the table at 0x805CAA40, 10 of {+0 script s16, +4 frames
+// u16, +6 kept}) and every busy bit (0x801556CC(-1, 0) at 0x80152184): right alone, where the room left is gone; here they
+// took player 1's scene's wait (779 never ran again: its last step, Camera01 back and fn22(0), never came) and its hold.
+// Inside player 2's change: the waits of scripts that aren't player 2's are put back (coop_p2_script_is), and with player
+// 1's scene or close-up on, the busy bits but the change's own (4) stay. Without ED_COOP_STAY there is no such bracket.
+#define STAY_WAITS 0x805CAA40u
+#define STAY_WAITS_CLEAR 0x80163F04u
+#define STAY_WAITS_CLEAR_AT 0x80152140u  // lr of the arrival's call
+#define STAY_BUSY_SET 0x801556CCu
+#define STAY_BUSY_CLEAR_AT 0x80152188u  // lr of the arrival's busy_set(-1, 0)
+static void stay_waits_clear(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (g_stay_bracket == 0 || cpu->lr != STAY_WAITS_CLEAR_AT || !guest_ram_range_valid(cpu, STAY_WAITS, 80u))
+        return;
+    u32 was[10][2];
+    for (u32 i = 0u; i < 10u; i++) {
+        was[i][0] = mem_read32(cpu, STAY_WAITS + 8u * i);
+        was[i][1] = mem_read32(cpu, STAY_WAITS + 8u * i + 4u);
+    }
+    const u32 args[1] = {cpu->gpr[3]};
+    u32 ignore = 0u;
+    hle_guest_call(cpu, STAY_WAITS_CLEAR, args, 1, 0.0, &ignore);
+    for (u32 i = 0u; i < 10u; i++) {
+        const s32 script = (s32)(s16)(was[i][0] >> 16);
+        if (script == 0 || coop_p2_script_is(script) || mem_read32(cpu, STAY_WAITS + 8u * i) == was[i][0])
+            continue;
+        mem_write32(cpu, STAY_WAITS + 8u * i, was[i][0]);
+        mem_write32(cpu, STAY_WAITS + 8u * i + 4u, was[i][1]);
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[stay] player 2's change keeps script %d's wait (%u frames): not theirs (frame %llu)\n", script, was[i][1] >> 16,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+static void stay_busy_clear(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (g_stay_bracket == 0 || cpu->lr != STAY_BUSY_CLEAR_AT || cpu->gpr[3] != 0xFFFFFFFFu || cpu->gpr[4] != 0u ||
+        !(coop_scene_on_of(0) || coop_p1_in_close_up(cpu)))
+        return;
+    const u32 keep = mem_read32(cpu, cpu->gpr[13] - 23344u) & ~COOP_BUSY_ROOM;
+    if (keep == 0u)
+        return;
+    const u32 args[2] = {cpu->gpr[3], cpu->gpr[4]};
+    u32 ignore = 0u;
+    hle_guest_call(cpu, STAY_BUSY_SET, args, 2, 0.0, &ignore);
+    mem_write32(cpu, cpu->gpr[13] - 23344u, keep);  // (written, not set: a busy set's event 102 isn't sent for player 1's own bits)
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[stay] player 2's change keeps player 1's busy %u: their scene or close-up goes on (frame %llu)\n", keep,
+                (unsigned long long)(cpu->timebase / 675000ull));
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+#define R6C_DELIVER 0x801F5294u
+static void r6c_creature(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const u32 node = cpu->gpr[3], message = cpu->gpr[5];
+    if (g_r6c_depth >= 4 || !guest_ram_range_valid(cpu, node, 56u) || !guest_ram_range_valid(cpu, message, 4u) || mem_read32(cpu, message) == 4u)
+        return;
+    const u32 type = mem_read32(cpu, node + 8u);
+    if (type == 0u || type == 2u || type == 19u)
+        return;
+    const u32 actor = mem_read32(cpu, node + 40u);
+    if (!guest_ram_range_valid(cpu, actor, 160u))
+        return;
+    s32 room = -1;
+    if (type == 78u) {
+        const u32 record = mem_read32(cpu, actor + 124u);
+        room = guest_ram_range_valid(cpu, record, 32u) ? (s32)mem_read32(cpu, record + 28u) : -1;
+    } else if (mem_read8(cpu, actor + 158u) == 2u) {
+        room = coop_object_room(cpu, node);
+    }
+    if (room == -1 || !r6_apart(cpu))  // (the cheap tests first: together this is all an event costs)
+        return;
+    // That room's player: player 2 in theirs, player 1 in theirs (an event of room A's sent from inside room B's).
+    const u32 p1 = r6_player1_node(cpu);
+    const u32 player = room == coop_object_room(cpu, g_coop_p2) ? g_coop_p2 : room == coop_object_room(cpu, p1) ? p1 : 0u;
+    // The room already current (inside a hit's, their events' or their turn's bracket, which swap the room alone): the
+    // player alone when it isn't that room's (the review: player 2's swing's victim reacted with player 1 the player).
+    const bool current = room == (s32)mem_read32(cpu, cpu->gpr[13] - 23276u);
+    if (player == 0u || (current && mem_read32(cpu, cpu->gpr[13] - 21492u) == player) || (!current && !r6_room_loaded(cpu, room)) ||
+        coop_camera_at_room_change(cpu))
+        return;
+    const u32 who[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+    const u32 now[3] = {mem_read32(cpu, player + 52u), player, mem_read32(cpu, player + 16u)};
+    u32 was[3], keep[3], args[8], result = 0u;
+    for (int i = 0; i < 8; i++)
+        args[i] = cpu->gpr[3 + i];
+    if (!current)
+        coop_room_in(cpu, room, keep);
+    for (int i = 0; i < 3; i++) {
+        was[i] = mem_read32(cpu, who[i]);
+        mem_write32(cpu, who[i], now[i]);
+    }
+    const u32 p1_was = g_r6c_p1;
+    g_r6c_p1 = p1;
+    g_r6c_depth++;
+    hle_guest_call(cpu, R6C_DELIVER, args, 8, cpu->fpr[1], &result);
+    g_r6c_depth--;
+    g_r6c_p1 = p1_was;
+    for (int i = 0; i < 3; i++)
+        mem_write32(cpu, who[i], was[i]);
+    if (!current)
+        coop_stay_room_out(cpu, keep);
+    static unsigned long long told;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (r6_log() && frame >= told + 600ull) {  // now and then: that it runs
+        told = frame;
+        fprintf(stderr, "[enemy] %u (type %u, room %d) runs as its room's game, player %d the player (event %u, frame %llu)\n", mem_read32(cpu, node + 16u),
+                type, room, player == g_coop_p2 ? 2 : 1, mem_read32(cpu, message), frame);
+    }
+    cpu->gpr[3] = result;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+// D4, apart: an enemy after a player of another room (kept from before they parted) or after the one player of its room
+// while the game holds them (their words, close-up, Tome) is after nobody (+20 := 0, the quarry's own "nobody"); the game
+// chooses again from its own room at its next look (every 8-64 frames), and a held player answers 59 "no" (coop_send_event).
+static void r6_enemy_apart(CPUState* cpu, u32 object, s32 room, u32 p1_node) {
+    if (room_slot_of(cpu, room) < 0)  // a node left over from a room no longer loaded (342-344 in chapter 1): the game's
+        return;
+    u32 node = 0u;
+    for (int i = 0; i < 1024 && (node = coop_next(cpu, node)) != 0u; i++)
+        if (mem_read32(cpu, node + 52u) == object)
+            break;
+    const u32 stats = node != 0u ? mem_read32(cpu, node + (u32)(s32)g_coop_stats_offset) : 0u;
+    if (!guest_ram_range_valid(cpu, stats, COOP_TARGET_B + 4u))
+        return;
+    if (r6_log()) {  // each change of its health, apart (the together one is coop_enemy_target's)
+        static struct {
+            u32 node;
+            s16 health;
+        } seen[32];
+        const s16 health = (s16)mem_read16(cpu, stats + (u32)(s32)g_coop_health_offset);
+        for (int i = 0; i < 32; i++)
+            if (seen[i].node == node || seen[i].node == 0u) {
+                if (seen[i].node == node && seen[i].health != health)
+                    fprintf(stderr, "[coop] %u's health %d -> %d (room %d, apart; frame %llu)\n", mem_read32(cpu, node + 16u), seen[i].health, health, room,
+                            (unsigned long long)(cpu->timebase / 675000ull));
+                seen[i].node = node;
+                seen[i].health = health;
+                break;
+            }
+    }
+    const u32 after = mem_read32(cpu, stats + COOP_TARGET_B);
+    const u32 ids[2] = {mem_read32(cpu, p1_node + 16u), mem_read32(cpu, g_coop_p2 + 16u)};
+    const int k = after == 0u ? -1 : after == ids[0] ? 0 : after == ids[1] ? 1 : -1;
+    if (k < 0)
+        return;
+    const s32 theirs = coop_object_room(cpu, k == 0 ? p1_node : g_coop_p2);
+    const bool other_room = theirs != room, held = !other_room && coop_player_held(cpu, k);
+    if (!other_room && !held)
+        return;
+    mem_write32(cpu, stats + COOP_TARGET_B, 0u);
+    if (r6_log())
+        fprintf(stderr, "[enemy] %u (room %d) %s player %d (room %d%s) (frame %llu)\n", mem_read32(cpu, node + 16u), room, other_room ? "dropped" : "passed over",
+                k + 1, theirs, held ? ", held" : "", (unsigned long long)(cpu->timebase / 675000ull));
+}
+
+// ED_COOP_ENEMY_LOG, every 120 frames while apart (from room_slots_frame's [stay] line): each character's room, place,
+// type, state, target and health, players left out.
+static void r6_enemy_roster(CPUState* cpu) {
+    if (!r6_log() || !r6_apart(cpu))
+        return;
+    const u32 p1 = r6_player1_node(cpu);
+    u32 node = 0u;
+    int told = 0;
+    for (int i = 0; i < 1024 && told < 16 && (node = coop_next(cpu, node)) != 0u; i++) {
+        if (node == p1 || node == g_coop_p2)
+            continue;
+        const u32 object = mem_read32(cpu, node + 52u), stats = mem_read32(cpu, node + (u32)(s32)g_coop_stats_offset);
+        if (!guest_ram_range_valid(cpu, object, COOP_OBJECT_ROOM + 4u) || !guest_ram_range_valid(cpu, stats, COOP_TARGET_B + 4u) ||
+            !guest_ram_range_valid(cpu, stats + (u32)(s32)g_coop_health_offset, 2u))
+            continue;
+        const s32 room = (s32)mem_read32(cpu, object + COOP_OBJECT_ROOM);
+        const s16 health = (s16)mem_read16(cpu, stats + (u32)(s32)g_coop_health_offset);
+        if (room == -1 || room_slot_of(cpu, room) < 0 || health < 0 || health > 10000)  // the two resident rooms only
+            continue;
+        told++;
+        fprintf(stderr, "[enemy] frame %llu: %u room %d at %.0f %.0f %.0f type %u state %u after %u health %d\n", (unsigned long long)(cpu->timebase / 675000ull),
+                mem_read32(cpu, node + 16u), room, guest_read_f32(cpu, object), guest_read_f32(cpu, object + 4u), guest_read_f32(cpu, object + 8u),
+                mem_read32(cpu, node + 8u), mem_read32(cpu, node + COOP_NODE_STATE), mem_read32(cpu, stats + COOP_TARGET_B), health);
+    }
+}
+
 static void coop_enemy_target(CPUState* cpu, u32 object) {
     if (!g_settings.mod_coop || g_coop_turn || g_coop_step_running || g_coop_p2 == 0u || !g_coop_p2_state ||
         !sda_ready(cpu))
@@ -24069,8 +24577,11 @@ static void coop_enemy_target(CPUState* cpu, u32 object) {
         !guest_ram_range_valid(cpu, p1, COOP_OBJECT_ROOM + 4u) || !guest_ram_range_valid(cpu, p2, COOP_OBJECT_ROOM + 4u))
         return;
     const u32 room = mem_read32(cpu, object + COOP_OBJECT_ROOM);
-    if (mem_read32(cpu, p1 + COOP_OBJECT_ROOM) != room || mem_read32(cpu, p2 + COOP_OBJECT_ROOM) != room)
+    if (mem_read32(cpu, p1 + COOP_OBJECT_ROOM) != room || mem_read32(cpu, p2 + COOP_OBJECT_ROOM) != room) {
+        if (r6_apart(cpu))  // R6 (D4): only when the players are apart; together this returns as it always has
+            r6_enemy_apart(cpu, object, (s32)room, p1_node);
         return;
+    }
     u32 node = 0u;
     for (int i = 0; i < 1024 && (node = coop_next(cpu, node)) != 0u; i++)
         if (mem_read32(cpu, node + 52u) == object)
@@ -26085,7 +26596,7 @@ bool tome_copy_hook_off(HleHandler fn) {
         OFF(coop_script_go_to_room), OFF(coop_cast), OFF(tw_mode_change), OFF(tw_tome_start), OFF(coop_controlled_id), OFF(coop_play_hold),
         OFF(coop_enchanted_look), OFF(coop_sign_follow), OFF(coop_lasting_find), OFF(coop_spells_update),
         OFF(coop_game_camera), OFF(hle_moves_let_go), OFF(hle_moves_want), OFF(hle_find_by_id), OFF(coop_position_copy),
-        OFF(coop_send_event), OFF(notify_GXSetDrawDone), OFF(coop_prompt_choose), OFF(coop_prompt_set), OFF(coop_prompt_clear), OFF(coop_scan_player1), OFF(coop_camera_chosen), OFF(coop_words_hold), OFF(coop_find_hold), OFF(coop_flags_ask), OFF(coop_words_tick), OFF(coop_hide_others), OFF(coop_hide_others_end), OFF(coop_found_place), OFF(coop_found_unproject), OFF(coop_look_prompt), OFF(coop_script_sends), OFF(coop_show_asked), OFF(coop_show_main_asked), OFF(coop_found_object_draw), OFF(coop_busy_ask),
+        OFF(coop_send_event), OFF(r6_hit_taker), OFF(r6_damage_taker), OFF(r6_hurt_taker), OFF(r6b_job_open), OFF(r6b_job_close), OFF(r6c_creature), OFF(notify_GXSetDrawDone), OFF(coop_prompt_choose), OFF(coop_prompt_set), OFF(coop_prompt_clear), OFF(coop_scan_player1), OFF(coop_camera_chosen), OFF(coop_words_hold), OFF(coop_find_hold), OFF(coop_flags_ask), OFF(coop_words_tick), OFF(coop_hide_others), OFF(coop_hide_others_end), OFF(coop_found_place), OFF(coop_found_unproject), OFF(coop_look_prompt), OFF(coop_script_sends), OFF(coop_show_asked), OFF(coop_show_main_asked), OFF(coop_found_object_draw), OFF(coop_busy_ask),
 #undef OFF
     };
     static bool said[sizeof kOff / sizeof kOff[0]];
@@ -27268,6 +27779,54 @@ static void find_coop(CPUState* cpu) {
         hazard->intercept = coop_hazard_touch;
     else
         fprintf(stderr, "[coop] the hazards' touch not found: they hurt player 2 every frame\n");
+    // R6 (D1): the three hit takers (stwu at +0; lwz r0,-23276(r13) at each gate), only with the players able to part.
+    if (getenv("ED_COOP_STAY") != NULL) {
+        const struct {
+            u32 at, first, gate;
+            HleHandler fn;
+        } kHits[3] = {{R6_HIT_TAKER, 0x9421FE30u, 0x48u, r6_hit_taker},
+                      {R6_DAMAGE_TAKER, 0x9421FFD0u, 0x34u, r6_damage_taker},
+                      {R6_HURT_TAKER, 0x9421FFC0u, 0x84u, r6_hurt_taker}};
+        for (int i = 0; i < 3; i++) {
+            HleDispatchEntry* e = hle_dispatch_entry(kHits[i].at);
+            if (mem_read32(cpu, kHits[i].at) == kHits[i].first && mem_read32(cpu, kHits[i].at + kHits[i].gate) == 0x800DA514u && e != NULL &&
+                e->intercept == NULL && e->notify == NULL)
+                e->intercept = kHits[i].fn;
+            else
+                fprintf(stderr, "[coop] R6: the hit taker 0x%08X not found: hits apart stay refused\n", kHits[i].at);
+        }
+        // R6b: the route job's graph build (stwu r1,-48(r1); its call bl at 0x800BB914) and its OSDisableInterrupts after
+        // the search (mfmsr r3; the call bl at 0x800BB9E0), each a notify that acts only at the job's own call.
+        HleDispatchEntry* build = hle_dispatch_entry(R6B_GRAPH_BUILD);
+        HleDispatchEntry* off = hle_dispatch_entry(R6B_INTERRUPTS_OFF);
+        if (getenv("ED_ROOM_SLOTS") != NULL && mem_read32(cpu, R6B_GRAPH_BUILD) == 0x9421FFD0u && mem_read32(cpu, 0x800BB914u) == 0x4BFFEC1Du &&
+            mem_read32(cpu, R6B_INTERRUPTS_OFF) == 0x7C6000A6u && mem_read32(cpu, 0x800BB9E0u) == 0x4814564Du && build != NULL && off != NULL &&
+            build->intercept == NULL && build->notify == NULL && off->intercept == NULL && off->notify == NULL) {
+            build->notify = r6b_job_open;
+            off->notify = r6b_job_close;
+        } else {
+            fprintf(stderr, "[coop] R6b: the route job not found: enemies of player 2's room route only near them\n");
+        }
+        // R6c: the handlers' delivery (stwu r1,-16(r1); lwz r0,12(r5) at +0xC; its bctrl at +0x60).
+        HleDispatchEntry* deliver = hle_dispatch_entry(R6C_DELIVER);
+        if (getenv("ED_ROOM_SLOTS") != NULL && mem_read32(cpu, R6C_DELIVER) == 0x9421FFF0u && mem_read32(cpu, R6C_DELIVER + 0xCu) == 0x8005000Cu &&
+            mem_read32(cpu, R6C_DELIVER + 0x60u) == 0x4E800421u && deliver != NULL && deliver->intercept == NULL && deliver->notify == NULL)
+            deliver->intercept = r6c_creature;
+        else
+            fprintf(stderr, "[coop] R6c: the handlers' delivery not found: player 2's room's creatures wait on player 1's room\n");
+        // R4b: the arrival's two clears (the waits' clear: stwu r1,-16(r1), its call bl at 0x8015213C; the busy set: stwu
+        // r1,-16(r1), lwz r0,-23344(r13) at +0x14, its call bl at 0x80152184). Their trace notifies, if any, stay.
+        HleDispatchEntry* waits = hle_dispatch_entry(STAY_WAITS_CLEAR);
+        HleDispatchEntry* busy_set = hle_dispatch_entry(STAY_BUSY_SET);
+        if (mem_read32(cpu, STAY_WAITS_CLEAR) == 0x9421FFF0u && mem_read32(cpu, 0x8015213Cu) == 0x48011DC9u && mem_read32(cpu, STAY_BUSY_SET) == 0x9421FFF0u &&
+            mem_read32(cpu, STAY_BUSY_SET + 0x14u) == 0x800DA4D0u && mem_read32(cpu, 0x80152184u) == 0x48003549u && waits != NULL && busy_set != NULL &&
+            waits->intercept == NULL && busy_set->intercept == NULL) {
+            waits->intercept = stay_waits_clear;
+            busy_set->intercept = stay_busy_clear;
+        } else {
+            fprintf(stderr, "[coop] R4b: the arrival's clears not found: player 2's door ends player 1's scene\n");
+        }
+    }
     if (hurt_log()) {
         HleDispatchEntry* dmg = hle_dispatch_entry(0x80061E90u);
         if (dmg != NULL && dmg->intercept == NULL && dmg->notify == NULL)
@@ -27441,13 +28000,16 @@ bool hle_save_held(void) {
     // Step E: and a use's script mid-run (its lr is HLE_USE_RETURN in the state), their close-up's hold without its window,
     // a close script of theirs still queued (host memory a state can't keep).
     // (And the use route's words of theirs, g_coop_words_theirs: the game's window with their hold.)
+    // R6b: and while a route job of player 2's room runs with their room in (its words and MSR[EE] are swapped then).
     return g_coop_tome_p2 || coop_p2_own_up() || g_coop_use.active || g_coop_p2_look.held || g_coop_p2_words.close_count > 0 ||
-           g_coop_words_theirs;
+           g_coop_words_theirs || g_r6b.open;
 }
 
 // NULL: a state saved before co-op was kept; player 2 is found again as
 // after a co-op save.
 void hle_coop_state_load(const void* in) {
+    // R6b: a route job's bracket open in this run belongs to it, not to the state (saves wait for it to close): forgotten.
+    memset(&g_r6b, 0, sizeof g_r6b);
     // The finish slot (fin_swap) is in RAM the state brings back: what it held is not known, so it's loaded again.
     g_p2_moves[FIN_MOVES_SLOT].model = g_p2_moves[FIN_MOVES_SLOT].part = -1;
     memset(g_fin, 0, sizeof g_fin);

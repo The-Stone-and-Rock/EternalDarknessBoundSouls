@@ -766,3 +766,15 @@ docs/coop-todo.md's table), a rule of its own, not a guard in step D. Open in do
   ED_ROOM_SLOTS the title machine is `saves/title-rooms.state` (frontend.cpp title_state_path, made fresh the first time), and
   quickstate refuses a MEM1 smaller than the build's under the switch ("made without the two room slots"). Keep in mind: any
   state the launcher loads by itself must match the memory layout of the switches it runs with.
+
+## A Jump-to-Game state made on a busy machine (2026-11-11 night, R6's baseline; a test accident, not the code)
+
+- **`saves/rooms-r6-base.state` held player 2 for good:** made by build-run-r6.sh's recipe (`jtg.sh 1` with the door chain
+  `ED_RUN_SCRIPT=1950:101,...`) while four reader agents ran on the same machine. The chapter intro ran slow (its camera
+  fly-over began at 2037, not ~1693; logs/run-20261111-194313-jtg-r6-base-state), so the forced door script 101 at 1950 ran
+  INSIDE the intro (script 478, busy 0x22) and the game's hold (both.tsv `hold`) stayed 0x1 from 1438 to the end. Every run
+  from that state: player 2's stick and B read but they never moved ("P2 PUSHES, STILL"), with or without ED_HURT_LOG
+  (logs/run-*-r6-mx-a-finlog, -r6-mx-b-hurt). The older `saves/rooms-ch1-183.state` (hold 0x0 at 3640) works on the same build
+  (logs/run-*-r6-mx-c-oldstate: player 2's door, walks). **Before using a fresh JTG state: `ed see 3640 RUN` on its making run
+  must show `hold 0x0`, and script 349 (control) must come before the first forced door; make states with nothing else
+  running, or with `JTG_SLOW=1`.**

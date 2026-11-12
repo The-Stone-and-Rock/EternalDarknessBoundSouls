@@ -2445,3 +2445,106 @@ with 40 large orbs on player 1 (ED_SPARKLES): together both halves show them, ap
 (logs/run-20261111-191217-rooms-r5c-s1-orbs40, shots 000005 / 000030 / 000045). Open: the orbs' eye-space place in the other
 player's half when together (coop-glitch-todo U4); the shadow pass isn't per room (a shadow of the room in play falls in the
 other half): with the lights.
+
+## R6, enemies and hits by room (2026-11-11 night; readers rooms/enemy-readers.md and enemy-readers-2.md, design rooms/design-r6.md, refuters rooms/refute-r6.md)
+
+### What the baseline runs showed (today's build before R6, `saves/rooms-ch1-183.state`, ED_HURT_LOG=1)
+- Player 1 stays with room 183's zombies, player 2 in 180 (r6-base2-c2): player 1 hit 125 -> 76, player 2 untouched. Right.
+- Player 2 standing among them, player 1 in 180 (r6-base-c1, a state where player 2 was held): zombie 40 sent `event 11 from
+  40 to 59` 15 times, and nothing landed: the victim's hit taker refuses a victim whose room isn't the room in play.
+- Player 2 swinging apart (r6-base2-c3): nothing lands. Together (r6-base2-c4): the zombies go after the nearer player.
+- A first fresh state, made while agents ran, held player 2 for good (docs/coop-failed-attempts.md): use states whose making
+  run shows `hold 0x0` at the save frame.
+
+### What the readers and refuters settled
+- Three victim-side gates take every hit: 0x8006255C (event 11's hit, gate 0x800625A4), 0x80061B9C (event 39's damage, gate
+  0x80061BD0; the death, event 8, is sent inside it), 0x800637B8 (event 53's hurt reaction, gate 0x8006383C). Their sends are
+  synchronous (0x801F59B0), so one bracket of the room word round the outer call covers the nested ones.
+- Lifting a gate's compare alone makes a killed enemy inert (the death 0x80038E54 has its own room test, 0x80038ED4).
+- The enemies' choice is room-filtered by +592 already (the quarry 0x800324B8), but zombies take only "the player" as a
+  candidate (flag 0x1000, 0x8003283C), so apart they never chose player 2.
+- The AI's waypoint graph (r13-25060, 28000 bytes, rebuilt by 0x800BA530 when r13-25064 != the room word) is the room in
+  play's only.
+
+### What was built (runtime/host/hle.c, ED_COOP_STAY=1 with ED_ROOM_SLOTS=2; nothing acts while the players are together)
+- `r6_apart`: mod_coop, ED_COOP_STAY, no R4 bracket, both players' rooms known, different and resident. Every new path opens
+  with it.
+- D1 `r6_hit_room` (intercepts on the three takers, installed only under ED_COOP_STAY, standing aside in the Tome copy's
+  turn): the call runs with the victim's room current (`coop_room_in`: the word and the slot table, coop_stay_room_in's body
+  for any room) when the attacker is in the victim's room or has none; with the attacker's room when they differ, so the
+  game's own gate refuses a hit across rooms. Ends as coop_as_player2 does (r3 from the call, passthrough off).
+- D3 `coop_sighting`: apart, the enemy's look runs as player 2 for an enemy of their room after them or after nobody.
+- D4 `r6_enemy_apart` (from coop_enemy_target's apart return): an enemy of a resident room after a player of another room,
+  or after the one player of its room while held, is after nobody (+20 := 0).
+- D5 `coop_send_event`: apart, event 59 to a player from a node of another room answers 0.
+- Logs (ED_COOP_ENEMY_LOG): `[enemy] hit|damage|hurt on V (room r) by A (room r): taken in their room | refused: rooms
+  differ`, `[enemy] N (room R) dropped|passed over player K`, a roster of both resident rooms' characters every 120 frames.
+- D2 (dropping event 58 across rooms) was refuted (it leaks the hit block) and not built.
+
+### The runs (the R6 build; scripts rooms/build-run-r6.sh)
+- r6b-c4 together, r6b-c5 together with player 2 swinging: as before R6 (zombies after the nearer, switching both ways by
+  distance; both players hit; player 2's swings kill: 40 and 38 to 10 -> 0). r6b-c2 (player 1 stays): as base2-c2.
+- r6c-c1n (player 2 put among zombies 39/40 before player 1 leaves; logs/run-20261111-205051-): `[enemy] hit on 59 (room 183)
+  by 40 (room 183): taken in their room`; player 2 68 -> 61 -> 54 -> 47 while player 1 stays 125 in 180.
+- r6c-c3n (the same, player 2 aims and swings; logs/run-20261111-205125-): player 2's swings land (`hit on 40 by 59`, `hit on
+  39 by 59`); zombie 39 killed by player 2 at 5077 and 40 by 39 at 4518, both to state 8 (dead, health 0: the death ran
+  inside the bracket), 40's body changing type on the game's own schedule later; player 1 125 throughout.
+- r6b-c1 (player 2 on the ledge at 1305,1508, ~1000 from the zombies): zombies 39, 40, 41 chose player 2 (state 3, after 59)
+  but stood: beyond 550 units an enemy routes by the waypoint graph, which is room 180's. **Open, R6b.**
+- The kit's ED_PUT tests the floor against the room in play: player 2 can't be put while apart (put them before the split).
+
+### Open after R6 (in order)
+- R6b: the waypoint graph for player 2's room (a second 28000-byte buffer, filled as 0x800BA530 does from their record's
+  +100 list, swapped in for their room's enemies' chase, 0x8003AD74 / 0x800BC044..0x800BC174), and event 61's route drop
+  (0x800BB0C0) when player 1 leaves the room player 2 stays in.
+- Player 2's FINISH HIM apart (0x800330E0 keeps the room in play's bodies; a prompt was seen in r6c-c3n: to read).
+- A downed zombie of player 2's room doesn't get up while apart (event 24, 0x8003D97C); the spawner waits (0x8002FC94).
+- Other enemy kinds than type 4 take their own looks (0x800CA370's 12 callers): they won't find player 2 apart yet.
+- The +12 write in coop_enemy_target (the quarry's flags word, not an id): part of the played together behaviour, left.
+- Effects of a hit in player 2's room are stamped with their room and freed by the frame's tick (no blood there), as in
+  their turn today; enemy sounds of their room are tagged player 1's.
+
+### R6b and R6c (the same night; rooms/waypoint-readers.md, design-r6b.md, behaviour-readers.md, design-r6c.md)
+- The user's point (2026-11-11 night): the first apart run had player 2's camera off player 2 (a test teleport), so it
+  proved nothing visible. Re-run as play: player 2 walks into room 183's hall on the stick (the hall's scene 419 runs as
+  their own while player 1 plays on in 180), then down to the zombies: they attack, player 2 fights back and kills them,
+  pictures with player 2's camera on them (logs/run-20261111-205757-r6c-walk3, -210144-r6c-walk5-swings).
+- R6b: routes for the enemies of player 2's room (the route thread's job runs in their room with a second graph at
+  0x83400000; saves wait while it runs). Zombies ~1000 units away now climb to player 2 on the ledge (r6d/r6e/r6g-c1-far).
+- R6c: apart, every event of a creature (or spawner) of player 2's room runs with their room current and player 2 as "the
+  player" (an intercept on the handlers' delivery 0x801F5294); player 2's own events and their held behaviour run with their
+  room current. Fixes after the review: the player swapped alone when the room is already current; the two small brackets
+  skip a room change; R5's sound gain tests the players' rooms, not the room word.
+- Runs on the final build (logs/run-20261111-21[45]*-r6g-*): apart, player 2 hits zombies (6) and kills one, takes 10 hits,
+  player 1 never hurt; zombies far away climb to them; together (c4, c5, c6) as on every earlier build. 56-60 fps.
+- Not verified by script: FINISH HIM apart, a downed zombie getting up apart, the spawner apart, other enemy kinds apart
+  (chapters 2-11; chapter 1 has only zombies). Each needs play or another chapter's state.
+
+### R4b, player 2's door beside a scene of player 1's (the user's play, 2026-11-11 night)
+- Seen (logs/run-20261111-221141-rooms-play, play-rooms-log.bat): player 1's zombie scene L01/779 in room 342 (from 1969),
+  player 2 down the ladder L01/103 into 342 during it (their change 2229-2291): from 2365 both halves on the scene's
+  Camera06 for good, player 1 let go. 779 never ran after 2246.
+- Why: the arrival 0x80151FDC, inside player 2's change (R4's bracket), clears the script waits (0x80163F04(1) at
+  0x8015213C; the table 0x805CAA40, 10 x {+0 script s16, +4 frames u16, +6 kept}) and every busy bit (0x801556CC(-1, 0) at
+  0x80152184): 779's wait went, so its last step (Camera01 back, fn22(0)) never came. And the host's ticket count cut
+  player 1's scene record (coop_p1_scene_on: "player 1's scene cut by a room asked for").
+- Built: inside player 2's change the waits of scripts not player 2's are put back (stay_waits_clear), with player 1's
+  scene or close-up on the busy bits but 4 stay (stay_busy_clear), and player 1's scene is cut only by tickets that move
+  player 1 (g_coop_p1_tickets). Without ED_COOP_STAY: unchanged (no bracket; every ticket counts).
+- Checked (logs/run-20261111-2216*-r4b-*): both doors (the R5 s1/s2 recipes: `ed check` the same three findings as R5's,
+  frame for frame), apart fights, together. The user's case itself: to play (play-rooms-log.bat).
+
+### R4c, arriving during the other player's scene (the user's play after R4b, 2026-11-11 night; readers rooms/arrival-readers.md)
+- Seen (logs/run-20261111-222138-rooms-play): with R4b the scene ran to its end, but player 2 stood in their arrival
+  (state 121, motion 15) from 2391 to 2981 with their half frozen on their room-341 close-up's eye (an off angle in 342).
+  The user's rule: a scene the other player began never shows on a player's screen; they keep their own camera and play on.
+- Why: player 2's ladder script L01/103's let-go (0x8016820C's 0x80199EA0(1), frame 2390) cleared busy bit 2, the one hold
+  bit player 1's scene rested on too; coop_p1_close_up dropped player 1's look (2391), so the busy ask stopped answering
+  "not busy" for player 2, their turns (pad, camera step) stopped and their door motion was posed, not advanced (0x800271F0).
+  And their first look in the new room would remake their camera from the game's set, the scene's (coop_zones_new).
+- Built (ED_COOP_STAY only): coop_play_hold keeps the other's scene's hold at a script step's let-go as it already did at a
+  close-up's; at the end of player 2's change with player 1's scene on (stay_scene_look_again) the scene's look is armed
+  again when bits 32 and 2 are there, and player 2's first look keeps their arrival's camera (g_stay_arrival_camera).
+- Checked: both doors as before (logs/run-20261111-2238*-r4c-s1/s2: the same `ed check` findings as R4b's and R5's). The
+  rest of the set stopped at the user's word; the user's case itself: to play (play-rooms-log.bat). Not done: the reverse
+  (player 1's door into player 2's scene).
