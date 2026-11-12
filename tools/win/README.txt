@@ -19,6 +19,11 @@ Two players: plug in two controllers (or one and the keyboard), then on the
 launcher open Co-op, turn on Split-screen co-op, and pick each player's
 character under Choose Character.
 
+Separate rooms (new, experimental): each player can go through doors on their
+own and play in a different room from the other, each half of the screen
+showing that player's own room. Quick-save states made by an earlier version
+won't load; memory card saves do.
+
 The game's program comes ready-made in this folder; its graphics, sound and
 music come from your disc. The first start takes a second or two longer while
 it reads what it needs from the disc.

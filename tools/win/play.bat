@@ -18,6 +18,10 @@ if not defined iso (
   exit /b 1
 )
 if not exist logs mkdir logs
+rem Co-op separate rooms (experimental, v0.1.3): two rooms loaded at once, and the other player stays in their room
+rem when one takes a door. Quick-save states made by an earlier version won't load with these on (memory card saves do).
+set ED_ROOM_SLOTS=2
+set ED_COOP_STAY=1
 rem Keep the last session's log: it is the only record of what went wrong.
 if exist logs\play.log move /y logs\play.log logs\play-prev.log >nul
 rem generated/main.dol with a forward slash: the first start makes the folder
