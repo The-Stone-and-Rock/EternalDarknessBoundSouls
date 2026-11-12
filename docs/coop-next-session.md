@@ -1,3 +1,56 @@
+# HANDOFF 2026-11-11 night (written for the next session, any model): separate rooms R1-R5 committed, R6 next
+
+**Where things stand.** The separate-rooms work is COMMITTED on `tools/game-kit` (this commit): two resident room slots
+(R1), the stayer (R2), each half its player's room (R3, plus the effects by room), doors from either side (R4), sound (R5:
+player 1 holds the music, the stayer's room keeps its sounds, a track in player 2's room is heard as theirs, player 2's copy
+Tome's sounds live). The user PLAYED it (2026-11-11 night): doors and sounds work through several rooms. It runs only with
+two environment switches: `ED_ROOM_SLOTS=2` (56 MB; a state made without it is refused) and `ED_COOP_STAY=1`. Records:
+`docs/coop-level3-design.md` from "Separate rooms" on (readers' facts, what was built, every run), `docs/coop-todo.md` (the
+step paragraphs with what is not yet done), `docs/coop-failed-attempts.md` (the fade's denormal marks, the launcher's title
+state), `docs/research/separate-rooms/` (the readers', refuters' and design files of every step, the run scripts, the R5
+patch script). `runtime/host/controls.cpp` holds the user's uncommitted test edits: never commit it.
+
+**How the user launches it to play (their shell is PowerShell, no `sh` on its path):**
+```
+$env:ED_ROOM_SLOTS = '2'; $env:ED_COOP_STAY = '1'
+& 'C:\Program Files\Git\bin\sh.exe' tools/ed/run.sh launcher NAME
+```
+(logs/run-*-NAME/ gets both.tsv, page logs, EVENTS.log and shots; `ed check`/`ed timeline` read them.) The launcher's Skip
+intro uses `saves/title-rooms.state` under the switch (made the first time). Scripted checks: `docs/research/separate-rooms/
+build-run-r5.sh` and `build-run-r6.sh` (build, a fresh state from Jump to Game by `tools/ed/jtg.sh` with `env -u
+ED_COOP_STAY`, then `tools/ed/run.sh STATE NAME` with ED_PUT / ED_RUN_SCRIPT / ED_PAD2_SCRIPT / ED_INPUT_SCRIPT). States hold
+guest memory: a host-only change keeps them loadable; remake them when the memory layout changes.
+
+**How the user wants this worked (their method, in their words: "Let's not guess", "I'm going to let you drive"):** for
+each step, readers on the game's own code (the `ed` tool: `python -I tools/ed/ed.py keep`, `dis`, `fn`, `needs`, `host`,
+`system`) and on the host, a written design, refuters against it (skip the panel when the user's budget is tight: refute it
+yourself from the readers' facts), ONE build, a fresh Jump-to-Game state on that build, scripted checks read from the logs
+and shots, then the user plays and reports. Commit only when told; never push. Add failed attempts with their code to
+`docs/coop-failed-attempts.md`; items seen to `docs/items-log.md`. The user's rules so far: player 2 has no music but all
+their in-game sounds (done); "Bring (character) to (character)" in the co-op menu later; the randomizer is the last step.
+
+**NEXT: R6, enemies and hits by room.** The user saw (2026-11-11): with the players in different rooms, enemies see player 2
+in the other room and try to attack them (no damage lands); player 2's attacks on the other room's enemies aim but land
+nothing. Same-room hits while apart DO land (R2's runs: room 183's zombies hurt player 2 while player 1 was in 180). The
+host today: `coop_enemy_target` (hle.c ~24061, from `coop_character_step` on 0x80133434) retargets an enemy to the nearer
+player only when both are in its room, else leaves the game's choice (the game only ever targets player 1); `coop_sighting`
+(~21469, on 0x8003B1C8) gives player 2 the sanity-cone sight (E1); the hurt twin for player 2 is in the 'hurt' notes of this
+file (the ch12 shield). Five readers were asked (sight/target, hits both ways, steps and collision of the other room's
+nodes, damage and death apart, the host and the kit); their reports: `docs/research/separate-rooms/enemy-readers.md` if it
+exists, else the workflow journal `C:/Users/stevi/.claude/projects/E--Eternal-Darkness-Recomp-Fork/73f71524-55f9-4337-bea8-
+8369f9fa7835/subagents/workflows/wf_8d47c1cd-706/journal.jsonl` (one {"type":"result"} line per reader, field
+result.report). The design to write from them: an enemy sees, targets, chases and hurts only a player whose object +592
+room is its own; a player's swing/shot/spell tests victims in their own room (run the hit test with their slot current,
+`coop_stay_room_in`'s pattern, or skip victims of another room); the other room's nodes step against their own room's
+collision (0x80123F70 by +592 answers it for non-players already: confirm). Checks planned in `build-run-r6.sh` (c1 player 1
+away, c2 player 2 away, c3 player 2 swings in their room), read from `[coop] N's health a -> b` / `goes after player` lines
+(ED_COOP_ENEMY_LOG=1) and both.tsv's p1hp/p2hp.
+
+**After R6, in this order:** the shadow pass and the lights per room (a shadow of the room in play falls in the other half;
+one light grid for both halves); the camera's small jump at an arrival (the kit's CAMERA blip, nine frames); the orbs'
+eye-space place in the other half when both are in one room (coop-glitch-todo U4); VISetBlack per half (the load's 3-4
+frames black both); R7 the Tome, saves and cutscenes while apart; chapters independently; "Bring X to Y"; the randomizer.
+
 # Co-op: where things stand
 
 Written 2026-11-02. Read this first, then update it at the end of the session.
@@ -5,6 +58,8 @@ Written 2026-11-02. Read this first, then update it at the end of the session.
 ## Start here (updated 2026-11-03)
 
 **2026-11-10, committed as d50f804 (the user: "commit what we have so far"): everything of this day below. The user's direction: a truly co-op game, each player using and examining different things at the same time; the plan is the note "Both players acting at once" in `docs/coop-todo.md`, in order: scenes, then words, then close-ups. Step 1 (two scenes at once) is in the code and played; player 2's pickup beside player 1's scene goes through, with the camera and prompt gates read from the game's code and handled (`docs/coop-todo.md`). Level 3 (close-ups, words and finds per player): round 2's design is in `docs/coop-level3-design.md`'s session record and the scratchpad (the memo's round 1 is refuted; round 2's design with its four fixes is what step A is built from). **Step A, player 2's own words window, is built behind `ED_COOP_OWN_WORDS=1` and script-verified both ways (`docs/coop-todo.md`): unplayed. Step B, player 2's own close-up (ed219: EXAMINE, DETAIL, words, RETURN, each player's in their own half with the other free), is built behind `ED_COOP_OWN_CLOSEUP=1` (with `ED_COOP_OWN_WORDS=1`; 2026-11-10 night, uncommitted) and script-verified in room 183 from `saves/slot2.state`: both holes at once in both orders, camera modes 2 and 0, player 1 alone, and a room change under it (`docs/coop-todo.md`, the build record at the end of `docs/coop-level3-design.md`). Step C, player 2's own find (PICK UP: the thing floating in their half, placed from their camera, the game's words carrying nothing of it), is built behind `ED_COOP_OWN_FIND=1` (with the other two; 2026-11-11 night) and script-verified in room 183 the same way, the switch unset and steps A+B alone identical to today's lend route (the record at the end of `docs/coop-level3-design.md`, the paragraph at the end of this file). Unplayed: the user plays B and C next, `sh tools/ed/run.sh saves/slot2.state NAME` (the switches are gone since step F). Then step D (a Tome during an own close-up or find), the same way: design from the game's gates first, build once, check by script, one play.**
+
+**2026-11-11 late afternoon, separate rooms begun (uncommitted): the readers, option A (two resident room slots, the game's own dormant two-slot room engine), and R1 the probe built and run clean (`ED_ROOM_SLOTS=2`, logs/run-20261111-150751-jtg-rooms-r1).** `docs/coop-todo.md` "Both players acting at once" has the paragraph (what the readers settled, the option, R1's result, R2-R7); `docs/coop-level3-design.md` "Separate rooms" the whole record. The user's direction: think first, Pius's chapter for the first tests, sanity effects likely fine, the Tome-found world change to keep in mind, "Bring X to Y" in the co-op menu after the tests. R2 (the other player stays, `ED_COOP_STAY=1`) is built and functional the same day (the todo's paragraph; `docs/coop-level3-design.md` "R2"): the stayer examines, picks up and walks in their room while player 1 is in another. The user's sound rule: player 2 has no music, their in-game sounds stay. NOT to be committed until functional as a whole (the user). R3 the picture is built and functional (each half its player's room: the marked camera matrix per room section; `docs/coop-level3-design.md` "R3"). The stayer flow R1-R3 is playable from Jump to Game with `ED_ROOM_SLOTS=2 ED_COOP_STAY=1 sh tools/ed/run.sh launcher NAME` (or from `saves/rooms-ch1-183.state`, made with the switches). R4 doors from either side is built and functional (player 2's door while player 1 stays: the ticket's runner bracketed as player 2, the stayer whoever didn't move, the fade quad the mover's half alone; `docs/coop-level3-design.md` "R4"). R5 sound is built and functional in its scripted checks (player 1 holds the music: player 2's music scripts pass together and are deferred apart, replayed when player 1 arrives; a door's fades leave the other player's room alone; a track in player 2's room is heard as theirs; player 2's copy Tome sounds live; `docs/coop-level3-design.md` "R5"). Not yet heard by the user, and the deferral is untested in a run (chapter 1 sets no music at a door): the user plays chapter 2's room 294 or the save room apart. Next: R6 enemies of the other room, R7 the Tome, saves and cutscenes while apart; then the cutscene examine issue the user saw, "Bring X to Y" in the co-op menu, lights per room, chapters independently, the randomizer last. Still uncommitted by the user's wish until functional as a whole: the user plays it first.
 
 **2026-11-11 afternoon, step F built, refuted, script-checked, committed and played by the user from Jump to Game (A to F; one issue, the cutscene examine, in the todo): the switches are gone, the look's windows are one route, the use route stays.** The readers found the lend route is the use route (a script of player 2's run as a use, a Tome item's, cast words, a spawned item's PICK UP), not dead code: `docs/coop-todo.md` "Both players acting at once" has the paragraph, `docs/coop-level3-design.md` "Step F" the readers, the refuted points, the build and every run. both.tsv gained `own2`. Next: the user plays A to F (`sh tools/ed/run.sh saves/jtg-ch1-room183.state NAME`, no switch); then separate rooms; the randomizer last. A later cleanup can still take the use route onto the own sets (a use's words into `g_coop_p2_words`), which would retire `g_coop_screen` and the lend: not step F's.
 

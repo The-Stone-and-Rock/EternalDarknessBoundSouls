@@ -3,7 +3,7 @@
 import sys, os, re, time
 root = sys.argv[1]; PAGE = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
 os.makedirs(root, exist_ok=True)
-KEY = re.compile(r'^\[(room\] (ticket|change)|controls\] cutscene|frontend\]|quick\]|run\]|split\] (on|off)|player\]|cheat\])|^\[coop\] (script|player 2 (brought|arrived|opened|has|opens|fell|stood|\(listed\))|player 1 has|a cutscene|the cutscene over|play goes on|a script asks|[0-9]+ (saw|seen|goes)|[0-9]+.s health|.* not found)|rror|xception|not found|crash|hang|stuck', re.I)
+KEY = re.compile(r'^\[(sound\]|dtk\]|stay\]|room\] (ticket|change)|controls\] cutscene|frontend\]|quick\]|run\]|split\] (on|off)|player\]|cheat\])|^\[coop\] (script|player 2 (brought|arrived|opened|has|opens|fell|stood|\(listed\))|player 1 has|a cutscene|the cutscene over|play goes on|a script asks|[0-9]+ (saw|seen|goes)|[0-9]+.s health|.* not found)|rror|xception|not found|crash|hang|stuck', re.I)
 FRAME = re.compile(r'\(frame (\d+)\)|at frame (\d+)')
 ROOM = re.compile(r'\[room\] change 0x([0-9A-Fa-f]+)')
 now = lambda: time.strftime('%Y-%m-%d %H:%M:%S')

@@ -738,3 +738,31 @@ build-win/var-head.exe), and worse (the cameras lent at 4702 already, and for th
 game's one busy word: the use's end clears hold bit 2 ('[trace] busy r3 2 r4 0 lr 0x80199F28 who 1'), which is player 1's
 close-up's hold too, and the use route reads that word as its own. The fix is the busy word kept per player (the 'Half' row of
 docs/coop-todo.md's table), a rule of its own, not a guard in step D. Open in docs/coop-todo.md.
+
+## The door's fade per half (separate rooms R4, 2026-11-11 evening)
+
+- **The fade quad marked by three bytes, like a found thing's matrix:** at `notify_GXLoadPosMtxImm` with lr 0x801E7F60 (the
+  fade tick's own identity matrix) the host wrote 0xD2 / 0xA0+view / 0xE5 into bytes +15 / +31 / +47 of the matrix in guest
+  memory, the stayer's view to leave it out. The run (logs/run-20261111-171826-rooms-r4-t1-p2door, shots 000011-000012):
+  BOTH halves darkened through player 2's door. The cause: the identity's translations are 0.0f, so a mark in the low byte
+  alone makes a denormal float (0x000000D2), and GXLoadPosMtxImm's body copies the matrix into the write-gather pipe with
+  paired-single stores, which this recomp flushes to 0 (`psq_store_value`, .deps/GXRuntime/src/core/cpu.c: `f32_is_denormal
+  ? 0`). A found thing's matrix keeps its mark because its translation is never 0. The readers' "marking in place is safe"
+  missed the store. Fixed by whole words: each translation := a normal float near 2e-31 whose low byte is the mark
+  (0x0C8000D2, 0x0C8000A0+view, 0x0C8000E5); nothing moves. Keep in mind for any mark on a matrix with a 0.0f translation.
+- **The mover forgotten when the live alpha reads 0 at the quad's load:** the tick draws the quad only while the alpha is
+  above 0 (0x801E7ED0), so that test never fired and `g_fade_mover` stayed set past the change; the next fade (a cutscene's,
+  the Tome's) would have been marked out of the stayer's half while the players were together. Now: forgotten when the
+  change is over and the fade's ticks (r13-21784) are spent.
+
+## The launcher's title state under the two room slots (2026-11-11 night, the user's first play of R5)
+
+- **Jump to Game from the launcher with `ED_ROOM_SLOTS=2 ED_COOP_STAY=1` halted at the first room change** (logs/run-20261111-
+  183757-play-r5, saves/reports/hang-20261111-183815.txt: the loader thread in PPCHalt from _ExitProcess, backchain 0x801534F8 ->
+  0x80151F60 -> 0x801DEF34's data check -> the fatal 0x8014EB18). The cause: Mods' Skip intro loads `saves/title.state`, a machine
+  saved on Oct 30 without the slots (40 MB MEM1, loaded with zeroes past its end), whose layout words r13-23304[1] / r13-23312[1]
+  are 0: the first room unpacked "into slot 1" at address 0 ([rooms] lines: slot 1 base 0x00000000) and the game halted on its
+  room-data check. The scripted runs never saw it: jtg.sh passes the launcher over and loads no title state. Fixed: with
+  ED_ROOM_SLOTS the title machine is `saves/title-rooms.state` (frontend.cpp title_state_path, made fresh the first time), and
+  quickstate refuses a MEM1 smaller than the build's under the switch ("made without the two room slots"). Keep in mind: any
+  state the launcher loads by itself must match the memory layout of the switches it runs with.

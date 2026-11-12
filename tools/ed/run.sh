@@ -13,7 +13,7 @@ R="logs/run-$(date +%Y%m%d-%H%M%S)-$NAME"; mkdir -p "$R/shots"; echo "$R"
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/ed/shots.ps1 -dir "$R/shots" -everyMs "${ED_RUN_SHOTS_MS:-250}" -width "${ED_RUN_SHOTS_W:-960}" >/dev/null 2>&1 &
 if [ -n "$ED_RUN_PROBE" ]; then export AURORA_SHADOW_PROBE="$R/probe.txt"; fi
 if [ "$STATE" = launcher ]; then SKIP=; else SKIP=--no-launcher; export ED_QUICKLOAD="$STATE"; fi
-ED_BOTH="$R/both.tsv" ED_DETAIL_LOG=1 ED_ROOM_LOG=1 ED_COOP_LOG=1 ED_COOP_CAST_LOG=1 ED_COOP_PAD_LOG=1 ED_COOP_TRACE=1 \
+ED_BOTH="$R/both.tsv" ED_DETAIL_LOG=1 ED_ROOM_LOG=1 ED_COOP_LOG=1 ED_DTK_LOG=1 ED_COOP_CAST_LOG=1 ED_COOP_PAD_LOG=1 ED_COOP_TRACE=1 \
     build-win/EternalDarkness.exe generated/main.dol --iso dump/GEDP01.iso $SKIP \
     --max-blocks 1000000000000000 2>&1 | python -u -I tools/coop-test/pagelog.py "$R" 20000 &
 GAME=$!

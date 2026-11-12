@@ -1892,3 +1892,556 @@ Checked by script from a fresh state (saves/jtg-ch1-room183.state remade on the 
   put in", "player 2's item leaves script 2116 for the real game", "item script 2116 ran as theirs: words 0, busy 0, their
   hold 0, room 0, cameras lent 0", "script 2116 runs for player 2" 4957.
 - The kit: `ed check` read every run with the new `own2` column (the timelines show "P2 close-up" through their own windows).
+
+# Separate rooms (the step after level 3): the readers, the design, the refuters, R1
+
+HEAD 6b2a584. Six readers' facts in rooms/readers.md (summaries in readers-short.md). This is a design with options; nothing is
+built. The user's direction: think first, don't guess; Pius's chapter (chapter 1 = LEVEL 1, rooms 341, 342, 180-184, 343, 344)
+for the first tests; sanity effects don't exist in chapter 1; the randomizer last.
+
+## The facts the design rests on
+
+1. The room engine was written for N resident rooms and this build pins N to 1. 0x8004304C is `li r3,1; blr` with 8 callers
+   (0x80020ECC the play-start allocation, which multiplies the 2,916,384-byte slot and the 335,008-byte per-slot area by it;
+   0x80153C80 the slot layout 0x80153C68, laying out N records from r13-23304[i]; 0x80154C5C the slot swap 0x80154C50 (current
+   and other indices xor 1, only when N == 2); 0x80154CB8 inside the load 0x80154C94 ("is the wanted room already in the other
+   slot": 0x80154D64-0x80154D94); 0x801517E8, 0x8015282C, 0x80153DC0, 0x80155470). The slot table is 0x8058AFC0: +0 the
+   current slot, +4 the other slot or -1, +12.. a record pointer per slot; 0x80155130(3) returns the other slot's record. The
+   resident-rooms table 0x8058AF60 (24-byte entries, count r13-23292 = 2: the current room and fn71's queued next) and the
+   ARAM cache of 2 room files (1,677,824 bytes each at ARAM 0x600000) already prefetch the next room. The host's guest RAM is 48
+   MB with the game's 24 MB untouched. [room-memory reader; ed dis 0x8004304C, 0x80020EB4, 0x80154C50, 0x80153C68]
+2. One "room in play" word, r13-23276 (fn25), 15 writers, 675 readers; r13-23288 the old room. Every room-shaped thing is the
+   resident record's: zones (0x80123F70(object)+180, via 0x80155130(2)), markers, cameras (eye records 0x80602B18..), collision
+   and geometry (pointers set by 0x801E1B74(record+0x813C) at 0x80151FDC), the light grid (0x804F0784), the sanity list, the
+   sound/ambience zones (0x80155234(2)). Nodes of the whole level live in ONE list, each stamped with its room (object +592,
+   0x801F64C8 sets it); room-wide walks filter by r13-23276 (hide-others, fn76, the tag find, events 61/62). Flags, scripts,
+   words, the carried lists, the Tome and the element pool are level-wide. [room-memory, actors-world, sanity readers]
+3. A room change is one synchronous whole-game event: the ticket (0x8058AFFC, busy 4), 0x80152298 waits for the GPU, fades
+   all 80 sound tracks, stops the background thread, blocks until the loader unpacked ARAM into the slot (3-4 frames here),
+   then 0x80151FDC: event 61 to the OLD room's nodes, prompt slots reset, busy cleared for all, the arriver placed on the
+   entry marker, event 62 to the NEW room's nodes, the arrival camera and script. The fade is a screen-wide game quad plus
+   VISetBlack: both halves black. [room-memory, render, host readers]
+4. The host already has: ownership of a change by its asker (notify_room_ticket, g_coop_room_p2, g_coop_entered_p2: the arrival
+   spot, scene, camera and door motion are the asker's); the other player walking through the fade; the left-behind state
+   named (coop_left_behind: object +592 differs) with every host look skipped in it, ended by coop_follow's bring; per-player
+   copies of everything a room gives a player (zone inside words, camera sets, prompt slots and looks, script words, the
+   windows), swapped into the game's one table for that player's turn; coop_character_step (player 2's character step run by
+   the host with their state in; its second scan off by default). [host-today reader]
+5. The picture: the renderer records ONE frame's draws and replays the whole packet per view with that player's projection;
+   nothing in it knows rooms; per-view exclusion exists only as the three-byte matrix mark on an object's draw (coop_found_mark,
+   marked_out_of); lights and shadows are per frame from one grid; co-op is capped at 60 because three full renders per game
+   frame already fill 16.7 ms here. The Tome copy is the one case of two worlds: a whole-RAM copy run in alternate frames, its
+   frame's picture kept and fitted into the owner's half (split_skip_views, s_menuKept). [render reader]
+6. Sound: one MusyX engine, one host mixer, one DTK music stream, one listener fed from the live camera block (player 1's) each
+   sound tick by one small function 0x8019EDD4; positioned tracks carry the room they started in (+132) and fn52 filters by it;
+   a room change drops stream tracks and fades all 80. Both players already hear every centred effect. [sound reader]
+7. Scripts run one chunk at a time to its end (r13-23228); their words (0x805CAA40) are level-wide and already per player
+   (coop_states_swap, coop_script_timers). Enemies are level-wide placings stamped with a room; no "Tome found switches
+   enemies on" rule exists in level 1 (the Tome is not in it). Pius's chapter has no sanity (r13-29244 == 0). [actors, sanity]
+
+## The options
+
+A. TWO RESIDENT ROOM SLOTS IN THE ONE GAME (the engine's own dormant two-slot system), each player's room the "room in play"
+   for their turn. N := 2 (a host intercept on 0x8004304C answering 2: the allocation, the layout, the swap and the "already in
+   the other slot" path all follow). Both rooms' data live in the game's own memory as the engine laid it out for. The player
+   who changes room loads into the slot that is free of the other player (the host steers the table's +0/+4 before the change
+   so the engine's "other slot" is the one to evict); the other player stays, their room resident, their object's +592 their
+   room, their turn run with their room in (r13-23276, the slot's current index, and every pointer `ed needs 0x80152298 /
+   0x80152614 / 0x80155130 / 0x80123F70` lists, as the camera sets are swapped today). Progress stays one game: one node
+   list, one flag set, one carry list, one Tome: nothing to merge. The picture needs a per-view room draw (D below), sound a
+   listener rule (E), the change's whole-game effects an owner filter (F).
+B. TWO WORLDS: player 2's room runs in a whole-RAM copy in alternate frames (the Tome copy's machinery), drawn into their half
+   as a kept picture. Rejected as the main road: the two worlds never see each other (an item picked up, a flag set, an enemy
+   killed in one is not in the other: co-op's shared progress breaks), ARAM is not copied (the room files' cache is one), the
+   copy's sound is never heard, and the game side roughly doubles (two full behaviour steps and draws per round) on a machine
+   already at the cap. Kept as a known fallback only for a whole-chapter separation much later, where sharing is not wanted.
+C. NO SECOND ROOM: the other player waits (held, their half still) while the mover is away, or is brought along as today.
+   Not separate rooms. Kept as the behaviour when a change can't be served (a level change, a cinematic that replaces the
+   actor list: mode 6).
+
+The recommendation is A: it is the game's own code ("the game already has the function"), progress stays shared, and its
+first step costs nothing of co-op.
+
+## The sub-steps (each from a fresh Jump to Game state on its build, chapter 1; the method as A-F: readers where needed,
+## refuters, one build, scripted checks, then the user plays)
+
+R1 PROBE: two slots in SOLO. ED_ROOM_SLOTS=2 (testing): the host answers 2 at 0x8004304C (an intercept setting r3 and
+   returning, as coop_busy_ask answers the busy ask); a log of the slot table (+0, +4, r13-23304[0..1], r13-23292, the
+   record's room/loaded bytes) at every ticket, change and arrival (room_log's places). Run solo from Jump to Game through
+   341 -> 342 (L01/103, transition 15) and 183 <-> 180 <-> 183 (119, 29, 119: the third change should find room 183 "already
+   in the other slot", 0x80154D64, and skip the unpack), with ED_ROOM_LOG=1 ED_HEAP_CHECK=N AURORA_SHADOW_LOG=1: does the
+   dormant path run clean (no crash, the right room in play, both grids seen by room_lights_update, the heap walk quiet, the
+   allocation 2.9 MB larger), and how long a change takes. Then the same run in co-op with nothing else changed (coop_follow
+   still brings): no regression. Nothing of this is co-op code; it answers the first open question of three readers.
+R2 THE OTHER PLAYER STAYS: ED_COOP_STAY=1 (testing): coop_follow doesn't bring player 2 when the two slots hold both rooms;
+   player 2's turn (coop_player_turn) runs with THEIR room in: r13-23276, the slot table's +0/+4 and r13-23288 swapped, plus
+   what the `ed needs` lists give for 0x80152298, 0x80152614, 0x80155130, 0x80123F70 and the character step (readers first:
+   this list is the step's substance); coop_character_step steps them against their slot's collision; coop_zones_new keys per
+   room (the info pointer differs per slot: fine). coop_left_behind's skips become "their room is the other slot": the looks,
+   camera step and prompts run with their slot in. Check from the state: player 1 through 119 to room 180, player 2 stays in
+   183 and walks (positions and floor in both.tsv, no FELL/SENT), examines the block (their own look in their room), player 1
+   walks in 180; then player 1 back through 29: both in 183 again, the follow's "already here" case. Player 2's half shows the
+   wrong room until R3: expected.
+R3 THE PICTURE: each half draws its player's room. The room geometry draw (the pointers 0x801E1B74 sets, the list consumer
+   0x80119D60 / 0x8011A278: a reader finds the draw's entry) is issued twice per frame, once per slot, each run bracketed by a
+   host GX-stream op "these draws are view N's" that the renderer honours in build_view (interp.cpp) as it honours the
+   three-byte mark; actors drawn by their +592 (the mark); lights: a grid per view (room_lights_update knows both grids;
+   dol_aurora_set_room_lights per view) and the shadow pass per view; the fade: the fade quad kept in the mover's view only
+   and VISetBlack answered per half (open: render reader). Cost: one extra room geometry draw per frame, not a full render.
+   Measure with DOL_INTERP_LOG and [fps] before and after; the cap stays 60.
+R4 DOORS FROM EITHER SIDE: the change by its owner only: the slot to evict is the mover's old slot unless the other player is
+   in it (both in one room: the free slot); one ticket at a time (the second player's door waits as the way-out wait does,
+   logged); the change's whole-game acts filtered by owner: the sound fade of the mover's room's tracks (tags +132, fn52's
+   filter), event 61 to the old room's nodes only when nobody stays in it, the prompt reset and busy clear for the mover (the
+   stayer's turn keeps theirs), the arrival placing and camera the mover's (today's ownership). The stayer's zones, script
+   marks and windows untouched (step E's cancels apply to the mover alone). Scenes a room runs once (419, 1040) run for the
+   first arriver as the game does in solo.
+R5 SOUND: the listener follows the camera of the player whose room has positioned sounds, else player 1's (0x8019EDD4's one
+   call site); the DTK music and centred effects stay shared (the user: "we might be fine"); the room change's fade only for
+   the mover's room (R4). Later: a per-side mix (the host owns left/right: audio.c, dtk.c).
+R6 ENEMIES AND THINGS IN TWO ROOMS: whether a node whose room is the other slot steps against its own slot's collision (open:
+   actors reader; the behaviour pass runs with player 1's room in: coop_character_step's pattern per node of the other room,
+   or the game's own filter skips them and they wake when a player enters); coop_enemy_target's "both in its room".
+R7 THE TOME, SAVES, CUTSCENES WITH TWO ROOMS: tw_keep's room packing stays blocked (the Tome never packs the room in co-op);
+   save states hold both slots as RAM (no format change) plus a new host blob for "whose room"; a cutscene (mode 6 replaces
+   the actor list) and a level change are option C moments: the other player is brought first.
+LATER, NOT THIS STEP: chapters independently (two level packs: scripts, words, bodies at r13-26452: a step of its own);
+   "Bring X to Y" in the co-op menu (the todo); the per-side sound mix.
+
+## What would make option A fail (to test in R1/R2 before anything else is built)
+
+- The dormant two-slot path has a slot-0 assumption somewhere: the lights code's "rooms load at r13-25984" (hle.c:6066),
+  the loader's 0x4000 branch using r13-23304[slot], 0x80151FDC's record pointer, the Tome's TW_ROOM_BUFFER (0x801538A4), the
+  host's 0x81800000 range checks. R1 shows the first three; the others are read.
+- The per-player room word is not enough: 675 readers include pointers cached at the change (0x801E1B74, the lights, the
+  zones getter) that a per-turn swap doesn't reach without the record's pointers swapped too. `ed needs` on the four
+  functions above is R2's reading; the camera-set swap precedent (kTwSwitches grew word by word) says it is a list, not a
+  wall.
+- A node in the other slot's room is stepped against the current slot's collision (falls). coop_character_step's host-run
+  step with their slot in is the answer for the players; enemies are R6.
+- The frame budget: an extra room geometry draw per frame on this machine. Measured in R3 before it is kept.
+
+## Refuted or corrected (three refuters, rooms/refute.md)
+
+- "Answer 2 at 0x8004304C and the allocation, layout and swap follow": REFUTED twice. (1) 0x80020EB4 sizes the block for N but
+  lays the model area, the per-slot areas and the level heap after ONE slot (0x80020F64/0x80020F7C), so slot 1 would lie on
+  the model area and the level heap. (2) The game's OS heap is 17.1 MB with 192 KB free in the chapter-1 states (heapwalk on
+  the states), not 24 MB: the +3.25 MB block fails (OSAllocFromHeap returns 0, the game memsets at address 0). So: the
+  allocation's caller (lr 0x80020ED0) is answered 1, slot 1 and area 1 are host-placed past the pools (ROOM_SLOT1 0x83000000,
+  ROOM_AREA1 0x83300000; cpu.c gives 8 MB more under ED_ROOM_SLOTS: 56 MB), the two per-slot records (73 KB) come from the
+  game's heap and the free total is logged.
+- "183 -> 180 -> 183 finds room 183 already in the other slot": REFUTED as the engine stands. 0x80152298's tail (0x801523A8-
+  0x80152404) marks the other slot's record dead (room -1, loaded 0, +0x8143 0) after EVERY change, and nothing in this build
+  writes the queued room at table +8 (both writers store -1), so the engine only alternates slots and never reuses the other.
+  The probe undoes the tail at the next room draw for a slot whose room is still in it (nothing unpacked into it since: the
+  posts 0x80151DC4(room, slot) are watched), so the "already in the other slot" path (0x80154D64 -> 0x80154C50 from lr
+  0x80154D94) can run. This is also what R2 needs to keep the stayer's room resident.
+- "The probe is nothing of co-op and safe": REFUTED on two points. A state saved under N=1 (+4 = -1, no second record) loaded
+  into an N=2 build breaks at the first change (the swap makes +4 = -2, the tail stores through it): the probe boots cold
+  through Jump to Game (the layout runs once at play start, 0x80020EB4 is guarded by r13-25984 != 0). And 0x80155450(room)
+  ("is it resident") answers 1 for every exit neighbour of a loaded slot's room when the count is 2 (0x801554C8-0x80155510),
+  for 8 callers: logged, compared with today's run, answered 1 at lr 0x80155474 if unwanted.
+- The slot-0 assumptions found: the game's 0x801538A4 (`lwz r3, -23304(r13)`: slot 0's base whatever the table says; 8
+  callers: the Tome's packing, menus) and room_lights_update's "the lower grid is the room's" rule (hle.c:6066-6075) with its
+  0x81800000 bounds: the rule is now "the grid inside the current slot's span" with two slots, the bounds the RAM's size.
+  The loader's 0x4000 branch, the slot thread, the swap, the table init, 0x80155130 and 0x80151FDC's record pointer all index
+  by the table or the message: clean.
+- R2's word list: `ed needs` cannot give it (tools/ed/player_data.tsv has no room rows: to add). From the disassembly the
+  turn swap must carry r13-23276, the table's +0/+4 (xor-paired), and the things copy r13-25060/-25064 (0x800BA530 rebuilds a
+  28000-byte list of the current record's +100 things at a change and at the frame's 0x800BB914; script verbs read it: a
+  second buffer per player). Not needed per turn: r13-23288, -23284, -22132, -22140. coop_character_step must swap the table's
+  +0/+4 too, since 0x80123F70's player path short-circuits to the CURRENT slot (only non-player nodes search by +592). The
+  change's walk 0x80043A5C -> 0x80043820 strips the parts and moves of every character not in the NEW room: the stayer's too
+  (an intercept: "in this room" when the node's room is loaded in any slot). The streamer stamps requests with r13-23276 and
+  0x801481FC refuses a request whose stamp differs (UNSURE: where player 2's body's requests are made).
+- R3: the room is NOT drawn through the object list but by 0x801E75B4(section) from 0x801E851C, section 3 (the other slot)
+  then 2, every frame: the engine already draws both resident slots; the probe shows it as double geometry. 0x801E1B74 is a
+  texture-bank word, not geometry pointers (drop it from any swap list). A GX-stream "view op" can't split the two room draws
+  in build_view (they share one byte-identical uniform block): the per-view exclusion is the existing three-byte matrix mark,
+  re-issued by the host at 0x801E75B4's entry for the room's matrix (index 27 from 0x8060248C, to read with ED_MATRIX_LOG);
+  the fade quad (the fade tick's own GXLoadPosMtxImm at lr 0x801E7F60) can be marked the same way; VISetBlack is never called
+  by the game. Lights: one grid and one fill_shadow per frame; per-view lighting is a renderer change (fill_shadow twice),
+  first build keeps player 1's room's grid for both. No frustum cull in the draw path (distance for detail only). The cost is
+  the second room's draws replayed in every output (3, or 5 with moments), not "one draw": unmeasured; the game's own hidden
+  frame and whole-frame moments (a cutscene, a menu) show both rooms overlapping while +4 != -1, so section 3 must answer 0
+  when both players share a room or the frame is shown whole.
+
+## R1, the two-slot probe: RUN (2026-11-11, logs/run-20261111-150751-jtg-rooms-r1, the build with ED_ROOM_SLOTS=2)
+
+Built as corrected: `room_slots*` in hle.c (0x8004304C answered 2 to every caller but the allocation's lr 0x80020ED0; slot 1
+and area 1 laid by the host at 0x83000000 / 0x83300000 after the game's own layout calls; the change's tail undone at the
+next room draw for a slot whose room is still in it; the lights' grid the current slot's; the table, the records, the heap's
+free total, the swaps, the unpack posts and "both rooms drawn" logged), and 8 MB more guest RAM under the switch alone
+(.deps/GXRuntime/src/core/cpu.c, the patch regenerated). Cold boot through Jump to Game, chapter 1, the chain 101, 105, 111,
+29 to room 183, then 119, 29, 119. Seen: 56 MB; the layout fixed ("slot 1 put at 0x83000000, the game's would be 0x80A026A0");
+the two records from the game's heap, free 119 KB after and steady, no "[heap] broken"; the rooms alternated slots (341 into
+slot 1, 343 slot 0, 344 slot 1, 180 slot 0, 183 slot 1; the unpacks' dest 0x83000000 three times, 0x8073A680 twice); each
+change's tail marked the other slot dead and the record was put back a frame later; the three return trips (183 -> 180 at
+3725, 180 -> 183 at 4125, 183 -> 180 at 4585) took the engine's own "already in the other slot" path (lr 0x80154D94) with NO
+unpack; the room draw's section 3 drew the other slot's room from 2086 on ("BOTH rooms drawn"); the grid chosen was the
+current slot's every time (0x8307EC28 for 341, 0x80787D04 for 343, 0x830AF504 for 344, 0x807931B4 for 180, 0x83086614 for
+183); 60 frames a second throughout; `ed check` 0 findings; both players in room 180 at the end, coop_follow bringing as
+today. Not seen: the other room's geometry in the pictures (the shots' vantages didn't look where the two rooms overlap: a
+chosen vantage next time), 0x80155450's neighbour answers (not logged). With the switch unset nothing of this is installed
+and the RAM stays 48 MB (the user's states load).
+
+So option A's first question is answered: the engine's dormant two-slot room system runs clean with a host-placed second
+slot. Next, R2: the other player stays in their room (coop_follow's bring off under a switch; their turn and their character
+step with their slot current: r13-23276, the table's +0/+4, the things copy r13-25060/-25064; the change's walk 0x80043820
+told the stayer's room is loaded; coop_left_behind as "their room is in no loaded slot").
+
+## R2, the other player stays: the readers, the build, the runs (2026-11-11 late afternoon)
+
+### What three readers settled (rooms/stay-readers.md)
+
+- The host's one notion of "left behind" is coop_follow's bring test (o2's +592 != o1's) and coop_left_behind, used by the
+  look, the camera step, the prompt show, the scene set and the quick cast. Nothing in the host swapped a room word for a
+  turn: coop_player_turn swaps the identity (r13-26524/-21492/-21496), the state copies, the input masks, the focus, the
+  camera block; coop_character_step (the host-run step) is OFF by default, so player 2's body is stepped by the game's own
+  pass as a NON-player node, and 0x80123F70's non-player path finds the room's collision by the node's +592 in any loaded
+  slot: the stayer walks on their own floor by the engine itself, as long as their slot's record is marked loaded.
+- 0x80123F70's PLAYER path (the object == r13-26524) short-circuits to the CURRENT slot: in player 2's turn (their identity
+  in) their look's scan, zones, controller and camera step see the room in play unless the slot table's +0 is theirs:
+  the turn must swap r13-23276 and the table's +0/+4 (xor-paired, as 0x80154C50 keeps them). The "things copy"
+  r13-25060/-25064 turned out to be the room's AI point graph, read only by script point verbs: not carried in R2.
+- The change strips the stayer twice: the load's 0x80043AB8 strips EVERY character's body, moves and parts level-wide
+  (no room test; its per-node block is entered on the node's kind, asked by 0x801F62C0 at lr 0x80043B00), and the arrival's
+  walk 0x80043A5C -> 0x80043820(node, record) strips every node not in the NEW room (0x80043898); the in-room branch is a
+  no-op for a set body, so sparing the node and running that branch are the same.
+- The change's tail (0x801523A8-0x80152404) marks the other slot's record dead inside the ticket tick, BEFORE the behaviour
+  pass of the same frame: a draw-time put-back leaves the stayer with no world for that frame. 0x80154B54 (the exits list)
+  has ONE caller, right after the tail (lr 0x80152434): the put-back goes there.
+- The load 0x80154C94 has no eviction choice: a fresh load always swaps and unpacks into the former other slot. The host
+  pre-steers the table before the change (notify_room_change, the entry) so the slot evicted is player 1's old one.
+- Events 61 (to the old room's nodes: the stayer's too) and 62 (to the new room's) are mild for a standing player; a
+  change of player 2's stamps and places r13-26524's object (player 1's): R2 keeps today's route (the bring) for a change
+  of player 2's; R4 takes ownership of it.
+- Sound (the user's rule, recorded): player 2 has no music, their in-game sounds stay; one listener on player 1's camera,
+  one music stream in the host (dtk.c): R5.
+
+### What was built (ED_COOP_STAY=1, with ED_ROOM_SLOTS=2; runtime/host/hle.c)
+
+- coop_stay_apart: player 2's room (object +592) is resident in a slot (the host's slot list), isn't the room in play, and
+  the change was player 1's (!g_coop_room_p2).
+- coop_follow: no bring while apart (logged "[stay] player 2 stays in room N (slot s) while player 1 went to room M");
+  its floor memory reset for the reunion. coop_left_behind := "their room is in no loaded slot". coop_camera_chosen
+  doesn't count the mover's room start for the stayer's set. coop_door_proxy trades no places across rooms.
+- coop_player_turn: coop_stay_room_in/out round the turn: r13-23276 := their room, the table's +0/+4 swapped to their
+  slot, both back after (with the identity).
+- The strips: an intercept on 0x80043820 passes over player 2's node while apart; the kind ask 0x801F62C0 at lr 0x80043B00
+  answers 0 for their node, so the load's level-wide strip passes over it too. Both logged.
+- The slot records: notify_room_slots_tail (0x80154B54 at lr 0x80152434) puts back, right after the change's tail, the
+  record of the room in play and, with the stayer, player 2's room; room_slots_return (at the change's entry) puts back
+  the other slot's record when the change is INTO its room (so the load finds it "already in the other slot") and swaps
+  the table's indices when player 2's room sits in the slot the engine would unpack into. The probe's draw-time put-back
+  is gone (it kept rooms nobody was in alive and drawn: the piling the user saw when both players were in one room).
+- A "[stay]" line every two seconds while apart (their room, slot and place; the room in play).
+- The stayer's room carried through every call that puts their own set in outside their turn: the window's tick
+  (coop_words_tick), a use of theirs (coop_use_start / continue_coop_use: g_coop_use.room_in), a timer's script
+  (coop_script_timers) and a Tome item's script (tome_copy_left). Without it the pickup's close (the find's events, the
+  close script 1181 as a use) ran with player 1's room in, and player 2 then walked in place at the block's spot.
+- The hold the game puts on everyone but the door's user (event 102: the node's +28's 8) let go for player 2 at the
+  change's tail on any door of player 1's (0x801F6828(node, 0), as coop_door_motion does for their own door): without it the
+  stayer stood held after player 1's door, and again after player 1 came back.
+
+### The runs (saves/rooms-ch1-183.state remade on each build from Jump to Game WITHOUT the stay switch, with ED_ROOM_SLOTS=2;
+### the chains in the scratch's rooms/runs-r2*.sh and build-run-t1c.sh; the game at 60 frames a second in every run)
+
+- A first state made WITH the switch on had player 2 stay behind in room 341 during the state's own door chain (the stay
+  works from the first door): the state is made without it. One run of player 2's door press from that broken state
+  (rooms-r2-t3-p2door) ran on past its frame limit with player 1 idle by room 183's zombies for two minutes: they died and
+  the game reset to the title through its own game-over path (OSResetSystem from 0x80022694): a test accident, not the code.
+- rooms-r2c-t1b-stay (logs/run-20261111-160310-): player 1 through 119 to 180 at 4073 ("a fresh load" into slot 0, player
+  1's old, by the steer; the load's strip and the arrival's walk pass over player 2's node; slot 1's record put back; "player
+  2 stays in room 183 (slot 1) while player 1 went to room 180"), BOTH rooms drawn while apart; player 2's own EXAMINE (4200),
+  DETAIL (4300) and PICK UP (4500, "own find from lr 0x800254F4", the block floated and placed from their camera) in room
+  183 with player 1 in 180; the close at 4701 and script 1181 as theirs; player 1 back through 29 at 4813 ("already in the
+  other slot: no unpack"), "one room drawn" after (the slot nobody is in left dead). Player 2 could not walk after.
+- rooms-r2c-t2-bring (-160343-, the switch unset): brought both times as today; the left room dead after each change; the
+  return "put back (a return into its room)" then "already in the other slot".
+- rooms-r2c-t3-p2door (-160414-): player 2 in the door's region presses OPEN DOOR (prompt 1, script 119): a change of
+  player 2's keeps today's route: player 2 brought to 180 beside the arrival, then their 29 back: both in 183.
+- rooms-r2d-t1c-stay (-160800-): with the hold let go at the tail: player 2 walked 250 units in room 183 while player 1 was
+  in 180 (4000-4100), but stood after player 1 came back (held again at that ticket).
+- rooms-r2e-t1d-stay (-161032-): the hold let go on any door of player 1's: no stuck after the reunion; but after the
+  pickup's close while apart player 2 walked ten units and stood (a walk in place at the block's spot), while the same
+  pickup with both in the room (rooms-r2e-cmp-pickup-walk, -161214-) walked freely.
+- rooms-r2f-t1e-stay (-161744-): the room carried through the tick and the uses: player 2 walks 240 units down right after
+  the pickup's close while apart (4700-4790), then 170 up and 80 left after the reunion. `ed check`: only the kit's camera
+  rule, which judges player 2's eye against the game's room (a per-player room column for the kit: with R3).
+
+Base: the uncommitted hle.c with ED_ROOM_SLOTS=2 (R1) and ED_COOP_STAY=1 (R2): both rooms resident, drawn piled in both halves.
+
+## The facts
+
+- The frame function 0x800080E4 draws the room twice: the opaque pass 0x801E851C (bl 0x80008118) calls 0x801E75B4(3) then
+  0x801E75B4(2); the translucent pass 0x801E85E0 (bl 0x80008140) loads the camera matrix 0x8060248C into index 27 (and its
+  normal matrix) and calls 0x801E73D4(3) then 0x801E73D4(2). Section 3 = the OTHER slot's record (0x80155130(3): table +4,
+  0 when -1), section 2 = the current's. The actors are drawn after, by 0x80119D60(1) -> 0x8011A278, with no room test.
+- The room's vertex formats carry no matrix index (0x801E16D0: POS/NRM/TEX only): the room draws with the CURRENT matrix,
+  index 27, which the opaque pass inherits from the update's camera build (0x801E4DC8 in 0x801E4BDC, before the pass) and
+  the translucent pass loads itself (0x801E85F8). 0x801E75B4 loads only a texture matrix (index 48). Later draws use 27
+  without reloading it (0x801F41C8 at 0x80008174, 0x801DC450/0x801DC55C, 0x80129BA0, the menu code).
+- The renderer replays the whole frame per view; its one per-view geometry filter is marked_out_of (interp.cpp:569):
+  a draw whose position matrix carries 0xD2 at +15, 0xA0+player at +31, 0xE5 at +47 has that matrix zeroed in that
+  player's view (the draw collapses to a point). Uniform blocks are deduplicated against the previous draw by content
+  hash, so a different mark per section gives the two rooms separate blocks. One mark excludes ONE view.
+- Whole-frame moments (split_off: a cutscene, the Tome with no sharing, no player or camera; the renderer's own fallbacks)
+  show the game's Real frame, which carries both rooms: section 3 must draw nothing then. 0x801E75B4 treats a record of 0
+  as nothing to draw (0x801E769C) and skips its texture-state side effects too (the N=1 shape).
+- coop_found_mark (hle.c ~3291) plants the three bytes on an actor's matrices during the object draw (lr gate
+  0x8011A278..0x8011B400) while g_coop_found_drawing is set, with g_coop_mark_view the view to leave; coop_found_object_draw
+  (~3261, at 0x8011A278's entry) decides it from the found/unseen lists.
+- The kit records 'room' as the game's room word; player 2's camera is judged against it (the false CAMERA findings).
+  tools/ed/coopcheck-recording.diff already specifies p1room/p2room columns (object +592).
+
+## The build
+
+P1 (the room per half). An intercept on both 0x801E75B4 and 0x801E73D4 (r3 = section; a `running` guard; the pattern of
+  coop_stay_strip_walk and room_slots_layout):
+  - room0 = the room of table +0's record (the room in play, player 1's half, view 0); room1 = coop_stay_apart(cpu) ?
+    player 2's room (object +592) : room0; the section's record: 3 -> table +4, 2 -> table +0; its room from +0x8140.
+  - Section 3: drawn only when room1 != room0, the section's record is live and its room == room1, and the halves are
+    shown (camera.c's g_split_on, exported as camera_split_on()); otherwise answer 0 without calling the game (section 3
+    draws nothing: the N=1 shape). Section 2: always drawn.
+  - When room1 != room0 and the split is on: before the game's call, load a MARKED copy of the camera matrix into 27
+    (section 3: out of view 0, byte 0xA0; section 2: out of view 1, byte 0xA1), by writing the 48 bytes of 0x8060248C
+    with the mark to a scratch guest address and guest-calling GXLoadPosMtxImm(scratch, 27); after the call, load the
+    unmarked 0x8060248C into 27 again (later draws use 27). Never mark 0x8060248C in place (the game reads it).
+  - Else: pass the call through untouched.
+P2 (the actors per half). coop_found_object_draw: when no found/unseen list matched and room1 != room0: the object's
+  +592 == room0 -> g_coop_found_drawing = true, g_coop_mark_view = 1 (out of player 2's half); == room1 -> view 0; neither
+  -> out of view 0 (one view only, logged once): the stayer's body leaves player 1's half, player 1's leaves the stayer's.
+P3 (the kit). both.tsv gains p1room and p2room (object +592 of each player's node, 0 without); recording.py's room_of(r,
+  half) = r.get(half+'room') or r['room'] used by the camera checks (check_cameras, coopjudge's on_room_camera /
+  camera_label / camera_back / LOST) for that half; coopjudge's TWO_ROOMS skipped when the run's log says the stayer is on.
+P4 (not now). The fade quad per half (mark at lr 0x801E7F60 for the non-mover's view: R4, with the mover's identity);
+  lights per room (one grid, player 1's room's, for both: a renderer change later); the per-command skip of the excluded
+  room (measure first: DOL_INTERP_LOG [split-cost], [fps]).
+
+## The checks (the state remade on the build; the stayer's recipe)
+
+- t1: player 1 through 119 to 180, player 2 stays in 183 and examines/picks up; pictures of both halves while apart: each
+  half its own room, no piled geometry; the stayer's body not in player 1's half; player 1 not in the stayer's; after the
+  return both in 183 with one room drawn; [fps] against R2's 60.
+- t2: the bring (switch off): unchanged pictures, one room.
+- t3: a cutscene while apart? (chapter 1's skeleton scene 419 in 183 by player 1 while player 2 stays... player 1 is in
+  180: scene 419 is a 183 script) -> player 2 (stayer in 183) triggers 419 while player 1 is in 180: a whole-frame moment
+  with the split off: the frame shows room 180 (view 0's) only, no pile. If scripting it is awkward, a note for the user.
+
+
+## R3, the picture: each half its player's room (2026-11-11 evening; readers in rooms/picture-readers.md, refuters in refute-r3.md)
+
+### What the readers and refuters settled
+
+- The room is drawn twice a frame: the opaque pass 0x801E851C calls 0x801E75B4(3) then (2), the translucent pass 0x801E85E0
+  calls 0x801E73D4(3) then (2); section 3 is the OTHER slot's record (0x80155130(3)), 2 the current's. The room's vertex
+  formats carry no matrix index: the room draws with the CURRENT matrix, index 27, the camera's (0x8060248C), which the
+  opaque pass inherits from the update's camera build (0x801E4DC8) and the translucent pass loads itself (0x801E85F8). Later
+  draws use 27 unreloaded. The room is NOT drawn through the object list (0x80119D60 -> 0x8011A278 draws the actors, with
+  no room test).
+- The renderer replays the frame once per half and leaves out a draw whose position matrix carries 0xD2 / 0xA0+view / 0xE5
+  at +15 / +31 / +47 (marked_out_of, interp.cpp; the found thing's mark). Uniform blocks are deduplicated by content hash, so
+  a different mark per section gives the two rooms separate blocks. One mark leaves one view; the renderer gained 0xA2
+  for both views. GXLoadPosMtxImm is notify-only in the host and its body writes the write-gather pipe into the same ordered
+  stream as the HLE'd display-list call, so a guest call of it from the section's entry lands before the list. The host's
+  interrupts are never delivered inside a guest call (a refuted hazard). 0x8060248C is the row-major LookAt matrix; +15/+31/+47
+  are the translation floats' low mantissa bytes, kept by the psq path (a 0.0f translation would lose its mark: never in a
+  LookAt).
+- camera.c's g_split_on is decided in the update's camera build, before the room draw (one-frame staleness possible on the
+  rare frame where the timebase boundary falls between the two camera runs: accepted). Whole-frame moments (the Tome copy's
+  turn, the shared Tome's own frames: dol_aurora_split_skip_views) show the frame fitted into one player's half: the owner's
+  room alone then.
+- A hide list (a press's own-view hide, the close-up's others) and the room rule can disagree on which view to leave: the
+  both-views mark takes it. Skinned bodies' matrices are all loaded inside the object draw's gate (0x8011B814 loads none).
+- The kit judged player 2's eye against the game's room word: p1room/p2room columns (object +592) and room_of(r, half) at
+  the camera, jump and fall rules; TWO_ROOMS gated off when the stayer is on.
+
+### What was built
+
+- room_section_draw (an intercept on 0x801E75B4 and 0x801E73D4; room_slots_frame kept for section 3): with player 2 apart
+  and the halves shown, section 3 (their room) is drawn with a marked copy of the camera matrix in 27 (out of player 1's
+  half) and section 2 (the room in play) with one out of player 2's half, the unmarked matrix loaded back after each
+  (ROOM_MTX_SCRATCH, GXLoadPosMtxImm by guest call); section 3 draws nothing when nobody is in its room or the frame is shown
+  whole; in a whole frame fitted into one player's half (g_room_whole_owner, recorded as dol_aurora_split_skip_views is set)
+  only the owner's room is drawn, unmarked.
+- coop_found_object_draw: with the players apart, a thing of the room in play leaves player 2's half, one of player 2's room
+  leaves player 1's, one in neither (or one a list hides from the other view) leaves both (0xA2; interp.cpp's marked_out_of).
+- camera_split_on() exported from camera.c. The kit: both.tsv's p1room/p2room; recording.room_of; coopjudge's room sites
+  and the TWO_ROOMS gate.
+
+### The runs (the state remade on the build; logs/run-20261111-1644*-rooms-r3-*)
+
+- t1-stay (-164408-): the same stayer recipe: player 1 through 119 to 180, player 2's EXAMINE, DETAIL, PICK UP and close of
+  the block in 183, player 1 back through 29. The pictures: while apart player 1's half shows room 180 alone (their body at
+  its door, OPEN DOOR), player 2's half room 183 alone with their close-up of the block and the pickup's words, neither body
+  in the other's half (shots 000038 at 4250, 000060 at 4600); together again, both halves room 183 (000085 at 5000). 60
+  frames a second throughout; `ed check`: the kit's camera rule no longer fires (it judges each half against its player's
+  room); the two STUCK? maybes after the pickup are room 183's zombies hitting player 2 (hp 68 -> 54 -> 33, state 7): play.
+- t2-bring (-164440-, the switch unset): brought both times, one room drawn throughout, 60 fps, no finding but the puts.
+- Not run: a cutscene or the Tome while apart (whole-frame moments), a fresh load while apart (a third room: section 2 dark
+  under the fade while the stayer's half keeps its room), the per-command skip's budget (both rooms' draws still replay in
+  every output; no frame-rate cost seen at these rooms).
+
+
+## R4, doors from either side: player 2's door while player 1 stays (2026-11-11 evening; readers in rooms/doors-readers.md)
+
+### What the readers settled
+
+- A change runs from the world frame's tick (0x800083EC -> 0x80155830 -> 0x80152614), outside any turn, so its who words
+  are player 1's; 0x80152614 reads the identity before 0x80152298 (0x8004305C at 0x80152640) and after it (the placing
+  0x801526CC, events 238/191, the arrival camera into the set in, the arrival script at 0x801527F4): a swap held only across
+  0x80152298 would stamp player 2 but place player 1 at the marker. 0x80154C94 always unpacks into the former other slot and
+  swaps after, so the slot table left as it is (player 1's slot current) evicts player 2's old slot: only the room word
+  r13-23276 need be player 2's. After their change the new room is current and player 1's slot is the other, which the
+  tail marks dead: the put-back must be for the stayer whoever it is. The ticket's event 102 holds everyone but the asker
+  (node +28 bit 8) and nothing in the player-2 path let player 1 go.
+- The fade is one global state: ticks at r13-21784, the live colour as four floats at 0x80602A2C (alpha +12); the tick
+  0x801E7DA4 draws its quad only while the alpha is above 0, with an orthographic projection and PSMTXIdentity into its own
+  stack buffer loaded by GXLoadPosMtxImm(m, 0) at lr 0x801E7F60. One quad covers the whole frame: both halves went black at
+  either player's door. VISetBlack is one latch per present (the load's 3-4 frames).
+
+### What was built
+
+- notify_ticket_run (a notify on 0x80152614, the ticket's runner): for a change of player 2's with the stayer on, the
+  bracket: coop_be_player2 held across the WHOLE run (not only 0x80152298), r13-23276 := player 2's room, the six prompt
+  slots saved, their camera set in (coop_cameras_in); coop_stay_change_end from notify_behaviour_pass (0x8014FDB8 at lr
+  0x80008400 / 0x80050A9C, the next thing the frame does) restores: the room in play := player 1's room, the table's +0/+4
+  swapped back so player 1's slot is current, g_coop_room_p2 cleared. g_stay_bracket / _was[5] / _room / _slots.
+- The stayer is whoever didn't move: coop_stay_stayer(cpu) (g_stay_bracket_was[1] during the bracket, else g_coop_p2); the
+  strips (0x80043820, 0x801F62C0) spare the stayer; the tail puts back the stayer's record and lifts their hold (0x801F6828)
+  whoever moved. coop_stay_apart no longer turns off under g_coop_room_p2.
+- Not for a change of player 2's with a stayer: coop_room_change_words (player 1's words stay), coop_follow's bring,
+  coop_p1_unplaced, g_coop_p1_own_camera and the arrival scene's camera as player 1's; coop_camera_chosen keeps player 2's
+  set as theirs during the bracket; coop_script_go_to_room refuses a second fn66 while a change is on its way (logged).
+- The fade per half: g_fade_mover (set at the ticket: 2 when player 2 asked, else 1) and, at GXLoadPosMtxImm from lr
+  0x801E7F60, the quad's matrix marked out of the stayer's view by WHOLE words (the identity's translations are 0.0f, and a
+  mark in the low byte alone is a denormal the game's psq store flushes to 0: docs/coop-failed-attempts.md); forgotten when
+  the change is over and the fade's ticks are spent.
+
+### The runs (the state remade from Jump to Game on the build; ED_ROOM_SLOTS=2 ED_COOP_STAY=1)
+
+- t1-p2door (logs/run-20261111-172710-rooms-r4c-t1-p2door; the first build's -171826-): player 2 at 183's door to 180 presses
+  OPEN DOOR while player 1 stands by the block; player 1 walks in 183 (3900-4000), player 2 walks in 180 (4100-4200), player 2
+  presses the way back (4300), both walk. p2room 183 -> 180 at 3830 -> 183 at ~4360, p1room 183 throughout; both halves their
+  own room; player 1's EXAMINE prompt back after the change (shot 000013). The fade (shots 000010-000012): player 2's half
+  darkens to black while player 1's half keeps room 183 lit; the first build blacked both (the denormal). `ed check`: the
+  two puts and one CAMERA blip 4364-4373 (player 2's eye 292 units off on the way back's arrival camera: nine frames, then on
+  a camera of 183; watch in play). 60 fps.
+- t2-p2door-p1follows (logs/run-20261111-171852-rooms-r4-t2-p2door-p1follows, the first build; the fade change doesn't touch
+  it): player 2's door to 180 at 3760, then player 1 takes 119 into 180 where player 2 already is: the same room again, one
+  room drawn, only the puts. 60 fps.
+- Not run: two doors at once (the second refused and logged; the way-out wait pattern is next if play wants it), a change
+  into a third room with a stayer (the stayer's slot must survive: the put-back covers it in reading only), player 2's door
+  while player 1 is in a close-up or words, the sound of a change (R5), the lights (one grid, player 1's room's).
+
+
+## R5, sound: player 1 holds the music; the stayer's room keeps its sounds; player 2's Tome ticks (2026-11-11 night; readers in rooms/sound-readers.md, refuters in refute-r5.md)
+
+### What the readers and refuters settled
+
+- One MusyX engine, one host mixer, one DTK music stream, one output: "player 2 has no music" can only mean the music never
+  follows player 2. The DTK music is changed by scripts through seven Lua wrappers (fn168 music_set, fn54 stream_play, fn56
+  stream_stop, fn147 music_step, fn57 pause, fn58 fade, fn59 music_wait) whose targets are 0x801A5CB8, 0x801A1750, 0x801A172C,
+  0x801A661C/0x801A65E4, 0x801A1990, 0x801A16A0, 0x801A19D0, and by game code keyed to the game (the chapter load's level
+  theme, the music step's room-word and story-flag switches from the main loop's sound tick, the sanity tracker on player 1's
+  sanity, bosses, the Tome's and insanity screens' resets, level end, front end, cinematics). fn62's door sounds and fn59's
+  waits ride the same music queue: refuse at the wrappers' call sites, never at the queue. fn151's duck (0x8019E068(0, 25, 10))
+  scales the DTK volume too (0x801A1B50 -> 0x801A0F3C -> 0x8019DE30 -> DTKSetVolume): a music act. A music call behind a
+  one-shot flag (L02/2325: flag 802 then fn58/fn56/fn58/fn54) refused outright is lost for the chapter: defer, don't drop.
+- The change's sound acts are owner- and room-blind: fn66's 0x801A05EC(len, 1, 0) at the press (lr 0x801668FC the cut,
+  0x80166970 the fade; the ticket is written BEFORE both, so g_coop_room_p2 already names the mover), 0x80152298's 0x801A0EAC
+  (every playing stream-backed track's slot released, and with 0x801A4B58(-1, -1, 1) ALL four direct stream records stopped) and
+  0x801A05EC(10, 1, 0) (all 80 tracks faded), the arrival's 0x8019F3F0 (the new room's emitter table, tagged with the room
+  data's own id: right in any bracket) and 0x8019E068(0|1, 100, 0) (two global ducking groups reset). The track update never
+  reads a track's room: a kept track of a room not in play keeps playing. Nothing restarts a faded room's emitters. One-shots
+  free their track at the start: the 80-track list holds looped emitters, ambience and stream-backed tracks. 0x8019F360(track,
+  fade, mode) is the per-track act both walks use; 0x801A05EC's entry and exit write nothing else. Direct stream records carry
+  no room (their id at +328, serial +348; 0x801A4B58(id, -1, 1) stops a sound id's records).
+- A positioned track's gain is 0x801A01D0(pos, range, min, max, mode) from the view block 0x803012E0's eye and r13-26524's
+  position (the louder), at lr 0x8019F230 (start) and 0x801A0310 (each tick; track = r3 - 80, room s16 at +132); the result is
+  MusyX's emitter maxVol, and MusyX pans and cuts against its ONE listener. Without a swap a track in player 2's room is judged
+  from player 1's eye against a point in another room's frame: an arbitrary loudness, not a reliably quiet one.
+- Player 2's copy Tome runs the game's Tome code on a copy of all of MEM1: its 0x8019DB90 (plain sound) calls start voices in
+  the copied MusyX state, thrown away at the swap back: silent. The copy's Tome frame also runs the sound tick on the copy,
+  which pops the music queue's cells (fn62's door sounds) and the music step's plain sounds: those must not be forwarded or
+  they play twice. The copy never runs the Tome's way out (569 close, 509) and the looped item sound 33 (handle r13-24480) is
+  stopped only by page code. A nested guest call of the SAME address from its own intercept re-enters the intercept: a running
+  guard, as coop_move_sound has.
+- The Tome's ids (from the code's context): 611 the cursor tick, 546 select, 495 page turn, 264 refusal, 33 an item's loop,
+  568 open, 569 close.
+
+### What was built (ED_COOP_STAY=1 with ED_ROOM_SLOTS=2; nothing without them but the [dtk] lines)
+
+- The music is player 1's: intercepts on the seven targets, taken only from the wrappers' call sites (lr 0x8016A348, 0x80169E94,
+  0x80169F8C, 0x8016A280/0x8016A294, 0x8016A03C, 0x8016A13C, 0x8016A1F0; the game's own calls pass) when the script is player
+  2's (coop_music_theirs: their change's bracket, player 2 the player (r13-21492 / r13-21496), or a script last run as theirs
+  (coop_p2_script_is) resumed after a wait). TOGETHER in one room the call passes (the music is the room's and player 1 is in
+  it; logged). APART it is deferred: the last fn168 (track, fade), fn54 (stream) and fn56 (stop) are kept for player 2's room
+  (g_music_deferred) and replayed through the game's targets when player 1 arrives in that room (coop_music_replay at the
+  arrival's 0x8019E068, lr 0x8015206C, no bracket). fn151's duck (0x8019E068 at lr 0x80164DD4 with r4 25) by player 2 apart is
+  passed over; its lift (100) always passes. The [dtk] prepare/cancel lines carry lr, the bracket and the frame.
+- The stayer's room keeps its sounds: coop_sound_change_act, first in tw_keep (the one intercept on 0x801A05EC and 0x8019E068):
+  at the press (fn66's two sites) and at the change (lr 0x80152354) the mover is g_coop_room_p2 ? 2 : 1 and the kept room the
+  OTHER player's (coop_player1_node: player 1's node as the last swap found it, g_coop_p1_node, or the current one); the host's
+  own walk coop_sound_fade_rooms does 0x801A05EC(ticks, 1, 0)'s per-track act by guest call to 0x8019F360 for every playing
+  track of another room and leaves the kept room's alone. Both in one room: nothing fades at the press. The arrival's group
+  reset is passed over for player 2's change (player 1's duck stays). A change of player 2's with no bracket: the game's,
+  logged. 0x801A0EAC (its own intercept): with a stayer, only the direct streams of rooms nobody is in are stopped, by sound id
+  (g_stream_starts: each 0x801A4884 start remembered with the room in play, from the SANITY_STREAM notify); the mover's old
+  room's stream-backed tracks fade through the walk (mode 6).
+- A track in player 2's room is heard as theirs: coop_sound_gain (intercept on 0x801A01D0, the two track sites, apart, not in
+  the copy's turn): the view block's eye := player 2's drawn eye (camera_player2_view) and r13-26524 := their object for a
+  guest call of the game's own function, both restored after; the result handed back. MusyX's pan stays player 1's camera's.
+- The copy Tome's sounds are live: tome_copy_sound/_stop (intercepts on 0x8019DB90 and 0x8019DC00, installed with tome_copy_tab):
+  in the copy's turn, from the Tome's own code (lr 0x80100000..0x80117000) only, the call is made in the real memory (cpu->ram
+  flipped for the guest call; a running guard) and its handle handed to the copy; at the copy's close (tome_copy_close) the
+  handles its turn left (r13-24480, -29056, -24108, when they differ from the real memory's) are stopped live and the close
+  sound 569 played.
+- Logs: [sound] fade / stream drop / gain / music passes|deferred|replayed / tome copy lines, [sound] tracks playing per room
+  every 120 frames while apart (the [stay] cadence), [dtk] with frames; run.sh sets ED_DTK_LOG=1; pagelog keeps [sound], [dtk],
+  [stay]; coopjudge's judge_door under two_rooms: 'music untouched' (no [dtk] line in the door's window), 'door fade by owner'
+  (the [sound] fade line), the kept count as info; the 'same room' check only without the stayer.
+- Not in R5 (said so): a per-side mix; MusyX's pan for player 2's room's emitters; sanity music and the insanity screens (the
+  game's); player 1's Tome in the copy (g_tome_copy_p1) keeps its sounds as before; more than 80 looped tracks across two rooms
+  (the free count is in the tracks line); the music refusal is exercised in play (chapter 1's doors set no music).
+
+### The runs
+
+(The state remade from Jump to Game on the build, the R4 recipe; ED_ROOM_SLOTS=2 ED_COOP_STAY=1; logs/run-20261111-18*-rooms-r5-*.)
+
+- s1-p2door (-182644-): player 2's door 183 -> 180 while player 1 stays in 183, walks, the way back. At the press (both in
+  183): `fade at the press: mover 2, room 183 kept (6 tracks), 0 faded`; at the change: the stream drop passed over, `room 183
+  kept (6 tracks), 0 faded`, the arrival's group reset passed over; no [dtk] line anywhere. Apart: `tracks playing: room 183
+  (player 1's) 6, room 180 (player 2's) 13, free 61 of 80` every 120 frames, and room 180's tracks (sounds 56, 490) measured as
+  player 2 (gains 0..73 by their eye). The way back's press: `mover 2, room 183 kept (6), 13 faded` (room 180's, nobody left
+  in it); its change: 0 faded (the 13 were already fading). `ed check`: the two puts and the known CAMERA blip on the way
+  back's arrival camera.
+- s2-p1door (-182711-): player 1's door 183 -> 180 while player 2 stays in 183, the way back by script 29. The press and the
+  change kept room 183's 6 tracks (mover 1); player 1's arrival kept the game's group reset (no bracket); room 183's tracks
+  measured as player 2 while apart; the way back faded room 180's 13 and kept 183's 6. No [dtk] line. Only the put.
+- s3-tome (-182737-, -182903-): player 2 opens their Tome while player 1 stands by: `tome copy: sound 568 (at 100) live from lr
+  0x80111220` at the open, 546 (select) at their A, 611 (the tick) at their B, each from the Tome's own code; the stick and
+  D-pad presses moved no cursor (Pious's inventory holds one item: the game's own silence); the copy closed by its own way
+  out, the close sound played by the host (no line of its own yet). No [dtk] line while the Tome was up: the copy's music
+  tick issued nothing.
+- Not run (chapter 1 has no music a door sets): the deferral and replay of player 2's music scripts (fn168/fn54/fn56 apart, the
+  [sound] music lines; L02/2325's desec.adp, the save room's td.adp), fn151's duck by player 2 apart; the pan of a sound in
+  player 2's room (one listener): by ear in play. The judge's new door checks ('music untouched', 'door fade by owner') run
+  only on a plan with a door step (ed check's global rules ran here).
+
+### R3 addendum (2026-11-11 night): the effects by their room
+
+Seen in the user's play: Karim's spirit orbs on player 1 (room 344) floating in player 2's half (room 341). The reader
+(rooms/particles-reader.md): the orbs are the host's own sparkles (ghost_sparkles_step asks the game for an ed184 effect);
+every effect is drawn through 0x8017C1D8(effect), after both room passes and the actors, by its kind's draw with the camera
+matrix 27 (world-space kinds) or GXInit's identity in index 60 (eye-space quads, the orbs); an effect knows its room at +56
+(stamped from the room in play as its request was consumed), and with two resident rooms the game's own room test
+(0x80155450) passes for both. Built: effect_draw_by_room, an intercept on 0x8017C1D8 installed with the room sections: with
+the players apart and the halves shown, an effect of a room not both are in is drawn with a marked 27 (room_mtx_load) and a
+marked identity in 60 (whole-word marks, the identity's translations being 0.0f), the clean ones loaded back after; in a
+whole frame only the owner's room's effects draw; the sparkles' +56 is their player's room each frame. Run: player 2's door
+with 40 large orbs on player 1 (ED_SPARKLES): together both halves show them, apart only player 1's half
+(logs/run-20261111-191217-rooms-r5c-s1-orbs40, shots 000005 / 000030 / 000045). Open: the orbs' eye-space place in the other
+player's half when together (coop-glitch-todo U4); the shadow pass isn't per room (a shadow of the room in play falls in the
+other half): with the lights.

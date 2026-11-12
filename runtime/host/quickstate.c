@@ -433,6 +433,12 @@ static bool check_region(const QsSection* s, const QsRegion* r,
         *why = "memory size differs from this build";
         return false;
     }
+    // With the two room slots (ED_ROOM_SLOTS, 56 MB) a smaller state has no slot 1 in its layout words: the first room would
+    // unpack into a slot at 0 and the game halt. Such a state is for a run without the switch.
+    if (size != r->size && strncmp(r->tag, "MEM1", 4) == 0 && getenv("ED_ROOM_SLOTS") != NULL) {
+        *why = "made without the two room slots (ED_ROOM_SLOTS): a state for a run without the switch";
+        return false;
+    }
     if (page != QS_PAGE_SIZE) {
         *why = "unknown memory page size";
         return false;

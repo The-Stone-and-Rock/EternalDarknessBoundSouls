@@ -11,7 +11,7 @@ import disc
 STICK = 40  # a stick pushed this far means they asked to walk
 BOOK_EYE = (200.0, 1100.0, 100.0)
 INT = {'ticket', 'fade', 'p1anim', 'p2anim', 'camidx', 'p1carry', 'p2carry', 'frame', 'ms', 'room', 'p1st', 'p1hp', 'p1m', 'p2st', 'p2hp', 'p2m', 'p1sx', 'p1sy', 'p2sx', 'p2sy', 'script', 'mode', 'mode2',
-       'screen', 'owner', 'shares', 'copy', 'copyp1', 'lent', 'cutscene', 'menu', 'own2'}
+       'screen', 'owner', 'shares', 'copy', 'copyp1', 'lent', 'cutscene', 'menu', 'own2', 'p1room', 'p2room'}
 HEX = {'camhash', 'p1b', 'p2b', 'busy', 'hold', 'focus', 'focus2', 'window', 'who', 'ctl', 'entry'}
 
 
@@ -56,6 +56,11 @@ def pos(r, p):
 
 def stick(r, p):
     return max(abs(r[p + 'sx']), abs(r[p + 'sy']))
+
+
+def room_of(r, half):
+    """The room this half's player is in: their own (p1room/p2room, since the separate-rooms step) or the room in play."""
+    return r.get(half + 'room') or r['room']
 
 
 def has_player2(r):
@@ -143,7 +148,7 @@ def check(rows, min_frames=30):
     # A place changing by itself: sent somewhere, or falling.
     for p in ('p1', 'p2'):
         for a, b in zip(rows, rows[1:]):
-            if (p == 'p2' and not (has_player2(a) and has_player2(b))) or a['room'] != b['room'] or b['frame'] - a['frame'] > 3:
+            if (p == 'p2' and not (has_player2(a) and has_player2(b))) or room_of(a, p) != room_of(b, p) or b['frame'] - a['frame'] > 3:
                 continue
             if a['cutscene'] or b['cutscene']:
                 continue
@@ -154,7 +159,7 @@ def check(rows, min_frames=30):
         i = 0
         while i + 30 < len(rows):
             a, b = rows[i], rows[i + 30]
-            if a['room'] == b['room'] and (p == 'p1' or has_player2(a)) and a[p + 'z'] - b[p + 'z'] > 250 and not a['cutscene']:
+            if room_of(a, p) == room_of(b, p) and (p == 'p1' or has_player2(a)) and a[p + 'z'] - b[p + 'z'] > 250 and not a['cutscene']:
                 out.append({'rule': 'FELL', 'who': p, 'from': a['frame'], 'to': b['frame'], 'text': '%s dropped %.0f units in 30 frames' % (p.upper(), a[p + 'z'] - b[p + 'z'])})
                 i += 120
             i += 1
@@ -229,7 +234,7 @@ def check_cameras(rows):
         last_flip = []
         was = None
         for a, b in zip(rows, rows[1:]):
-            if a['room'] != b['room'] or a['cutscene'] or b['cutscene'] or (half == 'p2' and not has_player2(a)):
+            if room_of(a, half) != room_of(b, half) or a['cutscene'] or b['cutscene'] or (half == 'p2' and not has_player2(a)):
                 was = None
                 continue
             if tome_of(a, half) or tome_of(b, half) or b['frame'] - a['frame'] > 3:
@@ -247,13 +252,13 @@ def check_cameras(rows):
                 continue
             d = dist(ea, eb)
             if d > 120:
-                near = nearest_camera(rooms, b['room'], eb)
+                near = nearest_camera(rooms, room_of(b, half), eb)
                 if near is None or near[0] > 60:
                     out.append({'rule': 'CAMERA', 'who': half, 'from': a['frame'], 'to': b['frame'], 'text':
                                 "%s's eye jumped %.0f units to %s, %s" % (
                                     half.upper(), d, tuple(round(x) for x in eb),
-                                    'not near any camera of room %d (nearest %s, %.0f away)' % (b['room'], near[1], near[0]) if near
-                                    else 'room %d has no cameras listed' % b['room'])})
+                                    'not near any camera of room %d (nearest %s, %.0f away)' % (room_of(b, half), near[1], near[0]) if near
+                                    else 'room %d has no cameras listed' % room_of(b, half))})
             # back and forth
             if was is not None and d > 1.5:
                 v = tuple(y - x for x, y in zip(ea, eb))
@@ -308,7 +313,7 @@ def camera_name(rooms, r, half):
     e = eye(r, half)
     if not any(e):
         return '-'
-    near = nearest_camera(rooms, r['room'], e)
+    near = nearest_camera(rooms, room_of(r, half), e)
     if near and near[0] < 40:
         return near[1]
     return 'free %d,%d,%d' % tuple(round(x) for x in e)

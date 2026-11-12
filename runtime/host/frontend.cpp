@@ -469,6 +469,9 @@ void restart_process() {
 
 // The machine at the game's title menu (Mods' Skip intro).
 constexpr const char* kTitleState = "saves/title.state";
+// With the two room slots (ED_ROOM_SLOTS, 56 MB) the title machine is another file: one made without them has no slot 1
+// (the layout words are the state's), and the first room then unpacks into a slot at 0 and the game halts on its data check.
+static const char* title_state_path() { return getenv("ED_ROOM_SLOTS") != nullptr ? "saves/title-rooms.state" : kTitleState; }
 
 void start_game(int slot) {
     snprintf(g_settings.disc, sizeof g_settings.disc, "%s", g_discs[g_disc].path.c_str());
@@ -484,9 +487,9 @@ void start_game(int slot) {
             quickstate_request_load(slot_path(slot).c_str());
         } else {
             struct stat st;
-            const bool title = g_settings.mod_skip_intro && stat(kTitleState, &st) == 0;
+            const bool title = g_settings.mod_skip_intro && stat(title_state_path(), &st) == 0;
             hle_set_skip_intro(g_settings.mod_skip_intro != 0 && !title);
-            quickstate_request_load(title ? kTitleState : quickstate_boot_path());
+            quickstate_request_load(title ? title_state_path() : quickstate_boot_path());
         }
         g_close = true;
         return;
@@ -496,11 +499,11 @@ void start_game(int slot) {
     // over and the menu saved as it came up (hle.c, ED_TITLE_STATE).
     if (slot == 0 && g_settings.mod_skip_intro) {
         struct stat st;
-        if (stat(kTitleState, &st) == 0) {
-            setenv("ED_QUICKLOAD", kTitleState, 1);
+        if (stat(title_state_path(), &st) == 0) {
+            setenv("ED_QUICKLOAD", title_state_path(), 1);
         } else {
             setenv("ED_SKIP_INTRO", "1", 1);
-            setenv("ED_TITLE_STATE", kTitleState, 1);
+            setenv("ED_TITLE_STATE", title_state_path(), 1);
         }
     }
     g_load_slot = slot;

@@ -131,7 +131,7 @@ def on_room_camera(rooms, r, h):
     e, _ = view(r, h)
     if not any(e):
         return False
-    near = R.nearest_camera(rooms, r['room'], e)
+    near = R.nearest_camera(rooms, R.room_of(r, h), e)
     return near is not None and near[0] < CAMERA_NEAR
 
 
@@ -139,7 +139,7 @@ def camera_label(rooms, r, h):
     e, _ = view(r, h)
     if not any(e):
         return '-'
-    near = R.nearest_camera(rooms, r['room'], e)
+    near = R.nearest_camera(rooms, R.room_of(r, h), e)
     return near[1] if near and near[0] < 40 else 'free %d,%d,%d' % tuple(round(x) for x in e)
 
 
@@ -231,7 +231,7 @@ def camera_back(v, rows, rooms, after, p, label, both=True):
                 "%s in their own view %.0f%% of the frames after %s (worst %.0f deg at frame %d, camera %s)" % (
                     h.upper(), seen * 100, label, off_axis(worst, h) or -1, worst['frame'], camera_label(rooms, worst, h)))
         v.check('room camera %s' % h, on >= SETTLED, "%s's eye on one of room %d's cameras %.0f%% of the frames after %s" % (
-            h.upper(), part[0]['room'], on * 100, label))
+            h.upper(), R.room_of(part[0], h), on * 100, label))
 
 
 def judge_tome(v, rows, log, rooms, s, e, plan):
@@ -349,8 +349,17 @@ def judge_door(v, rows, log, rooms, s, e, plan, ref):
             dz = abs(r30[p + 'z'] - r30[o + 'z'])
             v.check('follower beside', 20 <= d <= FOLLOW_NEAR and dz <= SAME_FLOOR,
                     '%s followed to %.0f from %s, %.0f higher or lower (beside: 20 to %d, within %d)' % (o.upper(), d, p.upper(), dz, FOLLOW_NEAR, SAME_FLOOR))
-            if 'p2room' in r30:
+            if 'p2room' in r30 and not plan.get('two_rooms'):  # (with the stayer on, the other player keeps their room)
                 v.check('same room', r30['p1room'] == r30['p2room'], 'both players\' own rooms %d and %d' % (r30['p1room'], r30['p2room']))
+    if plan.get('two_rooms'):
+        # R5 sound: a door never touches the disc music, and the stayer's room keeps its tracks (the host's [sound] lines).
+        dtk = lines_in(log, s, tc + 120, r'\[dtk\] (prepare|cancel)')
+        v.check('music untouched', not dtk, 'the disc music changed at a door (%s)' % (dtk[0][1].strip() if dtk else ''))
+        fades = lines_in(log, s, tc + 120, r'\[sound\] fade at .*: mover (\d), room (-?\d+) kept \((\d+) tracks\), (\d+) faded')
+        v.check('door fade by owner', bool(fades), 'the door\'s fades were walked by the host (%d lines)' % len(fades))
+        if fades:
+            kept = max(int(m.group(3)) for f, l, m in fades)
+            v.info('stayer room sounds', 'room %s kept %d playing tracks through the door' % (fades[0][2].group(2), kept))
         later = window(rows, tc + 30, s + step['walk_after'] + 200)
         if later:
             z0 = later[0][o + 'z']
@@ -446,7 +455,7 @@ def global_rules(rows, log, rooms, base, end, plan, run):
                 if last['frame'] - start['frame'] >= LOST_FRAMES:
                     out.append({'rule': 'LOST', 'who': h, 'from': start['frame'], 'to': last['frame'], 'text':
                                 "%s out of their own half's view for %d frames (%.0f deg off, room %d, camera %s%s)" % (
-                                    h.upper(), last['frame'] - start['frame'], off_axis(start, h) or -1, start['room'],
+                                    h.upper(), last['frame'] - start['frame'], off_axis(start, h) or -1, R.room_of(start, h),
                                     camera_label(rooms, start, h), ", player 2's own camera never stepped: the game's (player 1's) drawn"
                                     if h == 'p2' and not (start['p2ex'] or start['p2ey']) and 'v2on' not in start else '')})
                 start = None
@@ -455,7 +464,7 @@ def global_rules(rows, log, rooms, base, end, plan, run):
         gone = [r for r in part if r['p2m'] < 0]
         if gone:
             out.append({'rule': 'NO_P2', 'who': 'p2', 'from': gone[0]['frame'], 'to': gone[-1]['frame'], 'text': 'player 2 had no body for %d frames' % len(gone)})
-        if part and 'p2room' in part[0]:
+        if part and 'p2room' in part[0] and not plan.get('two_rooms'):  # (the separate-rooms step: two rooms are the design)
             apart = [r for r in part if r['p1room'] != r['p2room'] and not near(r['frame'], changes, 10, 120) and not r['cutscene']]
             if len(apart) > 30:
                 out.append({'rule': 'TWO_ROOMS', 'from': apart[0]['frame'], 'to': apart[-1]['frame'], 'text':
@@ -583,5 +592,8 @@ def any_run(run):
     start = playable(rows, False) or playable(rows, True)
     if start is None:
         return None, []
-    plan = dict(solo=start['p2m'] < 0, steps=[], end=rows[-1]['frame'] - start['frame'])
-    return start, global_rules(rows, log_lines(run), R.room_cameras(), start['frame'], rows[-1]['frame'], plan, run)
+    log = log_lines(run)
+    # The separate-rooms step: with the stayer on, the players apart is the design, not a finding (TWO_ROOMS).
+    plan = dict(solo=start['p2m'] < 0, steps=[], end=rows[-1]['frame'] - start['frame'],
+                two_rooms=any('the other player stays in their room' in l for l in log))
+    return start, global_rules(rows, log, R.room_cameras(), start['frame'], rows[-1]['frame'], plan, run)

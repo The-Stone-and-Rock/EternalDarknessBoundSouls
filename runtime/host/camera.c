@@ -1557,6 +1557,7 @@ bool hle_coop_player1_camera(float eye[3], float target[3], float* zoom);
 #define SPLIT_PITCH_HIGH 1.30f
 
 static bool g_split_on;
+bool camera_split_on(void) { return g_split_on; }  // hle.c: the halves are shown (the room draw per half)
 static float g_split_yaw, g_split_pitch, g_split_distance;
 static unsigned long long g_split_frame;
 // Player 2's view this frame, for their turn's sense of forward (hle.c).
