@@ -667,6 +667,8 @@ int main(int argc, char** argv) {
             }
             iso_path = launcher_iso;
         }
+        // Separate rooms only with co-op on (frontend.cpp rooms_follow_coop): also for runs with no launcher (tests).
+        rooms_follow_coop();
     }
 #endif
 

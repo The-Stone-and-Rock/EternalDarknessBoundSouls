@@ -21,6 +21,11 @@ bool frontend_run_launcher(const char* default_iso, char* iso_out,
 // the game paused until the player resumes.
 void frontend_frame(void);
 
+// Co-op separate rooms only with co-op on (ED_ROOM_SLOTS / ED_COOP_STAY, asked by play.bat): sets or clears the two
+// switches for this run from the ask and Mods > Co-op, before the game's memory, title machine and hooks read them.
+// True when that changed them.
+bool rooms_follow_coop(void);
+
 // A problem page over the game (report.c): heading, the text, and Keep
 // waiting (when can_wait) or Quit. True when the player chose to wait.
 bool frontend_problem(const char* heading, const char* text, bool can_wait);

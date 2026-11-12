@@ -14328,8 +14328,18 @@ static void room_slots_return(CPUState* cpu) {
     const s32 cur = (s32)mem_read32(cpu, ROOM_SLOT_TABLE), other = (s32)mem_read32(cpu, ROOM_SLOT_TABLE + 4u);
     if (cur < 0 || cur > 1 || other < 0 || other > 1)
         return;
-    if (g_room_slot_room[other] == wanted)
-        room_slot_put_back(cpu, other, "a return into its room");
+    // A return into a room nobody stayed in is a fresh load, as the game alone does: its record was marked dead at the tail
+    // that left it, and what it held is no longer the room's. The user's solo play froze (2026-11-12, saves/reports/
+    // hang-20261112-025508): room 180 left dead in slot 0 while room 183 was reloaded into itself twice, its slot overwritten
+    // (texture-like bytes; its collision tree's first cell pointing at cells -4633 and -7699), put back at the return and
+    // walked for good (0x80138E8C). A room a player stays in keeps its record at every tail (notify_room_slots_tail: "a player
+    // is in it"), so a return into it still finds it "already in the other slot".
+    if (g_room_slot_room[other] == wanted) {
+        const u32 record = room_slot_record(cpu, other);
+        const bool kept = record != 0u && ((mem_read32(cpu, record + 0x8140u) >> 8) & 0xFFu) != 0u;
+        fprintf(stderr, "[rooms] a return into room %d (slot %d): %s (frame %llu)\n", wanted, other,
+                kept ? "kept, a player stayed in it" : "nobody stayed in it: loaded fresh", (unsigned long long)(cpu->timebase / 675000ull));
+    }
     if (coop_stay() && g_coop_p2 != 0u && !g_coop_room_p2) {
         const s32 r2 = coop_object_room(cpu, g_coop_p2);
         if (r2 != -1 && r2 != wanted && room_slot_of(cpu, r2) == other && (s32)mem_read32(cpu, cpu->gpr[13] - 23276u) != r2) {

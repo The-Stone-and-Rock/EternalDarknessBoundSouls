@@ -778,3 +778,19 @@ docs/coop-todo.md's table), a rule of its own, not a guard in step D. Open in do
   (logs/run-*-r6-mx-c-oldstate: player 2's door, walks). **Before using a fresh JTG state: `ed see 3640 RUN` on its making run
   must show `hold 0x0`, and script 349 (control) must come before the first forced door; make states with nothing else
   running, or with `JTG_SLOW=1`.**
+
+## The separate-rooms switches reached solo play (2026-11-12, the user's solo play; fixed)
+
+- **play.bat (and the v0.1.3 package's) set ED_ROOM_SLOTS=2 / ED_COOP_STAY=1 for every run, solo too:** the two-room
+  engine (R1) and its hooks are keyed to the switch, not to co-op. A solo new game froze returning into room 180 (saves/
+  reports/hang-20261112-025508.txt and .state): room 180's copy, left dead in slot 0 while room 183 was reloaded into itself
+  twice, had been overwritten (texture-like bytes; its collision tree's first cell pointing at cells -4633 and -7699), the
+  return put its record back (room_slots_return) and 0x80138E8C walked it for good. The user's rule: co-op fixes never apply
+  to solo unless said so.
+- Fixed twice over: (1) a return into a room nobody stayed in is a fresh load (room_slots_return no longer revives a dead
+  record; a room a player stays in keeps its record at every tail); (2) the switches follow Mods > Co-op
+  (frontend.cpp rooms_follow_coop: play.bat's ask is kept, the switches are set only with co-op on, before the memory, the
+  title machine and the hooks read them; the launcher over a running game restarts when the choice changes them). Checked:
+  logs/run-20261112-030139-jtg-solo-returns (switches on, before the gate: six returns, each "loaded fresh"),
+  -030651-jtg-solo-gate (solo: "separate rooms off for this run", the doors as the game's own), -030834-jtg-coop-gate
+  (co-op: two slots, player 2 stays). Any new co-op feature that is switched by the environment must go through it too.

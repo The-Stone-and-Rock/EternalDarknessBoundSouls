@@ -473,13 +473,43 @@ constexpr const char* kTitleState = "saves/title.state";
 // (the layout words are the state's), and the first room then unpacks into a slot at 0 and the game halts on its data check.
 static const char* title_state_path() { return getenv("ED_ROOM_SLOTS") != nullptr ? "saves/title-rooms.state" : kTitleState; }
 
+// Co-op separate rooms are co-op's alone (the user, 2026-11-12: "Co op fixes should not apply to solo plays"). play.bat
+// asks for them for every run (ED_ROOM_SLOTS=2, ED_COOP_STAY=1); the ask is kept (ED_ROOM_SLOTS_ASKED, ED_COOP_STAY_ASKED,
+// carried through restart_process with the environment) and the switches themselves are set only while Mods > Co-op is on,
+// and cleared otherwise: solo plays the game's own one room, its memory (48 MB) and title machine, with none of the two-room
+// hooks. A solo play with them on froze returning into a room (saves/reports/hang-20261112-025508).
+extern "C" bool rooms_follow_coop(void) {
+    static const char* const kSwitch[2] = {"ED_ROOM_SLOTS", "ED_COOP_STAY"};
+    static const char* const kAsked[2] = {"ED_ROOM_SLOTS_ASKED", "ED_COOP_STAY_ASKED"};
+    const bool was = getenv(kSwitch[0]) != nullptr;
+    for (int i = 0; i < 2; i++) {
+        if (getenv(kSwitch[i]) != nullptr && getenv(kAsked[i]) == nullptr) {
+            const std::string value = getenv(kSwitch[i]);
+            setenv(kAsked[i], value.c_str(), 1);
+        }
+        const char* asked = getenv(kAsked[i]);
+        if (g_settings.mod_coop && asked != nullptr) {
+            const std::string value = asked;
+            setenv(kSwitch[i], value.c_str(), 1);
+        } else {
+            unsetenv(kSwitch[i]);
+        }
+    }
+    const bool now = getenv(kSwitch[0]) != nullptr;
+    if (was != now)
+        std::fprintf(stderr, "[rooms] separate rooms %s for this run: co-op is %s\n", now ? "on" : "off", g_settings.mod_coop ? "on" : "off");
+    return was != now;
+}
+
 void start_game(int slot) {
     snprintf(g_settings.disc, sizeof g_settings.disc, "%s", g_discs[g_disc].path.c_str());
     settings_save();
+    const bool rooms_changed = rooms_follow_coop();  // before the title machine's path below and the game's memory
     if (g_in_game) {
         // The launcher over a running game: load the save, or the machine as
         // it booted for a new game, in place (the same disc only).
-        if (!g_running_disc.empty() && g_discs[g_disc].path != g_running_disc) {
+        // Co-op turned on or off changes the separate rooms' memory and hooks: the game starts again, as for a disc.
+        if ((!g_running_disc.empty() && g_discs[g_disc].path != g_running_disc) || rooms_changed) {
             restart_process();
             return;
         }

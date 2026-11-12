@@ -6,9 +6,10 @@ set /p id=<generated\game_id.txt
 set "iso=%~1"
 if "%iso%"=="" set "iso=dump\%id%.iso"
 if not exist logs mkdir logs
-rem Co-op separate rooms on (the user, 2026-11-12): two rooms loaded at once (ED_ROOM_SLOTS=2, 56 MB) and the other
-rem player stays in their room at a door (ED_COOP_STAY=1). Quick-save states made without them won't load (memory card
-rem saves are fine). play-rooms-log.bat plays the same with everything recorded for Claude.
+rem Co-op separate rooms asked for (the user, 2026-11-12): two rooms loaded at once (ED_ROOM_SLOTS=2, 56 MB) and the
+rem other player stays in their room at a door (ED_COOP_STAY=1). They take effect only with Mods > Co-op on; solo plays
+rem the game's own one room (frontend.cpp rooms_follow_coop). Quick-save states made in co-op won't load solo and the
+rem other way round (memory card saves are fine). play-rooms-log.bat plays the same with everything recorded for Claude.
 set ED_ROOM_SLOTS=2
 set ED_COOP_STAY=1
 rem Keep the last session's log: it is the only record of what went wrong.
