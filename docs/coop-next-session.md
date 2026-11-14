@@ -1,3 +1,14 @@
+# HANDOFF 2026-11-14: effects per room and per camera, uncommitted on top of 96745f8
+
+**Built and checked by script from fresh Jump-to-Game states, NOT committed, NOT yet played by the user** (ED_FX_ROOMS,
+on by default with separate rooms; ED_FX_FACING=0 turns off the per-camera cards; ED_FX_KINDS=1 logs every effect drawn
+per room): every effect kind steps with its own room current (fx_ticks, 0x80182F98), the emitters that make them are
+walked with their own room (fx_emitters, 0x80144B34), and each half's effect cards face its own camera, apart and
+together (fx_facing_begin in effect_draw_by_room). Karim's altar flame (room 338) burns in the stayer's half and is no
+longer a flat sliver from player 2's side; chapter 1's 180 braziers burn in player 2's half when entered apart.
+docs/coop-todo.md (the brazier item), run script rooms/build-run-fx.sh, pictures Screenshots for Claude/fx-flames/.
+- Open: player 2 stands unlit by burning braziers in a room not in play (the light records, design-lights.md).
+
 # HANDOFF 2026-11-13 evening: the stayer keeps every action through the other's door, uncommitted
 
 **Built and checked by script from fresh Jump-to-Game states, NOT committed, NOT yet played by the user:** while one

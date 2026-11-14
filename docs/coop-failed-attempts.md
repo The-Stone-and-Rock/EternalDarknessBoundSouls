@@ -808,3 +808,11 @@ docs/coop-todo.md's table), a rule of its own, not a guard in step D. Open in do
   one-shot press again (StayerAgain, only for a B kept in the other's door, 20 frames on, nothing of theirs come up, the
   same exit prompt on show): logs/run-20261113-164514-stayer-s10c-p1-exit (pressed once more at 3857, player 1's ticket at
   3858; the mirror -164529-stayer-s5c-p2-exit goes in at once).
+
+## Effect cards drawn once per half, both into one vertex buffer (2026-11-14)
+Together with the split on, each effect was drawn twice from effect_draw_by_room (player 1's camera, then player 2's
+in 0x8060248C with matrix 60 = L1 x L2^-1), both writing the game's current vertex buffer. The renderer reads the
+vertices at the frame's end, so the second draw overwrote the first: player 1's altar flame (Karim, room 338) broke.
+Fixed by flipping the game's buffer word r13-21824 (0/1, flipped once a frame at 0x8002242C) for the second draw.
+Also wrong on the way: matrix 60's rotation built as R1 x R2 instead of R1 x R2^T made the cards vanish apart.
+

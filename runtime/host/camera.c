@@ -1561,7 +1561,7 @@ bool camera_split_on(void) { return g_split_on; }  // hle.c: the halves are show
 static float g_split_yaw, g_split_pitch, g_split_distance;
 static unsigned long long g_split_frame;
 // Player 2's view this frame, for their turn's sense of forward (hle.c).
-static Vec3 g_p2_eye, g_p2_target;
+static Vec3 g_p2_eye, g_p2_target, g_p2_up;
 static bool g_p2_view;
 
 bool camera_player2_view(float eye[3], float target[3]) {
@@ -1578,6 +1578,22 @@ static void look_axes(Vec3 eye, Vec3 target, Vec3 up, Vec3* x, Vec3* y, Vec3* z)
     *z = normalize(sub(eye, target));
     *x = normalize(cross(up, *z));
     *y = cross(*z, *x);
+}
+
+/* Player 2's camera as the game's own view matrix (rows right, up, back, each with
+ * -axis.eye), the form of 0x8060248C: hle.c builds their room's effect cards with it
+ * (fx_draw_facing), so they face player 2. False while their camera isn't the split's. */
+bool camera_player2_mtx(float m[12]) {
+    if (!g_split_on || !g_p2_view || length(g_p2_up) <= 0.0f)
+        return false;
+    Vec3 x, y, z;
+    look_axes(g_p2_eye, g_p2_target, g_p2_up, &x, &y, &z);
+    const Vec3 r[3] = {x, y, z};
+    for (int i = 0; i < 3; i++) {
+        m[i * 4 + 0] = r[i].x, m[i * 4 + 1] = r[i].y, m[i * 4 + 2] = r[i].z;
+        m[i * 4 + 3] = -dot(r[i], g_p2_eye);
+    }
+    return isfinite(m[3]) && isfinite(m[7]) && isfinite(m[11]);
 }
 
 static void split_off(unsigned long long frame, const char* why) {
@@ -1783,6 +1799,7 @@ void camera_split_update(CPUState* cpu) {
     }
     g_p2_eye = eye2;
     g_p2_target = focus;
+    g_p2_up = k;
     g_p2_view = true;
     // Player 2's camera in the game camera's view space: its axes and eye.
     Vec3 x1, y1, z1, x2, y2, z2;

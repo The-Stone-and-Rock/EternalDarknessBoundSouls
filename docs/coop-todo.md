@@ -137,8 +137,14 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   F8 (the stayer's mist across the other's door) needs a run with player 2's camera settled first; Part B (ED_FOG_VIEWS)
   is off by default, no visible change seen from it yet.
 - Separate from the fog: room 180's brazier flames and the floor glow round them are missing from the stayer's half
-  whenever 180 is not the room in play (effect steps tied to the room in play; fog-host-readers.md). Not covered by the
-  fog fix: readers next. Their light is missing too: player 2 by 180's door stands unlit where solo's hero is lit
+  whenever 180 is not the room in play (effect steps tied to the room in play; fog-host-readers.md). FIXED 2026-11-14
+  (uncommitted, not yet played by the user; ED_FX_ROOMS, default on with the stay): each effect steps with its own room
+  current (fx_ticks on 0x80182F98), the emitters are walked with theirs (fx_emitters on 0x80144B34), and each half's
+  effect cards face its own camera, apart and together (fx_facing_begin; together each effect is drawn once per half,
+  the second in the game's other vertex buffer). Checked from fresh Jump-to-Game states: Karim's altar flame (room 338)
+  apart and from player 2's side view, chapter 1's 180 braziers apart, solo untouched (build-run-fx.sh; pictures in
+  Screenshots for Claude/fx-flames/). Still open: player 2 by the braziers stays unlit in a room not in play (the light
+  records, design-lights.md), not the effects. Their light is missing too: player 2 by 180's door stands unlit where solo's hero is lit
   (Screenshots for Claude/fog-rooms/180-solo-vs-p2-half.jpg).
 - Saving apart, in-game saves and save states: the user is still deciding how it should work (separate, together only,
   or whether it matters). Ask before designing.

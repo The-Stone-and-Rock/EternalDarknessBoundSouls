@@ -14108,6 +14108,56 @@ static void effect_identity_load(CPUState* cpu, int mark_view) {
     u32 ignore = 0u;
     hle_guest_call(cpu, g_gx_load_pos_mtx, args, 2, 0.0, &ignore);
 }
+// Each half's effect cards face its own camera (ED_FX_ROOMS, with fx_ticks below). The kinds build their cards at draw time
+// from the game camera at 0x8060248C: the eye-space kinds (the sparkles, 0x8017CB28: PSMTXMultVec(0x8060248C, p), corners
+// x+-s, y+-s, drawn with matrix 60) and the world-space ones (matrix 27). The renderer turns player 1's eye space into
+// player 2's rigidly, so a card made for player 1's camera stays edge-on in player 2's half (the flat torch flames). For an
+// effect of player 2's room (drawn in their half only): their camera at 0x8060248C for the draw (27 already holds player
+// 1's, marked, so its world-space cards land right), and 60 = L1 x L2^-1 (the renderer's step L2 x L1^-1 undone), so the
+// eye-space cards, made in player 2's eye space, land unchanged. Put back after the draw.
+static int g_fx_rooms = -1;
+bool camera_player2_mtx(float m[12]);  // (camera.c)
+static bool fx_facing_begin(CPUState* cpu, int view, u32 cam_was[12]) {
+    float l2[12], l1[12], m[12];
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_FX_FACING") == NULL || strcmp(getenv("ED_FX_FACING"), "0") != 0;
+    if (!on || g_fx_rooms != 1 || !camera_player2_mtx(l2) || !guest_ram_range_valid(cpu, EFFECT_MTX_SCRATCH, 48u))
+        return false;
+    for (u32 i = 0u; i < 12u; i++) {
+        cam_was[i] = mem_read32(cpu, ROOM_CAMERA_MTX + 4u * i);
+        l1[i] = guest_read_f32(cpu, ROOM_CAMERA_MTX + 4u * i);
+    }
+    // L2^-1 = (R2^T, -R2^T t2); m = L1 x L2^-1.
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++)
+            m[r * 4 + c] = l1[r * 4 + 0] * l2[c * 4 + 0] + l1[r * 4 + 1] * l2[c * 4 + 1] + l1[r * 4 + 2] * l2[c * 4 + 2];  // R1 x R2^T
+        const float t[3] = {-(l2[0] * l2[3] + l2[4] * l2[7] + l2[8] * l2[11]), -(l2[1] * l2[3] + l2[5] * l2[7] + l2[9] * l2[11]),
+                            -(l2[2] * l2[3] + l2[6] * l2[7] + l2[10] * l2[11])};
+        m[r * 4 + 3] = l1[r * 4 + 0] * t[0] + l1[r * 4 + 1] * t[1] + l1[r * 4 + 2] * t[2] + l1[r * 4 + 3];
+    }
+    static const u32 kMark[3] = {0xD2u, 0xA0u, 0xE5u};
+    for (u32 i = 0u; i < 12u; i++) {
+        u32 w;
+        memcpy(&w, &m[i], 4);
+        if ((i & 3u) == 3u) {
+            const u32 row = i >> 2;
+            const u8 b = (u8)(row == 1u ? kMark[1] + (u32)view : kMark[row]);
+            w = (w & 0x7F800000u) != 0u ? (w & ~0xFFu) | b : 0x0C800000u | b;  // (a zero would be a denormal: a tiny normal)
+        }
+        mem_write32(cpu, EFFECT_MTX_SCRATCH + 4u * i, w);
+    }
+    const u32 args[2] = {EFFECT_MTX_SCRATCH, 60u};
+    u32 ignore = 0u;
+    hle_guest_call(cpu, g_gx_load_pos_mtx, args, 2, 0.0, &ignore);
+    for (u32 i = 0u; i < 12u; i++)
+        guest_write_f32(cpu, ROOM_CAMERA_MTX + 4u * i, l2[i]);
+    return true;
+}
+static void fx_facing_end(CPUState* cpu, const u32 cam_was[12]) {
+    for (u32 i = 0u; i < 12u; i++)
+        mem_write32(cpu, ROOM_CAMERA_MTX + 4u * i, cam_was[i]);
+}
 static void effect_draw_by_room(CPUState* cpu) {
     static bool running;
     g_hle_passthrough = true;
@@ -14116,10 +14166,62 @@ static void effect_draw_by_room(CPUState* cpu) {
         return;
     const s32 room0 = (s32)mem_read32(cpu, cpu->gpr[13] - 23276u);
     const bool whole = g_room_whole_owner != 0;
+    if (getenv("ED_FX_KINDS") != NULL) {  // (probe: each effect kind drawn, per room and place, once per 300 frames)
+        static u32 seen[96][3];
+        static int n;
+        static unsigned long long epoch;
+        const unsigned long long fr = cpu->timebase / 675000ull;
+        if (fr >= epoch + 300ull)
+            epoch = fr, n = 0;
+        const u32 d = mem_read32(cpu, effect + 328u), st = mem_read32(cpu, effect + 332u), rm = mem_read32(cpu, effect + 56u);
+        int i = 0;
+        while (i < n && (seen[i][0] != d || seen[i][1] != st || seen[i][2] != rm))
+            i++;
+        if (i == n && n < 96) {
+            seen[n][0] = d, seen[n][1] = st, seen[n][2] = rm, n++;
+            fprintf(stderr, "[effects] drawn: room %d (in play %d, player 2's %d) draw 0x%08X step 0x%08X at %d %d %d, +3 0x%02X count %u (frame %llu)\n", (s32)rm, room0,
+                    coop_object_room(cpu, g_coop_p2), d, st, (s16)mem_read16(cpu, effect + 16u), (s16)mem_read16(cpu, effect + 18u), (s16)mem_read16(cpu, effect + 20u),
+                    mem_read8(cpu, effect + 3u), mem_read8(cpu, effect + 1u), fr);
+        }
+    }
     const bool apart = coop_stay_apart(cpu) && (camera_split_on() || whole) && guest_ram_range_valid(cpu, EFFECT_MTX_SCRATCH, 48u);
     const s32 room1 = apart ? coop_object_room(cpu, g_coop_p2) : room0;
-    if (!apart || room1 == room0)
-        return;  // one room for both: the game's own draw
+    if (!apart || room1 == room0) {
+        // One room for both, the split on: each half's cards from its own camera (fx_facing_begin), the effect drawn once
+        // per half, each marked out of the other. Otherwise the game's own draw (one card set, player 1's camera).
+        u32 cam_was[12];
+        if (whole || g_fx_rooms != 1 || !camera_split_on() || g_coop_p2 == 0u || !guest_ram_range_valid(cpu, EFFECT_MTX_SCRATCH, 48u))
+            return;
+        u32 arg = effect, out = 0u;
+        room_mtx_load(cpu, 1);
+        effect_identity_load(cpu, 1);
+        running = true;
+        bool ok = hle_guest_call(cpu, EFFECT_DRAW, &arg, 1, 0.0, &out);
+        room_mtx_load(cpu, 0);
+        // The second half's cards in the other of the game's two vertex buffers (r13-21824, 0/1, flipped once a frame at
+        // 0x8002242C): the renderer reads them at the frame's end, so the first half's would be overwritten.
+        const u32 parity_at = cpu->gpr[13] - 21824u, parity = mem_read32(cpu, parity_at);
+        mem_write32(cpu, parity_at, parity ^ 1u);
+        if (ok && fx_facing_begin(cpu, 0, cam_was)) {
+            arg = effect;
+            ok = hle_guest_call(cpu, EFFECT_DRAW, &arg, 1, 0.0, &out);
+            fx_facing_end(cpu, cam_was);
+        } else if (ok) {
+            effect_identity_load(cpu, 0);
+            arg = effect;
+            ok = hle_guest_call(cpu, EFFECT_DRAW, &arg, 1, 0.0, &out);
+        }
+        mem_write32(cpu, parity_at, parity);
+        running = false;
+        room_mtx_load(cpu, -1);
+        effect_identity_load(cpu, -1);
+        if (!ok)
+            fprintf(stderr, "[effects] an effect's draw per half didn't run to its end (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+        hle_set_u32(cpu, out);
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
     const s32 room = (s32)mem_read32(cpu, effect + 56u);
     if (whole) {
         const s32 owner_room = g_room_whole_owner == 2 ? room1 : room0;
@@ -14132,7 +14234,10 @@ static void effect_draw_by_room(CPUState* cpu) {
     }
     const int view = room == room0 ? 1 : room == room1 ? 0 : 2;
     room_mtx_load(cpu, view);
-    effect_identity_load(cpu, view);
+    u32 cam_was[12];
+    const bool facing = room == room1 && fx_facing_begin(cpu, view, cam_was);
+    if (!facing)
+        effect_identity_load(cpu, view);
     // The mist (design-fog A7): the effect's own room's last actor's mist matrices, and player 2's room's in its own mist.
     fog_effect_matrices(cpu, room, room0, room1);
     FogSave fog;
@@ -14141,6 +14246,8 @@ static void effect_draw_by_room(CPUState* cpu) {
     running = true;
     const bool ok = hle_guest_call(cpu, EFFECT_DRAW, &arg, 1, 0.0, &out);
     running = false;
+    if (facing)
+        fx_facing_end(cpu, cam_was);
     if (fog_on)
         fog_end(cpu, &fog);
     room_mtx_load(cpu, -1);
@@ -14718,6 +14825,149 @@ static void coop_stay_room_out(CPUState* cpu, const u32 keep[3]) {
     mem_write32(cpu, cpu->gpr[13] - 23276u, keep[0]);
     mem_write32(cpu, ROOM_SLOT_TABLE, keep[1]);
     mem_write32(cpu, ROOM_SLOT_TABLE + 4u, keep[2]);
+}
+// ---- Effects step in their own room, players apart (ED_FX_ROOMS, default on with the stay) ----
+// Every effect (flames, sparks, smoke, glows: every kind, every chapter) knows its room at +56 (stamped from the room in
+// play when it is made, 0x80174C98). The per-effect update 0x801829E0 lets both resident rooms' effects step (0x80155450
+// answers yes for either slot), then 0x80182F98 runs the kind's own step (+332) for the frame's ticks. Inside those steps
+// the kinds test +56 against the room in play (r13-23276): a spent effect of another room is ended (sth 8 at +34:
+// 0x8018EF68, 0x80191EE8, 0x8019213C, 0x80194690, 0x80196758, 0x80196BF8, 0x801978D0 ...) and emitters skip their work
+// (0x80186748, 0x80186A00, 0x80186FB0, 0x80187220, 0x80193920 ...). So apart, the other player's room's flames burn out
+// and never come back in their half. Here an effect of player 2's resident room has its room current for its step
+// (coop_room_in: the room word and the slot table, as player 2's own turn has), so every kind's own test sees its room
+// as in play, and what it makes is stamped with that room. Together, solo, or an effect of player 1's room: untouched.
+static bool stayer_bl_is(CPUState* cpu, u32 site, u32 target);  // (below)
+#define FX_TICKS 0x80182F98u  // the kind's step x the frame's ticks (stwu r1,-32(r1); called at 0x80182A34, 0x80182AD4)
+static struct {
+    unsigned stepped, said_frame;
+} g_fx_stat;
+static void fx_ticks(CPUState* cpu) {
+    static bool running;
+    g_hle_passthrough = true;
+    const u32 effect = cpu->gpr[3];
+    if (running || g_fx_rooms != 1 || g_tome_copy_turn || !coop_stay_apart(cpu) || !guest_ram_range_valid(cpu, effect, 336u))
+        return;
+    const s32 room1 = coop_object_room(cpu, g_coop_p2), room = (s32)mem_read32(cpu, effect + 56u);
+    if (room != room1 || room_slot_of(cpu, room1) < 0)
+        return;  // player 1's room's effects (and any other's): the game's own step
+    u32 keep[3], arg = effect, out = 0u;
+    coop_room_in(cpu, room1, keep);
+    running = true;
+    const bool ok = hle_guest_call(cpu, FX_TICKS, &arg, 1, 0.0, &out);
+    running = false;
+    coop_stay_room_out(cpu, keep);
+    g_fx_stat.stepped++;
+    const unsigned frame = (unsigned)(cpu->timebase / 675000ull);
+    if (!ok)
+        fprintf(stderr, "[effects] an effect of room %d didn't step to its end (frame %u)\n", room, frame);
+    if (getenv("ED_COOP_LOG") != NULL && frame >= g_fx_stat.said_frame + 600u) {
+        fprintf(stderr, "[effects] room %d's effects stepped as their own room's: %u steps since the last line (frame %u)\n", room, g_fx_stat.stepped, frame);
+        g_fx_stat.said_frame = frame;
+        g_fx_stat.stepped = 0u;
+    }
+    hle_set_u32(cpu, out);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+// The emitters (fire, smoke and the like: pool entries from 0x801432BC, their room stamped at +4900 from the room in
+// play) make the effects. Their steps gate on +4900 == r13-23276 (0x8014E0DC, 0x8014D780, 0x8014D96C, 0x80149514,
+// 0x8014939C ...), so a room entered apart never makes its flames. The walker 0x80144B34 (from the frame at 0x80008488)
+// steps every entry inline (bctrl to +4896, for the entry's ticks). Apart, it is walked here exactly as the game walks it
+// (its tests in its order: 0x80144B60-0x80144C38), with an entry of player 2's room run with its room current.
+#define FX_EMITTERS 0x80144B34u
+static u32 fx_call(CPUState* cpu, u32 fn, u32 a, int n) {
+    u32 arg = a, out = 0u;
+    hle_guest_call(cpu, fn, &arg, n, 0.0, &out);
+    return out;
+}
+static void fx_emitters(CPUState* cpu) {
+    static bool running;
+    g_hle_passthrough = true;
+    if (running || g_fx_rooms != 1 || g_tome_copy_turn || !coop_stay_apart(cpu))
+        return;
+    const s32 room1 = coop_object_room(cpu, g_coop_p2);
+    if (room_slot_of(cpu, room1) < 0)
+        return;
+    const u32 sda = cpu->gpr[13];
+    bool any = false;  // (none of player 2's room's: the game's own walk)
+    unsigned guard = 0u;
+    for (u32 e = mem_read32(cpu, sda - 23524u); e != 0u && guard < 4096u; e = mem_read32(cpu, e), guard++)
+        if (guest_ram_range_valid(cpu, e, 4920u) && (s32)mem_read32(cpu, e + 4900u) == room1)
+            any = true;
+    if (!any)
+        return;
+    running = true;
+    const u32 scene = fx_call(cpu, 0x80157364u, 0u, 0);
+    unsigned own = 0u;
+    guard = 0u;
+    for (u32 e = mem_read32(cpu, sda - 23524u); e != 0u && guard < 4096u; guard++) {
+        if (!guest_ram_range_valid(cpu, e, 4920u))
+            break;
+        const u8 flags = mem_read8(cpu, e + 4904u);
+        bool run;
+        if (scene != 0u)
+            run = (flags & 0x80u) != 0u;
+        else {
+            run = true;
+            if ((flags & 0x05u) == 0u && fx_call(cpu, 0x80155450u, mem_read32(cpu, e + 4900u), 1) == 0u)
+                run = false;
+            else if (fx_call(cpu, 0x80155738u, 0u, 0) != 0u && (flags & 0x08u) != 0u)
+                run = false;
+        }
+        if (run) {
+            if (mem_read32(cpu, e + 4912u) == 0u && mem_read16(cpu, e + 4908u) != 0u) {
+                mem_write16(cpu, e + 4908u, 0u);
+                mem_write32(cpu, e + 4912u, 0x10000u);
+            }
+            const u32 hi = mem_read32(cpu, e + 4912u) >> 16;
+            const u32 lo = mem_read16(cpu, e + 4908u);
+            if (hi > lo) {
+                const bool theirs = (s32)mem_read32(cpu, e + 4900u) == room1;
+                const s32 n = (s32)(hi - lo);
+                for (s32 i = 0; i < n; i++) {
+                    u32 keep[3];
+                    if (theirs)
+                        coop_room_in(cpu, room1, keep);
+                    fx_call(cpu, mem_read32(cpu, e + 4896u), e, 1);
+                    if (theirs)
+                        coop_stay_room_out(cpu, keep);
+                    mem_write16(cpu, e + 4908u, (u16)(mem_read16(cpu, e + 4908u) + 1u));
+                }
+                own += theirs ? 1u : 0u;
+            }
+            mem_write32(cpu, e + 4912u, mem_read32(cpu, e + 4912u) + mem_read32(cpu, sda - 28920u));
+        }
+        e = mem_read32(cpu, e);
+    }
+    running = false;
+    static unsigned long long said;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (getenv("ED_COOP_LOG") != NULL && frame >= said + 600ull) {
+        said = frame;
+        fprintf(stderr, "[effects] the emitters walked here: %u of room %d's stepped as their own room's (frame %llu)\n", own, room1, frame);
+    }
+    hle_set_u32(cpu, 0u);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+static void fx_install(CPUState* cpu) {
+    const char* v = getenv("ED_FX_ROOMS");
+    g_fx_rooms = v != NULL && strcmp(v, "0") == 0 ? 0 : 1;
+    HleDispatchEntry* e = hle_dispatch_entry(FX_TICKS);
+    if (g_fx_rooms == 1 && mem_read32(cpu, FX_TICKS) == 0x9421FFE0u && stayer_bl_is(cpu, 0x80182A34u, FX_TICKS) && stayer_bl_is(cpu, 0x80182AD4u, FX_TICKS) &&
+        e != NULL && e->intercept == NULL) {
+        e->intercept = fx_ticks;
+        fprintf(stderr, "[effects] each room's effects step as their own room's, players apart (ED_FX_ROOMS=1)\n");
+        HleDispatchEntry* w = hle_dispatch_entry(FX_EMITTERS);
+        if (mem_read32(cpu, FX_EMITTERS) == 0x9421FFE0u && mem_read32(cpu, 0x80144BF8u) == 0x819F1320u && stayer_bl_is(cpu, 0x80008488u, FX_EMITTERS) && w != NULL &&
+            w->intercept == NULL)
+            w->intercept = fx_emitters;
+        else
+            fprintf(stderr, "[effects] the emitters' walk 0x%08X not taken: a room entered apart makes no flames\n", FX_EMITTERS);
+    } else {
+        fprintf(stderr, "[effects] %s: the other player's room's effects step as the room in play's\n", g_fx_rooms == 1 ? "NOT installed (0x80182F98 not as expected)" : "off (ED_FX_ROOMS=0)");
+        g_fx_rooms = 0;
+    }
 }
 static void room_slot_put_back(CPUState* cpu, int slot, const char* why) {
     const u32 p = room_slot_record(cpu, slot);
@@ -31502,8 +31752,10 @@ static void find_coop(CPUState* cpu) {
         }
         // The room mist per room (design-fog.md Part A): with the two slots and the stay (coop_stay), after the object draw's
         // notify (above) and the room draws' intercepts (the two-slot block).
-        if (coop_stay())
+        if (coop_stay()) {
             fog_install(cpu);
+            fx_install(cpu);  // (each room's effects step in their own room, apart)
+        }
         // R4b: the arrival's two clears (the waits' clear: stwu r1,-16(r1), its call bl at 0x8015213C; the busy set: stwu
         // r1,-16(r1), lwz r0,-23344(r13) at +0x14, its call bl at 0x80152184). Their trace notifies, if any, stay.
         HleDispatchEntry* waits = hle_dispatch_entry(STAY_WAITS_CLEAR);
