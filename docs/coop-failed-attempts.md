@@ -816,3 +816,7 @@ vertices at the frame's end, so the second draw overwrote the first: player 1's 
 Fixed by flipping the game's buffer word r13-21824 (0/1, flipped once a frame at 0x8002242C) for the second draw.
 Also wrong on the way: matrix 60's rotation built as R1 x R2 instead of R1 x R2^T made the cards vanish apart.
 
+## Smoke columns: 0x80602340 taken for the camera's eye (2026-11-14)
+Player 2's eye position was written into 0x80602340 for their effect draw. A logged run showed the word holds the
+camera's look direction along the floor (z dropped, made unit: (-0.904, 0.428, 0) for a -row 2 of (-0.645, 0.305,
+-0.701)), not a position: writing an eye there would have thrown the smoke columns far off. Fixed before it was played.

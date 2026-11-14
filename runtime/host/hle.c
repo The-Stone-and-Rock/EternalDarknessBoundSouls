@@ -14117,7 +14117,17 @@ static void effect_identity_load(CPUState* cpu, int mark_view) {
 // eye-space cards, made in player 2's eye space, land unchanged. Put back after the draw.
 static int g_fx_rooms = -1;
 bool camera_player2_mtx(float m[12]);  // (camera.c)
-static bool fx_facing_begin(CPUState* cpu, int view, u32 cam_was[12]) {
+// The game camera's look direction too (0x80602340, 3 floats, read with 0x801E4A8C; it equals -row 2 of 0x8060248C): the
+// smoke columns' builder 0x8017CCC8 aims each column with it, so a column made with player 2's matrix but player 1's look
+// direction moved with player 2's camera.
+#define FX_CAMERA_EYE 0x80602340u
+#define FX_CAM_WORDS 39
+// The game camera's block (read from a run, 2026-11-14): 0x8060248C the view [R | t], 0x806024BC its inverse [R^T | eye],
+// 0x806024EC R^T as nine floats then t (read by 0x8017E3C8, 0x8017E490, 0x8017E884, 0x80196E70). All three player 2's for
+// their draw, so every kind that builds its cards from any of them faces player 2.
+#define FX_CAMERA_INV 0x806024BCu
+#define FX_CAMERA_RT 0x806024ECu
+static bool fx_facing_begin(CPUState* cpu, int view, u32 cam_was[FX_CAM_WORDS]) {
     float l2[12], l1[12], m[12];
     static int on = -1;
     if (on < 0)
@@ -14150,13 +14160,61 @@ static bool fx_facing_begin(CPUState* cpu, int view, u32 cam_was[12]) {
     const u32 args[2] = {EFFECT_MTX_SCRATCH, 60u};
     u32 ignore = 0u;
     hle_guest_call(cpu, g_gx_load_pos_mtx, args, 2, 0.0, &ignore);
+    static int said;
+    if (said < 1 && getenv("ED_COOP_LOG") != NULL) {  // (once, before the swap: the camera block's three 3x4 matrices)
+        said++;
+        for (u32 at = ROOM_CAMERA_MTX; at <= ROOM_CAMERA_MTX + 0x60u; at += 0x30u) {
+            float q[12];
+            for (u32 i = 0u; i < 12u; i++)
+                q[i] = guest_read_f32(cpu, at + 4u * i);
+            fprintf(stderr, "[effects] matrix 0x%08X: %.3f %.3f %.3f %.1f | %.3f %.3f %.3f %.1f | %.3f %.3f %.3f %.1f\n", at, q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7], q[8],
+                    q[9], q[10], q[11]);
+        }
+        fprintf(stderr, "[effects] camera look 0x%08X: %.3f %.3f %.3f\n", FX_CAMERA_EYE, guest_read_f32(cpu, FX_CAMERA_EYE), guest_read_f32(cpu, FX_CAMERA_EYE + 4u),
+                guest_read_f32(cpu, FX_CAMERA_EYE + 8u));
+    }
     for (u32 i = 0u; i < 12u; i++)
         guest_write_f32(cpu, ROOM_CAMERA_MTX + 4u * i, l2[i]);
+    // Player 2's look along the floor: -(row 2 of their view) with z dropped, made unit (as the game's word: player 1's
+    // -row 2 (-0.645, 0.305, -0.701) is kept as (-0.904, 0.428, 0)).
+    float lx = -l2[8], ly = -l2[9];
+    const float len = sqrtf(lx * lx + ly * ly);
+    if (len > 1e-6f)
+        lx /= len, ly /= len;
+    const float look2[3] = {lx, ly, 0.0f};
+    for (u32 i = 0u; i < 3u; i++) {
+        cam_was[12u + i] = mem_read32(cpu, FX_CAMERA_EYE + 4u * i);
+        if (len > 1e-6f)
+            guest_write_f32(cpu, FX_CAMERA_EYE + 4u * i, look2[i]);
+    }
+    float eye2[3], inv[12], rt[12];
+    for (int c = 0; c < 3; c++)
+        eye2[c] = -(l2[0 + c] * l2[3] + l2[4 + c] * l2[7] + l2[8 + c] * l2[11]);
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
+            inv[r * 4 + c] = l2[c * 4 + r];  // R2^T
+            rt[r * 3 + c] = l2[c * 4 + r];
+        }
+        inv[r * 4 + 3] = eye2[r];
+        rt[9 + r] = l2[r * 4 + 3];
+    }
+    for (u32 i = 0u; i < 12u; i++) {
+        cam_was[15u + i] = mem_read32(cpu, FX_CAMERA_INV + 4u * i);
+        cam_was[27u + i] = mem_read32(cpu, FX_CAMERA_RT + 4u * i);
+        guest_write_f32(cpu, FX_CAMERA_INV + 4u * i, inv[i]);
+        guest_write_f32(cpu, FX_CAMERA_RT + 4u * i, rt[i]);
+    }
     return true;
 }
-static void fx_facing_end(CPUState* cpu, const u32 cam_was[12]) {
+static void fx_facing_end(CPUState* cpu, const u32 cam_was[FX_CAM_WORDS]) {
     for (u32 i = 0u; i < 12u; i++)
         mem_write32(cpu, ROOM_CAMERA_MTX + 4u * i, cam_was[i]);
+    for (u32 i = 0u; i < 3u; i++)
+        mem_write32(cpu, FX_CAMERA_EYE + 4u * i, cam_was[12u + i]);
+    for (u32 i = 0u; i < 12u; i++) {
+        mem_write32(cpu, FX_CAMERA_INV + 4u * i, cam_was[15u + i]);
+        mem_write32(cpu, FX_CAMERA_RT + 4u * i, cam_was[27u + i]);
+    }
 }
 static void effect_draw_by_room(CPUState* cpu) {
     static bool running;
@@ -14189,7 +14247,7 @@ static void effect_draw_by_room(CPUState* cpu) {
     if (!apart || room1 == room0) {
         // One room for both, the split on: each half's cards from its own camera (fx_facing_begin), the effect drawn once
         // per half, each marked out of the other. Otherwise the game's own draw (one card set, player 1's camera).
-        u32 cam_was[12];
+        u32 cam_was[FX_CAM_WORDS];
         if (whole || g_fx_rooms != 1 || !camera_split_on() || g_coop_p2 == 0u || !guest_ram_range_valid(cpu, EFFECT_MTX_SCRATCH, 48u))
             return;
         u32 arg = effect, out = 0u;
@@ -14234,7 +14292,7 @@ static void effect_draw_by_room(CPUState* cpu) {
     }
     const int view = room == room0 ? 1 : room == room1 ? 0 : 2;
     room_mtx_load(cpu, view);
-    u32 cam_was[12];
+    u32 cam_was[FX_CAM_WORDS];
     const bool facing = room == room1 && fx_facing_begin(cpu, view, cam_was);
     if (!facing)
         effect_identity_load(cpu, view);

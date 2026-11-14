@@ -148,6 +148,15 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   apart the actor light call applies 8 lights (ED_LIGHT_COUNT). Her outfit is dark; the earlier "unlit" came from
   comparing her with solo's silver-armoured Pius from another camera. 180's braziers are no dynamic lights (none of the
   12 records is used there, ED_FX_LIGHTS=1): characters take them from the room's lamp grid (G1/G2, design-lights.md).
+  The user's play the same day (together after being apart): the braziers' smoke columns in player 2's half leaned and
+  swung with player 2's camera. Cause: the smoke builder 0x8017CCC8 aims each column with the camera's horizontal look
+  direction (0x80602340, read by 0x801E4A8C), which stayed player 1's while the view was player 2's. Fixed (uncommitted):
+  player 2's draw now gets their whole camera block: the view 0x8060248C, its inverse 0x806024BC [R^T | eye], the
+  transposed rotation 0x806024EC (nine floats, then t) and the look word (fx_facing_begin). Checked in room 180 with
+  player 2 walking, plus the Karim, side-view and 180-apart runs (build-run-fx.sh); not yet played by the user.
+- Seen while checking (with the effect code off too, so not from it): when player 1 takes Karim's ladder out of 338,
+  the game's burn-away dissolve of the transition also eats room 338 in the staying player 2's half for about a second
+  (logs/run-*-fx-a-0 around frame 3250; Screenshots for Claude/fx-flames/a-seq.jpg).
 - Saving apart, in-game saves and save states: the user is still deciding how it should work (separate, together only,
   or whether it matters). Ask before designing.
 - Later: the in-game mod menu as its own page in the Tome; the launcher's settings inside the game's title menu
