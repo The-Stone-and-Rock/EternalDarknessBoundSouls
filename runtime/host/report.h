@@ -16,6 +16,10 @@ extern "C" {
 // write a report if the process crashes.
 void report_init(void);
 
+// Just before the program starts itself again (frontend.cpp restart_process): the log back on its own file or pipe, so
+// the new process's lines reach it.
+void report_before_restart(void);
+
 // Once the game runs (main.c): start the watchdog. No new game frame for
 // ED_HANG_SECONDS (default 6) while no menu holds the game is a hang.
 void report_start_watchdog(void);

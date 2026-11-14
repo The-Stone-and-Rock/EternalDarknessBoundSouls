@@ -1,3 +1,69 @@
+# HANDOFF 2026-11-13 evening: the stayer keeps every action through the other's door, uncommitted
+
+**Built and checked by script from fresh Jump-to-Game states, NOT committed, NOT yet played by the user:** while one
+player's door counts down, the other (the stayer) keeps their presses, together or apart, both directions: EXAMINE and its
+words, zone looks, quick spells and the 0x810 spell (cast at once; a summon is kept to the door's tail), Start (their Tome
+in a copy, with no door fade in it), B on the same exit (kept, goes in after; pressed once more if the door's shared script
+state was set back). Player 1's close-up now survives player 2's arrival (F2), and no copy Tome goes dark in a door (F3).
+The mover's own Start is refused in their door's fade, as the game refuses the hero's. Switches: ED_STAYER_PRESSES (unset/1,
+p1, p2, 0), ED_SPLIT_HOLD. Docs: rooms/design-stayer-presses.md + stayer-presses-impl-notes.md (runs table), rooms/
+design-stayer-findings.md + stayer-findings-impl-notes.md (runs table), run scripts build-run-stayer-presses.sh and
+build-run-stayer-findings.sh. Quick casts never work in chapters 1-2 (0x800069DC reads the chapter word): cast checks use
+chapter 3 with ED_CHEAT=1 (stayer-test-setups.md). **`ed test` is NOT to be run**: its scenarios load old slot saves.
+- Still open: a ladder's Yes answered in the other's door is lost (M13, needs read R1; always printed); player 2's
+  lend-route use/scene at player 1's door makes player 1 wait in the black (C2, R4d); 180's brazier flames and their light
+  missing in a half where 180 is not the room in play (readers next).
+- **The mist per room apart, built the same evening (uncommitted, not yet played):** the fog the user saw follow the room
+  in play was the game's own mist layer, every input taken from the room in play. Each half now draws its own room's mist
+  (ED_FOG_ROOMS, default on with separate rooms; ED_FOG_VIEWS, the renderer's per-half depth, default off). Checked from a
+  fresh state both ways round, turned order, a load, together, solo: rooms/fog-impl-notes.md "Runs"; pictures in
+  Screenshots for Claude/fog-rooms/. Run script rooms/build-run-fog.sh (no ed test, no ed chapters).
+- For the user's play: see "What to play" in the session's last message (both directions, a door during an EXAMINE, a
+  quick spell in chapter 3+, Start, both at one door).
+
+# HANDOFF 2026-11-13: + the stayer's room plays on through the other's door (Phase 1b), uncommitted
+
+**Built and checked by script, NOT committed, NOT yet played by the user:** while one player's door counts down (the
+~1 s before the room changes), the other player's room no longer stands still, together in one room or apart (the user's
+own case, measured held before the change: logs/run-20261113-124840-split-k3-apart-today). Its zombies walk, swing and hit
+the stayer; the player going through the door stays protected as in solo. docs/coop-level3-design.md "The change freeze,
+Phase 1b"; design rooms/design-split-hold.md (§18-19 final), impl notes rooms/split-hold-impl-notes.md, runs
+rooms/build-run-split-hold.sh. ED_SPLIT_HOLD=0 brings back the old hold (testing). (`ed test` was run on its old slot saves: that proves nothing and
+breaks the fresh-states rule; it is not to be run until its scenarios start from fresh Jump-to-Game states.)
+- Still held for that second, by design: the stayer's presses (quick spell, B, zone looks, player 2's Start), flame
+  flicker, sanity hits. Next visible stop: the arrival's event 61 to the room left lands on a live fight at the firing.
+- Not reached by script: a kill or a grab or a cast inside the window, item doors, zone exits, CLIMB DOWN from a look.
+  In the user's play look for always-printed `[split]` lines in capitals or "refused" / "inside the countdown".
+
+**The user's next play** is as below, plus: a door taken while the other fights (both directions, same room and apart):
+the fighter's screen should no longer pause.
+
+# HANDOFF 2026-11-12 (evening): uncommitted on top of 5eb040d: the arrival camera, lights per room 1+2, the floor probe, the change-freeze measurement, the restart log fix
+
+**Built and checked by script today, NOT committed, NOT yet played by the user** (each in docs/coop-level3-design.md under
+its own heading; designs, readers and refuters in docs/research/separate-rooms/):
+- The camera at an arrival apart: player 2 arrives on their own door's camera, no glide from player 1's eye; player 1
+  coming into player 2's room leaves player 2's camera alone. Kit: `ed check` ARRIVAL rule.
+- Lights per room, stage 1 (the game's own lighting of player 2's room by its own grid and dynamic lights) and stage 2
+  (two lamp sets, shadows and haze per view, a camera per view; renderer in .deps/GXRuntime, patch regenerated).
+  ED_LIGHTS_OFF=1 turns both off to compare. Not done: P7 (spell lights by the caster's room). L3 decided by the user
+  ("truly built by design"): player 2's body lit as a hero too (the room's nearest lamps), co-op together and apart.
+- The floor probe: `[floor] wrong room / falling / under / dead`, always on, for the user's fall in 182 (cause not found).
+- The change freeze measured: the picture stop is the solo game's own (~66 ms); in a split the door's countdown holds the
+  room left behind (zombies and the stayer) for ~1 s: Phase 1b (design-change-freeze.md §5) is the fix to build next.
+- The log kept through the launcher's co-op restart (report_before_restart). ED_PUT finds the put player's own floor.
+- `ed test` loads old slot saves (2026-11-09/10): NOT to be run (the user, 2026-11-13) until remade from fresh states.
+
+**The user's next play (play-rooms-log.bat, from the launcher with co-op already on):** Pius's chapter: the statue
+room 182 -> 181 as before (the fall: read `[floor]` lines first); doors apart both ways (the arrival camera); player 2 in a
+room apart, lit and shadowed by their own room; a door while both are in one room with enemies about (the ~1 s hold);
+player 2's torch apart (stage 1's dynamic lights); a spell cast apart (P7 not done: both halves show every spell light).
+FINISH HIM apart, to test later (the user). Saving apart: last.
+
+**NEXT (after the user's play):** Phase 1b of the change freeze (the split hold), then R4d (player 1's door into player
+2's scene: design-r4d.md, refuted and revised, not built), P7, the mansion's chapter pages for both players, the co-op
+teleport ("Bring X to Y" / "Y to X"), the `ed test` scenarios remade from fresh states.
+
 # HANDOFF 2026-11-12: separate rooms R1-R6 (+R4b, R4c) committed; played by the user in Pius's and Karim's chapters
 
 **Where things stand.** Committed on `tools/game-kit` and pushed to the fork (2026-11-12, the user: "very happy so far"): R6
@@ -13,6 +79,35 @@ waypoint-readers, behaviour-readers, arrival-readers, design-r6*, refute-r6, bui
 
 **NEXT:** the Pius issues the user saw (ask them, read their recordings), then R6's open list (FINISH HIM apart, a downed
 zombie's rise, the spawner, other enemy kinds apart) and the reverse of R4b/R4c (player 1's door into player 2's scene).
+
+**The user's report and direction, 2026-11-12 (supersedes the "After R6" list below where they differ):**
+- Karim's glow apart: fixed. FINISH HIM apart: probably works, the user tests it later (still to test).
+- Still to fix: shadows and lights per room; the camera jitter when a player enters a room apart; a brief freeze of the
+  OTHER player's picture when one changes room (player 1 fighting in one room, player 2 enters another: player 1's screen
+  pauses a moment; it is not a black screen, so "VISetBlack per half" below is this freeze).
+- The Tome opens for both players independently, as intended: nothing to do.
+- Saving apart: untested (only player 1 has save states and in-game saves); test after everything else.
+- NO chapters independently: the game is linear and stays so. Instead, the mansion between chapters (Alex regaining
+  control, a Chapter Page used) must give BOTH players the scene and carry them into the chapter together, as Jump to Game
+  does. Normal play's Chapter Page path is not traced yet; the mansion comes once Jump to Game play is stable.
+- A teleport selection in the mod menu under Co-op: "Bring X to Y" and "Bring Y to X", for a player who gets stuck.
+- The player 2 fall through the floor in room 182 (the statue room) as player 1 entered 181: not reproduced by script; the
+  user records it with play-rooms-log.bat. A floor probe now logs `[floor] wrong room / falling / under / dead` in every play
+  (docs/coop-level3-design.md "The floor probe"): read those lines first in the user's recording.
+- The randomizer last, once co-op is truly playable and stable.
+- `ed test` (2026-11-12): 5 of 20 pass, the SAME 5 with the same failure reasons on a baseline exe of 5eb040d's host
+  (build-win/var-base.exe, built by tools/ed/variant.sh with today's host changes reversed): the 15 failures are the
+  scenarios' old save slots and frames (slots 1-12 became the chapters' starts, 2026-11-04), not today's code. Repairing
+  the scenarios (fresh Jump-to-Game states for each) is its own task.
+- DONE (2026-11-12, uncommitted): the camera at an arrival apart (docs/coop-level3-design.md, the section of that name).
+- FIXED (2026-11-12, uncommitted): the log was lost after the launcher's co-op switch restarted the game. report.c tees
+  descriptors 1 and 2 through pipes for the crash report's tail; `_execv` handed the new process those pipes, whose
+  threads died with the old one (logs/play.log ended at "[rooms] separate rooms on for this run"). restart_process now
+  calls report_before_restart (untee, then waits up to 0.5 s for the tee threads to drain) and logs "[frontend] starting
+  again". Proven on a stand-in with the same tee (10 of 10 complete logs, 0 without); not yet seen with the game itself.
+- Method: readers read every point for BOTH players; refuters check each design idea against the current implementation
+  and the overall goal; engine-level changes only (never a save, room or chapter); in-game tests with the recording tools
+  (run.sh, `ed timeline`/`see`/`sheet`) so the game isn't opened and closed many times.
 
 **Together nothing changes** (every new path opens with the players apart by their own rooms; checked in every build).
 Apart: enemies of each room go after, chase (routes included), hit and are hit by that room's player only; player 2's own

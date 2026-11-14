@@ -225,11 +225,62 @@ def nearest_camera(rooms, room, at):
     return best
 
 
+def check_arrivals(rows, rooms):
+    """Separate rooms (rooms/design-arrival-camera.md): at each arrival of a half's player into a room while the other
+    player is in another room, the half must show its own room. ARRIVAL: within 10 rows the eye sits near a camera of the
+    OTHER player's room and far from every camera of its own; or, in the 60 rows after, the eye glides more than 300
+    units while the player barely moves (eye travel over 8 times theirs). Only rows where the two rooms differ count."""
+    out = []
+    if not rows or 'p1room' not in rows[0] or 'p2room' not in rows[0]:
+        return out
+    # Apart, the two halves never look from the same eye: one of them shows the other's room.
+    run = []
+    for r in rows + [None]:
+        same = (r is not None and has_player2(r) and room_of(r, 'p1') != room_of(r, 'p2') and not r['cutscene'] and
+                any(eye(r, 'p1')) and dist(eye(r, 'p1'), eye(r, 'p2')) < 2)
+        if same:
+            run.append(r)
+            continue
+        if len(run) >= 3:
+            out.append({'rule': 'ARRIVAL', 'who': 'p2', 'from': run[0]['frame'], 'to': run[-1]['frame'], 'text':
+                        "both halves look from the same eye %s while apart (P1 in room %d, P2 in room %d)" % (
+                            tuple(round(x) for x in eye(run[0], 'p1')), room_of(run[0], 'p1'), room_of(run[0], 'p2'))})
+        run = []
+    for half, other in (('p1', 'p2'), ('p2', 'p1')):
+        for i in range(1, len(rows)):
+            a, b = rows[i - 1], rows[i]
+            if room_of(a, half) == room_of(b, half) or (half == 'p2' and not has_player2(b)):
+                continue
+            mine = room_of(b, half)
+            window = [r for r in rows[i:i + 70] if room_of(r, half) == mine and room_of(r, other) != mine and not r['cutscene']]
+            if not window:
+                continue
+            for r in window[:10]:
+                e = eye(r, half)
+                if not any(e):
+                    continue
+                own = nearest_camera(rooms, mine, e)
+                theirs = nearest_camera(rooms, room_of(r, other), e)
+                if theirs and theirs[0] < 60 and (own is None or own[0] > 60):
+                    out.append({'rule': 'ARRIVAL', 'who': half, 'from': b['frame'], 'to': r['frame'], 'text':
+                                "%s arrived in room %d on the other room's camera %s (room %d)" % (half.upper(), mine, theirs[1], room_of(r, other))})
+                    break
+            rest = [r for r in window if not r['fade']][:60]
+            if len(rest) >= 2 and all(any(eye(r, half)) for r in rest):
+                travel = sum(dist(eye(x, half), eye(y, half)) for x, y in zip(rest, rest[1:]))
+                moved = dist(pos(rest[0], half), pos(rest[-1], half))
+                if travel > 300 and travel > 8 * max(moved, 1.0):  # a camera gliding, not following a walk
+                    out.append({'rule': 'ARRIVAL', 'who': half, 'from': rest[0]['frame'], 'to': rest[-1]['frame'], 'text':
+                                "%s's eye glided %.0f units after arriving in room %d while they moved %.0f" % (half.upper(), travel, mine, moved)})
+    return out
+
+
 def check_cameras(rows):
     """Each half's eye. A cut to one of the room's own cameras is the game working; a jump to anywhere else, or an eye
     going back and forth, is not."""
     out = []
     rooms = room_cameras()
+    out += check_arrivals(rows, rooms)
     for half in ('p1', 'p2'):
         last_flip = []
         was = None

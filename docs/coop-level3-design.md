@@ -2548,3 +2548,150 @@ other half): with the lights.
 - Checked: both doors as before (logs/run-20261111-2238*-r4c-s1/s2: the same `ed check` findings as R4b's and R5's). The
   rest of the set stopped at the user's word; the user's case itself: to play (play-rooms-log.bat). Not done: the reverse
   (player 1's door into player 2's scene).
+
+### The camera at an arrival apart (2026-11-12; readers rooms/arrival-camera-log-readers.md and arrival-camera-code-readers.md, design rooms/design-arrival-camera.md, refuters refute-arrival-camera-impl.md and -goal.md)
+
+- The cause (read, both halves): player 2's own change (the R4 bracket) cut their own set to the door's camera; their
+  first look in the new room dropped that set (coop_zones_new) and remade it from player 1's (coop_camera_set_fresh), so
+  their half took player 1's eye and glided from it to their room's camera for 55-80 frames (r4c-t1 3824-3900). Player 1's
+  half was continuous.
+- Built (hle.c, every path co-op with ED_COOP_STAY and the players apart): the arrival's cut tagged at the bracket's end
+  with the room, its zone list (0x80123F70 on player 2's object) and the ticket count (g_stay_arrived); their first new zone
+  list keeps the set only when all three match, once (coop_zones_new, which replaces R4c's g_stay_arrival_camera); player
+  1 coming into the room player 2 is in (case D) is not the room's start for player 2 (g_stay_start, both counting paths);
+  player 1's scene ending apart keeps a bare player 2's own camera (r6_apart); a set remade from player 1's while apart is
+  marked foreign and their first own camera choice is the game's own cut (fn8's c = 0: r9 0 at 0x801EE764); the Tome item
+  route takes player 2's zone list with their room in (as coop_use_start); player 1's half no longer takes player 2's room's
+  camera at player 2's arrival scene end apart. The kit's `ed check` has an ARRIVAL rule (another room's camera, a glide
+  while standing, both halves on one eye while apart).
+- Also: ED_PUT finds the floor of the put player's own room (camera_collide_object: 0x80123F70 by their object).
+- Checked (logs/run-20261112-1601*-cam-*, -1607..1611*-cam2-*, -161146-cam3-*): player 2's door 183 -> 180 arrives on
+  Camera02 from the first row and holds (was: player 1's eye, then a glide), the way back on Camera25; player 1's door
+  into player 2's room 183, and following player 2 into 180, leave player 2's camera where it was; Jump to Game with the
+  stay: player 1 back into 341 beside a bare player 2, their camera unchanged; a state loaded apart: player 2's first own
+  camera in 341 is a cut (2402); solo: separate rooms off. The old run r4c-t1 now flags ARRIVAL 3835-3894; the new runs
+  don't.
+- Open: a state loaded apart leaves player 2 on the other room's camera until they walk into a camera region of their own
+  (their set isn't in the co-op state: the saving-apart item, the user's last); player 2's third-person wall test in
+  camera modes 0/1 uses player 1's room's collision while apart (U10); the roll at player 2's cut (U5).
+- A test of player 2 put on room 341's Region01 (-167,-4) slid into the hole down to 342 (z -705): the room's own way
+  down, not a fall through the floor.
+
+### Lights per room, stage 1: the game's own lighting of player 2's room (2026-11-12; readers rooms/lights-game-readers.md and lights-render-readers.md, design rooms/design-lights.md G1-G3, refuters refute-lights-impl.md and -goal.md)
+
+- Built (hle.c; every path under lights_apart: co-op on, no Tome copy turn, no whole owner, the split on, player 2 apart,
+  their room's record loaded; installed with ED_ROOM_SLOTS and ED_COOP_STAY, ED_LIGHTS_OFF=1 leaves it out to compare):
+  G1, an intercept on the record getter 0x80155130 at the character draw's call (return 0x8002798C): an object of player
+  2's room registers with its own room's grid; G2, the actor draw's three light calls (0x801E6244, 0x801E87F4, 0x801E8B9C at
+  their call sites in 0x8011A278) run with player 2's room and player words in, so their dynamic lights are that room's
+  (player 2's torch lights their side); G3, the sections' light loader 0x801F2CB4 run under player 2's room before section 3
+  and plain again before section 2.
+- Checked, each apart case twice with the same presses (ED_LIGHTS_OFF=1 then on): Jump to Game, player 1 to 343, player 2
+  in 341: player 2's body and sword take 341's cool light instead of the amber of the other room (Screenshots for Claude/
+  lights1/p2-341-f2850.jpg); room 183's zombies and player 2 lit by 183's own grid while player 1 is in 180 (about 8
+  characters a frame answered, `[lights]` lines; zombies-183-f4300.jpg); 60 fps either way (16.67 ms a frame, none over 20);
+  together and solo: no `[lights]` line (logs/run-20261112-1638*-lights1-together, -1639*-solo). Off: nothing of it runs.
+- Next: stage 2, the shadows and haze per view (H and R1: two lamp sets, one shadow Frame per view, a camera per view),
+  then P7 (spell lights by the caster's room). Open, the user's to decide (L3): player 2's body lit as "the player" (the
+  game gives only player 1 room lamps 5-7), together and apart, or neither as today.
+
+### Lights per room, stage 2: shadows and haze per view (2026-11-12; design-lights.md H and R1; built by an implementer, two reviewers, a fixer)
+
+- Built: hle.c lights_frame (once a frame in room_slots_frame): set A from the current record, set B from player 2's
+  room's record, each only from a record that passes the game's loaded test; per view = lights_apart and B on; B off when
+  together, co-op off, the stay off or player 2 gone; `[lights] set A/B`, `apart on/off`, `per view on/off` lines;
+  reset at a state load. Renderer (.deps/GXRuntime, patch regenerated): two lamp sets (set_room_lights_other), the per-view
+  rule latched at the frame start, flats and lit sets keyed by their R3 marks while per view, a camera per view (the first
+  scene draw kept in each view: this fixes P4, view 0 had used a draw blanked out of it), fill_shadow split into fill_one
+  per view, render_character_shadows takes each view's Frame (encoding_view), menu-shared frames take the shown view's.
+  Reviewers' 10 points: 8 fixed, 2 noted (a free-camera photo apart shows view 0's shadows; the frame B goes off is one
+  Frame still grouped by marks).
+- Checked (logs/run-20261112-1715..1720*-lights2-*, off/on pairs): apart in 341/343, `[lights] set A: room 343 (6 lamps)`,
+  `set B: room 341 (18 lamps)`, `[shadow-view]` view 0 set 0 lamps 6 camera 80384, view 1 set 1 lamps 18, unmarked 0;
+  in 183/180 view 1 has player 2 and the zombies (5 casters, 10 lamps); player 2's door into player 1's room: `apart off`,
+  `set B off: the players together`, `per view off`. Pictures: player 2's half shows their own shadow from 341's lamps
+  (none before) (Screenshots for Claude/lights2/341-343-f2650.jpg); player 1's half as before. `ed flicker`: player 2's
+  shadows steadier (99% 0.97 against 2.09), no spikes beyond one small one in player 1's shadows (2.9). Together and solo:
+  no `[lights]` or `[shadow-view]` line, 0 findings.
+- Not done: P7, the spell lights by the caster's room (both views still get every spell light); L3 the user's choice.
+
+### The floor probe (2026-11-12; readers rooms/fall-ground-readers.md, fall-host-readers.md, fall-rooms-readers.md, design rooms/design-fall.md, refuters refute-fall-impl.md and -goal.md)
+
+- The user's fall (182, player 1 on to 181, player 2 staying) is not reproduced and its cause not found: three readers
+  found no default-build path that tests player 2 against 181's floor. 182's north half is at z 78 and 181 has no floor
+  under it, so one wrong-room floor test is fatal (C1); a dead record of the stayer's room freezes them in a void (C2); the
+  room in play's bodies collide in the stayer's step at their coordinates (C3, invisible bodies). Apart there is no rescue.
+- Built, log only (the design's fixes F1, G, D wait for evidence): `[floor] wrong room` (an intercept on the collision
+  getter 0x80123F70 that always passes through, logging when "the player" is asked about while their own room is the
+  other slot), `[floor] falling`, `[floor] under` and `[floor] dead` (floor_watch, once a frame apart). No switch: they
+  print in every play.
+- Checked: player 2 apart sliding down 341's hole names `falling` (and `under`, from the hole's ledges); doors and walking
+  apart in 183/180 print nothing; ED_COOP_P2_STEP=1 (a test switch that makes C1 windows) prints `wrong room` at the step's
+  calls (lr 0x8013346C, gravity 0x80133388, 0x801335D0) (logs/run-20261112-1733*..1736*-floor-*).
+
+### The change freeze, Phase 1: measured (2026-11-12; design rooms/design-change-freeze.md P1.1-P1.3, built log only by an implementer, two reviewers and a fixer)
+
+- Built (hle.c, log only): `[change-time]` (ED_CHANGE_TIME=1: stamps from the ticket's firing tick to the next pad read,
+  solo too), `[change-hold]` (ED_COOP_ENEMY_LOG: the rooms' nodes each frame from the ticket to 60 after the tail, event
+  102 from the busy set, the hold-bit setter 0x801F6828's callers).
+- Measured (logs/run-20261112-1801*..1802*-freeze-*): the picture stop is the game's own: 66 ms for player 1's or player
+  2's door, split or apart, and 59-67 ms solo (the unpack wait 14-26 ms, then the arrival, the lights, the draw and the
+  present). In a split (both in one room, one takes a door) the door's countdown holds the whole room left behind: the
+  busy set's event 102 reaches every node of the room, the zombies and the stayer get hold bit 8 and do not move for the
+  ~62 frames (one second), then the zombies take up the stayer (frames 3821-3887 of -freeze-m3-p1-leaves-fight). That is
+  the user's "pause for a brief second" in a split. Apart -> apart the picture stop alone.
+- Next: Phase 1b (F5: the shared room's creatures and the stayer not held at a split ticket; F2': engaged creatures go
+  after the stayer; F6: a grabbed stayer not let go by the other's door), after reading what a hit does to a player in
+  their door motion (the design's §5). The picture stop (Phase 2) only if wanted: it is the solo game's own hitch.
+
+### Player 2 lit as a hero (2026-11-12; the user: "I want co op to feel polished and as if it was truly built by design")
+
+- The game lights a character in 0x8011A278 with a budget handed to 0x801E6244 (r7): 1 for every creature (0x8011A304),
+  4 when the object is r13-26524's, the one player (0x8011A3F8-0x8011A408). With 4, 0x801E652C-0x801E6560 add up to three of
+  the room's real lamps nearest the body (lights 5-7). Player 2's body had 1: flatter than player 1's beside a sconce.
+- Built (hle.c lights_hero_budget, from the 0x801E6244 intercept lights_actor, installed in co-op with or without the
+  separate-rooms switches): player 2's body (r15 == their object, at the call site 0x8011A580) gets r7 = 4, together and
+  apart; solo has no player 2. ED_P2_HERO_LIGHT=0 leaves it as before (testing). The other player test there (0x8011A3C0:
+  0x801E14C8 sets r13-22064, the hero's fade amount read by 0x801E14F4 and 0x8011B750) is not a light: left as it is.
+- Checked: ED_LIGHT_COUNT=1 counts the light loads (0x801E54BC) inside player 2's body's light call apart: 5 with the
+  switch off, 8 with it on (the three room lamps), at every sample (logs/run-20261112-19*-jtg-hero4-*); together, the
+  `[lights] player 2's body lit as the hero` line; solo, nothing (logs/run-20261112-190922-jtg-hero-solo).
+
+### The change freeze, Phase 1b: the stayer's room plays on through the other's door (2026-11-13; readers rooms/hold-readers.md, mover-readers.md, stayer-readers.md, b0-k7-readers.md, b1b2-ticket-death-readers.md, b3-input-lock-readers.md; design rooms/design-split-hold.md, refuters refute-split-hold-impl.md and -goal.md; built by an implementer, two reviewers and a fixer: rooms/split-hold-impl-notes.md)
+
+- What holds the room: not event 102. The one busy word r13-23344 (4 from the ticket to the firing) plus each node's
+  standing bit +28 & 8 (set when the node is made, never cleared on creatures) stops every node's update and motion; the
+  player handler's busy filter (0x80058E80 -> 0x800CA964) swallows hits, damage, grabs and target asks. One word, so the
+  stayer's room was held apart too: measured before the change (logs/run-20261113-124840-split-k3-apart-today: player 1's
+  ladder in 180, player 2 in 183 among zombies chasing them, every zombie `step 0.0` for the 62 frames). That is the
+  user's report.
+- Built (hle.c, the block after r6_room_loaded): during a ticket's countdown with one player staying (`g_split`, opened in
+  notify_room_ticket, closed at the change's tail and on a state load), the busy ask 0x80155738 answers "not busy" only to
+  an allow list: the node update and motion asks for nodes of the stayer's room (A1), the message pump for messages to
+  them (A2, not event 75), and the stayer's own event filter (A3). Kept as solo, decided first: the mover's filter (K1),
+  kinds 9, 28, 32, 39, 50, 56, 73, 74 and 82 and their busy sites (K7: room tickets, captures, body switches, "can't die
+  while a ticket counts"), roomless nodes, scripts, sanity hits, lights and animators. The door's 102 is kept from the
+  stayer's room's nodes (no chase cut), creatures after the mover go after the stayer (shared room), coop_follow does not
+  re-place anyone in the window. Guards: a second ticket refused (always printed), the scene-request dispatcher's room
+  requests held to after the change, the countdown waits (900-frame cap) for a scene, words, find or cutscene begun in
+  the window, renewing player 1's door lock with the game's 0x800443E4 when they are the mover; no window for a stayer
+  mid-cast or under a cutscene at the ticket; a route job begun in the window runs whole. ED_SPLIT_HOLD=0 (testing) is
+  today's hold; `split` the shared room only; ED_SPLIT_TARGET_MOVER=1 (testing) leaves creatures on the mover.
+- Checked (docs/research/separate-rooms/build-run-split-hold.sh, fresh states on the build; logs/run-20261113-1347*..1349*):
+  - player 1 leaves the shared room (K1), player 2 leaves it (K2, K2b), a ladder (K4), and apart (K3, the user's case):
+    the stayer's room's zombies move on 25 of 26 countdown rows (0 of 26 with ED_SPLIT_HOLD=0), they hit the stayer
+    (player 2 60 -> 53 inside the window in K1, 53 -> 46 in K3), the mover stays in state 121 at full health, the
+    mover's filter keeps the creatures' target asks (`[split] the mover's filter kept event 59 ...`), the change fires on
+    time (0 frames waited), the arrival is the game's (hold bit re-set at 0x80152194); 20 frames after the firing the
+    zombies are back in state 3 after the stayer (zombie 39 in state 21 the whole run, on and off alike).
+  - Follow mode (K5) and solo (K6): no `[split]` line, the room held as before.
+  - Pictures (`ed sheet` 4130-4190 of K3 on and off): player 2's half shows the zombies moving while player 1's ladder
+    fades; off, frozen.
+  - No second ticket, no load inside a window, no wait, no held request in any run. `ed check`: only the scripted puts.
+  - Not reached by script: K1b (player 1's walk to the door didn't reach its prompt: no ticket); a kill inside the window;
+    a grabbed or casting stayer (K7-K10); item doors and zone exits (K11); CLIMB DOWN from a look and scene-first doors
+    (K12). The user's play covers the fight.
+- Still held, by design: the stayer's presses for that second (quick spell, B, zone looks, player 2's Start: F4), the
+  lights' flicker steps, sanity hits. The arrival's event 61 to the room left lands at the firing on a live fight: the
+  next visible stop, its own item. Risk 12: a scene begun inside the window whose end writes its own ticket loses it
+  (always printed: `A CINEMATIC'S OWN RETURN TICKET, LOST`).

@@ -563,6 +563,16 @@ static void restore_callback_context(CPUState* cpu,
 // What's done for player 2's Tome in its copy of the memory finishes there, before its turn
 // ends: run by the loop, later, its callback would land in the real memory.
 static bool g_tome_copy_turn;
+// The other player's brief freeze at a change, measured (below, after r6_enemy_roster; design-change-freeze.md Phase 1).
+static bool change_time(void);
+static u64 change_time_now(void);
+static void change_time_lights(CPUState* cpu, u64 began);
+static u64 change_time_lights_seen(void);
+static void change_time_present(CPUState* cpu, bool after);
+static void change_time_pad(CPUState* cpu, u64 began);
+static void change_tail(CPUState* cpu);
+static void change_hold_ticket(CPUState* cpu);
+static void change_hold_frame(CPUState* cpu);
 static int g_room_whole_owner;  // the player whose half a whole frame is fitted into (dol_aurora_split_skip_views), 0 none
 static void split_skip_views_set(int owner) { g_room_whole_owner = owner; dol_aurora_split_skip_views(owner); }
 static HlePendingCallback g_tome_copy_callbacks[HLE_CALLBACK_QUEUE_CAPACITY];
@@ -3257,6 +3267,86 @@ static int g_fade_mover;  // R4: a door's fade is the mover's half's alone (1 pl
 static bool coop_room_change_on(CPUState* cpu);
 static s32 coop_object_room(CPUState* cpu, u32 node);
 static u32 g_coop_p2;  // (below: player 2's node)
+// The stayer's room plays on through the other's door countdown (below, after r6_room_loaded; design-split-hold.md).
+static bool split_counting(CPUState* cpu);
+static bool split_on(CPUState* cpu);
+static bool split_busy_kept(CPUState* cpu);
+static bool split_busy_allows(CPUState* cpu);
+static void split_ticket_open(CPUState* cpu);
+static void split_over(CPUState* cpu, const char* why);
+static void split_room_load(CPUState* cpu);
+// The stayer keeps their presses through the other's door countdown (below, after split_on; design-stayer-presses.md).
+// stayer_window(cpu, who): who 0 player 1, 1 player 2 the stayer, in split_counting's window, ED_STAYER_PRESSES allowing.
+static bool stayer_window(CPUState* cpu, int who);
+static bool stayer_switch_allows(int who);
+static bool stayer_window_on(CPUState* cpu);  // step B: the window of whoever stays (stayer_window of the stayer)
+// design-stayer-findings.md (below, after stayer_window_on): F2c's gate for R4's bracket, F3b's fade-in tail of the window,
+// and R4's fade quad (F3c/F3d/F3h), all of which read g_split and g_stayer, defined later.
+static bool stay_bracket_p1_allowed(void);
+static bool stayer_fade_tail(CPUState* cpu, int owner);
+static void r4_fade_quad(CPUState* cpu);
+static bool split_door_holds_play(void);      // B4: the door's own hold (bit 2) was up at the ticket (g_split.word0)
+static bool stayer_say(int kind, int who);  // a [stayer] line's first time this window (and the logs on)
+static int stayer_current(CPUState* cpu);   // the stayer's index by the current id, or -1
+static u32 stayer_door_bits(void);           // P1: the door's prompt bit not up before the ticket
+static void stayer_p2_left_go(CPUState* cpu);
+static bool split_log(void);
+static unsigned long long split_frame(const CPUState* cpu);
+#define STAYER_SUMMON(spell) (((spell) & 0x1FF0u) == 0x820u)  // the cast's class (0x801C43D8): 0x820 a summon (0x801C4438)
+static struct {
+    u32 prompts0;                    // r13-24048 at the ticket (P1: the door's 0x10000 is the rest)
+    u32 bits;                        // busy 8/16/32 the stayer set in the window (stay_busy_clear; split_on's B2)
+    bool screen0;                    // g_coop_screen at the ticket (G2b)
+    bool screen_down;                // g_coop_screen was down at a tick in the window (G2b: a close-up begun in it)
+    bool look0;                      // player 1 staying had their own look or scene up at the ticket (B4: bit 2 theirs)
+    bool lock_set;                   // L1 ran this window: the Start lock set, the binding lock kept out
+    u32 lock_n;
+    unsigned long long lock_frame;
+    unsigned looks, presses, casts, starts, kept, ways, unmasked;  // the over line's counts
+    unsigned long long said;         // stayer_say's (kind, player) bits
+    unsigned long long frame_said;   // ED_STAYER_LOG's frame line, once per frame
+    unsigned long long room_turn_frame;  // hle_coop_controller's room_turn last ran (the frame line)
+    bool g2_said;
+    struct {
+        bool on;
+        u32 spell;
+    } summon[2];                     // a summon pressed in the window, cast after the tail (0 player 1, 1 player 2)
+    // F3b (design-stayer-findings §F3.2): the fade-in after the change's tail that closed the stayer's window (split_over):
+    // the stayer (1 player 1, 2 player 2), the tickets count and the frame then. stayer_fade_tail reads it.
+    int fade_tail;
+    unsigned fade_tail_tickets;
+    unsigned long long fade_tail_frame;
+    // F3h's forget (r4_fade_quad): the mover it forgot (1, 2) and the tickets count then. On the next frame the fade is still
+    // on (ticks 1, its last step not run yet: 0x801E7DA4), so the tail and F3e still count it for that one step.
+    int fade_forgot;
+    unsigned fade_forgot_tickets;
+} g_stayer;                         // zeroed at each split_ticket_open and split_state_load
+// Player 2's copy Tome closed in the window: its item's script (and a summon cast) wait for the tail. Not dropped by a new
+// ticket (the item may already be off their counts, coop_kinds out of the copy): only a state load drops it. In order, a few
+// deep: a second close before the first has run is kept behind it (and any close of theirs while one waits, so they run in
+// the order used). Each keeps what the copy's Use asked (g_tome_copy_use_script/item, read by tome_copy_left), and the room.
+#define STAYER_P2_LEFT_MAX 4
+typedef struct {
+    s32 script;
+    u32 next_cast;
+    s32 use_script;
+    u32 use_item;
+    s32 room;
+    u8 spell_item[24];
+} StayerP2Left;
+static struct {
+    unsigned n;          // waiting, item[0] first
+    unsigned waited;     // frames the first has waited after the tail (told once at STAYER_P2_LEFT_TELL)
+    StayerP2Left item[STAYER_P2_LEFT_MAX];
+} g_stayer_p2_left;
+#define STAYER_P2_LEFT_TELL 300u
+// What M11 kept and M12 marked waiting in a window (per player), for a state load to drop (§8): both carry the tickets
+// count, which a load doesn't reset, so their own rule wouldn't.
+static struct {
+    bool kept[2], way[2];
+    unsigned kept_tickets[2], way_tickets[2];
+    s32 kept_prompt[2];
+} g_stayer_marks;
 bool camera_split_on(void);  // camera.c: the halves are shown this frame
 static bool coop_p2_own_set_in(void);  // (step D: their own set is in the game's memory now)
 static u32 g_coop_found_objects[2][2];
@@ -3338,16 +3428,9 @@ static void notify_GXLoadPosMtxImm(CPUState* cpu) {
     // fade's (a cutscene's, the Tome's): the mover is forgotten then. The identity's translations are 0.0f, and a mark in
     // their low byte alone is a denormal the game's psq store flushes to 0 (cpu.c psq_store_value): whole words, each a
     // normal float near 2e-31 (exponent 0x19) whose low byte is the mark; nothing moves.
-    if (cpu->lr == 0x801E7F60u && g_fade_mover != 0) {
-        if (!coop_room_change_on(cpu) && (s32)mem_read32(cpu, cpu->gpr[13] - 21784u) <= 0) {
-            g_fade_mover = 0;
-        } else if (guest_ram_range_valid(cpu, cpu->gpr[3], 48u)) {
-            const u32 m = cpu->gpr[3];
-            mem_write32(cpu, m + 12u, 0x0C8000D2u);
-            mem_write32(cpu, m + 28u, 0x0C8000A0u + (g_fade_mover == 2 ? 0u : 1u));
-            mem_write32(cpu, m + 44u, 0x0C8000E5u);
-        }
-    }
+    // (design-stayer-findings F3c/F3d/F3h: in r4_fade_quad, below split_on, as it reads g_split and g_stayer.)
+    if (cpu->lr == 0x801E7F60u)
+        r4_fade_quad(cpu);
     static int matrix_log_enabled = -1;
     if (matrix_log_enabled < 0)
         matrix_log_enabled = getenv("ED_MATRIX_LOG") != NULL ? 1 : 0;
@@ -3684,9 +3767,11 @@ static void notify_VISetNextFrameBuffer(CPUState* cpu) {
 // the VI's buffer before its display copy existed, which was a black window.
 static void notify_VIFlush(CPUState* cpu) {
     (void)cpu;
+    change_time_present(cpu, false);  // ([change-time] t5, ED_CHANGE_TIME only)
     dol_platform_flush_xfb();
     mmio_fifo_dump_note("present", 0, 0);
     dol_platform_present();
+    change_time_present(cpu, true);
 }
 
 // TEMP DIAG (G013 H3): guest glxSwapSetBlack / VISetBlack. Gated by
@@ -4196,6 +4281,9 @@ static void hle_PADRead(CPUState* cpu) {
         return;
     }
 #endif
+#ifdef ED_AURORA
+    const u64 pad_began = monitor ? 0u : change_time_now();  // ([change-time] t6: the read's start, before its logs and row)
+#endif
     const bool menu = game_menu_open(cpu), cutscene = cutscene_playing(cpu);
     const bool p1_copy_up = g_tome_copy_open && g_tome_copy_p1;
     controls_set_game_menu(hle_coop_tome_shares() || menu);  // not turn about, for its button pictures
@@ -4232,6 +4320,8 @@ static void hle_PADRead(CPUState* cpu) {
     coop_watch(cpu, &state[0]);
     if (!monitor) {
         both_record(cpu, &state[0]);
+        change_time_pad(cpu, pad_began);  // ([change-time] t6, ED_CHANGE_TIME only)
+        change_hold_frame(cpu);  // ([change-hold]'s rows, ED_COOP_ENEMY_LOG only)
         test_set_flag(cpu);
         test_run_script(cpu);
         test_save_state(cpu);
@@ -6096,15 +6186,75 @@ static int room_slots(void);  // (below, ED_ROOM_SLOTS)
 #define ROOM_SLOT_BYTES 2916384u
 #define LIGHT_GRID_LAMPS 96
 
+// What set 0 (the room in play's lamps) last got, by either path: this one, or the frame's decision while the players are
+// apart (lights_frame, rooms/design-lights.md H). One record, so the edge back to together doesn't send the same grid again.
+static u32 g_lights_sent_grid, g_lights_sent_mark;
+static bool g_lights_own_a;  // the players apart: set 0 is sent once a frame from the current record (lights_frame), not here
+
+// A grid's lamps and its cells' three each, as the renderer takes them (count and dims already checked); NULL with no memory.
+static u8* room_lights_walk(CPUState* cpu, u32 grid, float* lamps, int* lamp_count, float origin[3], float size[3], int dims[3]) {
+    const u32 cells = grid + 36u;
+    const u32 count = mem_read32(cpu, grid + 4u);
+    const u32 sizes = mem_read32(cpu, grid + 20u), last = mem_read32(cpu, grid + 24u), across = mem_read32(cpu, grid + 28u);
+    dims[0] = (int)(last & 0xFFu);
+    dims[1] = (int)(across >> 24);
+    dims[2] = (int)((across >> 16) & 0xFFu);
+    origin[0] = guest_read_f32(cpu, grid + 8u);
+    origin[1] = guest_read_f32(cpu, grid + 12u);
+    origin[2] = guest_read_f32(cpu, grid + 16u);
+    size[0] = (float)(sizes >> 16);
+    size[1] = (float)(sizes & 0xFFFFu);
+    size[2] = (float)(last >> 16);
+    static u32 seen[LIGHT_GRID_LAMPS];
+    *lamp_count = 0;
+    u8* per_cell = (u8*)malloc((size_t)count * 3u);
+    if (per_cell == NULL)
+        return NULL;
+    for (u32 c = 0; c < count; c++) {
+        const u32 cell = cells + c * 20u;
+        const u32 here = mem_read32(cpu, cell + 8u), list = mem_read32(cpu, cell + 12u);
+        for (u32 i = 0; i < 3u; i++) {
+            per_cell[c * 3u + i] = 255u;
+            if (i >= here)
+                continue;
+            const u32 lamp = list + i * 20u;
+            int found = -1;
+            for (int n = 0; n < *lamp_count && found < 0; n++)
+                if (seen[n] == lamp || (lamps[n * 7] == guest_read_f32(cpu, lamp) && lamps[n * 7 + 1] == guest_read_f32(cpu, lamp + 4u) &&
+                                        lamps[n * 7 + 2] == guest_read_f32(cpu, lamp + 8u)))
+                    found = n;
+            if (found < 0 && *lamp_count < LIGHT_GRID_LAMPS) {
+                found = (*lamp_count)++;
+                seen[found] = lamp;
+                float* out = lamps + found * 7;
+                for (u32 k = 0; k < 3u; k++)
+                    out[k] = guest_read_f32(cpu, lamp + k * 4u);
+                const u32 colour = mem_read32(cpu, lamp + 12u);
+                out[3] = (float)(colour >> 24) / 255.0f;
+                out[4] = (float)((colour >> 16) & 0xFFu) / 255.0f;
+                out[5] = (float)((colour >> 8) & 0xFFu) / 255.0f;
+                out[6] = (float)mem_read32(cpu, lamp + 16u);
+            }
+            if (found >= 0)
+                per_cell[c * 3u + i] = (u8)found;
+        }
+    }
+    return per_cell;
+}
+
 static void room_lights_update(CPUState* cpu) {
 #ifdef ED_AURORA
-    static u32 sent_grid, sent_mark;
     // AURORA_SHADOW_LOG: the game's frame now and then, among the renderer's lines (`ed chapters`). Its count isn't the game's.
     static int sync = -1;
     if (sync < 0)
         sync = getenv("AURORA_SHADOW_LOG") != NULL;
     if (sync && cpu->timebase / 675000ull % 20ull == 0ull)
         fprintf(stderr, "[sync] game frame %llu\n", (unsigned long long)(cpu->timebase / 675000ull));
+    // Apart, the frame's decision sends set 0: this runs on every call of 0x801E4BDC, one inside the actor list, and the
+    // list's first entry can then be player 2's room's (G1), whose grid the span test below turns away.
+    if (g_lights_own_a)
+        return;
+    const u32 sent_grid = g_lights_sent_grid, sent_mark = g_lights_sent_mark;
     const u32 grid = mem_read32(cpu, LIGHT_GRID_POINTER);
     const u32 ram_end = GC_RAM_BASE + cpu->ram_size;  // (a room slot in the host's memory, ED_ROOM_SLOTS)
     if (grid < 0x80000000u || grid >= ram_end || mem_read32(cpu, grid + 32u) != grid + 36u)
@@ -6137,51 +6287,23 @@ static void room_lights_update(CPUState* cpu) {
     }
     sent_room = room;
     const u32 count = mem_read32(cpu, grid + 4u);
-    const u32 sizes = mem_read32(cpu, grid + 20u), last = mem_read32(cpu, grid + 24u), across = mem_read32(cpu, grid + 28u);
-    const int dims[3] = {(int)(last & 0xFFu), (int)(across >> 24), (int)((across >> 16) & 0xFFu)};
-    if (count == 0u || count > 20000u || count != (u32)dims[0] * (u32)dims[1] * (u32)dims[2])
+    const u32 last = mem_read32(cpu, grid + 24u), across = mem_read32(cpu, grid + 28u);
+    if (count == 0u || count > 20000u || count != (last & 0xFFu) * (across >> 24) * ((across >> 16) & 0xFFu))
         return;
-    sent_grid = grid;
-    sent_mark = mark;
-    const float origin[3] = {guest_read_f32(cpu, grid + 8u), guest_read_f32(cpu, grid + 12u), guest_read_f32(cpu, grid + 16u)};
-    const float size[3] = {(float)(sizes >> 16), (float)(sizes & 0xFFFFu), (float)(last >> 16)};
+    g_lights_sent_grid = grid;
+    g_lights_sent_mark = mark;
     static float lamps[LIGHT_GRID_LAMPS * 7];
-    static u32 seen[LIGHT_GRID_LAMPS];
-    int lamp_count = 0;
-    u8* per_cell = (u8*)malloc((size_t)count * 3u);
+    float origin[3], size[3];
+    int dims[3], lamp_count = 0;
+    // ([change-time] t4a/t4b, ED_CHANGE_TIME only: the walk, the log and the call_sync, as lights_set_send's apart)
+    const u64 lights_began = change_time_now();
+    u8* per_cell = room_lights_walk(cpu, grid, lamps, &lamp_count, origin, size, dims);
     if (per_cell == NULL)
         return;
-    for (u32 c = 0; c < count; c++) {
-        const u32 cell = cells + c * 20u;
-        const u32 here = mem_read32(cpu, cell + 8u), list = mem_read32(cpu, cell + 12u);
-        for (u32 i = 0; i < 3u; i++) {
-            per_cell[c * 3u + i] = 255u;
-            if (i >= here)
-                continue;
-            const u32 lamp = list + i * 20u;
-            int found = -1;
-            for (int n = 0; n < lamp_count && found < 0; n++)
-                if (seen[n] == lamp || (lamps[n * 7] == guest_read_f32(cpu, lamp) && lamps[n * 7 + 1] == guest_read_f32(cpu, lamp + 4u) &&
-                                        lamps[n * 7 + 2] == guest_read_f32(cpu, lamp + 8u)))
-                    found = n;
-            if (found < 0 && lamp_count < LIGHT_GRID_LAMPS) {
-                found = lamp_count++;
-                seen[found] = lamp;
-                float* out = lamps + found * 7;
-                for (u32 k = 0; k < 3u; k++)
-                    out[k] = guest_read_f32(cpu, lamp + k * 4u);
-                const u32 colour = mem_read32(cpu, lamp + 12u);
-                out[3] = (float)(colour >> 24) / 255.0f;
-                out[4] = (float)((colour >> 16) & 0xFFu) / 255.0f;
-                out[5] = (float)((colour >> 8) & 0xFFu) / 255.0f;
-                out[6] = (float)mem_read32(cpu, lamp + 16u);
-            }
-            if (found >= 0)
-                per_cell[c * 3u + i] = (u8)found;
-        }
-    }
     fprintf(stderr, "[room-lights] grid 0x%08X: %d lamps, %d x %d x %d cells\n", grid, lamp_count, dims[0], dims[1], dims[2]);
     dol_aurora_set_room_lights(lamps, lamp_count, origin, size, dims, per_cell);
+    if (lights_began != 0u)
+        change_time_lights(cpu, lights_began);
     free(per_cell);
 #else
     (void)cpu;
@@ -6260,8 +6382,9 @@ static bool collide_call(CPUState* cpu, u32 fn, const u32* args, int count, doub
     return false;
 }
 
-static bool camera_collide(CPUState* cpu, const float start[3], const float end[3], float radius, float hit[3]) {
-    const u32 object = mem_read32(cpu, cpu->gpr[13] + (u32)(s32)g_camera_player_offset);
+// For a given character's object: the world 0x80123F70(object) answers is the current slot's for the current player's
+// object and, for any other, the slot record of the room at its +592 (separate rooms: player 2's own room's floor).
+static bool camera_collide_object(CPUState* cpu, u32 object, const float start[3], const float end[3], float radius, float hit[3]) {
     if (object < 0x80000000u || object - 0x80000000u >= cpu->ram_size)
         return false;
     if (cpu->timebase / 675000ull < g_collide_rest_until)
@@ -6308,6 +6431,9 @@ static bool camera_collide(CPUState* cpu, const float start[3], const float end[
     for (u32 i = 0; i < 3u; i++)
         hit[i] = guest_read_f32(cpu, out + i * 4u) - offset[i];
     return true;
+}
+static bool camera_collide(CPUState* cpu, const float start[3], const float end[3], float radius, float hit[3]) {
+    return camera_collide_object(cpu, mem_read32(cpu, cpu->gpr[13] + (u32)(s32)g_camera_player_offset), start, end, radius, hit);
 }
 
 // The game fades out whatever is at or behind its camera (Alex, when its
@@ -11233,6 +11359,7 @@ static int room_slots(void);
 static void room_slots_return(CPUState* cpu);
 static int coop_stay(void);
 static void notify_room_change(CPUState* cpu) {
+    split_room_load(cpu);  // (G5: a direct load inside a door's countdown, told)
     coop_room_change_words(cpu);
     if (getenv("ED_ROOM_LOG") != NULL)
         room_log(cpu, "change");
@@ -11323,6 +11450,8 @@ static void notify_room_ticket(CPUState* cpu) {
     g_trace_ticket_frame = cpu->timebase / 675000ull;
     if (getenv("ED_ROOM_LOG") != NULL)
         room_log(cpu, "ticket");
+    change_hold_ticket(cpu);  // ([change-hold]'s window opens, ED_COOP_ENEMY_LOG only)
+    split_ticket_open(cpu);   // (the stayer's room plays on through it: ED_COOP_STAY, co-op only)
 }
 
 
@@ -12289,6 +12418,7 @@ static u32 g_coop_turn_p1;                // player 1's node, while player 2 is 
 // cast at the same time.
 static const u32 kCoopCasting[4] = {22336u, 22320u, 22316u, 22312u};
 static u32 g_coop_casting[4];
+static bool g_coop_casting_p2_in;  // player 2's casting words are the ones in memory (each coop_be_player2 swaps them)
 
 // Player 2 the player, the controlled character and the one casting (on),
 // or back (off).
@@ -12313,6 +12443,7 @@ static void coop_be_player2(CPUState* cpu, bool on, u32 was[5]) {
         g_coop_casting[i] = mem_read32(cpu, casting);
         mem_write32(cpu, casting, theirs);
     }
+    g_coop_casting_p2_in = !g_coop_casting_p2_in;
 }
 
 // Player 2's quick spells the game's (their Tome opens) or player 1's back
@@ -12406,10 +12537,20 @@ static void coop_quick_swap(CPUState* cpu, bool p2) {
 // 21488 its id, - 21484 its node; 0x801F6258, 0x801F6250), which is player 2
 // for their cast too, with what they are casting (coop_be_player2). Not while
 // they wait (wait): a press then is let go, not kept.
+static void coop_quick_cast_one(CPUState* cpu, u32 spell, u32 i);
 static void coop_quick_cast(CPUState* cpu, bool wait) {
     static u16 held;
     const u16 pressed = (u16)(g_coop_p2_buttons & ~held);
     held = g_coop_p2_buttons;  // (a press while they wait is not kept, as the game keeps none)
+    // A summon pressed in player 1's door (coop_quick_cast_ask kept it, design-stayer-presses §2.6): cast after the tail, by
+    // this route, at their first turn that would take a press.
+    if (g_stayer.summon[1].on && !wait && !g_tome_copy_turn && !split_counting(cpu) && !coop_p2_own_up() && cpu->ram_size >= SCRATCH_END - GC_RAM_BASE) {
+        g_stayer.summon[1].on = false;
+        if (split_log())
+            fprintf(stderr, "[stayer] player 2's kept summon 0x%08X cast after player 1's door (frame %llu)\n", g_stayer.summon[1].spell,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        coop_quick_cast_one(cpu, g_stayer.summon[1].spell, COOP_QUICKS);
+    }
     if (pressed == 0u || wait || cpu->ram_size < SCRATCH_END - GC_RAM_BASE)
         return;
     // Step D: under their own words, close-up or find no cast begins, as the game's controller begins none under a hold (one
@@ -12426,7 +12567,13 @@ static void coop_quick_cast(CPUState* cpu, bool wait) {
     for (u32 i = 0; i < COOP_QUICKS; i++) {
         if ((pressed & kCoopQuickButton[i]) == 0u)
             continue;
-        mem_write32(cpu, COOP_QUICK_SLOT, g_coop_quick[i]);
+        coop_quick_cast_one(cpu, g_coop_quick[i], i);
+    }
+}
+// One of player 2's quick spells cast (i its slot, COOP_QUICKS for a kept summon), as the game's cast with them the player.
+static void coop_quick_cast_one(CPUState* cpu, u32 spell_word, u32 i) {
+    {
+        mem_write32(cpu, COOP_QUICK_SLOT, spell_word);
         const u32 args[2] = {0u, COOP_QUICK_SLOT};
         const u32 first = mem_read32(cpu, cpu->gpr[13] - 22328u);
         u32 was[5], ignore = 0u;
@@ -12468,7 +12615,7 @@ static void coop_quick_cast(CPUState* cpu, bool wait) {
             const u32 spell = mem_read32(cpu, cpu->gpr[13] - 22328u);
             fprintf(stderr, "[coop] player 2's state %u, casting 0x%08X, record +16 0x%X, asked %u\n", mem_read32(cpu, g_coop_p2 + COOP_NODE_STATE), g_coop_casting[0],
                     mem_read32(cpu, COOP_SPELL_ITEM + COOP_SPELL_ITEM_TOME), mem_read32(cpu, cpu->gpr[13] - 26188u));
-            fprintf(stderr, "[coop] player 2 casts their quick spell %u (0x%08X): %s (frame %llu)\n", i, g_coop_quick[i],
+            fprintf(stderr, "[coop] player 2 casts their quick spell %u (0x%08X): %s (frame %llu)\n", i, spell_word,
                     spell != first ? "cast" : "not cast", (unsigned long long)(cpu->timebase / 675000ull));
         }
     }
@@ -13379,6 +13526,10 @@ static struct {
     int kinds_depth, kinds_count;
     u8 kinds[sizeof g_coop_kinds_in];
     double ms_most;
+    // design-stayer-findings F3a/F3b/F3c: this copy was opened in its owner's stayer window (1) or that window's fade-in tail
+    // (2), and the door's fade was left out of it; the fade quads its turns drew (r4_fade_quad), told at its close.
+    int fade_out;
+    unsigned fade_quads;
 } g_tome_copy;
 static bool g_coop_tome_p2;
 static bool g_coop_b_release;
@@ -13618,7 +13769,129 @@ static u32 r6_player1_node(CPUState* cpu);
 static void r6_enemy_roster(CPUState* cpu);
 static void r6b_frame(CPUState* cpu);
 static int g_stay_bracket;  // (R4: a change of player 2's running as theirs)
+// F2c (design-stayer-findings §F2.3): R4's bracket is player 2's change, and the game's prompt slots and looks in it are
+// player 1's (saved at the open, written back at the end). Taken once at the open: co-op stay's two-slot installs with
+// ED_SPLIT_HOLD not 0, ED_STAYER_PRESSES allowing player 1, the cameras not lent. False: every path below is today's.
+static bool g_stay_bracket_p1;
+static struct {
+    bool let_go;          // the arrival's prompt reset (0x801172B0 at lr 0x80152138) ran in it, or F2a passed one over
+    bool kept_said;       // F2b's "not read" trace, once
+    unsigned passed;      // F2a's passes (the log at most 8)
+    unsigned asks;        // F2b's asks after the let-go (the trace at most 16)
+} g_stay_bracket_p1_log;
+// At every bracket's open (the flag or not), for F2.5's WARNING (review-design 4, review-safety 10): the two looks' kinds and
+// the +64 index then, and whose slots the game's were (the cameras lent: player 2's lent ones).
+static struct {
+    u32 kind[2];
+    u32 index;
+    bool lent;
+} g_stay_bracket_looks;
 static unsigned long long g_stay_log;
+static void lights_frame(CPUState* cpu);  // (below: lights per room, the frame's lamp sets and views)
+static void fog_frame(CPUState* cpu);    // (below: the room mist per room, design-fog.md)
+static void fog_views_frame(CPUState* cpu);  // (below: the mist's depth per half, design-fog.md Part B)
+static bool r6_room_loaded(CPUState* cpu, s32 room);  // (below, R6)
+// ---- The floor probe (rooms/design-fall.md section 6, log only: nothing here changes play) ----
+// The user's fall (2026-11-12, Pius's statue room 182, player 1 going on to 181, player 2 staying): not reproduced, the cause
+// not found. 182's north half is at z 78 and 181 has no floor under it, so one wrong-room floor test is enough (C1), and a
+// stayer whose room's record goes dead stands frozen in a void (C2). These lines print with no switch, so a play names it:
+//   [floor] wrong room  the game's collision getter 0x80123F70 asked for "the player" (r13-26524) while that player's own
+//                       room is the OTHER resident slot: the step would test them against the room in play's floor (C1);
+//   [floor] falling     a player apart going down every frame for 45 frames, 300 units or more;
+//   [floor] under       a player apart standing under their own room's floor (the game's collision, cast down from above);
+//   [floor] dead        a player apart whose room's slot record isn't loaded for 30 frames (C2).
+static void floor_wrong_room(CPUState* cpu) {
+    static unsigned said;
+    static unsigned long long said_at;
+    g_hle_passthrough = true;  // always the game's answer: this only tells
+    if (!g_settings.mod_coop || !coop_stay() || room_slots() != 2 || g_coop_p2 == 0u || !sda_ready(cpu) || g_tome_copy_turn)
+        return;
+    const u32 object = cpu->gpr[3];
+    if (object != mem_read32(cpu, cpu->gpr[13] - 26524u) || !guest_ram_range_valid(cpu, object, 596u))
+        return;
+    const u32 p2_object = mem_read32(cpu, g_coop_p2 + 52u);
+    const u32 p1_node = g_coop_turn && g_coop_turn_p1 != 0u ? g_coop_turn_p1 : g_coop_p1_node;
+    const u32 p1_object = p1_node != 0u ? mem_read32(cpu, p1_node + 52u) : 0u;
+    const int who = object == p2_object ? 2 : object == p1_object ? 1 : 0;
+    if (who == 0 || p1_object == 0u || mem_read32(cpu, p1_object + 592u) == mem_read32(cpu, p2_object + 592u))
+        return;
+    const s32 room = (s32)mem_read32(cpu, object + 592u);
+    const u32 cur = room_slot_record(cpu, (s32)mem_read32(cpu, ROOM_SLOT_TABLE));
+    const s32 cur_room = cur != 0u ? (s32)(s16)(mem_read32(cpu, cur + 0x8140u) >> 16) : -1;
+    if (cur_room == room || !r6_room_loaded(cpu, room))
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (said < 20u || frame >= said_at + 600ull) {
+        said++;
+        said_at = frame;
+        fprintf(stderr, "[floor] wrong room: player %d is asked about as the player in room %d's slot while in room %d (lr 0x%08X, %s, turn %d, "
+                        "bracket %d, z %.1f, frame %llu)\n",
+                who, cur_room, room, cpu->lr, g_tome_copy_turn ? "copy turn" : "the game", g_coop_turn, g_stay_bracket, guest_read_f32(cpu, object + 8u), frame);
+    }
+}
+static void floor_watch(CPUState* cpu) {
+    static struct {
+        float z, top;
+        unsigned down, dead;
+        bool said_fall, said_under, said_dead;
+        s32 room;
+    } p[2];
+    if (!g_settings.mod_coop || !coop_stay() || g_coop_p2 == 0u || !sda_ready(cpu) || g_tome_copy_turn)
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    const u32 nodes[2] = {mem_read32(cpu, cpu->gpr[13] - 21492u), g_coop_p2};
+    const bool apart = coop_stay_apart(cpu);
+    for (int i = 0; i < 2; i++) {
+        const u32 o = nodes[i] != 0u ? mem_read32(cpu, nodes[i] + 52u) : 0u;
+        if (!apart || !guest_ram_range_valid(cpu, o, 596u)) {
+            memset(&p[i], 0, sizeof p[i]);
+            continue;
+        }
+        const s32 room = (s32)mem_read32(cpu, o + 592u);
+        const float x = guest_read_f32(cpu, o), y = guest_read_f32(cpu, o + 4u), z = guest_read_f32(cpu, o + 8u);
+        if (room != p[i].room) {
+            memset(&p[i], 0, sizeof p[i]);
+            p[i].room = room;
+            p[i].z = p[i].top = z;
+            continue;
+        }
+        if (!r6_room_loaded(cpu, room)) {
+            if (++p[i].dead == 30u && !p[i].said_dead) {
+                p[i].said_dead = true;
+                fprintf(stderr, "[floor] dead: player %d's room %d (slot %d) has had no loaded record for 30 frames; they stand at %.0f %.0f %.0f "
+                                "(the room in play %d, frame %llu)\n",
+                        i + 1, room, room_slot_of(cpu, room), x, y, z, (s32)mem_read32(cpu, cpu->gpr[13] - 23276u), frame);
+            }
+        } else {
+            p[i].dead = 0u;
+        }
+        if (z < p[i].z - 0.5f) {
+            if (p[i].down++ == 0u)
+                p[i].top = p[i].z;
+        } else {
+            p[i].down = 0u;
+        }
+        p[i].z = z;
+        if (p[i].down >= 45u && p[i].top - z >= 300.0f && !p[i].said_fall) {
+            p[i].said_fall = true;
+            fprintf(stderr, "[floor] falling: player %d in room %d at %.0f %.0f has gone down every frame for %u frames, from z %.0f to %.0f (the room "
+                            "in play %d, slot %d current, frame %llu)\n",
+                    i + 1, room, x, y, p[i].down, p[i].top, z, (s32)mem_read32(cpu, cpu->gpr[13] - 23276u), (s32)mem_read32(cpu, ROOM_SLOT_TABLE), frame);
+        }
+        // Under their own floor: every 30 frames, the game's collision of their own room (by their object) cast down at their
+        // x,y from 400 above; a surface more than 40 above their feet that they stand under.
+        if (frame % 30ull == (unsigned long long)i * 15ull && r6_room_loaded(cpu, room) && !p[i].said_under) {
+            const float from[3] = {x, y, z + 400.0f}, to[3] = {x, y, z + 40.0f};
+            float hit[3];
+            if (camera_collide_object(cpu, o, from, to, 0.0f, hit) && p[i].down > 0u) {
+                p[i].said_under = true;
+                fprintf(stderr, "[floor] under: player %d in room %d at %.0f %.0f %.0f is under a surface of their own room at z %.0f, and going down "
+                                "(the room in play %d, frame %llu)\n",
+                        i + 1, room, x, y, z, hit[2], (s32)mem_read32(cpu, cpu->gpr[13] - 23276u), frame);
+            }
+        }
+    }
+}
 static void room_slots_frame(CPUState* cpu) {
     static unsigned long long last_log;
     static bool both_was;
@@ -13636,6 +13909,14 @@ static void room_slots_frame(CPUState* cpu) {
         }
     }
     r6b_frame(cpu);  // R6b: the second route graph's room still in its slot (after the slots' rooms are read above)
+    const u64 lights_began = change_time_now();  // ([change-time]: apart, the lamps are sent from here; timed when it sends)
+    const u64 lights_seen = lights_began != 0u ? change_time_lights_seen() : 0u;
+    lights_frame(cpu);  // the renderer's two lamp sets and its views, once a frame (rooms/design-lights.md H)
+    if (lights_began != 0u && change_time_lights_seen() != lights_seen)
+        change_time_lights(cpu, lights_began);
+    floor_watch(cpu);  // the floor probe: a fall, a body under its floor or a dead record apart, logged (rooms/design-fall.md)
+    fog_frame(cpu);  // the mist per room's once-a-frame steps: room 1's scroll, palette and height, and its log (design-fog A6, A9, 5)
+    fog_views_frame(cpu);  // the mist's depth from each half's own camera, sent to the renderer (design-fog Part B, ED_FOG_VIEWS=1)
     // (A record the change's tail marked dead is put back at the tail for a slot a player is in, room_slots_tail, and at a
     // return into its room, room_slots_return: not here, or a room nobody is in stays drawn under the live one.)
     if (coop_stay_apart(cpu) && frame >= g_stay_log + 120ull) {
@@ -13668,6 +13949,7 @@ static void room_slots_frame(CPUState* cpu) {
 // nobody is in, or any section 3 while the frame is shown whole (the split off), draws nothing: the N=1 shape (a record
 // of 0: 0x801E769C). Never marked in place: the game reads 0x8060248C.
 #define ROOM_DRAW_ALPHA 0x801E73D4u
+static void lights_section(CPUState* cpu, u32 section);  // (below: lights per room, G3)
 #define ROOM_CAMERA_MTX 0x8060248Cu
 #define ROOM_MTX_SCRATCH (SCRATCH_HUD + 0xE00u)  // 48 bytes past the bars' slots and the quick cast's
 static u32 g_gx_load_pos_mtx;  // GXLoadPosMtxImm
@@ -13685,6 +13967,27 @@ static void room_mtx_load(CPUState* cpu, int mark_view) {
     u32 ignore = 0u;
     hle_guest_call(cpu, g_gx_load_pos_mtx, args, 2, 0.0, &ignore);
 }
+// The room mist per room, players apart (rooms/design-fog.md, Part A; below, beside lights_section): a scope round a draw of
+// player 2's room's things gives the game's mist asks that room's record, bank and gate and the mist matrices from player 2's
+// eye (A1-A6); the section draws keep their cached lists compiled in their own room's mist (A4); effects take their own
+// room's last actor's matrices (A7).
+typedef struct {
+    bool open;
+    u32 gate, bank, buf_at;
+    u32 buf[24];
+} FogSave;
+static bool fog_begin(CPUState* cpu, s32 room, FogSave* s, int site, int want_slot);
+static void fog_end(CPUState* cpu, const FogSave* s);
+static bool fog_list(CPUState* cpu, u32 fn, u32 section, int slot, bool scoped);
+static void fog_effect_matrices(CPUState* cpu, s32 room, s32 room0, s32 room1);
+static void fog_whole_seen(CPUState* cpu, u32 section, s32 room0, s32 room1);
+static bool fog_whole_wants(CPUState* cpu, u32 section, int slot, s32 room1);
+#define FOG_SITE_SECTION 0
+#define FOG_SITE_SECTION_ALPHA 1
+#define FOG_SITE_ACTOR 2
+#define FOG_SITE_EFFECT 3
+#define FOG_SITE_WHOLE 4
+#define FOG_LIST_FLAG 21780u  // r13-21780: set by a section compile (0x801E77BC, 0x801E53A4), read by both rooms' cached draws (0x801E7724, 0x801E73E8)
 static void room_section_draw(CPUState* cpu, u32 fn) {
     static bool running;
     static unsigned skipped_said;
@@ -13702,13 +14005,37 @@ static void room_section_draw(CPUState* cpu, u32 fn) {
     if (whole && apart && room1 != room0) {
         // One room for the owner's half: the owner's; the other section draws nothing, no marks (the frame isn't built per view).
         const s32 owner_room = g_room_whole_owner == 2 ? room1 : room0;
-        const u32 rec = room_slot_record(cpu, section == 3u ? other : (s32)mem_read32(cpu, ROOM_SLOT_TABLE));
+        const int slot = section == 3u ? other : (s32)mem_read32(cpu, ROOM_SLOT_TABLE);
+        const u32 rec = room_slot_record(cpu, slot);
         const s32 room = rec != 0u ? (s32)(s16)(mem_read32(cpu, rec + 0x8140u) >> 16) : -1;
         if (room != owner_room) {
             hle_set_u32(cpu, 0u);
             g_hle_passthrough = false;
             g_hle_tail_call = false;
+            return;
         }
+        // Player 2's room's list compiled in its own mist holds the layer; with the room in play mistless the game's draw
+        // would load none of its inputs (0x801E7630: no TLUT 0, 54/57 or texmap 7), so it gets its own room's (the scope, the
+        // band from the game camera). Otherwise the game's own draw, no mist scope (A4: its compile is marked; a limit, A11).
+        FogSave fog;
+        const bool whole_fog = section == 3u && fog_whole_wants(cpu, section, slot, room1) && fog_begin(cpu, room1, &fog, FOG_SITE_WHOLE, slot);
+        if (!whole_fog) {
+            fog_list(cpu, fn, section, slot, false);
+            fog_whole_seen(cpu, section, room0, room1);
+            return;
+        }
+        fog_list(cpu, fn, section, slot, true);  // (its list is its own: only a compile is marked here)
+        u32 arg = section, out = 0u;
+        running = true;
+        const bool ok = hle_guest_call(cpu, fn, &arg, 1, 0.0, &out);
+        running = false;
+        fog_end(cpu, &fog);
+        if (!ok)
+            fprintf(stderr, "[rooms] the section %u draw (0x%08X, a whole frame) didn't run to its end (frame %llu)\n", section, fn,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        hle_set_u32(cpu, out);
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
         return;
     }
     if (section == 3u) {
@@ -13725,16 +14052,32 @@ static void room_section_draw(CPUState* cpu, u32 fn) {
             g_hle_tail_call = false;
             return;
         }
+        lights_section(cpu, 3u);  // its own room's live lights (rooms/design-lights.md G3)
         room_mtx_load(cpu, 0);  // player 2's room: out of player 1's half
     } else {
-        if (!(apart && room1 != room0))
+        if (!(apart && room1 != room0)) {
+            fog_list(cpu, fn, section, (s32)mem_read32(cpu, ROOM_SLOT_TABLE), false);  // (A4: a list baked elsewhere, made again)
             return;  // one room for both: the game's own draw
+        }
+        lights_section(cpu, 2u);  // the room in play's lights back, if section 3 took player 2's
         room_mtx_load(cpu, 1);  // the room in play: out of player 2's half
     }
+    // The mist (design-fog A10): section 3 inside player 2's room's own mist, both passes; section 2 the game's. A4 before the
+    // draw: a compile in this call is marked, a list baked with the wrong room's mist is thrown away to be made again here.
+    FogSave fog;
+    const bool fog_on = section == 3u && fog_begin(cpu, room1, &fog, fn == ROOM_DRAW ? FOG_SITE_SECTION : FOG_SITE_SECTION_ALPHA, other);
+    // A recompile A4 forces sets the compile's flag r13-21780 that both rooms' cached draws read: kept as it was, so the
+    // other room's draw takes what it took before (the last compile the game made itself).
+    const bool forced = fog_list(cpu, fn, section, section == 3u ? other : (s32)mem_read32(cpu, ROOM_SLOT_TABLE), fog_on);
+    const u32 list_flag = forced ? mem_read32(cpu, cpu->gpr[13] - FOG_LIST_FLAG) : 0u;
     u32 arg = section, out = 0u;
     running = true;
     const bool ok = hle_guest_call(cpu, fn, &arg, 1, 0.0, &out);
     running = false;
+    if (forced)
+        mem_write32(cpu, cpu->gpr[13] - FOG_LIST_FLAG, list_flag);
+    if (fog_on)
+        fog_end(cpu, &fog);
     room_mtx_load(cpu, -1);  // the camera's own matrix back in 27: later draws use it
     if (!ok)
         fprintf(stderr, "[rooms] the section %u draw (0x%08X) didn't run to its end (frame %llu)\n", section, fn, (unsigned long long)(cpu->timebase / 675000ull));
@@ -13790,10 +14133,16 @@ static void effect_draw_by_room(CPUState* cpu) {
     const int view = room == room0 ? 1 : room == room1 ? 0 : 2;
     room_mtx_load(cpu, view);
     effect_identity_load(cpu, view);
+    // The mist (design-fog A7): the effect's own room's last actor's mist matrices, and player 2's room's in its own mist.
+    fog_effect_matrices(cpu, room, room0, room1);
+    FogSave fog;
+    const bool fog_on = room == room1 && fog_begin(cpu, room1, &fog, FOG_SITE_EFFECT, -1);
     u32 arg = effect, out = 0u;
     running = true;
     const bool ok = hle_guest_call(cpu, EFFECT_DRAW, &arg, 1, 0.0, &out);
     running = false;
+    if (fog_on)
+        fog_end(cpu, &fog);
     room_mtx_load(cpu, -1);
     effect_identity_load(cpu, -1);
     if (!ok)
@@ -13855,23 +14204,93 @@ static void coop_cameras_in(CPUState* cpu, int who);  // (below)
 static void stay_scene_look_again(CPUState* cpu);    // (below: R4c)
 static s32 g_stay_bracket_room;
 static u8 g_stay_bracket_slots[7u * 28u];
+// The camera at an arrival apart (rooms/design-arrival-camera.md). Player 2's own change (this bracket) cuts their own
+// set to the door's camera (the runner's camera block, 0x80152790-0x801527DC, with their set in); their first look in the
+// new room then dropped that set and remade it from player 1's (coop_zones_new, coop_camera_set_fresh), and their half
+// glided from player 1's eye for 55-80 frames (logs/run-20261111-172710-rooms-r4c-t1-p2door, 3824-3900). The set the
+// arrival cut is tagged with the room, its zone list and the ticket count (coop_stay_change_end), and their first new zone
+// list is checked against the tag, once (coop_zones_new). `foreign`: their set was last made from player 1's while apart
+// (another room's camera): their first own camera choice cuts to it, not blends (coop_camera_chosen).
+static struct {
+    bool on;          // their set holds the game's own arrival cut
+    bool foreign;     // their set was remade from player 1's (another room's) while apart
+    s32 room;         // the room it was cut for
+    u32 zones;        // that room's zone list (info+180 of 0x80123F70(their object))
+    unsigned tickets; // g_coop_tickets then
+} g_stay_arrived;
+static bool g_stay_bracket_chose;  // the arrival's camera choice ran in this bracket, in player 2's set
+// Player 1's change into the room player 2 is already in, apart (case D): not the room's start for player 2, whose set
+// stays theirs (coop_camera_chosen). Set at every runner entry of player 1's, before the bracket's gate.
+static struct {
+    bool on, apart;
+    s32 target, p2_room;
+    unsigned tickets;
+} g_stay_start;
+static bool coop_cameras_lent(void);  // (below: g_coop_cameras.lent)
 static void notify_ticket_run(CPUState* cpu) {  // 0x80152614(room, entry, camera, script, flags): the ticket's runner
+    g_stay_start.on = false;
+    if (coop_stay() && g_coop_p2 != 0u && sda_ready(cpu) && !g_coop_room_p2 && g_stay_bracket == 0) {
+        const s32 p1_room = (s32)mem_read32(cpu, cpu->gpr[13] - 23276u), p2_room = coop_object_room(cpu, g_coop_p2);
+        g_stay_start.on = true;
+        g_stay_start.apart = p2_room != -1 && p2_room != p1_room;
+        g_stay_start.target = (s32)cpu->gpr[3];
+        g_stay_start.p2_room = p2_room;
+        g_stay_start.tickets = g_coop_tickets;
+    }
     if (!coop_stay() || !g_coop_room_p2 || g_coop_p2 == 0u || !sda_ready(cpu) || g_stay_bracket != 0 || coop_object_room(cpu, g_coop_p2) == -1)
         return;
     g_stay_bracket = 2;
+    g_stay_bracket_p1 = stay_bracket_p1_allowed() && !coop_cameras_lent();  // F2c
+    memset(&g_stay_bracket_p1_log, 0, sizeof g_stay_bracket_p1_log);
+    g_stay_bracket_looks.kind[0] = mem_read32(cpu, 0x80307108u);  // PROMPT_LOOKS (below): +0 the kind, 32 apart, +64 the index
+    g_stay_bracket_looks.kind[1] = mem_read32(cpu, 0x80307108u + 32u);
+    g_stay_bracket_looks.index = mem_read32(cpu, 0x80307108u + 64u) & 1u;
+    g_stay_bracket_looks.lent = coop_cameras_lent();
     g_stay_bracket_room = (s32)mem_read32(cpu, cpu->gpr[13] - 23276u);
     coop_be_player2(cpu, true, g_stay_bracket_was);
     mem_write32(cpu, cpu->gpr[13] - 23276u, (u32)coop_object_room(cpu, g_coop_p2));
     coop_bytes(cpu, 0x80335A38u, g_stay_bracket_slots, sizeof g_stay_bracket_slots, true);
     coop_cameras_in(cpu, 2);
+    g_stay_bracket_chose = false;
+    if (coop_cameras_lent())  // coop_camera_chosen returns at lent: nothing is tagged, today's drop (design U2)
+        fprintf(stderr, "[stay] player 2's change with the cameras lent (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
     fprintf(stderr, "[stay] player 2's change to room %d runs as theirs (from room %d; player 1 stays in room %d; frame %llu)\n", (s32)cpu->gpr[3],
             coop_object_room(cpu, g_coop_p2), g_stay_bracket_room, (unsigned long long)(cpu->timebase / 675000ull));
+}
+// The look a prompt slot's let-go (0x80024CDC) acts on, as the game picks it: slot 2 the first (0x80024D1C-0x80024D28), slot 4
+// the second (0x80024D30-0x80024D3C), any other the looks' +64 (0x80024D4C) (design-stayer-findings F2.5, impl B).
+static u32 stay_slot_look(CPUState* cpu, int slot) {
+    const u32 looks = 0x80307108u;  // PROMPT_LOOKS (below)
+    const u32 index = slot == 2 ? 0u : slot == 4 ? 1u : (mem_read32(cpu, looks + 64u) & 1u);
+    return looks + index * 32u;
 }
 static void coop_stay_change_end(CPUState* cpu) {  // the behaviour pass after the ticket tick (0x8014FDB8 at lr 0x80008400 / 0x80050A9C)
     if (g_stay_bracket == 0)
         return;
+    // review-safety 3 (a check, no change): F2a also skips the cancel's per-set half (the pop and snap, 0x80024BCC-0x80024C10),
+    // which today landed in player 2's set. Their camera index and depth as the arrival left them, to set beside S5/S11's.
+    if (g_stay_bracket_p1 && g_stay_bracket_p1_log.passed > 0u && getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[stay] player 2's set at the end of their change (F2a passed %u): camera index %d depth %d (frame %llu)\n", g_stay_bracket_p1_log.passed,
+                (s32)mem_read32(cpu, cpu->gpr[13] - 26864u), (s32)mem_read32(cpu, cpu->gpr[13] - 21700u), (unsigned long long)(cpu->timebase / 675000ull));
     coop_cameras_in(cpu, 1);
     coop_bytes(cpu, 0x80335A38u, g_stay_bracket_slots, sizeof g_stay_bracket_slots, false);
+    // F2.5: player 1's -2 prompt written back over a look the arrival cancelled (kind 0): a press on it does nothing
+    // (0x80024DCC-0x80024DE4 -> 0x80025590) until the zone is left. Always printed, the flag or not. Only a look that was
+    // up at the open and is 0 now (an idle look beside a -2 pair is no dead prompt), indexed as the game does (slot 2 the
+    // first, slot 4 the second, any other the +64 index at the open), the player by whose slots they were.
+    for (int slot = 0; slot < 6; slot++) {
+        const u32 at = 0x80335A38u + (u32)slot * 28u;
+        const u32 index = slot == 2 ? 0u : slot == 4 ? 1u : g_stay_bracket_looks.index;
+        if ((s32)mem_read32(cpu, at + 12u) == -2 && g_stay_bracket_looks.kind[index] != 0u && mem_read32(cpu, 0x80307108u + index * 32u) == 0u)
+            fprintf(stderr, "[stay] WARNING: player %d's -2 prompt (slot %d) written back over look %u, kind %u at the open and 0 now: a dead prompt until the zone is left (frame %llu)\n",
+                    g_stay_bracket_looks.lent ? 2 : 1, slot, index, g_stay_bracket_looks.kind[index], (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    if (g_stay_bracket_p1 && getenv("ED_COOP_LOG") != NULL && (g_stay_bracket_p1_log.passed > 0u || coop_p1_in_close_up(cpu))) {
+        const u32 look = stay_slot_look(cpu, -1);  // the look in use (+64)
+        fprintf(stderr, "[stay] player 1's close-up carried over player 2's arrival: look kind %u stage %d, busy %u, their camera index %d depth %d (frame %llu)\n",
+                mem_read32(cpu, look), (s32)mem_read32(cpu, look + 8u), mem_read32(cpu, cpu->gpr[13] - 23344u), (s32)mem_read32(cpu, cpu->gpr[13] - 26864u),
+                (s32)mem_read32(cpu, cpu->gpr[13] - 21700u), (unsigned long long)(cpu->timebase / 675000ull));
+    }
     coop_be_player2(cpu, false, g_stay_bracket_was);
     const s32 new_room = (s32)mem_read32(cpu, cpu->gpr[13] - 23276u);
     const int new_slot = (s32)mem_read32(cpu, ROOM_SLOT_TABLE), p1_slot = room_slot_of(cpu, g_stay_bracket_room);
@@ -13880,7 +14299,25 @@ static void coop_stay_change_end(CPUState* cpu) {  // the behaviour pass after t
         mem_write32(cpu, ROOM_SLOT_TABLE, (u32)p1_slot);
         mem_write32(cpu, ROOM_SLOT_TABLE + 4u, (u32)new_slot);
     }
+    // The tag (design H4): player 2's object is not the current player's now (be_player2(false) ran), so the game's getter
+    // finds the slot record by their +592, the room the change put them in (0x80123FA4-0x80123FFC): its zone list.
+    g_stay_arrived.on = false;
+    if (g_stay_bracket_chose && !coop_cameras_lent()) {
+        u32 object = mem_read32(cpu, g_coop_p2 + 52u), info = 0u;
+        if (hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) && guest_ram_range_valid(cpu, info, 184u)) {
+            g_stay_arrived.on = true;
+            g_stay_arrived.room = new_room;
+            g_stay_arrived.zones = mem_read32(cpu, info + 180u);
+            g_stay_arrived.tickets = g_coop_tickets;
+            g_stay_arrived.foreign = false;  // the game's own cut replaced whatever was there
+            if (getenv("ED_COOP_LOG") != NULL)
+                fprintf(stderr, "[stay] player 2's set holds their arrival's camera for room %d (zones 0x%08X, frame %llu)\n", new_room,
+                        g_stay_arrived.zones, (unsigned long long)(cpu->timebase / 675000ull));
+        }
+    }
+    g_stay_bracket_chose = false;
     g_stay_bracket = 0;
+    g_stay_bracket_p1 = false;  // F2c
     g_coop_room_p2 = false;  // the change is done: player 2 is apart in their new room (coop_stay_apart)
     stay_scene_look_again(cpu);  // R4c: player 1's scene still on: player 2 plays on beside it from here
     fprintf(stderr, "[stay] player 2's change done: they are in room %d (slot %d); the room in play is player 1's %d (slot %d) again (frame %llu)\n", new_room,
@@ -14298,6 +14735,8 @@ static void room_slot_put_back(CPUState* cpu, int slot, const char* why) {
 static void notify_room_slots_tail(CPUState* cpu) {
     if (cpu->lr != 0x80152434u || !sda_ready(cpu))
         return;
+    change_tail(cpu);  // ([change-time] t3 and [change-hold]'s tail, their switches only)
+    split_over(cpu, "the change's tail");  // (the stayer's window, if one was open)
     // The room in play (the mover's, and the other's too when they are brought along) and, with the stayer, player 2's own.
     const s32 cur = (s32)mem_read32(cpu, ROOM_SLOT_TABLE);
     if (cur >= 0 && cur < 2)
@@ -14598,6 +15037,11 @@ static void tome_copy_p1_close(CPUState* cpu, const char* why) {
 
 static void tome_copy_sound_close(CPUState* cpu, const u32 copy_handles[3]);  // (below, R5)
 static void tome_copy_close(CPUState* cpu, const char* why) {
+    // F3.4: a copy the door's fade was left out of draws no fade quad (r4_fade_quad counts them in its turns).
+    if (g_tome_copy.fade_out != 0 && (split_log() || g_tome_copy.fade_quads > 0u))
+        fprintf(stderr, "[stayer] player %d's copy drew the fade quad %u times%s\n", g_tome_copy_p1 ? 1 : 2, g_tome_copy.fade_quads,
+                g_tome_copy.fade_quads > 0u ? " (WARNING: its fade was left out at the opening)" : "");
+    g_tome_copy.fade_out = 0;
     if (g_tome_copy_p1) {
         tome_copy_p1_close(cpu, why);
         return;
@@ -14652,6 +15096,35 @@ static void tome_copy_close(CPUState* cpu, const char* why) {
         aurora_split_menu(0, g_settings.mod_split);
         aurora_split_only_view(1);
     }
+    // Closed in player 1's door (design-stayer-presses §2.7): a cast goes now (the window's cast end has run; a record
+    // crosses the firing), but not a summon, and the item's script waits for the tail (it can ask for a room or a scene, and
+    // a room asked in the window is passed over: the item used for nothing). Run by stayer_p2_left_go.
+    // (And behind one already waiting, in or out of a window, so the items run in the order used. Full: told, and today's.)
+    const bool kept_before = g_stayer_p2_left.n > 0u;
+    if ((stayer_window(cpu, 1) || kept_before) && (script_left > 0 || (next_cast != 0u && STAYER_SUMMON(next_cast)))) {
+        const bool summon = next_cast != 0u && STAYER_SUMMON(next_cast);
+        if (g_stayer_p2_left.n >= STAYER_P2_LEFT_MAX) {
+            fprintf(stderr, "[stayer] PLAYER 2'S TOME ITEM SCRIPT %d NOT KEPT: %u already wait; it runs now (frame %llu)\n", script_left, g_stayer_p2_left.n,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+            tome_copy_left(cpu, script_left, next_cast, spell_item);
+            return;
+        }
+        StayerP2Left* left = &g_stayer_p2_left.item[g_stayer_p2_left.n++];
+        left->script = script_left;
+        left->next_cast = summon ? next_cast : 0u;
+        left->use_script = g_tome_copy_use_script;
+        left->use_item = g_tome_copy_use_item;
+        left->room = coop_object_room(cpu, g_coop_p2);
+        memcpy(left->spell_item, spell_item, sizeof left->spell_item);
+        g_tome_copy_use_script = 0;  // (kept with it: put back as it runs, stayer_p2_left_go)
+        g_stayer.kept++;
+        fprintf(stderr, "[stayer] player 2's Tome closes %s: %s%s%s wait%s for it (%u waiting; frame %llu)\n",
+                kept_before && !stayer_window(cpu, 1) ? "behind a kept item" : "in player 1's door", script_left > 0 ? "its item's script" : "",
+                script_left > 0 && summon ? " and " : "", summon ? "a summon" : "", script_left > 0 && summon ? "" : "s", g_stayer_p2_left.n,
+                (unsigned long long)(cpu->timebase / 675000ull));
+        tome_copy_left(cpu, 0, summon ? 0u : next_cast, spell_item);
+        return;
+    }
     tome_copy_left(cpu, script_left, next_cast, spell_item);
 }
 
@@ -14687,6 +15160,50 @@ static void tome_copy_cast_back_out(CPUState* cpu) {
     fprintf(stderr, "[tome-copy] player 2 backs out of their cast\n");
 }
 
+// The screen fade (design-stayer-findings §F3.1): ticks r13-21784, target colour r13-26896, live RGBA floats 0x80602A2C..38.
+// 0x801E7D24(colour*) sets the target and the live colour, 0x801E7C88(colour*, ticks) the ticks and the target, and
+// 0x801E7C98() answers "a fade is on" (its one caller, the Start handler's refusal at 0x80006CF4). None is hooked.
+#define FADE_TICKS 21784u
+#define FADE_TARGET 26896u
+#define FADE_LIVE 0x80602A2Cu
+#define FADE_SET_COLOUR 0x801E7D24u
+#define FADE_START 0x801E7C88u
+#define FADE_ON 0x801E7C98u
+static bool fade_on_now(CPUState* cpu) {
+    u32 on = 0u;
+    return hle_guest_call(cpu, FADE_ON, NULL, 0, 0.0, &on) && on != 0u;
+}
+// At a copy's opening, in the copy (after the swap and tome_copy_no_window, before TW_MODE_CHANGE): F3a/F3b leave the door's
+// fade out of a copy opened in its owner's stayer window or fade-in tail, through the game's own setters, so the copy's
+// 0x801E7DA4 draws nothing (0x801E7ECC-0x801E7ED4) and the Tome starts as the game always starts it (no Tome in a fade:
+// 0x80006CF4). F3g: a copy opened in any other fade is told, and left as it is.
+static void tome_copy_fade(CPUState* cpu) {
+    const u32 sda = cpu->gpr[13];
+    const int who = g_tome_copy_p1 ? 1 : 2;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    const s32 ticks = (s32)mem_read32(cpu, sda - FADE_TICKS);
+    const u32 target = mem_read32(cpu, sda - FADE_TARGET);
+    const float alpha = guest_read_f32(cpu, FADE_LIVE + 12u);
+    if (g_tome_copy.fade_out == 0) {
+        if (fade_on_now(cpu))
+            fprintf(stderr, "[tome-copy] player %d's copy opened in a fade (ticks %d, alpha %.1f; not the stayer window's) (frame %llu)\n", who, ticks, alpha, frame);
+        return;
+    }
+    const u32 scratch = (cpu->gpr[1] - 0x200u) & ~15u;  // below the stack, above the frames the callee makes (as camera_collide_object)
+    if (!guest_ram_range_valid(cpu, scratch, 16u))
+        return;
+    mem_write32(cpu, scratch, 0u);  // the colour 0, 0, 0, 0
+    u32 ignore = 0u;
+    const u32 colour[1] = {scratch};
+    const u32 start[2] = {scratch, 0u};
+    hle_guest_call(cpu, FADE_SET_COLOUR, colour, 1, 0.0, &ignore);  // live floats := 0, target := 0
+    hle_guest_call(cpu, FADE_START, start, 2, 0.0, &ignore);        // ticks := 0 (target 0 again)
+    if (split_log())
+        fprintf(stderr, "[stayer] player %d's copy: the door's fade left out of it (ticks %d, alpha %.1f, target 0x%08X; %s) (frame %llu)\n", who, ticks, alpha,
+                target, g_tome_copy.fade_out == 1 ? "the window" : "the fade-in", frame);
+    if (fade_on_now(cpu))
+        fprintf(stderr, "[stayer] WARNING: player %d's copy still has a fade on (frame %llu)\n", who, frame);
+}
 static bool tome_copy_step(CPUState* cpu) {
     if (!g_tome_copy_ask && !g_tome_copy_open)
         return false;
@@ -14743,6 +15260,30 @@ static bool tome_copy_step(CPUState* cpu) {
             return false;
         g_tome_copy.real = cpu->ram;
         memcpy(g_tome_copy.copy, g_tw.sharing ? g_tome_copy.clean : cpu->ram, cpu->ram_size);
+        // F3a/F3b (design-stayer-findings §F3.2): taken in its owner's stayer window or that window's fade-in tail, the copy
+        // carries the mover's door fade (ticks, target, live colour), which its Tome frame ticks (0x80111790) and draws in a
+        // whole frame, where R4's per-view mark does nothing. Read here, in the real memory (split_counting asks the ticket
+        // and the stayer's room; g_tome_copy_turn is still false); the fade is left out after the swap.
+        {
+            const int owner = g_tome_copy_p1 ? 0 : 1;
+            g_tome_copy.fade_out = stayer_window(cpu, owner) ? 1 : stayer_fade_tail(cpu, owner) ? 2 : 0;
+            g_tome_copy.fade_quads = 0u;
+        }
+        // The stayer's copy in the other's door (design-stayer-presses §2.7): the game copy's binding lock (r13-23592) is the
+        // mover's at player 1's door (~65 frames), and the copy's after-frame 0x8013E518 counts it down: its Tome took no
+        // button for its first ~65 turns. A copy's Tome is never the mover's: 0 in the copy (the copy's turn hasn't begun).
+        // The same gate as the fade's (review-design 3): the window or its fade-in tail (~ticket+60, what is left of the lock).
+        if (g_tome_copy.fade_out != 0) {
+            const u32 at = sda - 23592u - GC_RAM_BASE;
+            if ((u64)at + 4u <= (u64)cpu->ram_size) {
+                u8* const w = g_tome_copy.copy + at;
+                const u32 was = (u32)w[0] << 24 | (u32)w[1] << 16 | (u32)w[2] << 8 | w[3];
+                w[0] = w[1] = w[2] = w[3] = 0u;
+                if (split_log())
+                    fprintf(stderr, "[stayer] player %d's copy: the copy's input lock cleared (was %u) (frame %llu)\n", g_tome_copy_p1 ? 1 : 2, was,
+                            (unsigned long long)(cpu->timebase / 675000ull));
+            }
+        }
         // The story's flags as they are now: the snapshot is from before player 1's Tome, and a page's
         // first visit is told by them (r13 - 26528: the count, then the bits).
         const u32 flags = mem_read32(cpu, sda - 26528u);
@@ -14772,6 +15313,7 @@ static bool tome_copy_step(CPUState* cpu) {
     u32 ignore = 0u;
     if (opening) {
         tome_copy_no_window(cpu);
+        tome_copy_fade(cpu);  // F3a/F3b/F3g (design-stayer-findings): in the copy
         if (!g_tome_copy_p1) {
             coop_tome_player(cpu, true);
             g_tome_copy.kinds_depth = g_coop_kinds_depth;
@@ -14954,9 +15496,11 @@ static void sweep_put(CPUState* cpu) {
                 continue;
             }
             // On the floor under it, by the game's own collision (camera_collide): from 300 above to 1500 below. No floor: not put.
+            // Separate rooms: the floor of the room THEY are in (their own object's world), not the room in play's; put
+            // by room 343's floor while in 341, player 2 stood under 341's floor and fell (logs/run-20261112-160254-cam-lf-load-p2door).
             const float from[3] = {place[0], place[1], place[2] + 300.0f}, to[3] = {place[0], place[1], place[2] - 1500.0f};
             float hit[3];
-            if (!camera_collide(cpu, from, to, 0.0f, hit)) {
+            if (!camera_collide_object(cpu, object, from, to, 0.0f, hit)) {
                 fprintf(stderr, "[sweep] player %d not put: no floor under %.0f %.0f %.0f (frame %llu)\n", who, place[0], place[1], place[2],
                         cpu->timebase / 675000ull);
                 at = next + (list[next] == ';' ? 1u : 0u);
@@ -15009,6 +15553,7 @@ static void tw_mode_change(CPUState* cpu) {
     g_hle_passthrough = true;  // a nested dispatch passes itself through
     if (!copy_ran && !g_tome_copy_turn) {
         tome_copy_p1_left(cpu);
+        stayer_p2_left_go(cpu);  // (player 2's Tome item kept from player 1's door, after it)
         g_hle_passthrough = true;
     }
     if (copy_ran && g_tome_copy.stands_in)
@@ -15365,6 +15910,7 @@ static void coop_scene_p2_fresh(CPUState* cpu);
 static void coop_camera_set_fresh(CPUState* cpu) {
     if (!sda_ready(cpu))
         return;
+    g_stay_arrived.on = false;  // the set is remade from the game's: no arrival's cut left in it
     for (u32 i = 0u; i < 5u && (s32)mem_read32(cpu, cpu->gpr[13] - CAMERA_DEPTH) > 0; i++) {
         const u32 lr = cpu->lr;
         u32 ignore = 0u;
@@ -15411,6 +15957,19 @@ static void coop_camera_p2_in(CPUState* cpu) {
     if (follow && (getenv("ED_COOP_LOG") != NULL || coop_trace()))
         fprintf(stderr, "[coop] player 2's camera: the room's start chose one, theirs too (frame %llu)\n",
                 (unsigned long long)(cpu->timebase / 675000ull));
+    // Made from player 1's while apart: another room's camera (a state loaded apart, a scene's afresh apart, a teleport
+    // without a ticket). Marked: their first own camera choice cuts to it (coop_camera_chosen). r6_apart is false inside
+    // the bracket, where the arrival's cut overwrites this anyway.
+    g_stay_arrived.foreign = r6_apart(cpu);
+    if (g_stay_arrived.foreign && getenv("ED_COOP_LOG") != NULL) {
+        static s32 logged_room = -2;
+        const s32 room = coop_object_room(cpu, g_coop_p2);
+        if (room != logged_room) {
+            logged_room = room;
+            fprintf(stderr, "[stay] player 2's set remade from player 1's while apart (their room %d, player 1's %d, frame %llu)\n", room,
+                    (s32)mem_read32(cpu, cpu->gpr[13] - 23276u), (unsigned long long)(cpu->timebase / 675000ull));
+        }
+    }
     coop_camera_set_fresh(cpu);
     g_coop_cameras.p2_seen = g_coop_cameras.room_choices;
 }
@@ -15945,39 +16504,47 @@ static void coop_words_tick(CPUState* cpu) {
     coop_state(cpu, &g_coop_events_p1, false);
 }
 
-// R4c: player 2 arrived through their own door during player 1's scene (coop_stay_change_end): their first look in the new
-// room keeps the camera their arrival chose (its script's fn8 in their set), not one remade from the game's, which is the
-// scene's (coop_camera_set_fresh): a scene the other player began never shows in their half (the user, 2026-11-11).
-static bool g_stay_arrival_camera;
+// The arrival's camera kept (rooms/design-arrival-camera.md H5; R4c's keep, generalised): player 2's own change cut their
+// set to the door's camera (g_stay_arrived, tagged at coop_stay_change_end); their first new zone list keeps that set when
+// it is the list of the room the cut was for, they are still in that room (+592) and no ticket has run since. Used once,
+// kept or not. A list that differs (player 2 brought by player 1's change: a chapter's page or end, Jump to Game, left
+// behind), a later ticket, or a later list in the room: the drop and the room's-start follow, as before. The zone words,
+// prompts, looks and states of the new room reset either way. A scene the other player began never shows in their half
+// (the user, 2026-11-11), and their arrival never glides from the other room's eye.
 static void coop_zones_new(CPUState* cpu, u32 info) {
     const u32 zones = mem_read32(cpu, info + 180u);
-    if (zones != g_coop_zones.list && g_stay_arrival_camera) {
-        g_stay_arrival_camera = false;
-        coop_p2_own_cancel(cpu, "a new room's zones");
-        g_coop_zones.list = zones;
-        memset(g_coop_zones.p2, 0, sizeof g_coop_zones.p2);
-        coop_prompt_slots_clear();
-        memset(g_coop_p2_looks, 0, sizeof g_coop_p2_looks);
-        g_coop_p2_looks_set = true;
-        memset(g_coop_states.p2, 0, sizeof g_coop_states.p2);
-        if (getenv("ED_COOP_LOG") != NULL)
-            fprintf(stderr, "[stay] player 2's first look in the room they came to keeps their arrival's camera\n");
+    if (zones == g_coop_zones.list)
         return;
-    }
-    if (zones != g_coop_zones.list) {
-        coop_p2_own_cancel(cpu, "a new room's zones");  // before their set is dropped below: the cancel pops it
-        g_coop_zones.list = zones;
-        memset(g_coop_zones.p2, 0, sizeof g_coop_zones.p2);
-        coop_prompt_slots_clear();
-        // And the looks those prompts made ready (PROMPT_LOOKS): the old room's, a press in the new one went on from them.
-        memset(g_coop_p2_looks, 0, sizeof g_coop_p2_looks);
-        g_coop_p2_looks_set = true;
+    const u32 was = g_coop_zones.list;
+    coop_p2_own_cancel(cpu, "a new room's zones");  // before their set is dropped below: the cancel pops it
+    g_coop_zones.list = zones;
+    memset(g_coop_zones.p2, 0, sizeof g_coop_zones.p2);
+    coop_prompt_slots_clear();
+    // And the looks those prompts made ready (PROMPT_LOOKS): the old room's, a press in the new one went on from them.
+    memset(g_coop_p2_looks, 0, sizeof g_coop_p2_looks);
+    g_coop_p2_looks_set = true;
+    memset(g_coop_states.p2, 0, sizeof g_coop_states.p2);
+    const s32 room = g_coop_p2 != 0u ? coop_object_room(cpu, g_coop_p2) : -1;
+    const bool kept = g_stay_arrived.on && zones == g_stay_arrived.zones && g_coop_tickets == g_stay_arrived.tickets && room == g_stay_arrived.room;
+    const bool tagged = g_stay_arrived.on;
+    g_stay_arrived.on = false;  // one use, kept or not
+    if (kept) {
+        // Modes 0 and 1 draw camera.c's own follow from g_coop_own_view, which coop_camera_step doesn't refresh there:
+        // zeroed as the drop does. Mode 2's same turn rewrites it from the kept set before any draw.
+        if (!(g_settings.mod_p2_camera == 2 || coop_p2_look_up()))
+            g_coop_own_view_frame = 0ull;
+    } else {
         g_coop_cameras.p2_set = false;
         g_coop_cameras.p2_bare = true;
         g_coop_own_view_frame = 0ull;
-        memset(g_coop_states.p2, 0, sizeof g_coop_states.p2);
     }
+    if (getenv("ED_COOP_LOG") != NULL && (tagged || coop_stay()))
+        fprintf(stderr, "[stay] player 2's zones: list 0x%08X -> 0x%08X, their room %d (slot %d): %s (frame %llu)\n", was, zones, room,
+                room != -1 ? room_slot_of(cpu, room) : -1,
+                kept ? "their arrival's camera kept" : tagged ? "not the room their arrival was cut for: dropped" : "dropped",
+                (unsigned long long)(cpu->timebase / 675000ull));
 }
+static bool coop_cameras_lent(void) { return g_coop_cameras.lent; }
 
 // Player 1 is in a new room and player 2 isn't brought yet (coop_follow, after their turn): their
 // place is the old room's numbers, which mean somewhere else in this one. Looked at there, they
@@ -16427,14 +16994,16 @@ static bool coop_scene_use_over(CPUState* cpu) {
 }
 
 // Player 1's scene, look, find or words are up (theirs: not player 2's words): what player 2's way out waits for.
+// Or player 1's door on its way with player 2 staying (design-stayer-presses §2.3: one ticket record).
 static bool coop_way_out_p1_up(CPUState* cpu) {
     return coop_p1_scene_on() || coop_player1_mid_use(cpu) || g_coop_words_free || g_coop_find_free ||
-           (sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u && !g_coop_words_theirs);
+           (sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u && !g_coop_words_theirs) || stayer_window(cpu, 1);
 }
 // Player 2's scene, close-up, words or script hold are up (not player 1's own words): what player 1's way out waits for.
+// Or player 2's door on its way with player 1 staying.
 static bool coop_way_out_p2_up(CPUState* cpu) {
     return coop_scene_p2s_on() || coop_p2_scene_on() || g_coop_screen || g_coop_words_theirs || coop_p2_holds(cpu) || g_coop_p2_words.up ||
-           coop_p2_look_up() || (sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u && !g_coop_words_free);
+           coop_p2_look_up() || (sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u && !g_coop_words_free) || stayer_window(cpu, 0);
 }
 
 static void coop_way_look_begin(CPUState* cpu, int who, u32 list, u32 count, bool waits) {
@@ -16502,6 +17071,42 @@ static void coop_way_out_go(CPUState* cpu, int who, u32 list, u32* words) {
 }
 
 static void coop_script_go_to_room(CPUState* cpu) {
+    // M12 (design-stayer-presses §5.2): a way out the stayer walks into in the other's door waits (marked, let go after the
+    // window by their next look), not passed over by R4 below. Under the window only: follow mode and today's order as were.
+    {
+        const int who = g_coop_way_look.who;
+        const bool waits = who >= 0 && g_coop_way_look.waits &&
+                           (who == 1 ? g_coop_prompt_look && !g_coop_arrived && !coop_door_turns(cpu) : g_coop_p1_scan || g_coop_p1_own_look);
+        if (waits && stayer_window(cpu, who)) {
+            g_stayer.ways++;
+            if (stayer_say(5, who))
+                fprintf(stderr, "[stayer] player %d's way out (fn66 %d) waits for player %d's door (frame %llu)\n", who + 1, (s32)cpu->gpr[3], 2 - who,
+                        (unsigned long long)(cpu->timebase / 675000ull));
+            coop_way_out_wait(cpu);
+            g_stayer_marks.way[who] = true;
+            g_stayer_marks.way_tickets[who] = g_coop_tickets;
+            cpu->gpr[3] = 0u;
+            g_hle_passthrough = false;
+            g_hle_tail_call = false;
+            return;
+        }
+    }
+    // M13 not built (design-stayer-presses §5.3, read R1): a room the stayer's own script asks for in the window is lost:
+    // printed every time and passed over, as R4 below does (§6). Before R4: under the stayer's own 8, 16 or 32 (B2 keeps their
+    // room playing) coop_room_change_on reads off, so R4 isn't reached, and fn66 would half run (let-go, motion, fade) before
+    // G1 refused its ticket.
+    {
+        const int stayer = stayer_current(cpu);
+        if (stayer >= 0 && stayer_window(cpu, stayer)) {
+            fprintf(stderr, "[stayer] A ROOM ASKED FOR BY PLAYER %d'S SCRIPT %d IN PLAYER %d'S DOOR: PASSED OVER (one ticket record; fn66 %d, busy 0x%X%s, frame %llu)\n",
+                    stayer + 1, (s32)(s16)mem_read32(cpu, cpu->gpr[13] - 23228u), 2 - stayer, (s32)cpu->gpr[3], mem_read32(cpu, cpu->gpr[13] - 23344u),
+                    coop_room_change_on(cpu) ? "" : ", R4 off under the stayer's own bits", (unsigned long long)(cpu->timebase / 675000ull));
+            cpu->gpr[3] = 0u;
+            g_hle_passthrough = false;
+            g_hle_tail_call = false;
+            return;
+        }
+    }
     if (coop_stay() && coop_room_change_on(cpu)) {  // R4: one change at a time (the ticket is one record): the second waits for a new press
         if (coop_room_change_log())
             fprintf(stderr, "[stay] a room asked for (fn66 %d) while one is on its way: passed over (frame %llu)\n", (s32)cpu->gpr[3],
@@ -16598,6 +17203,10 @@ static void coop_prompt_look(CPUState* cpu, u32 object) {
         // look record: held for good with no RETURN. The game's stepper hold turns no zones off.
         if (g_coop_p2_words.up && !coop_p2_look_up())
             mem_write32(cpu, cpu->gpr[13] - 23040u, 0u);  // zones off while their words are up, as the game has it (in the block, put back)
+        // Staying in player 1's door (design-stayer-presses §2.3): their zones on for the scan, whatever the door has the one
+        // zones word as (with it 0 the scan only clears what they stand in, 0x80134BE8). In the block, put back.
+        else if (stayer_window(cpu, 1) && !g_coop_p2_words.up && !coop_p2_scene_on() && mem_read32(cpu, cpu->gpr[13] - 23040u) == 0u)
+            mem_write32(cpu, cpu->gpr[13] - 23040u, 1u);
     }
     coop_way_look_begin(cpu, 1, args[1], args[2], p1_up);
     const bool scene_was = coop_p2_scene_on();
@@ -17138,7 +17747,10 @@ static void coop_scene_set(CPUState* cpu, u32 function) {
         // zone of their own (logs/run-20261106-120343-jtg-regm4-c2r1-m4, 4510 on). Kept, they're on what their zones
         // chose, as a player standing there with no scene would be.
         const bool own = g_coop_cameras.p2_set && !g_coop_cameras.p2_bare && !fresh;
-        const bool afresh = !own && (fresh || (chose && shared)) && !coop_left_behind(cpu);
+        // Apart (rooms/design-arrival-camera.md H7): a bare set not made in the scene is player 2's own room's start camera;
+        // remade from the game's it would be player 1's room's scene camera. Kept. A fresh one (another room's already) is
+        // remade as before, marked foreign (coop_camera_p2_in) and cut at their next own zone choice.
+        const bool afresh = !own && (fresh || (chose && shared)) && !coop_left_behind(cpu) && !(r6_apart(cpu) && !fresh);
         if (afresh && coop_p2_cameras_rest(cpu)) {  // not while their own close-up's camera is on their set (step B)
             // Theirs began in the scene, or follows the room's start (no zone of theirs has chosen): taken afresh at their
             // next turn (coop_camera_step), from where the scene leaves the game's, as before they walked in it. Its own end
@@ -17157,15 +17769,14 @@ static void coop_scene_set(CPUState* cpu, u32 function) {
 static void coop_scene_camera_set(CPUState* cpu) { coop_scene_set(cpu, SCENE_CAMERA_SET); }
 
 // R4c: the end of player 2's own room change (coop_stay_change_end) with player 1's in-world scene on (rooms/arrival-readers.md).
-// Their arrival keeps its own camera (g_stay_arrival_camera: their first look doesn't remake their set from the game's, the
-// scene's), and player 1's scene's look is armed again when the hold it rests on (bits 32 and 2, kept through the door by
+// Their arrival keeps its own camera (every bracket's arrival is tagged now: g_stay_arrived, coop_zones_new), and player 1's
+// scene's look is armed again when the hold it rests on (bits 32 and 2, kept through the door by
 // coop_play_hold's script let-go and stay_busy_clear) is there: coop_p1_close_up holds it, the busy ask answers player 2's
 // turn "not busy" with the hold opened round it (hle_coop_controller), so their arrival motion and turns go on and their
 // camera is stepped, as when both were in the room as the scene began. Nothing with no scene of player 1's on.
 static void stay_scene_look_again(CPUState* cpu) {
     if (!coop_scene_on_of(0))
         return;
-    g_stay_arrival_camera = true;
     const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u);
     const bool armed = !g_coop_p1_look && g_coop_scene_of[0].function == 0x80042974u && (busy & 34u) == 34u && !cutscene_playing(cpu);
     if (armed) {
@@ -17219,18 +17830,41 @@ static void coop_camera_chosen(CPUState* cpu) {
     const bool room_change = coop_camera_at_room_change(cpu);
     if (room_change && g_stay_bracket != 0) {  // R4: player 2's arrival with their set in: theirs
         g_coop_cameras.p2_bare = false;
+        g_stay_bracket_chose = true;  // the arrival's cut, in their set: tagged at the bracket's end (coop_stay_change_end)
         return;
     }
     if (!room_change && (g_coop_turn || g_coop_prompt_look || coop_use_theirs() || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2)) {
         if (g_coop_cameras.p2_bare && (getenv("ED_COOP_LOG") != NULL || coop_trace()))
             fprintf(stderr, "[coop] player 2's zone chose their camera (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
         g_coop_cameras.p2_bare = false;
+        // Their set was remade from player 1's while apart (another room's camera, g_stay_arrived.foreign): their first own
+        // choice is the game's own cut (fn8's c = 0: 0x801EE764 with r9 0 sets the shown record's cut-pending word,
+        // 0x801EE898-0x801EE8B4), not a blend from the other room's eye. A notify: r9 is still the argument.
+        if (cpu->pc == CAMERA_CHOOSE && g_stay_arrived.foreign) {
+            g_stay_arrived.foreign = false;
+            cpu->gpr[9] = 0u;
+            if (getenv("ED_COOP_LOG") != NULL)
+                fprintf(stderr, "[stay] player 2's first own camera in room %d after another room's: cut (frame %llu)\n", coop_object_room(cpu, g_coop_p2),
+                        (unsigned long long)(cpu->timebase / 675000ull));
+        }
         return;
     }
     if (!room_change && g_coop_cameras.p1_zones != 1)
         return;
     if (coop_stay_apart(cpu))
         return;  // ED_COOP_STAY: the room's start is the mover's; the stayer's set isn't remade from it (coop_camera_p2_in)
+    // Player 1 came into the room player 2 was already in, apart at the runner's entry (case D): both counts of the room's
+    // start (the change and player 1's first look) are player 1's; player 2's set stays theirs (design H8).
+    if (g_stay_start.on && g_stay_start.apart && g_stay_start.tickets == g_coop_tickets && g_stay_start.p2_room == g_stay_start.target &&
+        (s32)mem_read32(cpu, cpu->gpr[13] - 23276u) == g_stay_start.target && coop_object_room(cpu, g_coop_p2) == g_stay_start.target) {
+        static unsigned logged_tickets = ~0u;
+        if (getenv("ED_COOP_LOG") != NULL && logged_tickets != g_coop_tickets) {
+            logged_tickets = g_coop_tickets;
+            fprintf(stderr, "[stay] player 1 came into player 2's room %d: player 2's camera stays theirs (%s, frame %llu)\n", g_stay_start.target,
+                    room_change ? "the room change" : "player 1's first look", (unsigned long long)(cpu->timebase / 675000ull));
+        }
+        return;
+    }
     g_coop_cameras.room_choices++;
     if (g_coop_cameras.p2_bare && (getenv("ED_COOP_LOG") != NULL || coop_trace()))
         fprintf(stderr, "[coop] the room's start chose a camera (%s, frame %llu)\n", room_change ? "the room change" : "player 1's first look",
@@ -17990,7 +18624,15 @@ static bool continue_coop_use(CPUState* cpu) {
             g_coop_assist_at = 0u;
         // What it opened is theirs from this frame on: player 1's half keeps
         // their last view from before it (not a frame with its words).
-        const bool busy_new = close_use ? (mem_read32(cpu, cpu->gpr[13] - 23344u) & ~g_coop_use.busy_before) != 0u : coop_busy(cpu);
+        // B6 (design-stayer-presses.md §3.6): in the other's door countdown (the stayer's window), by what the use set
+        // itself, as close_use: the window's busy 4 (in busy_before) isn't a close-up of theirs. Taken for one, a use that
+        // opens nothing (a switch, a flag) gave player 2 the screen and the game's pad, and G2b held player 1 in the black.
+        const bool own_bits = close_use || stayer_window_on(cpu);
+        const bool busy_new = own_bits ? (mem_read32(cpu, cpu->gpr[13] - 23344u) & ~g_coop_use.busy_before) != 0u : coop_busy(cpu);
+        if (!close_use && own_bits && stayer_say(10, 1))
+            fprintf(stderr, "[stayer] player 2's use is up by its own bits only: 0x%X (busy 0x%X, before 0x%X; script %d frame %llu)\n",
+                    mem_read32(cpu, cpu->gpr[13] - 23344u) & ~g_coop_use.busy_before, mem_read32(cpu, cpu->gpr[13] - 23344u),
+                    g_coop_use.busy_before, g_coop_use.script, (unsigned long long)(cpu->timebase / 675000ull));
         if (!room && ((busy_new && !g_coop_script_hold) || g_coop_use.found)) {
             g_coop_screen = true;
             coop_hold_player1();
@@ -18522,7 +19164,8 @@ static void coop_run_script(CPUState* cpu) {
                     arrival_scene ? "arrival" : "their own", (s32)args[0], scene_was, g_coop_p2_scene, g_coop_cameras.lent, words);
         g_coop_tome_cast = false;
         coop_be_player2(cpu, false, was);
-        if (arrival_scene && scene_was && !g_coop_p2_scene && g_coop_cameras.lent && g_coop_p1_own_camera != -1)
+        // Not apart (design H12): player 1's kept set would take the game's, lent, player 2's room's camera.
+        if (arrival_scene && scene_was && !g_coop_p2_scene && g_coop_cameras.lent && g_coop_p1_own_camera != -1 && !r6_apart(cpu))
             coop_p1_scene_end_camera(cpu);  // player 1 the player again: their body
         cpu->lr = ran;
         g_hle_passthrough = false;
@@ -19011,6 +19654,58 @@ static void coop_press_drop(CoopPressKept* kept, int who, const char* why) {
         fprintf(stderr, "[coop] player %d's kept B (prompt %d script %d) let go: %s\n", who, kept->prompt, kept->script, why);
     kept->on = false;
 }
+// M11's kept exit B, pressed once more (design-stayer-presses §5.1): a door's script is one state machine for both players.
+// Room 183's OPEN DOOR (L01/119): its zone runs it at state 0 (the prompt, state 1, the room queued), the B runs it at state
+// 1 (fn66, state 0). The mover's B at that door set it back to 0, so the stayer's kept B, going in after the change, only
+// showed the prompt again and asked no room (logs/run-20261113-164130-stayer-s10b-p1-exit, frame 3836): the player would
+// press again. So once, for a B kept in the other's door only: STAYER_AGAIN_AFTER frames after it went in, with no room
+// asked for since, nothing of theirs come up meanwhile (words, a look, a find, a scene, the busy word: a locked door's words
+// say no, and are never pressed again), and the same exit prompt on show, it is pressed again by the same route.
+#define STAYER_AGAIN_AFTER 20u
+#define STAYER_AGAIN_LONGEST 90u
+typedef struct {
+    bool on, other;
+    s32 prompt, script;
+    unsigned tickets;
+    unsigned long long from;
+} StayerAgain;
+static StayerAgain g_stayer_again[2];  // [0] player 1, [1] player 2
+static void stayer_again_arm(CPUState* cpu, int who, const CoopPressKept* kept) {
+    StayerAgain* const a = &g_stayer_again[who];
+    memset(a, 0, sizeof *a);
+    if (!g_stayer_marks.kept[who] || g_stayer_marks.kept_tickets[who] != kept->tickets || g_stayer_marks.kept_prompt[who] != kept->prompt ||
+        !coop_prompt_is_exit(kept->prompt))
+        return;
+    g_stayer_marks.kept[who] = false;
+    a->on = true;
+    a->prompt = kept->prompt;
+    a->script = kept->script;
+    a->tickets = g_coop_tickets;
+    a->from = cpu->timebase / 675000ull;
+}
+static bool stayer_again_due(CPUState* cpu, int who, bool shown_same, bool own_up) {
+    StayerAgain* const a = &g_stayer_again[who];
+    if (!a->on)
+        return false;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (g_coop_tickets != a->tickets || frame > a->from + STAYER_AGAIN_LONGEST || frame < a->from) {
+        a->on = false;  // the room was asked for (or never will be by this press)
+        return false;
+    }
+    if (own_up)
+        a->other = true;
+    if (a->other) {  // something of theirs came up: the door's script answered; not pressed again
+        a->on = false;
+        return false;
+    }
+    if (frame < a->from + STAYER_AGAIN_AFTER || !shown_same)
+        return false;
+    a->on = false;
+    fprintf(stderr, "[stayer] player %d's kept B on prompt %d (script %d) asked no room: its door's script was set back by the other's door; "
+                    "pressed once more (frame %llu)\n",
+            who + 1, a->prompt, a->script, frame);
+    return true;
+}
 static bool g_coop_p1_look_open;  // player 2's turn, with the hold let go for it: the look isn't over
 static bool coop_p1_close_up(CPUState* cpu) {
     if (!g_coop_p1_look)
@@ -19023,7 +19718,10 @@ static bool coop_p1_close_up(CPUState* cpu) {
     // 32: its scene's, as the lever's. 1: its script's busy_set (fn91(1)) beside its hold, as a door that asks first
     // has it (L01/103: hold, busy, DETAIL, words with a Yes/No): the look went over at it, and the other player stood.
     // 4: the room their look's script asked for (CLIMB DOWN: its hold, then the ticket), player 2 going on through it.
-    const u32 room_bit = coop_room_change_other(cpu, true) ? COOP_BUSY_ROOM : 0u;
+    // B3 (design-stayer-presses.md §3.3): and player 2's door with player 1 staying (their window): their look isn't read
+    // "over" for the other's room bit, so R4b carries it over player 2's arrival. (B1 keeps coop_busy_ask from answering
+    // "not busy" for everyone by it in the window.)
+    const u32 room_bit = coop_room_change_other(cpu, true) || stayer_window(cpu, 0) ? COOP_BUSY_ROOM : 0u;
     // 8: player 2's words beside player 1's scene (coop_words_hold, theirs): player 1's look read as over at them.
     const bool held = (mem_read32(cpu, cpu->gpr[13] - 23344u) & ~(32u | COOP_BUSY_SCRIPT | room_bit | (g_coop_words_theirs ? 8u : 0u) | (g_coop_find_theirs ? 16u : 0u))) == 2u;
     if (g_coop_screen || cutscene_playing(cpu) || (on && !held)) {
@@ -19054,11 +19752,16 @@ static bool coop_p1_close_up(CPUState* cpu) {
 // Not a cutscene's words, and not player 2's own (their half and pad, coop_hold_player1).
 // A script's own step may have held play just before (the urn, 0x8016820C). Let go as the script's
 // end would: its input channels stay on with only the bit cleared, and player 2, standing, couldn't start.
-static bool coop_script_hold_go(CPUState* cpu) {
+// room_ok (B4, design-stayer-presses.md §3.4): the other's door countdown (busy 4) doesn't refuse it: player 1's words and
+// finds in player 2's door open with no hold (coop_no_pause, under stayer_window(cpu, 0)), so they set no busy bit and the
+// room and the mover's change go on. And a hold that is the door's own (bit 2 up at the ticket, script 132's) is never let
+// go: player 1 stands in their words anyway (the words have the focus). Player 2's (coop_their_close_up) and player 1's
+// turn (coop_player1_turn) pass false until C2.
+static bool coop_script_hold_go(CPUState* cpu, bool room_ok) {
     // Bit 1 with the hold is the script's own busy_set (fn91(1)), which many a look sets beside its hold (126 scripts;
     // a door that asks first, L01/103): it stays, and the script clears it as it ends. Refused, its words held both
     // players, as the game's words hold does: the other player stood till the words closed.
-    const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u);
+    const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u) & ~(room_ok ? COOP_BUSY_ROOM : 0u);
     // Player 1's bare scene beside (its bits 32 and 2 and the hold's channels are theirs, and stay): player 2's words
     // or find are theirs with no letting go. Refused for the scene bit, their examine's words beside player 1's block
     // scene were held the game's way and player 1's look read as over (scenes-user13 16289).
@@ -19066,6 +19769,22 @@ static bool coop_script_hold_go(CPUState* cpu) {
         return true;
     if ((busy & ~2u) != 0u && busy != (2u | COOP_BUSY_SCRIPT))
         return false;
+    // Bit 2 is let go only as player 1's own look's or scene's hold: one up at the ticket that wasn't theirs, or one up now
+    // with no look or scene of theirs (a door that holds just after its ticket), is the door's, and stays.
+    const bool p1_own_hold = g_coop_p1_look || coop_p1_scene_on();
+    if (room_ok && (busy & 2u) != 0u && (split_door_holds_play() || !p1_own_hold)) {
+        static unsigned long long told;
+        const unsigned long long frame = cpu->timebase / 675000ull;
+        if (split_log() && frame > told + 60ull) {
+            told = frame;
+            fprintf(stderr, "[stayer] player 1's words or find open with no hold: the door's own hold stays (%s; busy 0x%X; frame %llu)\n",
+                    split_door_holds_play() ? "bit 2 at the ticket" : "no look or scene of player 1's", mem_read32(cpu, cpu->gpr[13] - 23344u), frame);
+        }
+        return true;
+    }
+    if (room_ok && stayer_say(9, 0))
+        fprintf(stderr, "[stayer] player 1's words or find open with no hold in player 2's door (busy 0x%X; frame %llu)\n",
+                mem_read32(cpu, cpu->gpr[13] - 23344u), (unsigned long long)(cpu->timebase / 675000ull));
     if ((busy & 2u) != 0u) {
         // What its own letting go does (0x80042B30(0), the step's 0x8016A6DC): 0x80199EA0 alone left
         // r13 - 25696 on, which the Tome's opening asks (0x80006D0C), and the page after a circle never
@@ -19092,7 +19811,7 @@ static bool coop_their_close_up(CPUState* cpu) {
     if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || cutscene_playing(cpu) ||
         !((g_coop_use.active && g_coop_use.p2) || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 || coop_close_up_p2s()))
         return false;
-    return coop_script_hold_go(cpu);
+    return coop_script_hold_go(cpu, false);  // (B4: room_ok only with C2; with no hold G2 wouldn't wait for their words)
 }
 
 static bool coop_no_pause(CPUState* cpu) {
@@ -19100,7 +19819,7 @@ static bool coop_no_pause(CPUState* cpu) {
     if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || cutscene_playing(cpu) || (g_coop_use.active && g_coop_use.p2) ||
         mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2)
         return false;
-    return coop_script_hold_go(cpu);
+    return coop_script_hold_go(cpu, stayer_window(cpu, 0));  // (B4: player 1 staying through player 2's door)
 }
 
 #define WORDS_HOLD 0x80042A8Cu
@@ -19116,6 +19835,31 @@ static bool g_coop_words_free;
 #define PROMPT_LET_GO 0x80024CDCu
 static void coop_close_up_kept(CPUState* cpu) {
     g_hle_passthrough = true;
+    // F2a (design-stayer-findings §F2.3): inside R4's bracket (player 2's change, F2c's flag) the game's prompt slots are
+    // player 1's, saved at the open and written back at the end, and the looks are theirs. The arrival's prompt reset
+    // (0x801172B0 at 0x80152134 -> 0x80116E70(slot, 1) -> here) is meant for the one who arrives, whose prompts are the
+    // host's: a -2's let-go (0x80024B24(0), the close-up's cancel) belongs to nobody in this change. Passed over, as the lend
+    // route's keep below; the game's slot zeroing (0x80116EC8) and the shown record's reset still run. Before today's test,
+    // which returns here (r13-21492 is player 2 in the bracket). Not with the cameras lent: the slots are then player 2's.
+    if (g_stay_bracket != 0 && g_stay_bracket_p1 && g_settings.mod_coop && sda_ready(cpu)) {
+        // The caller of 0x80116E70 (its LR save, 0x80116E7C: stw r0, 20(r1)); the arrival's reset is 0x801172B0 at lr 0x80152138.
+        const u32 caller = guest_ram_range_valid(cpu, cpu->gpr[1] + 20u, 4u) ? mem_read32(cpu, cpu->gpr[1] + 20u) : 0u;
+        if (guest_backchain_contains(cpu, 0x80152138u, 0x8015213Cu))
+            g_stay_bracket_p1_log.let_go = true;
+        if ((s32)cpu->gpr[3] == -2 && !coop_cameras_lent()) {
+            g_stay_bracket_p1_log.let_go = true;
+            if (g_stay_bracket_p1_log.passed++ < 8u && split_log()) {
+                const int slot = (s32)cpu->gpr[4];
+                const u32 look = stay_slot_look(cpu, slot);
+                fprintf(stderr, "[stay] player 2's change passes over the let-go of player 1's close-up prompt: slot %d, look %u kind %u stage %d (from 0x%08X): it stays theirs (frame %llu)\n",
+                        slot, (look - 0x80307108u) / 32u, mem_read32(cpu, look), (s32)mem_read32(cpu, look + 8u), caller,
+                        (unsigned long long)(cpu->timebase / 675000ull));
+            }
+            g_hle_passthrough = false;
+            g_hle_tail_call = false;
+            return;
+        }
+    }
     if (!g_settings.mod_coop || g_coop_p2 == 0u || !g_coop_screen || (s32)cpu->gpr[3] != -2 || !sda_ready(cpu) ||
         mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2)
         return;
@@ -19345,6 +20089,19 @@ static void coop_find_hold(CPUState* cpu) {
 #define COOP_TIMERS_ASKED 0x80008494u  // the main loop's ask of bit 2 before the script timers
 static void coop_flags_ask(CPUState* cpu) {
     g_hle_passthrough = true;
+    // P1 (design-stayer-presses §2.2): the world frame's ask at 0x800084DC (lr 0x800084E0) clears the shown prompt
+    // (0x80117360(0)) on any bit of r13-24048; the ticket's 0x10000 hid player 1's prompts for player 2's whole door. Asked
+    // there in the window with player 1 staying, the door's bit is left out (bit 4 never: it may be player 1's own fn139).
+    // (Not with player 2's cameras and prompts lent in: the shown record would be theirs, pressed by player 1's B.)
+    if (cpu->lr == 0x800084E0u && stayer_window(cpu, 0) && !g_coop_cameras.lent && sda_ready(cpu)) {
+        const u32 word = mem_read32(cpu, cpu->gpr[13] - 24048u), door = stayer_door_bits();
+        if ((word & door) == 0u)
+            return;
+        hle_set_u32(cpu, word & cpu->gpr[3] & ~door);
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
     if (cpu->lr != COOP_TIMERS_ASKED || !g_coop_find_theirs || !coop_p1_scene_on() || g_coop_p1_look_kind != 3 || !sda_ready(cpu))
         return;
     hle_set_u32(cpu, mem_read32(cpu, cpu->gpr[13] - 24048u) & cpu->gpr[3] & ~2u);
@@ -19400,7 +20157,10 @@ static bool coop_player_held(CPUState* cpu, int k) {
                (g_tome_copy_open && g_tome_copy_p1);
     return g_coop_screen || g_coop_words_theirs || coop_p2_holds(cpu) || (g_tw.sharing && g_coop_tome_owner == 1) ||
            (g_tome_copy_open && !g_tome_copy_p1) || g_coop_p2_words.up || coop_p2_look_up() ||
-           g_coop_p2_find.up;  // (step D: the find's hold, before its window and after)
+           g_coop_p2_find.up ||  // (step D: the find's hold, before its window and after)
+           // B3 (design-stayer-presses.md §3.3): their own scene in player 1's door, where coop_p2_holds' room bit (player 2's
+           // own door only) reads it as not theirs. Not widened there: its p2_hold branch would take player 1's controller.
+           (stayer_window(cpu, 1) && coop_p2_scene_on());
 }
 // Which player an id is (0, 1), or -1. Player 1's while player 2 is the player (their turn, or a call made as them) is
 // the one kept as their turn began.
@@ -19432,20 +20192,60 @@ static void coop_gate_log(CPUState* cpu, const char* where) {
             g_coop_cameras.lent, g_coop_tome_owner, hle_coop_tome_shares(), game_menu_open(cpu), cutscene_playing(cpu), frame);
 }
 
-static void coop_busy_ask(CPUState* cpu) {
+static void coop_busy_ask_answer(CPUState* cpu) {
     g_hle_passthrough = true;
+    // Inside a door's countdown with the other player staying (design-split-hold.md S1, K1/K7): the mover's own filter
+    // and the room-changers' asks keep the game's word, before today's cases, which answer for everyone.
+    if (split_busy_kept(cpu))
+        return;
+    // B1 (design-stayer-presses.md §3.1): in the stayer's window with ED_STAYER_PRESSES allowing them, no "not busy for
+    // everyone". Cases (a), (b), p1_free and (d) below answer 0 to every caller, the mover's node update and motion, the
+    // message pump, kind 19 and K7 among them; with player 1's look kept up through player 2's door (B3), or player 2's
+    // lend-route close-up, they'd let the mover's change and the room's kept kinds run free. Only the allow list answers.
+    if (stayer_window_on(cpu)) {
+        if (split_busy_allows(cpu)) {
+            hle_set_u32(cpu, 0u);
+            g_hle_passthrough = false;
+        }
+        return;
+    }
     // And player 1's words or find with no hold, under their script's own busy bit (fn91(1), a door that asks first):
     // with the hold let go the word was 1, not 0, so main's controller (0x8000749C), where player 2's turn runs, was
     // passed over, and player 2 stood till the words closed. Player 1 stays still by the window's lock, as in any words.
     const bool p1_free = (g_coop_words_free || g_coop_find_free) && sda_ready(cpu) &&
                          mem_read32(cpu, cpu->gpr[13] - 23344u) == COOP_BUSY_SCRIPT && !cutscene_playing(cpu) && !game_menu_open(cpu);
-    if ((g_coop_screen && (g_coop_words_theirs || coop_busy(cpu)) && !cutscene_playing(cpu) && !game_menu_open(cpu)) || coop_p1_close_up(cpu) || p1_free ||
-        coop_p2_holds(cpu)) {
+    // F2b (design-stayer-findings §F2.3): inside R4's bracket (F2c's flag) the look is player 1's and the window is over, so
+    // coop_p1_close_up would read it "over" (no room bit) and clear it (lr 0x80058E84, the arrival's player handler), and
+    // R4b's keep at 0x80152184 would find no close-up. Not asked there while player 1 is in a close-up (a close-up inside
+    // their scene too, impl E); the other terms answer as today.
+    const bool bracket_p1 = g_stay_bracket != 0 && g_stay_bracket_p1 && coop_p1_in_close_up(cpu);
+    const bool screen_term = g_coop_screen && (g_coop_words_theirs || coop_busy(cpu)) && !cutscene_playing(cpu) && !game_menu_open(cpu);
+    if (bracket_p1 && !screen_term && !g_stay_bracket_p1_log.kept_said && coop_trace()) {
+        g_stay_bracket_p1_log.kept_said = true;
+        fprintf(stderr, "[trace] player 1's look kept through player 2's change: not read at lr 0x%08X (busy %u, frame %llu)\n", cpu->lr,
+                sda_ready(cpu) ? mem_read32(cpu, cpu->gpr[13] - 23344u) : 0u, (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    if (screen_term || (!bracket_p1 && coop_p1_close_up(cpu)) || p1_free || coop_p2_holds(cpu)) {
         hle_set_u32(cpu, 0u);
         g_hle_passthrough = false;
         coop_gate_log(cpu, "busy ask answers not busy");
+    } else if (split_busy_allows(cpu)) {  // (S1's allow list A1-A3: the stayer's room's nodes and the stayer's events)
+        hle_set_u32(cpu, 0u);
+        g_hle_passthrough = false;
     } else {
         coop_gate_log(cpu, "busy ask left to the game");
+    }
+}
+static void coop_busy_ask(CPUState* cpu) {
+    coop_busy_ask_answer(cpu);
+    // F2b's check (design-stayer-findings §F2.3, impl A / goal 1.5): after the arrival's let-go F2a leaves bit 2 in the
+    // word where today it was cleared, so an ask left to the game there reads 6 or 2 where today it read 4 or 0. Each one
+    // in the bracket after that point is listed (the trace only; nothing is changed by it).
+    if (g_stay_bracket != 0 && g_stay_bracket_p1 && g_stay_bracket_p1_log.let_go && coop_trace() && g_stay_bracket_p1_log.asks < 16u) {
+        g_stay_bracket_p1_log.asks++;
+        fprintf(stderr, "[trace] bracket ask after the let-go: lr 0x%08X, node 0x%08X (r28 0x%08X), busy %u, %s (frame %llu)\n", cpu->lr, cpu->gpr[31], cpu->gpr[28],
+                sda_ready(cpu) ? mem_read32(cpu, cpu->gpr[13] - 23344u) : 0u, g_hle_passthrough ? "left to the game" : "answered not busy",
+                (unsigned long long)(cpu->timebase / 675000ull));
     }
 }
 
@@ -19489,6 +20289,32 @@ static void coop_quick_cast_ask(CPUState* cpu) {
     const bool p2 = mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u);
     if (!coop_room_change_other(cpu, p2))
         return;
+    // The stayer's presses (design-stayer-presses §2.6): in the window the stayer's quick spell goes in (0x800069DC's own gates
+    // are none of the ticket's), but a summon (class 0x820: its body returns by a ticket) is kept and cast after the tail.
+    if (stayer_window(cpu, p2 ? 1 : 0)) {
+        const int who = p2 ? 1 : 0;
+        const u32 spell = guest_ram_range_valid(cpu, cpu->gpr[4], 4u) ? mem_read32(cpu, cpu->gpr[4]) : 0u;
+        if (spell != 0u && STAYER_SUMMON(spell)) {
+            if (g_stayer.summon[who].on && g_stayer.summon[who].spell == spell) {  // (asked again: already kept, told once)
+                g_hle_passthrough = false;
+                g_hle_tail_call = false;
+                return;
+            }
+            g_stayer.summon[who].on = true;
+            g_stayer.summon[who].spell = spell;
+            g_stayer.kept++;
+            fprintf(stderr, "[stayer] player %d's summon 0x%08X waits for player %d's door (frame %llu)\n", who + 1, spell, 2 - who,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+            g_hle_passthrough = false;
+            g_hle_tail_call = false;
+            return;
+        }
+        g_stayer.casts++;
+        if (stayer_say(2, who))
+            fprintf(stderr, "[stayer] player %d's quick spell 0x%08X goes in through player %d's door (frame %llu)\n", who + 1, spell, 2 - who,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        return;
+    }
     if (coop_room_change_log())
         fprintf(stderr, "[coop] player %d's quick spell waits: player %d's room change is on its way (frame %llu)\n", p2 ? 2 : 1, p2 ? 1 : 2,
                 (unsigned long long)(cpu->timebase / 675000ull));
@@ -19557,7 +20383,7 @@ static void coop_player1_turn(CPUState* cpu) {
         mem_write32(cpu, cpu->gpr[13] - 23344u, busy_was);
     } else if ((busy_was & ~COOP_BUSY_SCRIPT) == 2u && guest_ram_range_valid(cpu, hold_channel, 20u) && mem_read32(cpu, hold_channel + 16u) != 0u) {
         // (With the script's busy_set beside it too: a door that asks first, its DETAIL, held player 1.)
-        coop_script_hold_go(cpu);
+        coop_script_hold_go(cpu, false);
         mem_write32(cpu, cpu->gpr[13] - 23344u, busy_was);
     }
     const u32 node = cpu->gpr[3];
@@ -19631,20 +20457,20 @@ static void coop_player_turn(CPUState* cpu);
 // away. Left out altogether, the pick up showed before the circle's scene and B skipped it. So: as
 // the game has it in a close-up, with the hold's channel on and player 2 the player.
 #define COOP_PROMPT_CHOOSE 0x80117628u
-static void coop_prompt_choose(CPUState* cpu) {
-    static bool running;
+static bool g_prompt_choose_running;
+static void coop_prompt_choose_today(CPUState* cpu) {
     g_hle_passthrough = true;
     // Player 1's look: told nobody's busy, the pick up showed before its scene ended, and B skipped it.
     // As in player 2's close-up below, with them the player already. Not in player 2's turn.
-    if (!running && g_coop_p1_look && !g_coop_p1_look_open && !g_coop_turn && !g_coop_use.active && sda_ready(cpu)) {
+    if (!g_prompt_choose_running && g_coop_p1_look && !g_coop_p1_look_open && !g_coop_turn && !g_coop_use.active && sda_ready(cpu)) {
         const u32 look_channel = mem_read32(cpu, cpu->gpr[13] - 23060u);
         if (guest_ram_range_valid(cpu, look_channel, 20u)) {
             const u32 mask_was = mem_read32(cpu, look_channel + 16u), busy_was = mem_read32(cpu, cpu->gpr[13] - 23344u), lr = cpu->lr;
             u32 ignore = 0u;
             mem_write32(cpu, look_channel + 16u, 0x0FFFFFFFu);
-            running = true;
+            g_prompt_choose_running = true;
             hle_guest_call(cpu, COOP_PROMPT_CHOOSE, NULL, 0, 0.0, &ignore);
-            running = false;
+            g_prompt_choose_running = false;
             mem_write32(cpu, look_channel + 16u, mask_was);
             mem_write32(cpu, cpu->gpr[13] - 23344u, busy_was);
             cpu->lr = lr;
@@ -19653,7 +20479,7 @@ static void coop_prompt_choose(CPUState* cpu) {
             return;
         }
     }
-    if (running || !g_coop_screen || g_coop_use.active || !sda_ready(cpu))
+    if (g_prompt_choose_running || !g_coop_screen || g_coop_use.active || !sda_ready(cpu))
         return;
     const u32 channel = mem_read32(cpu, cpu->gpr[13] - 23060u);
     if (!guest_ram_range_valid(cpu, channel, 20u))
@@ -19662,12 +20488,40 @@ static void coop_prompt_choose(CPUState* cpu) {
     u32 was[5], ignore = 0u;
     mem_write32(cpu, channel + 16u, 0x0FFFFFFFu);
     coop_be_player2(cpu, true, was);
-    running = true;
+    g_prompt_choose_running = true;
     hle_guest_call(cpu, COOP_PROMPT_CHOOSE, NULL, 0, 0.0, &ignore);
-    running = false;
+    g_prompt_choose_running = false;
     coop_be_player2(cpu, false, was);
     mem_write32(cpu, channel + 16u, mask_was);
     cpu->lr = lr;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+// P1 (design-stayer-presses §2.2): the chooser returns at 0x801176B4 while r13-24048 is not 0, read directly. One wrapper,
+// first: in the window with player 1 staying, the door's bit is out of the word for whatever today's code runs (player 1's
+// look branch with its channel opened, player 2's close-up's, or the plain choosing as a guest call), and back after.
+static void coop_prompt_choose(CPUState* cpu) {
+    if (g_prompt_choose_running || g_coop_turn || !stayer_window(cpu, 0) || g_coop_cameras.lent || !sda_ready(cpu)) {
+        coop_prompt_choose_today(cpu);
+        return;
+    }
+    const u32 at = cpu->gpr[13] - 24048u, door = stayer_door_bits(), word = mem_read32(cpu, at);
+    if ((word & door) == 0u) {
+        coop_prompt_choose_today(cpu);
+        return;
+    }
+    mem_write32(cpu, at, word & ~door);
+    coop_prompt_choose_today(cpu);
+    if (g_hle_passthrough) {  // today's would run the game's own: run here, inside the bracket
+        const u32 lr = cpu->lr;
+        u32 ignore = 0u;
+        g_prompt_choose_running = true;
+        hle_guest_call(cpu, COOP_PROMPT_CHOOSE, NULL, 0, 0.0, &ignore);
+        g_prompt_choose_running = false;
+        cpu->lr = lr;
+    }
+    mem_write32(cpu, at, mem_read32(cpu, at) | (word & door));
+    g_stayer.unmasked++;
     g_hle_passthrough = false;
     g_hle_tail_call = false;
 }
@@ -19793,6 +20647,8 @@ static void coop_scan_room_start(CPUState* cpu) {
     g_coop_cameras.p1_zones = first ? 1 : 2;
     hle_guest_call(cpu, COOP_SCAN, args, 4, 0.0, &answer);
     g_coop_cameras.p1_zones = 0;
+    if (first)
+        g_stay_start.on = false;  // player 1's first look in the fade: the last count of the room's start (design H8)
     cpu->gpr[3] = answer;
     g_hle_passthrough = false;
     g_hle_tail_call = false;
@@ -19889,7 +20745,10 @@ static void coop_scan_player1(CPUState* cpu) {
     // Player 1 going on through player 2's room change: their zones aren't looked at till they're brought along. A way out
     // or a scene of theirs would ask for a second room, or play, over the one on its way. The look's answer isn't used
     // (0x801335C4).
-    if (!g_coop_prompt_look && !g_coop_p1_scan && coop_room_change_other(cpu, false) && cpu->gpr[3] != mem_read32(cpu, g_coop_p2 + 52u)) {
+    // Staying in player 2's door (design-stayer-presses §2.3), they look as at any time: their own look below, a way out
+    // waiting for the door (coop_way_out_p2_up).
+    if (!g_coop_prompt_look && !g_coop_p1_scan && coop_room_change_other(cpu, false) && cpu->gpr[3] != mem_read32(cpu, g_coop_p2 + 52u) &&
+        !stayer_window(cpu, 0)) {
         cpu->gpr[3] = 0u;
         g_hle_passthrough = false;
         g_hle_tail_call = false;
@@ -19916,9 +20775,16 @@ static void coop_scan_player1(CPUState* cpu) {
             // into the room during player 2's block-holes scene and never got CameraRgn07's camera, their half left on
             // Camera25's rail end, pointed at player 2 (the user's play, logs/run-20261110-101457-follow-after, 7200-7600).
             const u32 zones_were = mem_read32(cpu, cpu->gpr[13] - COOP_ZONES_ON);
-            const bool zones_on = zones_were == 0u && coop_p2_scene_on() && !cutscene_playing(cpu);
+            const bool p1_stays = stayer_window(cpu, 0);  // (design-stayer-presses §2.3: player 2's door on its way)
+            const bool zones_on = zones_were == 0u && (coop_p2_scene_on() || p1_stays) && !cutscene_playing(cpu);
             if (zones_on)
                 mem_write32(cpu, cpu->gpr[13] - COOP_ZONES_ON, 1u);
+            if (p1_stays) {
+                g_stayer.looks++;
+                if (stayer_say(3, 0))
+                    fprintf(stderr, "[stayer] player 1's zone look goes on through player 2's door (zones %u; frame %llu)\n", zones_were,
+                            (unsigned long long)(cpu->timebase / 675000ull));
+            }
             static bool said;
             if (getenv("ED_COOP_LOG") != NULL && said != zones_on) {
                 said = zones_on;
@@ -20023,7 +20889,11 @@ static void hle_coop_controller(CPUState* cpu) {
     if (both_scenes && g_coop_cameras.lent)
         coop_player1_camera(cpu);
     CoopHoldKept look_hold;
-    if (p1_look) {
+    // B3 (design-stayer-presses.md §3.3): not in player 2's door with player 1 staying (their look kept up through it):
+    // player 2 is the mover then, in their door's motion, and their turn with busy 0 would let K1 pass 0 to the mover's
+    // filter. Their turn runs through coop_door_turns as today.
+    const bool look_hold_open = p1_look && !stayer_window(cpu, 0);
+    if (look_hold_open) {
         coop_hold_open(cpu, &look_hold);
         g_coop_p1_look_open = true;
     }
@@ -20048,7 +20918,25 @@ static void hle_coop_controller(CPUState* cpu) {
     // them still from the ticket on (anim 15, stick read), and they stood through the fade (L01/103,
     // run-20261106-051733-jtg-dh1-c1p2ladder 2786-2834).
     static bool room_was;
-    const bool room_turn = !p1_look && !p2_hold && coop_room_change_other(cpu, false);
+    // B5 (design-stayer-presses.md §3.5): player 1 staying stands in their own look, words and find (no hold, so the
+    // room's own countdown is all that's on): the game's controller runs for them, as at any time. Their turn would clear
+    // the focus (coop_player1_turn) and walk them under their words.
+    static bool p1_stood;  // a B5 pause in this room change: room_turn comes back from the game's copy, not g_coop_p1_free
+    const bool p1_stands = stayer_window(cpu, 0) &&
+                           (g_coop_words_free || g_coop_find_free || g_coop_p1_look ||
+                            (sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u && !g_coop_words_theirs));
+    // (Kept through the window: the stayer's own scene (bit 32, which B2 lets run) reads the room change off while it's up.)
+    if (!stayer_window(cpu, 0) && !coop_room_change_other(cpu, false))
+        p1_stood = false;
+    if (p1_stands && !p1_look && !p2_hold && coop_room_change_other(cpu, false) && stayer_say(11, 0))
+        fprintf(stderr, "[stayer] player 1 stands in their own look, words or find through player 2's door (words %d find %d look %d window %u; frame %llu)\n",
+                g_coop_words_free, g_coop_find_free, g_coop_p1_look, sda_ready(cpu) ? mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u : 0u,
+                (unsigned long long)(cpu->timebase / 675000ull));
+    const bool room_turn = !p1_look && !p2_hold && coop_room_change_other(cpu, false) && !p1_stands;
+    // Any pause of room_turn in the window for player 1's own thing: B5's stand, their look (B3 keeps it up through the
+    // door, and p1_look turns room_turn off), or their own scene. The game's controller ran them through it.
+    if (stayer_window(cpu, 0) && !room_turn && (p1_stands || p1_look || coop_p1_scene_on()))
+        p1_stood = true;
     // Player 1's words or find with no hold (coop_no_pause), from a look whose script set its own busy bit beside its
     // hold (fn91(1): a door that asks first, L01/103): the bit stays on through the words, for the script to clear,
     // and player 2 stood still under it, their stick read. Their turn runs without it, as with the hold's in a look.
@@ -20060,7 +20948,7 @@ static void hle_coop_controller(CPUState* cpu) {
     coop_player_turn(cpu);
     if (busy_out)
         mem_write32(cpu, cpu->gpr[13] - 23344u, mem_read32(cpu, cpu->gpr[13] - 23344u) | busy_was);
-    if (p1_look) {
+    if (look_hold_open) {
         g_coop_p1_look_open = false;
         coop_hold_shut(cpu, &look_hold);
     }
@@ -20072,8 +20960,15 @@ static void hle_coop_controller(CPUState* cpu) {
         // let go their controller still stood them (event 45 each frame, their input's status 0x400, no stick: the room change
         // of a prompt player 2 pressed, OPEN DOOR 1212 and the ladder's Yes, not a walk-in door).
         CoopHoldKept room_kept;
+        g_stayer.room_turn_frame = cpu->timebase / 675000ull;  // (ED_STAYER_LOG's frame line)
         g_coop_p1_turn_fresh = !room_was;
-        g_coop_p1_from_free = !room_was;
+        // (B5: after a pause in their own look, words or find, from the game's copy: g_coop_p1_free is saved only at busy 0,
+        // so it's from before the ticket, and would bring back the stick and buttons of before the door.)
+        g_coop_p1_from_free = !room_was && !p1_stood;
+        if (!room_was && p1_stood && stayer_say(12, 0))
+            fprintf(stderr, "[stayer] player 1's turn through player 2's door again, from the game's copy (frame %llu)\n",
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        p1_stood = false;
         coop_hold_open(cpu, &room_kept);
         coop_player1_turn(cpu);
         coop_hold_shut(cpu, &room_kept);
@@ -20706,10 +21601,18 @@ static void coop_player_turn(CPUState* cpu) {
         coop_bytes(cpu, prompt, p1_prompt, sizeof p1_prompt, true);
     // Through player 1's room change their zones aren't looked at, and their B starts nothing: a way out or a scene
     // would ask for a second room, or play, over the one on its way. Brought along, they look again.
-    if (!scan && g_coop_p2_is_player && room_other) {
+    // Staying in player 1's door (ED_COOP_STAY's stay, design-stayer-presses §2.3), they look and press as at any time: their
+    // way out waits for it (coop_way_out_p1_up, coop_script_go_to_room), an exit prompt's B is kept (M11).
+    const bool p2_stays = room_other && stayer_window(cpu, 1);
+    if (!scan && g_coop_p2_is_player && room_other && !p2_stays) {
         g_coop_prompt = -1;
         g_coop_prompt_script = 0;
     } else if (!scan && g_coop_p2_is_player) {
+        if (p2_stays) {
+            g_stayer.looks++;
+            if (stayer_say(3, 1))
+                fprintf(stderr, "[stayer] player 2's zone look goes on through player 1's door (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+        }
         coop_prompt_look(cpu, now[0]);
         // Their B with a prompt: its script runs at player 1's controller
         // (coop_use_start).
@@ -20739,7 +21642,21 @@ static void coop_player_turn(CPUState* cpu) {
                     fprintf(stderr, "[coop] player 2's press starts nothing: a scene of their own is on\n");
             } else if (coop_player1_mid_use(cpu)) {
                 coop_press_keep(&g_coop_p2_kept, 2, g_coop_prompt, g_coop_prompt_script, "player 1's look or find is up");
+            } else if (p2_stays && coop_prompt_is_exit(g_coop_prompt)) {
+                // M11 (design-stayer-presses §5.1): one ticket record. Kept, it goes in after the change: in a split their
+                // OPEN DOOR follows the mover by their own ticket.
+                g_stayer.kept++;
+                coop_press_keep(&g_coop_p2_kept, 2, g_coop_prompt, g_coop_prompt_script, "player 1's door is on its way");
+                g_stayer_marks.kept[1] = true;
+                g_stayer_marks.kept_tickets[1] = g_coop_p2_kept.tickets;
+                g_stayer_marks.kept_prompt[1] = g_coop_p2_kept.prompt;
             } else {
+                if (p2_stays) {
+                    g_stayer.presses++;
+                    if (stayer_say(4, 1))
+                        fprintf(stderr, "[stayer] player 2's B on prompt %d (script %d) goes in through player 1's door (frame %llu)\n", g_coop_prompt,
+                                g_coop_prompt_script, (unsigned long long)(cpu->timebase / 675000ull));
+                }
                 coop_press_drop(&g_coop_p2_kept, 2, "pressed again");
                 g_coop_use_script = g_coop_prompt_script;
                 g_coop_use_prompt = g_coop_prompt;
@@ -20761,16 +21678,26 @@ static void coop_player_turn(CPUState* cpu) {
             } else {
                 kept->gone = 0u;
                 if (coop_player1_mid_use(cpu) || coop_p2_scene_on() || g_coop_screen || coop_door_turns(cpu) || g_coop_use.active ||
-                    g_coop_use_script != 0 || g_coop_tome_owner >= 0) {
+                    g_coop_use_script != 0 || g_coop_tome_owner >= 0 || (stayer_switch_allows(1) && split_counting(cpu))) {  // (M11: not in a window)
                     kept->free = 0u;
                 } else if (++kept->free >= COOP_PRESS_SETTLE) {
                     kept->on = false;
                     g_coop_use_script = kept->script;
                     g_coop_use_prompt = kept->prompt;
+                    stayer_again_arm(cpu, 1, kept);
                     if (getenv("ED_COOP_LOG") != NULL)
                         fprintf(stderr, "[coop] player 2's kept B goes in: prompt %d script %d (frame %llu)\n", kept->prompt, kept->script,
                                 (unsigned long long)(cpu->timebase / 675000ull));
                 }
+            }
+        }
+        // A kept exit B of the other's door that asked no room: once more (stayer_again_due).
+        if (g_stayer_again[1].on && !g_coop_use.active && g_coop_use_script == 0) {
+            const StayerAgain* const a = &g_stayer_again[1];
+            const bool own_up = coop_p2_own_up() || coop_p2_scene_on() || g_coop_screen || coop_busy(cpu);
+            if (stayer_again_due(cpu, 1, g_coop_prompt == a->prompt && g_coop_prompt_script == a->script, own_up)) {
+                g_coop_use_script = g_coop_prompt_script;
+                g_coop_use_prompt = g_coop_prompt;
             }
         }
     }
@@ -20795,8 +21722,11 @@ static void coop_player_turn(CPUState* cpu) {
     // Their quick spells wait through player 1's room change (as player 1's through theirs: coop_quick_cast_ask) and in the
     // new room until coop_follow brings them (coop_left_behind): cast there, at the old room's numbers, 30 frames after
     // player 1's room change (logs/run-20261106-092849-jtg-dc3-c12p1-p2cast, frame 4796).
+    // Staying in player 1's door (design-stayer-presses §2.6), their quick spells go in, with the copy Tome only (a cast that
+    // asks for the Tome opens their copy; without it, the path that makes them the game's player).
+    const bool quick_lifted = room_other && stayer_window(cpu, 1) && tome_copy_mode() == 2;
     if (g_coop_p2_is_player)
-        coop_quick_cast(cpu, room_other || coop_left_behind(cpu));  // their quick spells, as the player
+        coop_quick_cast(cpu, (room_other && !quick_lifted) || coop_left_behind(cpu));  // their quick spells, as the player
     const bool ran = hle_guest_call(cpu, COOP_CONTROLLER, &p2, 1, 0.0, &ignore);
     if (g_coop_p2_is_player)
         coop_camera_step(cpu);
@@ -21232,6 +22162,10 @@ static void coop_follow(CPUState* cpu, u32 player) {
     // either player anywhere.
     static float was[3], stood_z;
     static unsigned inside;
+    // A door's countdown with the other staying (design-split-hold.md S4): nobody is put anywhere for its second, and the
+    // trackers above wait (after it, apart, stood_z is NAN below; together they go on from where they were).
+    if (split_on(cpu))
+        return;
     const float z2 = guest_read_f32(cpu, o2 + 8u);
     if (mem_read32(cpu, o2 + COOP_OBJECT_ROOM) == room) {
         float now[3];
@@ -24221,6 +25155,2086 @@ static bool r6_room_loaded(CPUState* cpu, s32 room) {
     return (s32)(s16)(w >> 16) == room && ((w >> 8) & 0xFFu) != 0u && (w & 0xFFu) != 0u;
 }
 
+// ---- The stayer's room plays on through the other's door countdown (docs/research/separate-rooms/design-split-hold.md §2-3,
+// §11 and the final decisions of §19; readers b0-k7, b1b2-ticket-death, b3-input-lock, hold, mover, stayer). One player takes
+// a door (the mover) and the other stays (ED_COOP_STAY): the ticket (0x80155770) sets busy 4, and for its countdown every
+// node of the room asking "busy?" stood (the node update 0x8000749C and the motion steps ask busy, then the node's +28 & 8),
+// and the stayer's own events (the player's filter at 0x80058E80) were swallowed on the word alone. Nothing is written: the
+// word stays 4 and the ticket the game's. The busy ask (coop_busy_ask) answers "not busy" to a short read allow list for the
+// stayer's room only (A1-A3); the mover's own filter and the room-changers keep the word (K1, K7) before today's cases; the
+// door's 102 is kept from the shared room's nodes (S2); creatures after the mover take up the stayer (S3); nobody is
+// re-placed (S4); and five guards bound what can begin in the window: a second ticket refused and a room request held (G1),
+// the countdown waiting for a scene or cutscene begun in it (G2), no window for a stayer mid-cast (G3), a route job run whole
+// (G4), a direct room load told (G5). Every path opens only with g_split.on: co-op, player 2 there, ED_COOP_STAY's stay with
+// ED_ROOM_SLOTS=2's installs (g_split_ready), outside the Tome copy's turn. Solo and follow mode never set it.
+// Testing: ED_SPLIT_HOLD unset or 1 both shapes (the shared room, the stayer's own room apart), "split" the shared room only,
+// 0 off; ED_SPLIT_TARGET_MOVER=1 leaves S3 off (creatures may stay on the mover, so K1 is exercised). [split] lines with
+// ED_COOP_ENEMY_LOG or ED_COOP_LOG; G1's and G5's always.
+#define SPLIT_TICKET_WRITER 0x80155770u
+#define SPLIT_TICKET_TICK 0x80155830u
+#define SPLIT_REQUESTS 0x800B7208u  // the request dispatcher (r13-25172 the request, r13-25176 its delay)
+#define SPLIT_SEND 0x801F57C0u      // a message's send; the broadcast's call (lr 0x801F568C) has the receiver node in r31
+#define SPLIT_SEND_BROADCAST 0x801F568Cu
+#define SPLIT_INPUT_LOCK 0x800443E4u  // the ticket's lock: 0x800068E0(n) and 0x8013E99C(n), each an unsigned max
+#define SPLIT_PLAYER_FILTER 0x80058E84u  // lr of the player handler's busy ask (node in r31, message in r28, event in r18)
+#define SPLIT_PUMP 0x801F5420u           // lr of the delayed messages' busy ask (message in r29: +0 event, +8 receiver id)
+#define SPLIT_CINEMATIC_TICKET 0x8012D2F0u  // lr of a cinematic's own return ticket (0x8012D1A0)
+#define SPLIT_WAIT_LONGEST 900u  // G2: a wait this long lets the countdown go on (never a door that never comes)
+static bool g_split_ready;  // its hooks installed (find_coop's ED_COOP_STAY block)
+static bool g_split_lock_ok;  // 0x800443E4 as read (G2's renewal of the mover's lock)
+static struct {
+    bool on;       // a window: from the ticket to the change's tail (split_counting asks the ticket itself)
+    bool shared;   // both in one room at the ticket (else apart: the stayer's own room)
+    int mover;     // 1 or 2
+    s32 room;      // the stayer's room
+    s32 from, to;  // the mover's room, the room asked for
+    u32 word0;     // the busy bits up before the ticket (4 left out)
+    unsigned long long frame;
+    struct {
+        u32 lr;
+        const char* what;
+        unsigned n;
+    } asks[24];
+    unsigned answered, kept;   // busy asks answered "not busy" by the allow list, kept by K1/K7
+    unsigned sends_kept, sends_told, sends_said;  // S2: the door's 102 not sent, sent to kind 19/K7, last summed
+    struct {
+        u32 event, sender;
+    } swallowed[32];           // K1's log: each event and sender the mover's filter took, once
+    unsigned swallowed_more;
+    unsigned refused;          // G1: second tickets refused
+    struct {
+        u32 lr;
+        s32 room;
+    } refused_seen[8];         // G1's line once per (lr, room) in a window
+    unsigned refused_seen_n;
+    bool requests_held;        // G1: the room request held at the dispatcher (told once a window)
+    bool waiting;              // G2
+    unsigned long long wait_from;
+    unsigned wait_frames, waited, wait_said;
+    u32 wait_extra;
+} g_split;
+static struct {
+    bool open;  // G4: a route job outside R6b's bracket, interrupts held off from its graph build to its done
+    u32 ee;
+} g_split_job;
+// ED_SPLIT_HOLD: 2 both shapes (unset or 1), 1 the shared room only ("split"), 0 off.
+static int split_switch(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char* s = getenv("ED_SPLIT_HOLD");
+        on = s == NULL || strcmp(s, "1") == 0 ? 2 : strcmp(s, "split") == 0 ? 1 : strcmp(s, "0") == 0 ? 0 : 2;
+        if (s != NULL && on == 2 && strcmp(s, "1") != 0)
+            fprintf(stderr, "[split] ED_SPLIT_HOLD=%s is not 0, 1 or split: both shapes\n", s);
+    }
+    return on;
+}
+static bool split_target_mover_test(void) {  // ED_SPLIT_TARGET_MOVER=1 (testing, K1b/K2b): S3 left off
+    static int on = -1;
+    if (on < 0) {
+        const char* s = getenv("ED_SPLIT_TARGET_MOVER");
+        on = s != NULL && strcmp(s, "1") == 0;
+    }
+    return on != 0;
+}
+static bool split_log(void) { return r6_log() || coop_room_change_log(); }
+static unsigned long long split_frame(const CPUState* cpu) { return cpu->timebase / 675000ull; }
+// Each from their own node: player 1's from r6_player1_node (r13-21492 may be player 2's then), player 2's g_coop_p2.
+static u32 split_mover_node(CPUState* cpu) { return g_split.mover == 2 ? g_coop_p2 : r6_player1_node(cpu); }
+static u32 split_stayer_node(CPUState* cpu) { return g_split.mover == 2 ? r6_player1_node(cpu) : g_coop_p2; }
+// The window: a ticket counting (+0 > 0), the stayer still in the room they stayed in. K1, K7, G1, G2, G4 and G5 key on this,
+// whatever else is in the busy word.
+static bool split_counting(CPUState* cpu) {
+    if (!g_split.on || g_tome_copy_turn || !g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) ||
+        (s32)mem_read32(cpu, COOP_ROOM_TICKET) <= 0)
+        return false;
+    return coop_object_room(cpu, split_stayer_node(cpu)) == g_split.room;
+}
+// And the room change is all that's on (busy 4 with 2 and 1 at most, no cutscene, no menu): the allow list, S2, S3, S4.
+// B2 (design-stayer-presses.md §3.2): the busy bits the stayer set themselves (g_stayer.bits, by who set them: 8, 16, 32)
+// don't turn it off, so the stayer's own scene, words or find leave their room playing. It calls nothing that writes
+// (coop_p1_close_up would clear player 1's look). With ED_STAYER_PRESSES off g_stayer.bits is 0: today's test.
+static bool split_on(CPUState* cpu) {
+    if (!split_counting(cpu))
+        return false;
+    if (g_stayer.bits == 0u)
+        return coop_room_change_on(cpu);
+    const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u);
+    return (busy & COOP_BUSY_ROOM) != 0u && (busy & ~(COOP_BUSY_ROOM | 2u | 1u) & ~g_stayer.bits) == 0u && !cutscene_playing(cpu) &&
+           !game_menu_open(cpu);
+}
+// ---- The stayer keeps every action through the other's door countdown (docs/research/separate-rooms/design-stayer-presses.md,
+// step A: §1, §2, §5.1, §5.2, §7, §8). ED_STAYER_PRESSES: unset or 1 both directions, p1 player 1 staying only, p2 player 2
+// staying only, 0 off (every refusal of today stands). It needs the split hold's window: everything here starts from
+// split_counting (g_split.on: co-op, player 2 there, ED_COOP_STAY's stay with ED_ROOM_SLOTS=2's installs, not the copy's
+// turn), so solo and follow mode never reach it.
+static int stayer_switch(void) {  // 3 both, 1 player 1 staying only, 2 player 2 staying only, 0 off
+    static int on = -1;
+    if (on < 0) {
+        const char* s = getenv("ED_STAYER_PRESSES");
+        on = s == NULL || strcmp(s, "1") == 0 ? 3 : strcmp(s, "p1") == 0 ? 1 : strcmp(s, "p2") == 0 ? 2 : strcmp(s, "0") == 0 ? 0 : 3;
+        if (s != NULL && on == 3 && strcmp(s, "1") != 0)
+            fprintf(stderr, "[stayer] ED_STAYER_PRESSES=%s is not 0, 1, p1 or p2: both directions\n", s);
+    }
+    return on;
+}
+static const char* stayer_switch_name(void) {
+    const int s = stayer_switch();
+    return s == 3 ? "1" : s == 1 ? "p1" : s == 2 ? "p2" : "0";
+}
+static bool stayer_switch_allows(int who) { return who >= 0 && who <= 1 && (stayer_switch() & (1 << who)) != 0; }
+static bool stayer_window(CPUState* cpu, int who) {
+    if (!stayer_switch_allows(who) || !split_counting(cpu))
+        return false;
+    return g_split.mover == (who == 0 ? 2 : 1);
+}
+// Step B's window: split_counting with the switch allowing whoever stays (the mover may be either player).
+static bool stayer_window_on(CPUState* cpu) {
+    if (!g_split.on || (g_split.mover != 1 && g_split.mover != 2))
+        return false;
+    return stayer_window(cpu, g_split.mover == 2 ? 0 : 1);
+}
+// B4: a door whose hold spans its ticket (script 132: hold[fn21](0) ... fn66): bit 2 was in the word at the ticket.
+// Not when player 1 staying had their own look or scene up at the ticket: then that bit 2 was their own hold's.
+static bool split_door_holds_play(void) { return g_split.on && (g_split.word0 & 2u) != 0u && !g_stayer.look0; }
+static bool stayer_say(int kind, int who) {
+    const unsigned long long bit = 1ull << ((kind * 2 + (who & 1)) & 63);
+    if ((g_stayer.said & bit) != 0ull)
+        return false;
+    g_stayer.said |= bit;
+    return split_log();
+}
+static bool stayer_log_frames(void) {  // ED_STAYER_LOG=1: the frame line
+    static int on = -1;
+    if (on < 0) {
+        const char* s = getenv("ED_STAYER_LOG");
+        on = s != NULL && strcmp(s, "1") == 0;
+    }
+    return on != 0;
+}
+// The stayer's index (0 player 1, 1 player 2) by the current id (r13-21496), or -1 when it's the mover's or nobody's.
+static int stayer_current(CPUState* cpu) {
+    if (!g_split.on || g_coop_p2 == 0u || !sda_ready(cpu))
+        return -1;
+    const u32 node = split_stayer_node(cpu);
+    if (node == 0u || !guest_ram_range_valid(cpu, node, 20u))
+        return -1;
+    return mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, node + 16u) ? (g_split.mover == 2 ? 0 : 1) : -1;
+}
+// Something of a player's own is up (a scene, a look or close-up, words, a find): who 0 player 1, 1 player 2.
+static bool stayer_things_up(CPUState* cpu, int who) {
+    (void)cpu;
+    if (who == 0)
+        return coop_scene_on_of(0) || g_coop_p1_look || g_coop_words_free || g_coop_find_free;
+    return coop_scene_on_of(1) || g_coop_screen || g_coop_words_theirs || g_coop_find_theirs;
+}
+// P1: the door's prompt bit (0x10000 of r13-24048, set by the ticket at 0x801557E0), the part not up before the ticket.
+static u32 stayer_door_bits(void) { return 0x10000u & ~g_stayer.prompts0; }
+// K7 (§19.1): kinds (node +8) whose paths reach the ticket writer, a capture, fn66 or a death solo never meets with a ticket
+// counting: never on the allow list, still sent the door's 102.
+static bool split_k7_kind(u32 kind) {
+    switch (kind) {
+    case 9: case 28: case 32: case 39: case 50: case 56: case 73: case 74: case 82:
+        return true;
+    default:
+        return false;
+    }
+}
+// Kind 19 (a held player: the door's 102 lets them go, as today) or K7.
+static bool split_kind_kept(CPUState* cpu, u32 node) {
+    const u32 kind = mem_read32(cpu, node + 8u);
+    return kind == 19u || split_k7_kind(kind);
+}
+// K7's busy-ask sites (§19.2, lr): kind 39's capture, kind 50's timer and its copy of the player's filter.
+static bool split_k7_site(u32 lr) { return lr == 0x800E891Cu || lr == 0x800A29B8u || lr == 0x800A2C24u; }
+// A1's test: a node of the stayer's room (its object's +592), not the mover, not kind 19 and not K7. Roomless nodes (-1)
+// never pass: they stand as in solo.
+static bool split_node_freed(CPUState* cpu, u32 node) {
+    if (node == 0u || !guest_ram_range_valid(cpu, node, 56u) || node == split_mover_node(cpu))
+        return false;
+    return g_split.room != -1 && coop_object_room(cpu, node) == g_split.room && !split_kind_kept(cpu, node);
+}
+// The player's busy filter takes these while busy (0x800CA964, decoded in mover-readers.md §2): 8, 11, 39 and 59 but for
+// rooms 208 and 64's own cases, the rest always.
+static bool split_filter_takes(u32 event) {
+    switch (event) {
+    case 8: case 10: case 11: case 24: case 25: case 30: case 32: case 39: case 50: case 53: case 55: case 57: case 59: case 60:
+    case 63: case 67: case 101: case 103: case 107: case 125: case 133: case 202:
+        return true;
+    default:
+        return false;
+    }
+}
+// [split] busy asked at lr ...: the first time per lr and answer in a window, the counts at its end.
+static void split_ask_note(CPUState* cpu, const char* what, bool answered) {
+    if (answered)
+        g_split.answered++;
+    else
+        g_split.kept++;
+    if (!split_log())
+        return;
+    for (int i = 0; i < 24; i++) {
+        if (g_split.asks[i].lr == cpu->lr && g_split.asks[i].what == what) {
+            g_split.asks[i].n++;
+            return;
+        }
+        if (g_split.asks[i].lr == 0u) {
+            g_split.asks[i].lr = cpu->lr;
+            g_split.asks[i].what = what;
+            g_split.asks[i].n = 1u;
+            fprintf(stderr, "[split] busy asked at lr 0x%08X: %s (frame %llu)\n", cpu->lr, what, split_frame(cpu));
+            return;
+        }
+    }
+}
+// K1's log: an event the mover's filter takes on the game's word (r18 the event, r28 the message: +4 its sender).
+static void split_mover_filter_note(CPUState* cpu) {
+    const u32 event = cpu->gpr[18], msg = cpu->gpr[28];
+    if (!split_log() || !split_filter_takes(event) || mem_read32(cpu, cpu->gpr[13] - 23344u) == 0u || !guest_ram_range_valid(cpu, msg, 12u))
+        return;
+    const u32 sender = mem_read32(cpu, msg + 4u);
+    for (int i = 0; i < 32; i++) {
+        if (g_split.swallowed[i].event == event && g_split.swallowed[i].sender == sender)
+            return;
+        if (g_split.swallowed[i].event == 0u) {
+            g_split.swallowed[i].event = event;
+            g_split.swallowed[i].sender = sender;
+            const u32 node = r6_node_of_id(cpu, sender);
+            char kind[16] = "?";
+            if (node != 0u && guest_ram_range_valid(cpu, node, 12u))
+                snprintf(kind, sizeof kind, "%u", mem_read32(cpu, node + 8u));
+            fprintf(stderr, "[split] the mover's filter kept event %u from %u (kind %s) (frame %llu)\n", event, sender, kind, split_frame(cpu));
+            return;
+        }
+    }
+    g_split.swallowed_more++;
+}
+// S1, K1 and K7 (§3.1, §19.2): asked first in coop_busy_ask. True: the game's word, as solo.
+static bool split_busy_kept(CPUState* cpu) {
+    if (!split_counting(cpu))
+        return false;
+    if (cpu->lr == SPLIT_PLAYER_FILTER && cpu->gpr[31] != 0u && cpu->gpr[31] == split_mover_node(cpu)) {
+        split_ask_note(cpu, "kept: the mover", false);
+        split_mover_filter_note(cpu);
+        return true;
+    }
+    if (split_k7_site(cpu->lr)) {
+        split_ask_note(cpu, "kept: a room-changer", false);
+        return true;
+    }
+    return false;
+}
+// S1's allow list (§3.2), after today's cases: true answers "not busy".
+//   A1: the node update (lr 0x800074A0, node r28) and the motion and physics steps (0x800271F4, 0x8002729C, 0x80027768,
+//       0x800277F8, node r31), for a node split_node_freed passes;
+//   A2: the delayed messages (lr 0x801F5420, message r29) to such a node, but event 75;
+//   A3: the player handler's filter (lr 0x80058E84) for the stayer's node (r31).
+static bool split_busy_allows(CPUState* cpu) {
+    if (!split_on(cpu))
+        return false;
+    const u32 lr = cpu->lr;
+    bool ok = false;
+    if (lr == 0x800074A0u) {
+        ok = split_node_freed(cpu, cpu->gpr[28]);
+    } else if (lr == 0x800271F4u || lr == 0x8002729Cu || lr == 0x80027768u || lr == 0x800277F8u) {
+        ok = split_node_freed(cpu, cpu->gpr[31]);
+    } else if (lr == SPLIT_PUMP) {
+        const u32 msg = cpu->gpr[29];
+        ok = guest_ram_range_valid(cpu, msg, 12u) && mem_read32(cpu, msg) != 75u &&
+             split_node_freed(cpu, r6_node_of_id(cpu, mem_read32(cpu, msg + 8u)));
+    } else if (lr == SPLIT_PLAYER_FILTER) {
+        ok = cpu->gpr[31] != 0u && cpu->gpr[31] == split_stayer_node(cpu);
+    }
+    if (ok)
+        split_ask_note(cpu, "not busy: the stayer's room", true);
+    return ok;
+}
+// G3: the stayer's spell word (r13-22336), read where it is: coop_be_player2 is the one swap of the casting words, and
+// g_coop_casting_p2_in follows it (r13-21488 is no guide: coop_player1_turn writes it with no casting swap).
+static bool split_stayer_casting(CPUState* cpu) {
+    const bool p2_in = g_coop_casting_p2_in;
+    const bool stayer_p2 = g_split.mover == 1;
+    const u32 spell = stayer_p2 == p2_in ? mem_read32(cpu, cpu->gpr[13] - 22336u) : g_coop_casting[0];
+    // Narrowed (design-stayer-presses §2.6) with the stayer's presses on: a summon alone (its body returns by a ticket). A
+    // record-only cast goes on through the window and the firing (the change calls nothing in the spell code).
+    if (spell != 0u && stayer_switch_allows(stayer_p2 ? 1 : 0)) {
+        if (!STAYER_SUMMON(spell) && split_log())
+            fprintf(stderr, "[stayer] player %d is casting 0x%08X, not a summon: their window opens (frame %llu)\n", stayer_p2 ? 2 : 1, spell,
+                    split_frame(cpu));
+        return STAYER_SUMMON(spell);
+    }
+    return spell != 0u;
+}
+// S2's sum: [split] the door's 102 kept from room R's nodes, once per broadcast (told at the next tick or the window's end).
+static void split_sends_say(CPUState* cpu) {
+    const unsigned all = g_split.sends_kept + g_split.sends_told;
+    if (all == g_split.sends_said)
+        return;
+    g_split.sends_said = all;
+    if (split_log())
+        fprintf(stderr, "[split] the door's 102 kept from room %d's nodes: %u (kind-19/K7 nodes told: %u) (frame %llu)\n", g_split.room, g_split.sends_kept,
+                g_split.sends_told, split_frame(cpu));
+}
+static void split_wait_end(CPUState* cpu, const char* why) {
+    if (!g_split.waiting)
+        return;
+    g_split.waiting = false;
+    if (split_log())
+        fprintf(stderr, "[split] the countdown goes on at %d after %u frames (%s; frame %llu)\n", (s32)mem_read32(cpu, COOP_ROOM_TICKET), g_split.wait_frames, why,
+                split_frame(cpu));
+}
+// The window's end: the change's tail (notify_room_slots_tail), another ticket with no tail between, or a state load.
+static void split_over(CPUState* cpu, const char* why) {
+    if (!g_split.on)
+        return;
+    split_wait_end(cpu, why);
+    split_sends_say(cpu);
+    if (split_log()) {
+        char more[96] = "";
+        if (g_split.swallowed_more != 0u || g_split.refused != 0u)
+            snprintf(more, sizeof more, "; %u more events the mover's filter kept, %u second tickets refused", g_split.swallowed_more, g_split.refused);
+        fprintf(stderr, "[split] over at frame %llu (%s): %u asks answered not busy, %u kept, %u frames waited%s\n", split_frame(cpu), why, g_split.answered,
+                g_split.kept, g_split.waited, more);
+        for (int i = 0; i < 24 && g_split.asks[i].lr != 0u; i++)
+            fprintf(stderr, "[split]   lr 0x%08X %s: %u\n", g_split.asks[i].lr, g_split.asks[i].what, g_split.asks[i].n);
+        if (stayer_switch_allows(g_split.mover == 2 ? 0 : 1))
+            fprintf(stderr, "[split]   stayer: looks %u, B %u, casts %u, Starts %u, kept %u, ways %u, prompts unmasked %u, bits 0x%X\n", g_stayer.looks,
+                    g_stayer.presses, g_stayer.casts, g_stayer.starts, g_stayer.kept, g_stayer.ways, g_stayer.unmasked, g_stayer.bits);
+    }
+    // L1's Start lock (r13-26232) back to the count solo would have reached: it counts down only while the play channel runs
+    // with r4 == 1 (0x80006900-0x80006964), not under words, so player 1's words in the window kept it up past it. A count
+    // above what L1 set was set by something else (a script's deny_menu) and is left.
+    if (g_stayer.lock_set && sda_ready(cpu)) {
+        g_stayer.lock_set = false;
+        const u32 now = mem_read32(cpu, cpu->gpr[13] - 26232u);
+        const unsigned long long gone = split_frame(cpu) - g_stayer.lock_frame;
+        const u32 solo = (unsigned long long)g_stayer.lock_n > gone ? g_stayer.lock_n - (u32)gone : 0u;
+        if (now <= g_stayer.lock_n && now > solo) {
+            mem_write32(cpu, cpu->gpr[13] - 26232u, solo);
+            if (split_log())
+                fprintf(stderr, "[stayer] the Start lock put back to %u (was %u) (frame %llu)\n", solo, now, split_frame(cpu));
+        }
+    }
+    // F3b (design-stayer-findings §F3.2): the arrival's fade-in (0x801521A8: 0x801E7C88(.., 10)) follows this tail, and R4
+    // still keeps it out of the stayer's half; a copy the stayer opens in it starts with no fade (stayer_fade_tail).
+    if (strcmp(why, "the change's tail") == 0 && (g_split.mover == 1 || g_split.mover == 2)) {
+        const int stayer = g_split.mover == 2 ? 0 : 1;
+        if (stayer_switch_allows(stayer)) {
+            g_stayer.fade_tail = stayer + 1;
+            g_stayer.fade_tail_tickets = g_coop_tickets;
+            g_stayer.fade_tail_frame = split_frame(cpu);
+        }
+    }
+    g_split.on = false;
+}
+// F2c (design-stayer-findings §F2.3): R4's bracket counts the game's slots as player 1's for the switches that build on it:
+// the two-slot installs, ED_SPLIT_HOLD not 0, ED_STAYER_PRESSES allowing player 1. Not a window (goal 1.4): the bracket
+// runs in refused windows too (a stayer charging a summon, a cutscene at the ticket).
+static bool stay_bracket_p1_allowed(void) { return g_split_ready && split_switch() != 0 && stayer_switch_allows(0); }
+// F3h forgot `mover` at this door's fade-in's last drawn quad (ticks 1 after the store at 0x801E7EA8), and its last step
+// (ticks 1 -> 0, the alpha onto 0, nothing drawn) has not run yet: 0x801E7C98 still answers "a fade is on" for this frame.
+static bool r4_fade_forgot(CPUState* cpu, int mover) {
+    return g_fade_mover == 0 && mover != 0 && g_stayer.fade_forgot == mover && g_stayer.fade_forgot_tickets == g_coop_tickets && sda_ready(cpu) &&
+           (s32)mem_read32(cpu, cpu->gpr[13] - FADE_TICKS) == 1;
+}
+// F3b: the fade-in of the change that closed `owner`'s window (0 player 1, 1 player 2): R4's own marking rule for the
+// stayer's half (the mover kept, ticks left), bounded to that change's tickets count and 60 frames after its tail (timebase
+// frames: under load the 10 ticks outlast 12 of them; F3h ends it at the fade-in's last quad, and the frame after that
+// quad through r4_fade_forgot). Never widened to "g_fade_mover set" (impl I).
+static bool stayer_fade_tail(CPUState* cpu, int owner) {
+    if ((owner != 0 && owner != 1) || g_stayer.fade_tail != owner + 1 || g_coop_tickets != g_stayer.fade_tail_tickets || g_tome_copy_turn ||
+        split_frame(cpu) > g_stayer.fade_tail_frame + 60ull || !sda_ready(cpu))
+        return false;
+    const int mover = owner == 0 ? 2 : 1;
+    if (g_fade_mover != mover && !r4_fade_forgot(cpu, mover))
+        return false;
+    return (s32)mem_read32(cpu, cpu->gpr[13] - FADE_TICKS) > 0;
+}
+// F3e (design-stayer-findings §F3.2, goal 1.3; review-safety 1): player `mover`'s own door's fade is on, in co-op stay with the
+// switches on. Their door: the countdown of their ticket, the window (refused ones too: a stayer's summon, a cutscene at the
+// ticket, apart under ED_SPLIT_HOLD=split, where g_split.on is false), or R4's mover through the fade-in after the arrival.
+static bool r4_own_fade_on(CPUState* cpu, int mover) {
+    if (!g_split_ready || split_switch() == 0 || stayer_switch() == 0 || !coop_stay() || g_coop_p2 == 0u || g_tome_copy_turn || !sda_ready(cpu))
+        return false;
+    const bool counting = g_coop_room_p2 == (mover == 2) && (s32)mem_read32(cpu, COOP_ROOM_TICKET) > 0;
+    const bool door = counting || (g_split.on && g_split.mover == mover) || g_fade_mover == mover || r4_fade_forgot(cpu, mover);
+    return door && fade_on_now(cpu);
+}
+// R4's fade quad (notify_GXLoadPosMtxImm at lr 0x801E7F60; the comment there). design-stayer-findings:
+//   F3c: not in a copy's turn: there the quad is a whole frame's, where the mark does nothing, and the forget test would read
+//        the copy's memory (busy 0, tome_copy_no_window) and drop the mover early. Counted for the copy's close line.
+//   F3d: the stayer's own busy bits (B2's g_stayer.bits: their scene, words, find) keep the door on for the forget test, as
+//        split_on does: else the mover was forgotten when the fade-out's ticks ran out under them, and the last black frames
+//        and the fade-in were drawn into the stayer's half. Not in a cutscene (forgotten as today).
+//   F3h: after the change's tail, the fade-in's last drawn quad (ticks 1 after the tick's store at 0x801E7EA8; the next step
+//        draws nothing, 0x801E7ECC-0x801E7ED4) forgets the mover: today it was kept to the next ticket, and a later fade
+//        (a scene's, a script's) was left out of the old stayer's half. Behind both switches.
+static void r4_fade_quad(CPUState* cpu) {
+    if (g_tome_copy_turn) {
+        if (g_tome_copy_open || g_tome_copy.started)
+            g_tome_copy.fade_quads++;
+        return;
+    }
+    if (g_fade_mover == 0)
+        return;
+    const s32 ticks = (s32)mem_read32(cpu, cpu->gpr[13] - FADE_TICKS);
+    const bool change_on = coop_room_change_on(cpu);
+    const bool door_on = change_on || (stayer_window_on(cpu) && !cutscene_playing(cpu));
+    if (!door_on && ticks <= 0) {
+        g_fade_mover = 0;
+        return;
+    }
+    if (guest_ram_range_valid(cpu, cpu->gpr[3], 48u)) {
+        const u32 m = cpu->gpr[3];
+        mem_write32(cpu, m + 12u, 0x0C8000D2u);
+        mem_write32(cpu, m + 28u, 0x0C8000A0u + (g_fade_mover == 2 ? 0u : 1u));
+        mem_write32(cpu, m + 44u, 0x0C8000E5u);
+    }
+    if (!change_on && ticks <= 0) {  // (door_on: the new term alone kept the mark)
+        const int stayer = g_split.mover == 2 ? 0 : 1;
+        if (stayer_say(20, stayer))
+            fprintf(stderr, "[stayer] the door's fade stays out of player %d's half under their own busy 0x%X (frame %llu)\n", stayer + 1,
+                    mem_read32(cpu, cpu->gpr[13] - 23344u), split_frame(cpu));
+    }
+    if (g_split_ready && split_switch() != 0 && stayer_switch() != 0 && !door_on && !g_split.on && ticks == 1) {
+        const int mover = g_fade_mover;
+        g_fade_mover = 0;
+        g_stayer.fade_forgot = mover;  // (the fade's last step, next frame, still counts for the tail and F3e)
+        g_stayer.fade_forgot_tickets = g_coop_tickets;
+        if (split_log())
+            fprintf(stderr, "[stayer] the door's fade-in is over: mover %d forgotten (frame %llu)\n", mover, split_frame(cpu));
+    }
+}
+// At the ticket (notify_room_ticket's end: its entry, before the record and the busy set are written; g_coop_room_p2 set).
+static void split_ticket_open(CPUState* cpu) {
+    if (g_split.on)
+        split_over(cpu, "another ticket before the change's tail");
+    g_split.on = false;
+    if (!g_split_ready || !g_settings.mod_coop || g_coop_p2 == 0u || !coop_stay() || !sda_ready(cpu))
+        return;  // solo, follow mode, no two-slot installs: nothing here
+    memset(&g_split, 0, sizeof g_split);
+    memset(&g_stayer, 0, sizeof g_stayer);  // (a summon kept from the last window is dropped by this ticket)
+    g_split.mover = g_coop_room_p2 ? 2 : 1;
+    const int stayer = g_split.mover == 2 ? 1 : 2;
+    const s32 r1 = coop_object_room(cpu, r6_player1_node(cpu)), r2 = coop_object_room(cpu, g_coop_p2);
+    const s32 rm = g_split.mover == 2 ? r2 : r1, rs = g_split.mover == 2 ? r1 : r2;
+    const unsigned long long frame = split_frame(cpu);
+    const char* no = NULL;
+    if (g_tome_copy_turn)
+        no = "the Tome copy's turn";
+    else if (rs == -1)
+        no = "the stayer has no room";
+    else if (split_switch() == 0)
+        no = "ED_SPLIT_HOLD=0";
+    else if (split_switch() == 1 && rm != rs)
+        no = "apart, with ED_SPLIT_HOLD=split";
+    else if (cutscene_playing(cpu))  // (§7: in a cutscene both stay held, as today; G2 waits only for one begun in the window)
+        no = "a cutscene at the ticket";
+    else if (split_stayer_casting(cpu))  // G3
+        no = "casting";
+    if (no != NULL) {
+        if (split_log()) {
+            if (strcmp(no, "casting") == 0)
+                fprintf(stderr, "[split] player %d is casting: their room holds as today (frame %llu)\n", stayer, frame);
+            else
+                fprintf(stderr, "[split] player %d's door from room %d (to room %d): player %d's room holds as today (%s; frame %llu)\n", g_split.mover, rm,
+                        (s32)cpu->gpr[3], stayer, no, frame);
+        }
+        return;
+    }
+    g_split.on = true;
+    g_split.shared = rm == rs;
+    g_split.room = rs;
+    g_split.from = rm;
+    g_split.to = (s32)cpu->gpr[3];  // (0x80155770(room, ...): its +8, still to be written)
+    g_split.word0 = mem_read32(cpu, cpu->gpr[13] - 23344u) & ~COOP_BUSY_ROOM;
+    g_split.frame = frame;
+    if (split_log())
+        fprintf(stderr, "[split] player %d's door from room %d (to room %d): player %d stays in room %d (%s); their room plays on (busy before 0x%X; frame %llu)\n",
+                g_split.mover, rm, g_split.to, stayer, rs, g_split.shared ? "shared" : "apart", g_split.word0, frame);
+    // The stayer's presses (design-stayer-presses §1): what was up at the ticket. The writer's notify runs at its entry, so
+    // r13-24048 is as it was before 0x80117260(0x10000, 1) at 0x801557E0.
+    if (stayer_switch_allows(stayer - 1)) {
+        g_stayer.prompts0 = mem_read32(cpu, cpu->gpr[13] - 24048u);
+        g_stayer.screen0 = g_coop_screen;
+        g_stayer.look0 = stayer == 1 && (g_coop_p1_look || coop_p1_scene_on());
+        const u32 up = g_split.word0 & (8u | 16u | 32u);
+        // Word0's 8, 16 and 32 are the stayer's own only when the stayer alone has a thing up.
+        if (up != 0u && stayer_things_up(cpu, stayer - 1) && !stayer_things_up(cpu, g_split.mover - 1))
+            g_stayer.bits = up;
+        if (split_log())
+            fprintf(stderr, "[stayer] player %d stays: their presses go on (ED_STAYER_PRESSES=%s); bits at the ticket 0x%X (the stayer's 0x%X; prompts 0x%X) (frame %llu)\n",
+                    stayer, stayer_switch_name(), up, g_stayer.bits, g_stayer.prompts0, frame);
+    }
+}
+// G1 (§3.8): a second room ticket inside the window, refused (the writer is void: its record, busy set, lock and cast end
+// are all skipped, so g_split and g_fade_mover stay the door's). Intercept on 0x80155770; notify_room_ticket runs only on
+// passthrough. A cinematic's own return ticket (lr 0x8012D2F0) is lost so: told loudly (risk 12).
+static void split_ticket_ask(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!split_counting(cpu))
+        return;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+    bool again = false;
+    for (unsigned i = 0; i < g_split.refused_seen_n && !again; i++)
+        again = g_split.refused_seen[i].lr == cpu->lr && g_split.refused_seen[i].room == (s32)cpu->gpr[3];
+    if (!again && g_split.refused_seen_n < 8u) {
+        g_split.refused_seen[g_split.refused_seen_n].lr = cpu->lr;
+        g_split.refused_seen[g_split.refused_seen_n].room = (s32)cpu->gpr[3];
+        g_split.refused_seen_n++;
+    }
+    g_split.refused++;
+    if (!again)  // (past eight pairs every new one is printed: never fewer lines than pairs)
+        fprintf(stderr, "[split] a second room ticket refused: room %d transition %d (lr 0x%08X, frame %llu)%s\n", (s32)cpu->gpr[3], (s32)cpu->gpr[10], cpu->lr,
+                split_frame(cpu), cpu->lr == SPLIT_CINEMATIC_TICKET ? ": A CINEMATIC'S OWN RETURN TICKET, LOST (risk 12)" : "");
+}
+// G1 (§19.3): the request dispatcher 0x800B7208(mask), passed over inside the window when it would run a room request (1 or
+// 16: ed145's scene return, a ticket; 32 or 64: a direct load), so the request and its delay stay and run after the change
+// (the dispatcher clears both whatever its branch did, 0x800B72F0). A call that only counts the delay down is the game's.
+// After the window the held request runs where the game is then: 0x800ADA24 tickets the current player to the scene's kept
+// room, so with the mover's room in play it can send them back. Told at its first run (always printed when the room in play
+// isn't the stayer's room the request was held in). Holding it longer would hold the dispatcher's one request word (game
+// over, ed88) with it.
+static struct {
+    bool pending;
+    u32 request;
+    s32 room;  // the stayer's room it was held in
+} g_split_request;
+static void split_request_after(CPUState* cpu) {
+    if (!g_split_request.pending || g_tome_copy_turn || !sda_ready(cpu))
+        return;
+    const u32 request = mem_read32(cpu, cpu->gpr[13] - 25172u);
+    if (request != g_split_request.request) {  // cleared or replaced: not ours any more
+        g_split_request.pending = false;
+        return;
+    }
+    if ((request & cpu->gpr[3]) == 0u || (s32)mem_read32(cpu, cpu->gpr[13] - 25176u) - 1 > 0)
+        return;
+    g_split_request.pending = false;
+    const s32 in_play = (s32)mem_read32(cpu, cpu->gpr[13] - 23276u);
+    if (in_play != g_split_request.room)
+        fprintf(stderr, "[split] THE HELD ROOM REQUEST %u RUNS IN ROOM %d, NOT ROOM %d WHERE IT WAS ASKED (lr 0x%08X, frame %llu)\n", request, in_play,
+                g_split_request.room, cpu->lr, split_frame(cpu));
+    else if (split_log())
+        fprintf(stderr, "[split] the held room request %u runs in room %d (frame %llu)\n", request, in_play, split_frame(cpu));
+}
+static void split_requests(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!split_counting(cpu)) {
+        split_request_after(cpu);
+        return;
+    }
+    const u32 request = mem_read32(cpu, cpu->gpr[13] - 25172u);
+    if ((request != 1u && request != 16u && request != 32u && request != 64u) || (request & cpu->gpr[3]) == 0u ||
+        (s32)mem_read32(cpu, cpu->gpr[13] - 25176u) - 1 > 0)
+        return;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+    g_split_request.pending = true;
+    g_split_request.request = request;
+    g_split_request.room = g_split.room;
+    if (!g_split.requests_held) {
+        g_split.requests_held = true;
+        fprintf(stderr, "[split] room request %u held at the dispatcher until the door's change (lr 0x%08X, frame %llu)\n", request, cpu->lr, split_frame(cpu));
+    }
+}
+// R4b's case (stay_busy_clear): player 2's door with player 1's own scene or close-up on, which keeps its bits over the
+// arrival. G2 leaves it as it is today.
+static bool split_r4b_case(CPUState* cpu) { return g_split.mover == 2 && (coop_scene_on_of(0) || coop_p1_in_close_up(cpu)); }
+// G2 (§3.9, §19.4): the tick 0x80155830, at the top of the world frame and of the other mode's frame. It waits (its +0 and +4
+// not counted this frame) while a scene, held words or a find begun in the window (busy bits 8/16/32 not in word0) or a
+// cutscene is up (begun in it: no window opens under one), and only while +0 > 1 (0x8007D1E0, 0x8007D49C and 0x8014E0EC act on +0 == 1). Player 1 the mover: their
+// lock is the game's copy's, renewed with the game's own 0x800443E4(+0 + 3) each waiting frame (a max: the solo margin,
+// held). Player 2 the mover: their lock isn't the game's copy (it would hold player 1, the stayer); a wait over 50 frames is
+// told (their 120-frame door-turn window). notify_change_tick runs only on passthrough (it acts at +0 == 1 alone).
+static void stayer_after_tail(CPUState* cpu);
+static void stayer_frame_line(CPUState* cpu);
+static void split_tick(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!split_counting(cpu)) {
+        stayer_after_tail(cpu);  // (a summon player 1 pressed in the window, cast now)
+        // Set after its guest call, which may dispatch hooks of its own: the tick and notify_change_tick run.
+        g_hle_passthrough = true;
+        g_hle_tail_call = false;
+        return;
+    }
+    split_sends_say(cpu);
+    stayer_frame_line(cpu);
+    const s32 count = (s32)mem_read32(cpu, COOP_ROOM_TICKET);
+    const u32 extra = (mem_read32(cpu, cpu->gpr[13] - 23344u) & ~(COOP_BUSY_ROOM | 2u | 1u)) & ~g_split.word0;
+    const bool cut = cutscene_playing(cpu);
+    // G2b (design-stayer-presses §4.2, until C2): player 2 staying, a lend-route close-up of theirs (g_coop_screen, not up
+    // at the ticket) sets only bit 2, which G2 masks; player 1's arrival would cut it (R4d is not built).
+    // (A close-up up at the ticket that ends in the window, then another: the second is begun in it, as G2's bits are.)
+    if (!g_coop_screen)
+        g_stayer.screen_down = true;
+    const bool g2b = g_split.mover == 1 && stayer_switch_allows(1) && (!g_stayer.screen0 || g_stayer.screen_down) && g_coop_screen;
+    if (count <= 1 || (extra == 0u && !cut && !g2b) || split_r4b_case(cpu)) {
+        split_wait_end(cpu, count <= 1 ? "its last count" : "what began in the window is over");
+        return;
+    }
+    if (g_split.mover == 1 && stayer_switch_allows(1) && !g_stayer.g2_said && !g_split.waiting) {
+        g_stayer.g2_said = true;
+        // Player 2's only when something of theirs is up: `extra` is every bit begun in the window (player 1's own door
+        // script's words after its fn66, a cutscene), and their lend-route words and finds write 8 and 16 directly.
+        const bool use2 = g_coop_use.active && g_coop_use.p2;
+        const bool theirs = g2b || use2 || g_coop_words_theirs || g_coop_find_theirs || coop_scene_on_of(1);
+        const char* what = (extra & 32u) != 0u && coop_scene_on_of(1)                ? "SCENE"
+                           : g2b || use2                                             ? "USE"
+                           : (extra & (8u | 16u)) != 0u && (g_coop_words_theirs || g_coop_find_theirs) ? "WORDS"
+                           : (extra & 32u) != 0u                                     ? "SCENE"
+                           : (extra & (8u | 16u)) != 0u                              ? "WORDS"
+                                                                                     : "CUTSCENE";
+        if (theirs)
+            fprintf(stderr, "[stayer] THE COUNTDOWN WAITS FOR PLAYER 2'S %s (%s): PLAYER 1 IN THE BLACK (busy 0x%X, frame %llu)\n", what,
+                    extra != 0u || cut ? "G2" : "G2b", extra, split_frame(cpu));
+        else
+            fprintf(stderr, "[stayer] THE COUNTDOWN WAITS FOR %s (G2, not player 2's): PLAYER 1 IN THE BLACK (busy 0x%X, frame %llu)\n", what, extra,
+                    split_frame(cpu));
+    }
+    if (g_split.waiting && g_split.wait_frames >= SPLIT_WAIT_LONGEST) {
+        if (g_split.wait_said != 2u) {
+            g_split.wait_said = 2u;
+            fprintf(stderr, "[split] the countdown waited %u frames for busy 0x%X%s: it goes on under it (frame %llu)\n", g_split.wait_frames, extra,
+                    cut ? " and a cutscene" : "", split_frame(cpu));
+        }
+        return;
+    }
+    if (!g_split.waiting) {
+        g_split.waiting = true;
+        g_split.wait_from = split_frame(cpu);
+        g_split.wait_frames = 0u;
+        g_split.wait_said = 0u;
+        g_split.wait_extra = extra;
+        if (split_log())
+            fprintf(stderr, "[split] the countdown waits at %d: busy 0x%X begun in the window%s (player %d the mover; frame %llu)\n", count, extra,
+                    cut ? ", a cutscene" : "", g_split.mover, split_frame(cpu));
+    }
+    g_split.wait_frames++;
+    g_split.waited++;
+    if (g_split.mover == 1 && g_split_lock_ok && !g_coop_turn) {
+        const u32 args[1] = {(u32)(count + 3)};
+        u32 ignore = 0u;
+        hle_guest_call(cpu, SPLIT_INPUT_LOCK, args, 1, 0.0, &ignore);
+    } else if (g_split.mover == 2 && g_split.wait_frames == 51u && g_split.wait_said == 0u) {
+        g_split.wait_said = 1u;
+        if (split_log())
+            fprintf(stderr, "[split] the countdown has waited over 50 frames in player 2's door: their door turns may run out (frame %llu)\n",
+                    split_frame(cpu));
+    }
+    // Handled: +0 and +4 not counted this frame. Set after the guest call, which may dispatch hooks of its own.
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+// S2 (§3.4): the door's 102, kept from the stayer's room's nodes: a send of the broadcast (lr 0x801F568C, the receiver node
+// in r31) not made, the loop going on (it ignores r3). Kind 19 and K7 still get it, as roomless nodes and other rooms do (the
+// broadcast's own filter). Both shapes: the busy set broadcasts to the current id's room (0x801556FC-0x80155720), and apart
+// that is the stayer's room when player 2's way out writes its ticket as player 1's (notify_room_ticket's exit_p2); with the
+// mover current, apart, it never reaches that room and nothing is kept. The 102s of the creature code's busy clears go
+// through the same call and are kept the same way.
+static bool split_send_keeps(CPUState* cpu, u32 node) {
+    return g_split.on && node != 0u && guest_ram_range_valid(cpu, node, 56u) && coop_object_room(cpu, node) == g_split.room &&
+           !split_kind_kept(cpu, node) && split_on(cpu);
+}
+static void split_send(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (cpu->lr != SPLIT_SEND_BROADCAST || cpu->gpr[3] != 102u || !g_split.on || !split_on(cpu))
+        return;
+    const u32 node = cpu->gpr[31];
+    if (!guest_ram_range_valid(cpu, node, 56u) || coop_object_room(cpu, node) != g_split.room)
+        return;
+    if (split_kind_kept(cpu, node)) {
+        g_split.sends_told++;
+        return;
+    }
+    g_split.sends_kept++;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+// S3 (§3.5): the stayer's index (0 player 1, 1 player 2) for coop_enemy_target in a split's window, else -1.
+static int split_target_stayer(CPUState* cpu) {
+    if (!g_split.on || !g_split.shared || split_target_mover_test() || !split_on(cpu))
+        return -1;
+    return g_split.mover == 2 ? 0 : 1;
+}
+// G4 (§3.11): a route job's graph build (lr 0x800BB918) inside the window that R6b did not bracket runs with interrupts off
+// to its done (lr 0x800BB9E4), so it can never be pre-empted at the retrace and resume after the change. From r6b_job_open
+// and r6b_job_close (R6b's notifies).
+static void split_job_open(CPUState* cpu, u32 lr_built) {
+    if (cpu->lr != lr_built || g_split_job.open || !split_counting(cpu))
+        return;
+    g_split_job.ee = cpu->msr & 0x00008000u;
+    cpu->msr &= ~0x00008000u;
+    g_split_job.open = true;
+    if (split_log())
+        fprintf(stderr, "[split] a route job run whole (for %u; frame %llu)\n", guest_ram_range_valid(cpu, cpu->gpr[24], 20u) ? mem_read32(cpu, cpu->gpr[24] + 16u) : 0u,
+                split_frame(cpu));
+}
+static void split_job_close(CPUState* cpu) {
+    cpu->msr |= g_split_job.ee;
+    g_split_job.open = false;
+}
+// G5 (§3.12): a direct room load (0x80152298) inside the window, told (refusing it could leave its caller on the loader's
+// queue). A ticket's own load comes after the window (the tick takes +0 to 0 first).
+static void split_room_load(CPUState* cpu) {
+    if (!split_counting(cpu))
+        return;
+    fprintf(stderr, "[split] a room load inside the countdown: room %d (lr 0x%08X, frame %llu)\n", (s32)cpu->gpr[3], cpu->lr, split_frame(cpu));
+}
+// §11: a state load. g_split is host memory; a state loaded mid-countdown plays the rest held, as today.
+static void split_state_load(void) {
+    memset(&g_split, 0, sizeof g_split);
+    memset(&g_split_job, 0, sizeof g_split_job);
+    memset(&g_split_request, 0, sizeof g_split_request);
+    // The stayer's presses (design-stayer-presses §8): the record, the kept summons and player 2's kept Tome item. A kept B
+    // and a waiting way out carry the tickets count, which a load doesn't reset: dropped by their own rule.
+    for (unsigned i = 0u; i < g_stayer_p2_left.n; i++)
+        fprintf(stderr, "[stayer] player 2's kept Tome item script %d dropped: a state load\n", g_stayer_p2_left.item[i].script);
+    CoopPressKept* const kept[2] = {&g_coop_p1_kept, &g_coop_p2_kept};
+    for (int i = 0; i < 2; i++) {
+        if (g_stayer_marks.kept[i] && kept[i]->on && kept[i]->tickets == g_stayer_marks.kept_tickets[i] && kept[i]->prompt == g_stayer_marks.kept_prompt[i])
+            coop_press_drop(kept[i], i + 1, "a state load (kept in a door's window)");
+        if (g_stayer_marks.way[i] && g_coop_way_out[i].on && g_coop_way_out[i].tickets == g_stayer_marks.way_tickets[i]) {
+            g_coop_way_out[i].on = false;
+            fprintf(stderr, "[stayer] player %d's way out from a door's window let go: a state load\n", i + 1);
+        }
+    }
+    memset(&g_stayer, 0, sizeof g_stayer);
+    memset(&g_stayer_p2_left, 0, sizeof g_stayer_p2_left);
+    memset(&g_stayer_marks, 0, sizeof g_stayer_marks);
+    memset(g_stayer_again, 0, sizeof g_stayer_again);
+}
+
+// L1 (design-stayer-presses §2.1): player 2's prompt door (and an exit_p2 ticket) is written as a use, in player 1's
+// controller with the game's input copy in, which is player 1's, the stayer's: the ticket's 0x800443E4(+0 + 3) at
+// 0x801557F4 put the binding lock (r13-23592, by 0x8013E99C: per input copy) on them for ~65 frames, and their play channel
+// (r13-26224) ran no row: no B, Start, quick spell or R. Here only the Start lock (r13-26232, by 0x800068E0: shared) is set,
+// the same count, as solo has it in a door; it is put back at split_over. Intercept on 0x800443E4: G2's own call (lr the
+// guest-call sentinel), the other callers and player 2's walk-in door in their own turn (the lock their own copy's) pass.
+static bool stayer_bl_is(CPUState* cpu, u32 site, u32 target) {  // (the install's code check: a bl at site to target)
+    const u32 w = mem_read32(cpu, site);
+    return (w & 0xFC000003u) == 0x48000001u && site + (u32)(((s32)(w << 6)) >> 6 & ~3) == target;
+}
+#define STAYER_LOCK_AT 0x801557F8u     // lr of the ticket writer's call of 0x800443E4
+#define STAYER_START_LOCK 0x800068E0u  // r13-26232 := max(r13-26232, r3)
+static void stayer_lock(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (cpu->lr != STAYER_LOCK_AT || g_coop_turn || g_coop_events_own || !stayer_window(cpu, 0))
+        return;  // (g_coop_events_own: player 2's input copy is in for coop_events' words, not player 1's)
+    const u32 n = cpu->gpr[3], lr = cpu->lr, binding = mem_read32(cpu, cpu->gpr[13] - 23592u);
+    u32 ignore = 0u;
+    hle_guest_call(cpu, STAYER_START_LOCK, &n, 1, 0.0, &ignore);
+    cpu->lr = lr;
+    g_stayer.lock_set = true;
+    g_stayer.lock_n = n;
+    g_stayer.lock_frame = split_frame(cpu);
+    if (split_log())
+        fprintf(stderr, "[stayer] player 2's door: the input lock %u kept out of player 1's copy (the Start lock set; binding lock %u) (frame %llu)\n", n, binding,
+                g_stayer.lock_frame);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+// The ticket's cast end (0x801C5118(0) at 0x801557FC, lr 0x80155800) ends the charging cast of the main id (r13-21488 by
+// 0x801F6258; r13-22336). At player 2's walk-in door in their turn the turn swaps only three words (coop_player_turn), and
+// at an exit_p2 ticket written with player 1 current, that id is player 1's, the stayer's: passed over (§2.6). The cast
+// trace's notify on this entry runs only on passthrough, so the skip is told here.
+#define STAYER_CAST_END 0x801C5118u
+#define STAYER_CAST_END_AT 0x80155800u
+static void stayer_cast_end(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (cpu->lr != STAYER_CAST_END_AT || !split_counting(cpu) || !sda_ready(cpu))
+        return;
+    const int stayer = g_split.mover == 2 ? 0 : 1;
+    const u32 node = split_stayer_node(cpu);
+    if (!stayer_window(cpu, stayer) || node == 0u || !guest_ram_range_valid(cpu, node, 20u) ||
+        mem_read32(cpu, cpu->gpr[13] - 21488u) != mem_read32(cpu, node + 16u))
+        return;
+    if (split_log())
+        fprintf(stderr, "[stayer] the ticket's cast end passed over: the main id is player %d's, the stayer's (spell 0x%08X, frame %llu)\n", stayer + 1,
+                mem_read32(cpu, cpu->gpr[13] - 22336u), split_frame(cpu));
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+// After the tail, at the world frame's tick (lr 0x800083F0, outside any turn): a summon player 1 pressed in the window, cast
+// by the route it came from, a guest call of 0x800069DC(0, slot) with the spell in the slot, as coop_quick_cast does.
+// Player 2's is cast in their turn (coop_quick_cast).
+#define STAYER_TICK_AT 0x800083F0u
+static void stayer_after_tail(CPUState* cpu) {
+    if (!g_stayer.summon[0].on || cpu->lr != STAYER_TICK_AT || g_coop_turn || g_tome_copy_turn || !g_settings.mod_coop || !sda_ready(cpu) ||
+        cpu->ram_size < SCRATCH_END - GC_RAM_BASE)
+        return;
+    if (coop_busy(cpu) || cutscene_playing(cpu) || game_menu_open(cpu) || mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u || g_tome_copy_open ||
+        g_tome_copy_ask || g_coop_use.active || g_coop_screen)
+        return;  // (waits for nothing to be up, no copy Tome and no use or close-up of player 2's; a new ticket or a state load drops it)
+    const u32 node = r6_player1_node(cpu);
+    if (node == 0u || !guest_ram_range_valid(cpu, node, 20u) || mem_read32(cpu, cpu->gpr[13] - 21496u) != mem_read32(cpu, node + 16u))
+        return;
+    g_stayer.summon[0].on = false;
+    const u32 spell = g_stayer.summon[0].spell, lr = cpu->lr;
+    mem_write32(cpu, COOP_QUICK_SLOT, spell);
+    const u32 args[2] = {0u, COOP_QUICK_SLOT};
+    u32 ignore = 0u;
+    hle_guest_call(cpu, COOP_QUICK_CAST, args, 2, 0.0, &ignore);
+    cpu->lr = lr;
+    if (split_log())
+        fprintf(stderr, "[stayer] player 1's kept summon 0x%08X cast after player 2's door (frame %llu)\n", spell, split_frame(cpu));
+}
+// ED_STAYER_LOG=1: once per window frame, at the tick (the game copy's words: player 1's).
+static void stayer_frame_line(CPUState* cpu) {
+    if (!stayer_log_frames() || !sda_ready(cpu) || !stayer_window(cpu, g_split.mover == 2 ? 0 : 1))
+        return;
+    const unsigned long long frame = split_frame(cpu);
+    if (frame == g_stayer.frame_said)
+        return;
+    g_stayer.frame_said = frame;
+    const u32 sda = cpu->gpr[13];
+    const u32 play = mem_read32(cpu, sda - 26224u);
+    const u32 play_mask = guest_ram_range_valid(cpu, play, 20u) ? mem_read32(cpu, play + 16u) : 0xFFFFFFFFu;
+    const u32 shown = PROMPT_SLOTS + 6u * 28u;
+    float p[2][3] = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
+    const u32 nodes[2] = {r6_player1_node(cpu), g_coop_p2};
+    for (int i = 0; i < 2; i++) {
+        const u32 o = nodes[i] != 0u && guest_ram_range_valid(cpu, nodes[i], 56u) ? mem_read32(cpu, nodes[i] + 52u) : 0u;
+        for (u32 k = 0u; guest_ram_range_valid(cpu, o, 12u) && k < 3u; k++)
+            p[i][k] = guest_read_f32(cpu, o + k * 4u);
+    }
+    fprintf(stderr,
+            "[stayer] frame %llu +0 %d: binding %u start %u prompts 0x%X busy 0x%X hold %u zones %u play +16 0x%08X focus 0x%08X shown %d/%u use %d/%d "
+            "screen %d p1 look %d words %d find %d p2 prompt %d room turn %d bits 0x%X p1 %.0f %.0f %.0f p2 %.0f %.0f %.0f\n",
+            frame, (s32)mem_read32(cpu, COOP_ROOM_TICKET), mem_read32(cpu, sda - 23592u), mem_read32(cpu, sda - 26232u), mem_read32(cpu, sda - 24048u),
+            mem_read32(cpu, sda - 23344u), mem_read32(cpu, sda - 25696u), mem_read32(cpu, sda - 23040u), play_mask, mem_read32(cpu, sda - 23552u),
+            (s32)mem_read32(cpu, shown + 8u), mem_read32(cpu, shown + 4u), g_coop_use.active, g_coop_use.p2, g_coop_screen, g_coop_p1_look,
+            g_coop_words_free, g_coop_find_free, g_coop_prompt, g_stayer.room_turn_frame + 1ull >= frame && g_stayer.room_turn_frame != 0ull,
+            g_stayer.bits, p[0][0], p[0][1], p[0][2], p[1][0], p[1][1], p[1][2]);
+}
+
+// ---- Lights per room, stage 1: the game's own lighting of player 2's room by that room (rooms/design-lights.md G1-G3) ----
+// Apart, the game lit every character and both room sections from the room in play: player 2's body and their room's
+// creatures took player 1's room's grid (amber in 342 for a player in blue-grey 341) and dynamic lights. The game is
+// room-aware below the registration (0x801E5DDC picks its per-room table by the object's +592 through 0x80155544); the gaps
+// are the grid the character draw registers (the CURRENT slot's record, 0x8002798C) and the room word and player words its
+// light functions and the sections' light loader read. Every path opens only with lights_apart: R3's picture test (the split
+// on, no whole owner, player 2 apart) with co-op on, no Tome copy turn and player 2's room's record loaded.
+static bool lights_apart(CPUState* cpu) {
+    if (!g_settings.mod_coop || g_tome_copy_turn || g_room_whole_owner != 0 || !camera_split_on() || !coop_stay_apart(cpu))
+        return false;
+    return r6_room_loaded(cpu, coop_object_room(cpu, g_coop_p2));
+}
+static bool g_lights_room_on;  // installed (ED_ROOM_SLOTS with ED_COOP_STAY, and not ED_LIGHTS_OFF): G1-G3 all or none
+static struct {
+    unsigned asked, answered, lit, sections;  // U6: counts since the last line
+    unsigned long long said;
+    bool turn_said;
+} g_lights_count;
+static void lights_count_log(CPUState* cpu) {
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (getenv("ED_COOP_LOG") == NULL || frame < g_lights_count.said + 120ull)
+        return;
+    g_lights_count.said = frame;
+    if (g_lights_count.answered || g_lights_count.lit || g_lights_count.sections)
+        fprintf(stderr, "[lights] frame %llu: 0x80155130 asked %u, answered for room %d %u; actors lit as room %d %u; section lights %u\n", frame,
+                g_lights_count.asked, coop_object_room(cpu, g_coop_p2), g_lights_count.answered, coop_object_room(cpu, g_coop_p2), g_lights_count.lit,
+                g_lights_count.sections);
+    g_lights_count.asked = g_lights_count.answered = g_lights_count.lit = g_lights_count.sections = 0u;
+}
+// G1: the character draw (0x8002790C) asks the CURRENT slot's record (0x80155130(2), return 0x8002798C) for the grid it
+// registers its object with (record+112's table, 0x80027998-0x800279EC); an object of player 2's room gets that room's
+// record, the one the game's own 0x80155130(0x80155544(room)) gives. r21 (the record) is read once there, so only the grid
+// changes. Everything else asks as before.
+#define LIGHTS_RECORD_GET 0x80155130u
+static void lights_record_for_actor(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (cpu->lr != 0x8002798Cu || cpu->gpr[3] != 2u)
+        return;
+    g_lights_count.asked++;
+    if (!lights_apart(cpu))
+        return;
+    const u32 o = cpu->gpr[30];
+    const s32 room1 = coop_object_room(cpu, g_coop_p2);
+    if (!guest_ram_range_valid(cpu, o, 596u) || (s32)mem_read32(cpu, o + 592u) != room1)
+        return;
+    const u32 record = room_slot_record(cpu, room_slot_of(cpu, room1));
+    if (record == 0u)
+        return;
+    if (g_coop_turn && !g_lights_count.turn_said) {  // U5
+        g_lights_count.turn_said = true;
+        fprintf(stderr, "[lights] grid asked in player 2's turn (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    // Once per room of player 2's: the first lamp of the grid their room's characters now take, beside the room in play's.
+    static s32 said_room = -2;
+    if (said_room != room1 && getenv("ED_COOP_LOG") != NULL) {
+        said_room = room1;
+        u32 colour[2] = {0u, 0u};
+        const u32 records[2] = {record, room_slot_record(cpu, (s32)mem_read32(cpu, ROOM_SLOT_TABLE))};
+        for (int i = 0; i < 2; i++) {
+            const u32 table = records[i] != 0u ? mem_read32(cpu, records[i] + 112u) : 0u;
+            const u32 grid = guest_ram_range_valid(cpu, table, 4u) ? mem_read32(cpu, table) : 0u;
+            const u32 cells = grid + 36u, first = guest_ram_range_valid(cpu, cells, 16u) ? mem_read32(cpu, cells + 12u) : 0u;
+            colour[i] = guest_ram_range_valid(cpu, first, 16u) ? mem_read32(cpu, first + 12u) : 0u;
+        }
+        fprintf(stderr, "[lights] room %d's characters lit from their own room's grid: first lamp colour %u,%u,%u (the room in play %d's: %u,%u,%u; frame %llu)\n",
+                room1, colour[0] >> 24, (colour[0] >> 16) & 0xFFu, (colour[0] >> 8) & 0xFFu, (s32)mem_read32(cpu, cpu->gpr[13] - 23276u), colour[1] >> 24,
+                (colour[1] >> 16) & 0xFFu, (colour[1] >> 8) & 0xFFu, (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    g_lights_count.answered++;
+    hle_set_u32(cpu, record);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+// The room and its player in for a draw-time call of the game's (G2, G3): the room word and the slot table (coop_room_in),
+// and the three player words (object, node, id) player 2's, as the room's one player. Its own helper: r6c_creature's swap
+// (a committed fix with its own words) stays as it is.
+typedef struct {
+    u32 room[3], words[3];
+} LightsRoomKeep;
+static void lights_room_in(CPUState* cpu, s32 room, LightsRoomKeep* k) {
+    coop_room_in(cpu, room, k->room);
+    const u32 at[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+    const u32 now[3] = {mem_read32(cpu, g_coop_p2 + 52u), g_coop_p2, mem_read32(cpu, g_coop_p2 + 16u)};
+    for (int i = 0; i < 3; i++) {
+        k->words[i] = mem_read32(cpu, at[i]);
+        mem_write32(cpu, at[i], now[i]);
+    }
+}
+static void lights_room_out(CPUState* cpu, const LightsRoomKeep* k) {
+    const u32 at[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+    for (int i = 0; i < 3; i++)
+        mem_write32(cpu, at[i], k->words[i]);
+    coop_stay_room_out(cpu, k->room);
+}
+// G2: an actor of player 2's room lit with its room and that room's player in: the three light calls of the actor draw
+// 0x8011A278 (0x801E6244 the lights, 0x801E87F4 no grid, 0x801E8B9C its +596 rule), each at its own call site (object in
+// r15). Their dynamic lights are then the room's (+42 == r13-23276: player 2's torch lights them, player 1's doesn't), the
+// 0x08 rule and the room-292 cell rule see the room. The budget test (0x8011A3F8) ran before: player 2's body keeps the
+// non-player budget, together and apart alike.
+#define LIGHTS_ACTOR 0x801E6244u
+#define LIGHTS_ACTOR_NO_GRID 0x801E87F4u
+#define LIGHTS_ACTOR_RULE 0x801E8B9Cu
+// Player 2 lit as a hero (the user, 2026-11-12: "I want co op to feel polished and as if it was truly built by design in the
+// game"). The actor draw gives its light call 0x801E6244 a budget (r7: 1, and 4 when the object is r13-26524's, the one
+// player: 0x8011A304, 0x8011A3F8-0x8011A408); with 4 it adds up to three of the room's real lamps nearest the body (lights
+// 5-7, 0x801E652C-0x801E6560). Player 2's body had 1, like any creature: flatter beside a sconce than player 1's. In co-op
+// their body gets the hero's 4, together and apart; solo has no player 2. ED_P2_HERO_LIGHT=0 (testing) leaves it as before.
+// (The other player test there, 0x8011A3C0, is the hero's fade amount for their body and what they hold: not a light.)
+static void lights_hero_budget(CPUState* cpu, u32 fn, u32 site) {
+    static int on = -1;
+    if (on < 0) {
+        const char* v = getenv("ED_P2_HERO_LIGHT");
+        on = v == NULL || strcmp(v, "0") != 0;
+    }
+    if (!on || fn != LIGHTS_ACTOR || cpu->lr != site || !g_settings.mod_coop || g_coop_p2 == 0u || g_tome_copy_turn || cpu->gpr[7] != 1u)
+        return;
+    if (cpu->gpr[15] != mem_read32(cpu, g_coop_p2 + 52u))
+        return;
+    cpu->gpr[7] = 4u;
+    static bool said;
+    if (!said && getenv("ED_COOP_LOG") != NULL) {
+        said = true;
+        fprintf(stderr, "[lights] player 2's body lit as the hero (budget 4: the room's lamps nearest them, frame %llu)\n",
+                (unsigned long long)(cpu->timebase / 675000ull));
+    }
+}
+// ED_LIGHT_COUNT (testing): the light loads (0x801E54BC) made inside player 2's body's light call apart, logged with the
+// budget, to see the hero budget's lamps arrive.
+static unsigned g_light_loads;
+static void light_load_count(CPUState* cpu) { (void)cpu; g_light_loads++; }
+static void lights_actor_call(CPUState* cpu, u32 fn, u32 site) {
+    static bool inside;
+    g_hle_passthrough = true;
+    if (!inside)
+        lights_hero_budget(cpu, fn, site);  // before the bracket: its guest call takes r7 as it is now
+    if (inside || !g_lights_room_on || cpu->lr != site || !lights_apart(cpu))
+        return;
+    const u32 o = cpu->gpr[15];
+    const s32 room1 = coop_object_room(cpu, g_coop_p2);
+    if (!guest_ram_range_valid(cpu, o, 596u) || (s32)mem_read32(cpu, o + 592u) != room1)
+        return;
+    u32 args[6], out = 0u;
+    for (int i = 0; i < 6; i++)
+        args[i] = cpu->gpr[3 + i];
+    LightsRoomKeep keep;
+    lights_room_in(cpu, room1, &keep);
+    inside = true;
+    g_light_loads = 0u;
+    const bool ok = hle_guest_call(cpu, fn, args, 6, cpu->fpr[1], &out);
+    inside = false;
+    lights_room_out(cpu, &keep);
+    if (!ok)
+        fprintf(stderr, "[lights] the actor light call 0x%08X didn't run to its end (frame %llu)\n", fn, (unsigned long long)(cpu->timebase / 675000ull));
+    g_lights_count.lit += fn == LIGHTS_ACTOR;
+    if (fn == LIGHTS_ACTOR && o == mem_read32(cpu, g_coop_p2 + 52u) && getenv("ED_COOP_LOG") != NULL) {  // what player 2's body got
+        static unsigned long long said;
+        const unsigned long long frame = cpu->timebase / 675000ull;
+        if (frame >= said + 300ull) {
+            said = frame;
+            fprintf(stderr, "[lights] player 2's body: the light call gave 0x%08X with budget %u, %u light loads (frame %llu)\n", out, args[4],
+                    g_light_loads, frame);
+        }
+    }
+    hle_set_u32(cpu, out);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+static void lights_actor(CPUState* cpu) { lights_actor_call(cpu, LIGHTS_ACTOR, 0x8011A580u); }
+static void lights_actor_no_grid(CPUState* cpu) { lights_actor_call(cpu, LIGHTS_ACTOR_NO_GRID, 0x8011A5B8u); }
+static void lights_actor_rule(CPUState* cpu) { lights_actor_call(cpu, LIGHTS_ACTOR_RULE, 0x8011A5F0u); }
+// G3: player 2's room section with its room's live lights. The passes load them once (0x801F2CB4 at 0x801E8584 / 0x801E8684:
+// the dynamic lights of r13-23276, light 7 above r13-26524) before section 3 then 2; run again under player 2's room before
+// section 3, and again plain before section 2 (only after the first ran) to put back exactly what the game loaded.
+#define LIGHTS_SECTION_LOAD 0x801F2CB4u
+static bool g_lights_g3_ran;
+static void lights_section(CPUState* cpu, u32 section) {
+    u32 ignore = 0u;
+    if (section == 3u) {
+        g_lights_g3_ran = false;
+        if (!g_lights_room_on || !lights_apart(cpu))
+            return;
+        LightsRoomKeep keep;
+        lights_room_in(cpu, coop_object_room(cpu, g_coop_p2), &keep);
+        hle_guest_call(cpu, LIGHTS_SECTION_LOAD, NULL, 0, 0.0, &ignore);
+        lights_room_out(cpu, &keep);
+        g_lights_g3_ran = true;
+        g_lights_count.sections++;
+        lights_count_log(cpu);
+    } else if (g_lights_g3_ran) {
+        g_lights_g3_ran = false;
+        hle_guest_call(cpu, LIGHTS_SECTION_LOAD, NULL, 0, 0.0, &ignore);
+    }
+}
+
+// ---- The room mist per room, players apart (docs/research/separate-rooms/design-fog.md, Part A) ----
+// The user (2026-11-13): "fog from the block room is seen in the other player's screen ... depending on which player leaves
+// the room, the fog changes." The mist is the game's own material layer 9 (0x801E21FC adds K2 x ramp(depth, height) x a
+// scrolling noise), and every input of it is the room in play's: the record 0x80153998(2) (record+124), the ramp bank
+// r13-21808, the gate r13-22144, texture matrix 54 (the band, from that record's top and the game camera's depth row) and 57
+// (the scroll). Apart, the room in play is player 1's, so both halves took player 1's room's mist. Here, while lights_apart
+// (the same gate as the lights, so the two always agree on a thing's room) and ED_FOG_ROOMS isn't 0, a scope round each draw
+// of player 2's room's things (its room section, its actors, its effects) gives the game's asks that room's record (A2), its
+// bank and gate, its actors' rule (A3) and matrix 54 from player 2's own eye (A5), and 57 its own scroll when it differs (A6).
+// The room sections' cached lists bake the gate and the ramp at their compile: one baked with the wrong room's mist is thrown
+// away the way the game itself does it, and made again inside the right scope (A4). Effects reuse the last actor's matrices,
+// so each gets its own room's last actor's (A7). At the other's door the stayer's noise and scroll are kept (A8), and a height
+// ease of player 2's room eases their room's top (A9). Solo, follow, together, the split off, the Tome copy: no scope opens.
+// Switches: ED_FOG_ROOMS (0 off, 1 on, 2 the records only: the band from the game camera), ED_FOG_LISTS=0 (no list hygiene),
+// ED_FOG_KEEP=0 (the door's noise as the game makes it), ED_FOG_LOG=1 (also with ED_COOP_LOG): the [fog] lines.
+#define FOG_RECORD_ASK 0x80153998u     // 0x80153998(n): a room's mist record (n 2 the current slot's, 0/1 that slot's)
+#define FOG_MATERIAL 0x801E21FCu       // the material setup (its layer 9)
+#define FOG_BUF 0x8060238Cu            // the mist matrices, 96 bytes per buffer (r13-21824): 54 at +0, 57 at +48
+#define FOG_CAMERA_ROW2 (ROOM_CAMERA_MTX + 32u)
+#define FOG_DOOR_SETUP 0x801E0170u     // at a change: K2, the palette words, the scroll reset
+#define FOG_NOISE_FILL 0x801E01D8u     // the noise made again (and the scroll reset)
+#define FOG_NOISE_PALETTE 0x801E055Cu  // TLUT 0's history refilled
+#define FOG_HEIGHT_SET 0x801E4A80u     // (frames, target): the mist top's ease
+#define FOG_PALETTE_STEP 0x801E0DFCu   // the noise palette's walk, once a frame from the opaque pass
+#define FOG_TEXMTX_SCRATCH (SCRATCH_HUD + 0xE80u)  // 96 bytes: an effect's 54 then 57
+static bool g_fog_on;          // installed: the record ask (A2) and the room draws are hooked
+static int g_fog_rooms = 1;    // ED_FOG_ROOMS
+static bool g_fog_lists = true, g_fog_keep = true, g_fog_log;
+static bool g_fog_views;       // ED_FOG_VIEWS=1: Part B, the renderer gives each half the mist's depth from its own camera
+static u32 g_fog_load_texmtx;  // GXLoadTexMtxImm
+static int g_fog_slot = -1;    // the slot whose mist the game's asks get, or -1: the game's own
+static s32 g_fog_room = -1;    // that slot's room (A3's rule)
+static u32 g_fog_e, g_fog_bank1;  // its record and its texture bank
+static bool g_fog_section3;    // inside section 3's opaque draw's scope (the [fog] loaded line)
+static bool g_fog_degraded;    // the open scope's gate was put off for want of a noise: a list compiled in it isn't its own
+static bool g_fog_list_ok[2];  // A4: the slot's cached list was compiled in its own room's mist
+static s32 g_fog_list_room[2] = {-1, -1};  // the room that verdict is for (a slot reloaded unseen: the verdict is unknown)
+static bool g_fog_noise_filled;  // the noise was made since the state (A6, A8)
+static bool g_fog_noise_check;   // after a state load: is the noise texture in the loaded RAM filled (fog_frame)
+static unsigned g_fog_window;  // the game's frame draws seen (its ask at 0x800080F8): "this frame's" for A7
+static int g_fog_xf_room = -1;  // A7: whose last actor's 54/57 the GX now holds (0 room0, 1 room1, -1 not one of them)
+static struct {
+    u32 m[2][12];
+    unsigned window[2];
+} g_fog_last[2];               // A7: each room's last actor's 54 and 57
+static struct {
+    bool on;
+    s32 room;
+    float sx, sy;
+    bool was_own;  // the last apart frame drew room 1 on its own scroll (false together): an off-to-on edge takes the game's pair
+} g_fog_scroll = {false, -1, 0.0f, 0.0f, false};  // A6: room 1's own scroll
+static struct {
+    unsigned n;
+    float target;
+    s32 room;
+} g_fog_h1;                    // A9: room 1's height ease
+static struct {
+    bool on;
+    float sx, sy;
+    u32 e;
+    s32 room;
+    bool own;                  // the pair kept is room 1's own scroll (player 2 the stayer, on their own scroll)
+} g_fog_door;                  // A8: the stayer's noise kept through the other's door
+static struct {
+    unsigned actors, effects;
+    unsigned long long said;
+    s32 pair[2];
+    s32 test_pair[2];
+    bool loaded_want;
+    float a_row0[4];
+} g_fog_stat = {0u, 0u, 0ull, {-2, -2}, {-2, -2}, false, {0.0f, 0.0f, 0.0f, 0.0f}};
+static struct {
+    unsigned long long said;
+    s32 room0, room1;
+    u32 e0, e1;
+    int rule;
+} g_fog_frame_log = {0ull, -2, -2, 0u, 0u, -1};
+static unsigned g_fog_skips[6];  // the [fog] skipped lines, up to 8 each
+enum { FOG_SKIP_NOISE, FOG_SKIP_RECORD, FOG_SKIP_NO_MIST, FOG_SKIP_PALETTE, FOG_SKIP_WHOLE, FOG_SKIP_K2 };
+static unsigned long long fog_frame_no(const CPUState* cpu) { return cpu->timebase / 675000ull; }
+static float fog_word_f32(u32 w) {
+    float f;
+    memcpy(&f, &w, sizeof f);
+    return f;
+}
+static bool fog_skip_say(int kind) { return g_fog_skips[kind]++ < 8u; }
+// FA (design-fog A0): the lights' predicate (co-op on, no Tome copy turn, no whole owner, the split on, apart, player 2's
+// room's record loaded) and the switch.
+static bool fog_apart(CPUState* cpu) { return g_fog_on && g_fog_rooms != 0 && lights_apart(cpu); }
+// The game's own ask for a room's mist record (its override record and loaded test included): 0 none.
+// *failed (when given): the guest call didn't run to its end (not "no record").
+static u32 fog_ask_ex(CPUState* cpu, u32 n, bool* failed) {
+    u32 e = 0u;
+    const bool ok = hle_guest_call(cpu, FOG_RECORD_ASK, &n, 1, 0.0, &e);
+    if (failed != NULL)
+        *failed = !ok;
+    if (!ok || e == 0u || !guest_ram_range_valid(cpu, e, 48u))
+        return 0u;
+    return e;
+}
+static u32 fog_ask(CPUState* cpu, u32 n) { return fog_ask_ex(cpu, n, NULL); }
+// The slot whose record holds a room, loaded (+0x8142 and +0x8143 set, as the game's ask tests): read from the slot table's
+// records, not the host's cache (which keeps a slot's old room while an unpack is on its way). -1: none.
+static int fog_slot_of(CPUState* cpu, s32 room) {
+    for (int i = 0; i < 2; i++) {
+        const u32 rec = room_slot_record(cpu, i);
+        if (rec == 0u)
+            continue;
+        const u32 w = mem_read32(cpu, rec + 0x8140u);
+        if ((s32)(s16)(w >> 16) == room && ((w >> 8) & 0xFFu) != 0u && (w & 0xFFu) != 0u)
+            return i;
+    }
+    return -1;
+}
+typedef struct {
+    float k2000, k005, k200, k0625, wrap;
+} FogK;
+static FogK fog_k(CPUState* cpu) {  // the game's own constants (.sdata2: 2000.0, 0.005, 200.0, 0.000625 and the scroll's wrap)
+    const u32 r2 = cpu->gpr[2];
+    const FogK k = {guest_read_f32(cpu, r2 - 19188u), guest_read_f32(cpu, r2 - 19184u), guest_read_f32(cpu, r2 - 19192u),
+                    guest_read_f32(cpu, r2 - 19180u), guest_read_f32(cpu, r2 - 19228u)};
+    return k;
+}
+// Row 2 of a LookAt (as the game camera's): z = normalize(eye - target), (z, -z.eye). The up vector does not enter it.
+static bool fog_lookat_row(const float eye[3], const float target[3], float row[4]) {
+    const float z[3] = {eye[0] - target[0], eye[1] - target[1], eye[2] - target[2]};
+    const float len = sqrtf(z[0] * z[0] + z[1] * z[1] + z[2] * z[2]);
+    if (!(len > 0.0f) || !isfinite(len))
+        return false;
+    for (int i = 0; i < 3; i++)
+        row[i] = z[i] / len;
+    row[3] = -(row[0] * eye[0] + row[1] * eye[1] + row[2] * eye[2]);
+    return true;
+}
+// Matrix 54 as the game builds it (0x801E4EC8-0x801E4F60) from a camera's row 2 and the band's shift d = 200 - top:
+// row 0 = -(row 2)/2000 then x Trans(0,0,d), row 1 = (0,0,0.005,0) x Trans(0,0,d), row 2 = 0.
+static void fog_mist_a(const FogK* k, const float row[4], float d, float a[12]) {
+    a[0] = -row[0] / k->k2000, a[1] = -row[1] / k->k2000, a[2] = -row[2] / k->k2000, a[3] = (-row[3] - row[2] * d) / k->k2000;
+    a[4] = 0.0f, a[5] = 0.0f, a[6] = k->k005, a[7] = k->k005 * d;
+    for (int i = 8; i < 12; i++)
+        a[i] = 0.0f;
+}
+static bool fog_window_open(CPUState* cpu) {  // inside the game's frame draw, between its gate's set and clear (0x80008110-0x80008188)
+    return guest_backchain_contains(cpu, 0x80008114u, 0x80008180u);
+}
+// The self-test (design-fog 5), once per pair of rooms while FA, at section 3's scope (the buffer still the game's A): D1 the
+// game's A against the host's formula from the game camera's row 2 and the room in play's top; D2 the game camera's row 2
+// against a LookAt of the game's view record (0x803012E0: eye, target) when the cameras aren't lent: A5's LookAt reading.
+static void fog_self_test(CPUState* cpu, u32 e0, u32 buf, const FogK* k) {
+    float row[4], a[12], d1 = -1.0f, d2 = -1.0f;
+    for (int i = 0; i < 4; i++)
+        row[i] = guest_read_f32(cpu, FOG_CAMERA_ROW2 + 4u * (u32)i);
+    if (e0 != 0u) {
+        // Each row at its own size: row 0 x 2000 (the camera row and the depth constant), row 1 / 0.005 (0, 0, 1, d); row 0's
+        // x/y/z are at most 1/2000 as built, so unscaled a wrong depth direction would stay under 0.001.
+        fog_mist_a(k, row, k->k200 - guest_read_f32(cpu, e0), a);
+        d1 = 0.0f;
+        for (int i = 0; i < 12; i++) {
+            const float sc = i < 4 ? k->k2000 : i < 8 && k->k005 != 0.0f ? 1.0f / k->k005 : 1.0f;
+            const float x = a[i] * sc, y = guest_read_f32(cpu, buf + 4u * (u32)i) * sc;
+            d1 = fmaxf(d1, fabsf(x - y) / (1.0f + fabsf(x)));
+        }
+    }
+    float eye[3], target[3], view_row[4];
+    if (!hle_coop_cameras_lent() && !hle_coop_screen()) {
+        for (int i = 0; i < 3; i++) {
+            eye[i] = guest_read_f32(cpu, CAMERA_VIEW + 4u * (u32)i);
+            target[i] = guest_read_f32(cpu, CAMERA_VIEW + 12u + 4u * (u32)i);
+        }
+        if (fog_lookat_row(eye, target, view_row)) {
+            d2 = 0.0f;
+            for (int i = 0; i < 4; i++)
+                d2 = fmaxf(d2, fabsf(view_row[i] - row[i]) / (1.0f + fabsf(row[i])));
+        }
+    }
+    fprintf(stderr, "[fog] self-test: D1 %s%.6f (the game's A vs the host's formula, row 0 x 2000, row 1 / 0.005%s), D2 %s%.6f (the game camera's row 2 vs a LookAt of its view%s); "
+                    "both under 0.001 expected (frame %llu)\n",
+            d1 >= 0.0f && d1 > 1e-3f ? "LARGE " : "", d1, e0 == 0u ? ": the room in play has no mist record, not taken" : "",
+            d2 >= 0.0f && d2 > 1e-3f ? "LARGE " : "", d2, d2 < 0.0f ? ": cameras lent or no view, not taken" : "", fog_frame_no(cpu));
+}
+// A1: the mist scope. Only while FA, for player 2's room (room1 != room0) in a resident slot; nests as nothing (an inner draw
+// of an open scope is already in it). Saves the gate, the bank and both matrices of the buffer the draws read, then gives the
+// game's asks room 1's (A2), and room 1's matrices: 54 from player 2's eye (A5), 57 its own scroll when it has one (A6).
+// want_slot (>= 0, the section draws): the slot whose record the game's draw draws; the scope opens only when room 1's
+// record is that one. FOG_SITE_WHOLE: section 3 in a whole frame of player 2's (room_section_draw: only when the room in
+// play has no mist and room 1's list was compiled in its own), the band from the game camera, the frame's camera then.
+static bool fog_begin(CPUState* cpu, s32 room, FogSave* s, int site, int want_slot) {
+    s->open = false;
+    const bool whole_site = site == FOG_SITE_WHOLE;
+    if (g_fog_slot >= 0)
+        return false;
+    if (whole_site ? !(g_fog_on && g_fog_rooms != 0 && g_settings.mod_coop && g_room_whole_owner == 2 && g_coop_p2 != 0u) : !fog_apart(cpu))
+        return false;
+    const u32 sda = cpu->gpr[13];
+    const s32 room0 = (s32)mem_read32(cpu, sda - 23276u), room1 = coop_object_room(cpu, g_coop_p2);
+    if (room != room1 || room1 == room0)
+        return false;
+    const int slot = fog_slot_of(cpu, room1);
+    const u32 rec = slot >= 0 ? room_slot_record(cpu, slot) : 0u;
+    const u32 index = mem_read32(cpu, sda - 21824u);
+    const u32 buf = FOG_BUF + 96u * index;
+    if (slot < 0 || (want_slot >= 0 && slot != want_slot) || rec == 0u || index > 1u || !guest_ram_range_valid(cpu, buf, 96u)) {
+        if (fog_skip_say(FOG_SKIP_RECORD))
+            fprintf(stderr, "[fog] skipped: room %d's record or the mist buffer not found (slot %d, the draw's slot %d, buffer %u; frame %llu)\n", room1, slot,
+                    want_slot, index, fog_frame_no(cpu));
+        return false;
+    }
+    bool ask_failed = false;
+    const u32 e1 = fog_ask_ex(cpu, (u32)slot, &ask_failed);
+    const FogK k = fog_k(cpu);
+    const bool section = site == FOG_SITE_SECTION;
+    const bool thing = site == FOG_SITE_ACTOR || site == FOG_SITE_EFFECT;
+    // An actor or effect with the game's gate off (outside the frame draw, or the room in play mistless) and room 1 without a
+    // record: nothing for a scope to give (no layer either way), so no ask of the room in play, no back-chain walk and no
+    // re-entered draw (the review's frame-time point: every object-draw pass of a mistless room 1).
+    if (thing && e1 == 0u && !ask_failed && mem_read32(cpu, sda - 22144u) == 0u)
+        return false;
+    const s32 pair[2] = {room0, room1};
+    u32 e0 = 0u;
+    bool e0_asked = false;
+    if (section && (g_fog_stat.test_pair[0] != room0 || g_fog_stat.test_pair[1] != room1)) {
+        g_fog_stat.test_pair[0] = room0, g_fog_stat.test_pair[1] = room1;
+        g_fog_stat.loaded_want = true;
+        e0 = fog_ask(cpu, 2u), e0_asked = true;
+        if (g_fog_log)
+            fog_self_test(cpu, e0, buf, &k);
+    }
+    s->gate = mem_read32(cpu, sda - 22144u);
+    s->bank = mem_read32(cpu, sda - 21808u);
+    s->buf_at = buf;
+    for (u32 i = 0u; i < 24u; i++)
+        s->buf[i] = mem_read32(cpu, buf + 4u * i);
+    // The gate: room 1's layer on where the game's is on (the gate set: the room in play has mist, in the frame draw), and also
+    // where the room in play has none but the frame draw is open (the game never sets the gate then). No noise made since the
+    // state with the room in play mistless: off (no layer rather than an unfilled texture).
+    u32 gate = 0u;
+    // A failed ask (not "no record"): a list compiled in this scope is not marked its own (A4 clears it once an ask works).
+    bool degraded = ask_failed;
+    if (ask_failed && fog_skip_say(FOG_SKIP_RECORD))
+        fprintf(stderr, "[fog] skipped: room %d's mist record ask didn't run to its end: drawn without it (frame %llu)\n", room1, fog_frame_no(cpu));
+    if (e1 != 0u) {
+        if (s->gate != 0u) {
+            gate = 1u;
+        } else {
+            if (!e0_asked)
+                e0 = fog_ask(cpu, 2u), e0_asked = true;
+            if (e0 == 0u && fog_window_open(cpu)) {
+                gate = 1u;
+                if (!g_fog_noise_filled) {
+                    gate = 0u;
+                    degraded = true;
+                    if (fog_skip_say(FOG_SKIP_NOISE))
+                        fprintf(stderr, "[fog] skipped: room %d's mist with no noise made yet (the room in play %d has none): drawn without it (frame %llu)\n",
+                                room1, room0, fog_frame_no(cpu));
+                }
+            }
+        }
+    } else if (section && s->gate != 0u && fog_skip_say(FOG_SKIP_NO_MIST)) {
+        fprintf(stderr, "[fog] skipped: room %d has no mist record: its things drawn without the layer (the room in play %d has one; frame %llu)\n", room1,
+                room0, fog_frame_no(cpu));
+    }
+    const u32 bank1 = mem_read32(cpu, rec + 0x813Cu);
+    mem_write32(cpu, sda - 22144u, gate);
+    mem_write32(cpu, sda - 21808u, bank1);
+    g_fog_slot = slot, g_fog_room = room1, g_fog_e = e1, g_fog_bank1 = bank1;
+    g_fog_degraded = degraded;
+    float a[12] = {0.0f}, row[4] = {0.0f}, eye[3] = {0.0f}, target[3] = {0.0f};
+    bool p2_eye = false;
+    if (e1 != 0u && gate != 0u && k.k2000 != 0.0f) {
+        // A5: player 2's eye (ED_FOG_ROOMS=2: the game camera's, the band alone); with their close-up or the lent cameras the
+        // game camera is theirs. A whole frame is drawn with the game camera: its row.
+        p2_eye = !whole_site && g_fog_rooms == 1 && camera_player2_view(eye, target) && fog_lookat_row(eye, target, row);
+        if (!p2_eye)
+            for (int i = 0; i < 4; i++)
+                row[i] = guest_read_f32(cpu, FOG_CAMERA_ROW2 + 4u * (u32)i);
+        fog_mist_a(&k, row, k.k200 - guest_read_f32(cpu, e1), a);
+        for (u32 i = 0u; i < 12u; i++)
+            guest_write_f32(cpu, buf + 4u * i, a[i]);
+        // A6: B' = the game's B with room 1's own scroll (in a whole frame the room in play has no mist: always its own)
+        if ((g_fog_scroll.on || whole_site) && g_fog_scroll.room == room1) {
+            const float b[12] = {k.k0625, 0.0f, 0.0f, k.k0625 * g_fog_scroll.sx, 0.0f, k.k0625, 0.0f, k.k0625 * g_fog_scroll.sy, 0.0f, 0.0f, 0.0f, 0.0f};
+            for (u32 i = 0u; i < 12u; i++)
+                guest_write_f32(cpu, buf + 48u + 4u * i, b[i]);
+        }
+        if (section)
+            for (int i = 0; i < 4; i++)
+                g_fog_stat.a_row0[i] = a[i];
+    }
+    if (section) {
+        g_fog_section3 = true;
+        const unsigned long long frame = fog_frame_no(cpu);
+        if (g_fog_log && (frame >= g_fog_stat.said + 600ull || g_fog_stat.pair[0] != pair[0] || g_fog_stat.pair[1] != pair[1])) {
+            g_fog_stat.said = frame;
+            g_fog_stat.pair[0] = pair[0], g_fog_stat.pair[1] = pair[1];
+            fprintf(stderr, "[fog] frame %llu: section 3 (room %d) in its own mist: gate %u, bank 0x%08X, A' row0 (%.6f %.6f %.6f %.4f) row1 (%.6f %.6f %.6f %.4f) "
+                            "from %s (%.0f %.0f %.0f)->(%.0f %.0f %.0f) | the game's A row0 (%.6f %.6f %.6f %.4f); %u actors, %u effects of %d in its mist since the last line\n",
+                    frame, room1, gate, bank1, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7],
+                    p2_eye ? "player 2's eye" : g_fog_rooms == 2 ? "the game camera (records only)" : "the game camera (player 2's close-up or lent)",
+                    eye[0], eye[1], eye[2], target[0], target[1], target[2], fog_word_f32(s->buf[0]), fog_word_f32(s->buf[1]),
+                    fog_word_f32(s->buf[2]), fog_word_f32(s->buf[3]), g_fog_stat.actors, g_fog_stat.effects, room1);
+            g_fog_stat.actors = g_fog_stat.effects = 0u;
+        }
+    } else if (site == FOG_SITE_EFFECT) {
+        g_fog_stat.effects++;
+    }
+    s->open = true;
+    return true;
+}
+static void fog_end(CPUState* cpu, const FogSave* s) {
+    if (!s->open)
+        return;
+    const u32 sda = cpu->gpr[13];
+    for (u32 i = 0u; i < 24u; i++)
+        mem_write32(cpu, s->buf_at + 4u * i, s->buf[i]);
+    mem_write32(cpu, sda - 22144u, s->gate);
+    mem_write32(cpu, sda - 21808u, s->bank);
+    g_fog_slot = -1, g_fog_room = -1, g_fog_e = 0u, g_fog_bank1 = 0u;
+    g_fog_section3 = false;
+    g_fog_degraded = false;
+}
+// A2: the game's record ask (0x80153998). Inside a scope, the asks of the room section draws (lr 0x801E75D8 opaque, 0x801E7450
+// translucent), of the actors' rule (0x8011BE5C) and of the material setup (0x801E2244) get the scope's slot; the material
+// setup's also its bank (the opaque draw writes the current one at 0x801E75F8, after the scope opened; the layer reads it at
+// 0x801E2AA4 in this same setup). Every other ask (the matrix build 0x801E4EC0, the ease, the palette, a change's ask with
+// its slot index) is the game's. The frame draw's own ask (lr 0x800080FC) counts the frames for A7.
+static void fog_record_ask(CPUState* cpu) {
+    g_hle_passthrough = true;  // the game's own function always runs
+    if (cpu->gpr[3] != 2u)
+        return;
+    if (cpu->lr == 0x800080FCu) {
+        g_fog_window++;
+        g_fog_xf_room = -1;
+        return;
+    }
+    if (g_fog_slot < 0)
+        return;
+    switch (cpu->lr) {
+    case 0x801E75D8u:
+    case 0x801E7450u:
+    case 0x8011BE5Cu:
+        cpu->gpr[3] = (u32)g_fog_slot;
+        return;
+    case 0x801E2244u:
+        cpu->gpr[3] = (u32)g_fog_slot;
+        mem_write32(cpu, cpu->gpr[13] - 21808u, g_fog_bank1);
+        return;
+    default:
+        return;
+    }
+}
+// A3: the actors' rule (0x8011BE00: no mist on an actor above the record's top in rooms 83, 99 and 213, by the room in play's
+// NUMBER at 0x8011BE64) for room 1, at its material setup (lr 0x8011C120; the object in r24, its +8 the height). With A2 the
+// game's own test read room 1's top; here the number is room 1's. Bit 9 (512) is the layer; nothing else in 0x8011BE00 touches it.
+static void fog_material(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (g_fog_slot < 0 || cpu->lr != 0x8011C120u)
+        return;
+    const u32 o = cpu->gpr[24];
+    bool rule = false;
+    if (g_fog_e != 0u && (g_fog_room == 83 || g_fog_room == 99 || g_fog_room == 213) && guest_ram_range_valid(cpu, o, 12u))
+        rule = guest_read_f32(cpu, g_fog_e) < guest_read_f32(cpu, o + 8u);
+    cpu->gpr[5] = rule ? cpu->gpr[5] & ~512u : cpu->gpr[5] | 512u;
+}
+// A10: an actor of player 2's room drawn inside its room's mist (the object draw 0x8011A278: its matrices A' x model and B x
+// model at 0x8011A764/0x8011A788, its pieces' materials at 0x8011C11C and 0x8011BAC0). The inner dispatch of the guest call
+// passes through here (running) and runs the object draw's notify (coop_found_object_draw: the marks), then the game's draw.
+static void fog_object_draw(CPUState* cpu) {
+    static bool running;
+    g_hle_passthrough = true;
+    if (running || !g_fog_on || g_fog_slot >= 0 || !g_settings.mod_coop || g_fog_rooms == 0 || g_coop_p2 == 0u || !sda_ready(cpu))
+        return;
+    const u32 o = cpu->gpr[3];
+    if (!guest_ram_range_valid(cpu, o, 596u))
+        return;
+    const s32 room1 = coop_object_room(cpu, g_coop_p2);
+    if (room1 == -1 || (s32)mem_read32(cpu, o + 592u) != room1)
+        return;
+    FogSave fog;
+    if (!fog_begin(cpu, room1, &fog, FOG_SITE_ACTOR, -1))
+        return;
+    u32 args[6], out = 0u;
+    for (int i = 0; i < 6; i++)
+        args[i] = cpu->gpr[3 + i];
+    running = true;
+    const bool ok = hle_guest_call(cpu, COOP_OBJECT_DRAW, args, 6, cpu->fpr[1], &out);
+    running = false;
+    fog_end(cpu, &fog);
+    g_fog_stat.actors++;
+    if (!ok)
+        fprintf(stderr, "[fog] an object's draw (room %d) didn't run to its end (frame %llu)\n", room1, fog_frame_no(cpu));
+    hle_set_u32(cpu, out);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+// A7 (a notify on GXLoadTexMtxImm): each room's last actor's 54 and 57 as the object draw loads them (lr 0x8011A7B0,
+// 0x8011A7C0; the object in r15); a section's loads (0x801E7668/0x801E768C, 0x801E74D0/0x801E74F4) leave no actor's in the GX.
+static void fog_texmtx_load(CPUState* cpu) {
+    const u32 lr = cpu->lr;
+    if (!g_fog_on || g_fog_rooms == 0 || !g_settings.mod_coop)
+        return;
+    if (lr == 0x8011A7B0u || lr == 0x8011A7C0u) {
+        int r = -1;
+        if (g_fog_slot >= 0)
+            r = 1;
+        else if (sda_ready(cpu) && guest_ram_range_valid(cpu, cpu->gpr[15], 596u) &&
+                 (s32)mem_read32(cpu, cpu->gpr[15] + 592u) == (s32)mem_read32(cpu, cpu->gpr[13] - 23276u))
+            r = 0;
+        g_fog_xf_room = r;
+        const int which = lr == 0x8011A7C0u;
+        if (r < 0 || !guest_ram_range_valid(cpu, cpu->gpr[3], 48u))
+            return;
+        for (u32 i = 0u; i < 12u; i++)
+            g_fog_last[r].m[which][i] = mem_read32(cpu, cpu->gpr[3] + 4u * i);
+        g_fog_last[r].window[which] = g_fog_window;
+    } else if (lr == 0x801E7668u || lr == 0x801E768Cu || lr == 0x801E74D0u || lr == 0x801E74F4u) {
+        g_fog_xf_room = -1;
+        if (lr == 0x801E7668u && g_fog_section3 && g_fog_stat.loaded_want && g_fog_log && guest_ram_range_valid(cpu, cpu->gpr[3], 16u)) {
+            g_fog_stat.loaded_want = false;
+            float m[4];
+            for (u32 i = 0u; i < 4u; i++)
+                m[i] = guest_read_f32(cpu, cpu->gpr[3] + 4u * i);
+            fprintf(stderr, "[fog] loaded: texmtx 54 row0 (%.6f %.6f %.6f %.4f) at lr 0x801E7668 in section 3 (A' row0 %.6f %.6f %.6f %.4f; frame %llu)\n", m[0],
+                    m[1], m[2], m[3], g_fog_stat.a_row0[0], g_fog_stat.a_row0[1], g_fog_stat.a_row0[2], g_fog_stat.a_row0[3], fog_frame_no(cpu));
+        }
+    }
+}
+// A7 in the effects' draw (effect_draw_by_room): the effect's own room's last actor's 54/57, when that room's were loaded in
+// this frame draw and aren't what the GX holds; by the game's own GXLoadTexMtxImm.
+static void fog_effect_matrices(CPUState* cpu, s32 room, s32 room0, s32 room1) {
+    if (g_fog_load_texmtx == 0u || !fog_apart(cpu))
+        return;
+    const int r = room == room1 ? 1 : room == room0 ? 0 : -1;
+    if (r < 0 || g_fog_xf_room == r || g_fog_last[r].window[0] != g_fog_window || g_fog_last[r].window[1] != g_fog_window ||
+        !guest_ram_range_valid(cpu, FOG_TEXMTX_SCRATCH, 96u))
+        return;
+    for (u32 w = 0u; w < 2u; w++)
+        for (u32 i = 0u; i < 12u; i++)
+            mem_write32(cpu, FOG_TEXMTX_SCRATCH + 48u * w + 4u * i, g_fog_last[r].m[w][i]);
+    u32 ignore = 0u;
+    const u32 a54[3] = {FOG_TEXMTX_SCRATCH, 54u, 0u}, a57[3] = {FOG_TEXMTX_SCRATCH + 48u, 57u, 0u};
+    hle_guest_call(cpu, g_fog_load_texmtx, a54, 3, 0.0, &ignore);
+    hle_guest_call(cpu, g_fog_load_texmtx, a57, 3, 0.0, &ignore);
+    g_fog_xf_room = r;
+}
+// A4: the room sections' cached lists (0x801E75B4 compiles record+288/+292 at its first draw, +0x8138 the size, and bakes the
+// gate, the ramp index and the ramp's address into it). At the opaque draw of a section, before the game's draw: a compile in
+// this call is marked as the room's own (section 2: the current room; section 3: only inside its scope); a list about to be
+// called that was not is cleared as the game's own clear does it (0x801E84B0-0x801E84B8: +0x8138 and +304), so the game
+// compiles it again in this same call (section 3 only inside a scope, section 2 always). Marked false at every state load.
+// The verdict is kept with its room: a slot whose record now holds another room (reloaded where this didn't see it) is
+// unknown, as after a load. Not with no player 2 (co-op on alone: one room, the game's). True: the list was cleared here.
+static bool fog_list(CPUState* cpu, u32 fn, u32 section, int slot, bool scoped) {
+    if (!g_fog_on || fn != ROOM_DRAW || !g_settings.mod_coop || g_coop_p2 == 0u || (section != 2u && section != 3u) || slot < 0 || slot > 1)
+        return false;
+    const u32 rec = room_slot_record(cpu, slot);
+    if (rec == 0u)
+        return false;
+    const u32 w = mem_read32(cpu, rec + 0x8140u);
+    if (((w >> 8) & 0xFFu) == 0u || (w & 0xFFu) == 0u)
+        return false;  // not loaded: the game's draw draws nothing
+    const s32 room = (s32)(s16)(w >> 16), room0 = (s32)mem_read32(cpu, cpu->gpr[13] - 23276u);
+    if (g_fog_list_room[slot] != room)
+        g_fog_list_ok[slot] = false;
+    if (mem_read32(cpu, rec + 0x8138u) == 0u) {
+        g_fog_list_ok[slot] = section == 2u || (scoped && !g_fog_degraded);
+        g_fog_list_room[slot] = room;
+        if (g_fog_log) {
+            char how[48];
+            if (g_fog_list_ok[slot])
+                snprintf(how, sizeof how, "in its own mist");
+            else
+                snprintf(how, sizeof how, "under room %d's", room0);
+            fprintf(stderr, "[fog] list: room %d (slot %d) compiled as section %u %s (frame %llu)\n", room, slot, section, how, fog_frame_no(cpu));
+        }
+        return false;
+    }
+    if (g_fog_list_ok[slot] || g_fog_rooms == 0 || !g_fog_lists || (section == 3u && (!scoped || g_fog_degraded)))
+        return false;
+    mem_write32(cpu, rec + 0x8138u, 0u);
+    mem_write32(cpu, rec + 304u, 0u);
+    g_fog_list_ok[slot] = true;  // (made again in this call, as its own)
+    g_fog_list_room[slot] = room;
+    static unsigned said;
+    if (said++ < 16u || g_fog_log)
+        fprintf(stderr, "[fog] list: room %d (slot %d) compiled outside its mist: cleared, made again as section %u (frame %llu)\n", room, slot, section,
+                fog_frame_no(cpu));
+    return true;
+}
+// A whole frame of player 2's, section 3 (room 1's record in `slot`): its cached list was compiled in its own mist with a
+// record (the layer is in the list) and the room in play has none (the game's draw would load none of the layer's inputs).
+static bool fog_whole_wants(CPUState* cpu, u32 section, int slot, s32 room1) {
+    if (!g_fog_on || g_fog_rooms == 0 || !g_settings.mod_coop || g_room_whole_owner != 2 || section != 3u || g_coop_p2 == 0u || slot < 0 || slot > 1)
+        return false;
+    const u32 rec = room_slot_record(cpu, slot);
+    if (rec == 0u || !g_fog_list_ok[slot] || g_fog_list_room[slot] != room1 || mem_read32(cpu, rec + 0x8138u) == 0u)
+        return false;
+    if (fog_ask(cpu, 2u) != 0u || fog_ask(cpu, (u32)slot) == 0u)
+        return false;
+    static unsigned said;
+    if (said++ < 8u || (g_fog_log && said % 600u == 0u))
+        fprintf(stderr, "[fog] whole frame: room %d's list holds its own mist and the room in play has none: drawn with its own mist's inputs "
+                        "(frame %llu)\n",
+                room1, fog_frame_no(cpu));
+    return true;
+}
+// A whole frame of player 2's (the Tome copy's, the shared Tome's): their room is the game's own draw with room 0's mist, as its
+// lights are (a limit, design-fog A11).
+static void fog_whole_seen(CPUState* cpu, u32 section, s32 room0, s32 room1) {
+    if (!g_fog_on || g_fog_rooms == 0 || g_room_whole_owner != 2 || section != 3u || !g_fog_log || !fog_skip_say(FOG_SKIP_WHOLE))
+        return;
+    fprintf(stderr, "[fog] skipped: a whole frame of player 2's draws room %d with room %d's mist (a limit; frame %llu)\n", room1, room0, fog_frame_no(cpu));
+}
+// Once a frame (room_slots_frame, at section 3's opaque draw, inside the frame draw): A6 room 1's own scroll (the game's step,
+// 0x801E4B4C-0x801E4B90, under its gates r13-21912 and r13-21936) when its speed differs from the room in play's or that room
+// has none, and the palette's walk 0x801E0DFC(room 1's) when the room in play has no record (the opaque pass walks only its
+// own); A9 room 1's height ease (0x801E4AE4-0x801E4B48 on room 1's top); the [fog] frame line.
+static void fog_frame(CPUState* cpu) {
+    if (!g_fog_on || !g_settings.mod_coop || g_tome_copy_turn || !sda_ready(cpu) || g_coop_p2 == 0u)
+        return;
+    const unsigned long long frame = fog_frame_no(cpu);
+    const u32 sda = cpu->gpr[13];
+    const u32 e0 = fog_ask(cpu, 2u);
+    if (e0 != 0u)
+        g_fog_noise_filled = true;  // the room in play has a record: its arrival (or the game's load) made the noise
+    if (g_fog_noise_check) {
+        // After a state load: the noise texture (r13-21988, 256x256 C8, 64 KB, filled by 0x801E01D8) is in the RAM the state
+        // brought back; a filled one has few all-zero words.
+        g_fog_noise_check = false;
+        const u32 tex = mem_read32(cpu, sda - 21988u);
+        unsigned nonzero = 0u;
+        if (tex != 0u && guest_ram_range_valid(cpu, tex, 0x10000u))
+            for (u32 i = 0u; i < 256u; i++)
+                nonzero += mem_read32(cpu, tex + 256u * i) != 0u;
+        if (nonzero >= 128u && !g_fog_noise_filled)
+            g_fog_noise_filled = true;
+        if (g_fog_log)
+            fprintf(stderr, "[fog] loaded state: the noise texture 0x%08X has %u of 256 sampled words set: %s (frame %llu)\n", tex, nonzero,
+                    g_fog_noise_filled ? "made" : "not made yet", frame);
+    }
+    const bool fa = fog_apart(cpu);
+    const s32 room0 = (s32)mem_read32(cpu, sda - 23276u), room1 = coop_object_room(cpu, g_coop_p2);
+    const int slot1 = fog_slot_of(cpu, room1);
+    const bool h1_drop = g_fog_h1.n > 0u && (room1 == room0 || room1 != g_fog_h1.room);
+    if (h1_drop) {
+        if (g_fog_log)
+            fprintf(stderr, "[fog] height: room %d's ease dropped (%s; frame %llu)\n", g_fog_h1.room, room1 == room0 ? "together" : "player 2 left it", frame);
+        g_fog_h1.n = 0u;
+    }
+    const u32 e1 = slot1 >= 0 && room1 != room0 && (fa || g_fog_h1.n > 0u) ? fog_ask(cpu, (u32)slot1) : 0u;
+    const bool still = mem_read32(cpu, sda - 21912u) != 0u || mem_read32(cpu, sda - 21936u) != 0u;
+    const FogK k = fog_k(cpu);
+    if (g_fog_scroll.room != room1) {  // a new room 1 (player 2's own arrival): its scroll from 0, as the game's arrival resets it
+        g_fog_scroll.room = room1;
+        g_fog_scroll.sx = g_fog_scroll.sy = 0.0f;
+        g_fog_scroll.was_own = true;  // (that start is its own: not taken from the game's pair)
+    }
+    if (room1 == room0)
+        g_fog_scroll.was_own = false;  // together the room's scroll is the game's pair
+    g_fog_scroll.on = false;
+    if (fa && e1 != 0u) {
+        g_fog_scroll.on = e0 == 0u || mem_read32(cpu, e1 + 4u) != mem_read32(cpu, e0 + 4u) || mem_read32(cpu, e1 + 8u) != mem_read32(cpu, e0 + 8u);
+        if (g_fog_scroll.on && !g_fog_scroll.was_own) {
+            // Room 1 was drawn on the game's pair (together, or the speeds matched) and now takes its own: from where the game's
+            // pair has it (A8 kept it at the other's door), so the stayer's noise doesn't move.
+            g_fog_scroll.sx = guest_read_f32(cpu, sda - 21928u);
+            g_fog_scroll.sy = guest_read_f32(cpu, sda - 21924u);
+            if (g_fog_log)
+                fprintf(stderr, "[fog] scroll: room %d on its own scroll from the game's pair %.3f,%.3f (frame %llu)\n", room1, g_fog_scroll.sx,
+                        g_fog_scroll.sy, frame);
+        }
+        g_fog_scroll.was_own = g_fog_scroll.on;
+        if (g_fog_scroll.on && !still) {
+            g_fog_scroll.sx += guest_read_f32(cpu, e1 + 4u);
+            if (g_fog_scroll.sx > k.wrap)
+                g_fog_scroll.sx -= k.wrap;
+            g_fog_scroll.sy += guest_read_f32(cpu, e1 + 8u);
+            if (g_fog_scroll.sy > k.wrap)
+                g_fog_scroll.sy -= k.wrap;
+        }
+        if (e0 == 0u && g_fog_noise_filled) {
+            u32 ignore = 0u, arg = e1;
+            hle_guest_call(cpu, FOG_PALETTE_STEP, &arg, 1, 0.0, &ignore);
+        }
+        if (e0 != 0u && g_fog_log) {  // one palette (TLUT 0) and one K2 a frame: logged when the two rooms' differ (a limit)
+            static const u32 kPalette[8] = {12u, 16u, 20u, 24u, 28u, 32u, 40u, 44u};
+            bool differ = false;
+            for (int i = 0; i < 8; i++)
+                differ |= mem_read32(cpu, e1 + kPalette[i]) != mem_read32(cpu, e0 + kPalette[i]);
+            if (differ && (g_fog_frame_log.room0 != room0 || g_fog_frame_log.room1 != room1) && fog_skip_say(FOG_SKIP_PALETTE))
+                fprintf(stderr, "[fog] skipped: rooms %d and %d's noise palettes differ: one palette a frame, the room in play's (a limit; frame %llu)\n", room0,
+                        room1, frame);
+            if (mem_read32(cpu, sda - 21956u) != 0xFFFFFFFFu && (g_fog_frame_log.room0 != room0 || g_fog_frame_log.room1 != room1) && fog_skip_say(FOG_SKIP_K2))
+                fprintf(stderr, "[fog] skipped: the mist colour K2 is tinted (0x%08X): one a frame, the room in play's (a limit; frame %llu)\n",
+                        mem_read32(cpu, sda - 21956u), frame);
+        }
+    }
+    if (g_fog_h1.n > 0u && e1 != 0u && !still) {  // A9: the game's step, on room 1's top
+        const float top = guest_read_f32(cpu, e1);
+        g_fog_h1.n--;
+        if (g_fog_h1.n == 0u) {
+            guest_write_f32(cpu, e1, g_fog_h1.target);
+            if (g_fog_log)
+                fprintf(stderr, "[fog] height: room %d's mist top at %.1f (frame %llu)\n", room1, g_fog_h1.target, frame);
+            g_fog_h1.target = 0.0f;
+        } else {
+            guest_write_f32(cpu, e1, top + (g_fog_h1.target - top) / (float)g_fog_h1.n);
+        }
+    }
+    const int rule = !fa ? 0 : g_fog_rooms;
+    if (g_fog_log && (frame >= g_fog_frame_log.said + 600ull || g_fog_frame_log.room0 != room0 || g_fog_frame_log.room1 != room1 ||
+                      g_fog_frame_log.e0 != e0 || g_fog_frame_log.e1 != e1 || g_fog_frame_log.rule != rule)) {
+        g_fog_frame_log.said = frame;
+        g_fog_frame_log.room0 = room0, g_fog_frame_log.room1 = room1, g_fog_frame_log.e0 = e0, g_fog_frame_log.e1 = e1, g_fog_frame_log.rule = rule;
+        char r0[96], r1[128];
+        if (e0 != 0u)
+            snprintf(r0, sizeof r0, "E top %.1f ramp %u scroll %.2f,%.2f", guest_read_f32(cpu, e0), mem_read32(cpu, e0 + 36u), guest_read_f32(cpu, sda - 21928u),
+                     guest_read_f32(cpu, sda - 21924u));
+        else
+            snprintf(r0, sizeof r0, "no mist");
+        if (room1 != room0 && slot1 >= 0 && e1 != 0u)
+            snprintf(r1, sizeof r1, "room1 %d slot %d top %.1f ramp %u%s", room1, slot1, guest_read_f32(cpu, e1), mem_read32(cpu, e1 + 36u),
+                     g_fog_scroll.on ? " (its own scroll)" : "");
+        else if (room1 != room0)
+            snprintf(r1, sizeof r1, "room1 %d slot %d no mist%s", room1, slot1, fa ? "" : " (not apart in the split, or not read)");
+        else
+            snprintf(r1, sizeof r1, "together");
+        fprintf(stderr, "[fog] frame %llu: room in play %d %s | %s | overlay colour 0x%08X, r13-25676 %u | rule %s\n", frame, room0, r0, r1,
+                mem_read32(cpu, sda - 21692u), mem_read32(cpu, sda - 25676u), rule == 1 ? "on" : rule == 2 ? "records-only" : "off");
+    }
+}
+// Part B (design-fog 4, ED_FOG_VIEWS=1): the renderer copies a draw's texture matrices into both halves unchanged, and the
+// mist's depth (matrix 54's row 0) is the game camera's, so together player 2's half took player 1's camera's depth, and in
+// player 2's close-up (the game camera theirs) player 1's half took player 2's. Once a frame (room_slots_frame, at section
+// 3's opaque draw: the frame's draws follow it in the GX stream), while co-op and the halves are on, the renderer is sent
+// what it needs to rewrite that row per view: the game camera's column 2 (world z in its view space), and the band shift
+// d = 200 - the mist top of the room in play and of player 2's room (NaN: no mist record; together, the room in play's).
+// It finds the rows by their build from the draw's own position matrix (interp.cpp mist_rows); room 1's draws given
+// player 2's own eye by Part A's scope don't match and are left. Only with the two slots and the stay (fog_install).
+static void fog_views_frame(CPUState* cpu) {
+#ifdef ED_AURORA
+    static bool was_on;
+    const bool on = g_fog_views && g_settings.mod_coop && camera_split_on() && !g_tome_copy_turn && g_room_whole_owner == 0 &&
+                    g_coop_p2 != 0u && sda_ready(cpu) && guest_ram_range_valid(cpu, ROOM_CAMERA_MTX, 48u);
+    const unsigned long long frame = fog_frame_no(cpu);
+    if (on != was_on && g_fog_views && g_fog_log)
+        fprintf(stderr, "[fog] views: the mist depth per half %s (frame %llu)\n", on ? "on" : "off (co-op, the halves or player 2 not up)", frame);
+    was_on = on;
+    if (!on)
+        return;  // (the renderer draws a frame without it as the game made it)
+    const FogK k = fog_k(cpu);
+    if (!(k.k2000 > 0.0f))
+        return;
+    const u32 sda = cpu->gpr[13];
+    const float c2[3] = {guest_read_f32(cpu, ROOM_CAMERA_MTX + 8u), guest_read_f32(cpu, ROOM_CAMERA_MTX + 24u), guest_read_f32(cpu, ROOM_CAMERA_MTX + 40u)};
+    const u32 e0 = fog_ask(cpu, 2u);
+    const float d0 = e0 != 0u ? k.k200 - guest_read_f32(cpu, e0) : NAN;
+    const s32 room0 = (s32)mem_read32(cpu, sda - 23276u), room1 = coop_object_room(cpu, g_coop_p2);
+    float d1 = d0;
+    if (room1 != room0) {
+        const int slot1 = fog_slot_of(cpu, room1);
+        const u32 e1 = slot1 >= 0 ? fog_ask(cpu, (u32)slot1) : 0u;
+        d1 = e1 != 0u ? k.k200 - guest_read_f32(cpu, e1) : NAN;
+    }
+    dol_aurora_split_set_mist(true, c2, d0, d1, k.k2000, (uint32_t)frame);
+    static unsigned long long said;
+    static s32 said_rooms[2] = {-2, -2};
+    if (g_fog_log && (frame >= said + 600ull || said_rooms[0] != room0 || said_rooms[1] != room1)) {
+        said = frame;
+        said_rooms[0] = room0, said_rooms[1] = room1;
+        fprintf(stderr, "[fog] views: frame %llu: sent c2 (%.4f %.4f %.4f), room in play %d d %.1f, player 2's room %d d %.1f%s\n", frame, c2[0], c2[1], c2[2],
+                room0, d0, room1, d1, room1 == room0 ? " (together)" : "");
+    }
+#else
+    (void)cpu;
+#endif
+}
+// A8: at a change with a stayer (the other player stays in their room), the stayer's mist isn't made again under them: the
+// change's mist setup at 0x80152160-0x80152170 (its arriving room's record in r3) gives K2 and the palette words as the game
+// sets them, keeps the noise (0x801E01D8 passed over: its caller ignores r3) and the scroll, and refills TLUT 0 only when the
+// arriving room's palette differs. Only when the stayer's room has a record and a noise was made. The mover is under the fade.
+static void fog_door_setup(CPUState* cpu) {  // 0x801E0170 at lr 0x80152164
+    g_hle_passthrough = true;
+    if (cpu->lr != 0x80152164u)
+        return;
+    g_fog_door.on = false;
+    if (!g_fog_on || g_fog_rooms == 0 || !g_fog_keep || !g_settings.mod_coop || g_tome_copy_turn || !sda_ready(cpu) || cpu->gpr[3] == 0u)
+        return;
+    const u32 stayer = coop_stay_stayer(cpu);
+    if (!coop_stay_spared(cpu, stayer))
+        return;
+    const s32 room = coop_object_room(cpu, stayer);
+    const int slot = fog_slot_of(cpu, room);
+    if (slot < 0 || slot == (s32)mem_read32(cpu, ROOM_SLOT_TABLE))
+        return;
+    const u32 e = fog_ask(cpu, (u32)slot);
+    if (e == 0u)
+        return;
+    if (!g_fog_noise_filled) {
+        if (fog_skip_say(FOG_SKIP_NOISE))
+            fprintf(stderr, "[fog] skipped: the stayer's room %d's noise at the door: none made since the state, the game's made (frame %llu)\n", room,
+                    fog_frame_no(cpu));
+        return;
+    }
+    const u32 sda = cpu->gpr[13];
+    g_fog_door.on = true;
+    g_fog_door.sx = guest_read_f32(cpu, sda - 21928u);
+    g_fog_door.sy = guest_read_f32(cpu, sda - 21924u);
+    // Player 2 the stayer (player 1's door, no bracket) on their room's own scroll (A6): the game's pair is player 1's room's,
+    // so theirs is what the pair takes on (room 1 draws on the game's pair again if the arriving room's speed is its own).
+    g_fog_door.own = g_stay_bracket == 0 && g_fog_scroll.on && g_fog_scroll.room == room;
+    if (g_fog_door.own) {
+        g_fog_door.sx = g_fog_scroll.sx;
+        g_fog_door.sy = g_fog_scroll.sy;
+    }
+    g_fog_door.e = e;
+    g_fog_door.room = room;
+}
+static void fog_noise_fill(CPUState* cpu) {  // 0x801E01D8(record)
+    g_hle_passthrough = true;
+    if (cpu->lr == 0x8015216Cu && g_fog_door.on) {
+        const u32 sda = cpu->gpr[13];
+        guest_write_f32(cpu, sda - 21928u, g_fog_door.sx);
+        guest_write_f32(cpu, sda - 21924u, g_fog_door.sy);
+        hle_set_u32(cpu, 0u);
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
+    if (cpu->gpr[3] != 0u)
+        g_fog_noise_filled = true;
+}
+static void fog_noise_palette(CPUState* cpu) {  // 0x801E055C(record) at lr 0x80152174
+    g_hle_passthrough = true;
+    if (cpu->lr != 0x80152174u || !g_fog_door.on)
+        return;
+    g_fog_door.on = false;
+    static const u32 kPalette[8] = {12u, 16u, 20u, 24u, 28u, 32u, 40u, 44u};
+    const u32 e = cpu->gpr[3];
+    bool same = e != 0u && guest_ram_range_valid(cpu, e, 48u);
+    for (int i = 0; same && i < 8; i++)
+        same = mem_read32(cpu, e + kPalette[i]) == mem_read32(cpu, g_fog_door.e + kPalette[i]);
+    static unsigned said;
+    if (g_fog_log || said++ < 8u)
+        fprintf(stderr, "[fog] door: the stayer's (room %d) noise and scroll kept%s; palette %s (the room in play %d; frame %llu)\n", g_fog_door.room,
+                g_fog_door.own ? " (its own scroll into the game's pair)" : "", same ? "kept" : "taken from the arriving room's",
+                (s32)mem_read32(cpu, cpu->gpr[13] - 23276u), fog_frame_no(cpu));
+    if (same) {
+        hle_set_u32(cpu, 0u);
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+    }
+}
+// A9: the mist top's ease (0x801E4A80(frames, target): two words the frame begin's 0x801E4AB0 eases the CURRENT record's top
+// with). In player 2's turn apart (their room's scripts: fn124 room_layer_height) or at the change's reset inside player 2's
+// bracket (lr 0x801521E0): room 1's own pair, the game's left as it was (player 1's room's).
+static void fog_height_set(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!g_fog_on || g_fog_rooms == 0 || !g_settings.mod_coop || g_tome_copy_turn || !sda_ready(cpu) || g_coop_p2 == 0u)
+        return;
+    const bool turn = g_coop_turn && r6_apart(cpu);
+    const bool reset = cpu->lr == 0x801521E0u && g_stay_bracket != 0;
+    if (!turn && !reset)
+        return;
+    // (The reset is the change's own (0, r2-22248): an ease of their room's ends there, as the game's does at a change.)
+    g_fog_h1.n = reset ? 0u : cpu->gpr[3];
+    g_fog_h1.target = (float)cpu->fpr[1];
+    g_fog_h1.room = coop_object_room(cpu, g_coop_p2);
+    if (g_fog_log)
+        fprintf(stderr, "[fog] height: room %d eases to %.1f over %u frames (%s, lr 0x%08X; frame %llu)\n", g_fog_h1.room, g_fog_h1.target, g_fog_h1.n,
+                reset ? "reset" : cpu->lr == 0x8016D0D4u ? "fn124" : cpu->lr == 0x80083248u ? "animator" : "player 2's turn", cpu->lr, fog_frame_no(cpu));
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+static void fog_state_load(void) {
+    g_fog_list_ok[0] = g_fog_list_ok[1] = false;
+    g_fog_list_room[0] = g_fog_list_room[1] = -1;
+    g_fog_noise_filled = false;
+    g_fog_noise_check = true;  // (the loaded RAM's noise read at the next frame)
+    g_fog_slot = -1, g_fog_room = -1, g_fog_e = 0u, g_fog_bank1 = 0u;
+    g_fog_section3 = g_fog_degraded = false;
+    g_fog_xf_room = -1;
+    memset(g_fog_last, 0, sizeof g_fog_last);
+    g_fog_scroll.on = false, g_fog_scroll.room = -1, g_fog_scroll.sx = g_fog_scroll.sy = 0.0f, g_fog_scroll.was_own = false;
+    memset(&g_fog_h1, 0, sizeof g_fog_h1);
+    memset(&g_fog_door, 0, sizeof g_fog_door);
+    g_fog_stat.test_pair[0] = g_fog_stat.test_pair[1] = -2;
+}
+// The installs (design-fog A0, A10): with ED_ROOM_SLOTS=2 and ED_COOP_STAY, beside the lights', after the object draw's notify.
+// Each checks its function's first word and the game's call of it at the site it acts on, and that no intercept is there.
+static void fog_install(CPUState* cpu) {
+    {
+        const char* v = getenv("ED_FOG_ROOMS");
+        g_fog_rooms = v == NULL || v[0] == '\0' ? 1 : strcmp(v, "0") == 0 ? 0 : strcmp(v, "2") == 0 ? 2 : 1;
+        v = getenv("ED_FOG_LISTS");
+        g_fog_lists = v == NULL || strcmp(v, "0") != 0;
+        v = getenv("ED_FOG_KEEP");
+        g_fog_keep = v == NULL || strcmp(v, "0") != 0;
+        v = getenv("ED_FOG_LOG");
+        g_fog_log = (v != NULL && strcmp(v, "0") != 0) || getenv("ED_COOP_LOG") != NULL;
+        v = getenv("ED_FOG_VIEWS");
+        g_fog_views = v != NULL && v[0] != '\0' && strcmp(v, "0") != 0;
+    }
+#ifndef ED_AURORA
+    g_fog_views = false;  // (the renderer's part only)
+#endif
+    if (g_fog_views)
+        fprintf(stderr, "[fog] views: each half's mist depth from its own camera (ED_FOG_VIEWS=1, design-fog Part B)\n");
+    fog_state_load();
+    g_fog_noise_check = false;  // (at boot no noise was made: the game's load or a change into a mist room makes it)
+    HleDispatchEntry* draw = hle_dispatch_entry(ROOM_DRAW);
+    HleDispatchEntry* draw_alpha = hle_dispatch_entry(ROOM_DRAW_ALPHA);
+    HleDispatchEntry* ask = hle_dispatch_entry(FOG_RECORD_ASK);
+    if (draw == NULL || draw->intercept != room_section_draw_opaque || draw_alpha == NULL || draw_alpha->intercept != room_section_draw_alpha ||
+        mem_read32(cpu, FOG_RECORD_ASK) != 0x9421FFF0u || !stayer_bl_is(cpu, 0x801E75D4u, FOG_RECORD_ASK) || !stayer_bl_is(cpu, 0x801E744Cu, FOG_RECORD_ASK) ||
+        !stayer_bl_is(cpu, 0x801E2240u, FOG_RECORD_ASK) || !stayer_bl_is(cpu, 0x8011BE58u, FOG_RECORD_ASK) || !stayer_bl_is(cpu, 0x800080F8u, FOG_RECORD_ASK) ||
+        ask == NULL || ask->intercept != NULL) {
+        fprintf(stderr, "[fog] NOT installed: the room draws or the mist record's ask 0x%08X aren't as expected or are taken: both halves take the room in "
+                        "play's mist\n",
+                FOG_RECORD_ASK);
+        return;
+    }
+    ask->intercept = fog_record_ask;
+    g_fog_on = true;
+    HleDispatchEntry* material = hle_dispatch_entry(FOG_MATERIAL);
+    if (mem_read32(cpu, FOG_MATERIAL) == 0x9421FFB0u && stayer_bl_is(cpu, 0x8011C11Cu, FOG_MATERIAL) && material != NULL && material->intercept == NULL)
+        material->intercept = fog_material;
+    else
+        fprintf(stderr, "[fog] the actors' rule at 0x%08X not taken: room 1's actors keep the room in play's number's rule\n", FOG_MATERIAL);
+    // The object draw: its notify (coop_found_object_draw, installed before) stays and runs on the passthrough.
+    HleDispatchEntry* object_draw = hle_dispatch_entry(COOP_OBJECT_DRAW);
+    if (mem_read32(cpu, COOP_OBJECT_DRAW) == 0x9421FD20u && object_draw != NULL && object_draw->intercept == NULL)
+        object_draw->intercept = fog_object_draw;
+    else
+        fprintf(stderr, "[fog] the object draw 0x%08X not taken: player 2's room's actors keep the room in play's mist\n", COOP_OBJECT_DRAW);
+    g_fog_load_texmtx = sdk_symbol_address("GXLoadTexMtxImm");
+    HleDispatchEntry* texmtx = g_fog_load_texmtx != 0u ? hle_dispatch_entry(g_fog_load_texmtx) : NULL;
+    if (texmtx != NULL && texmtx->notify == NULL && stayer_bl_is(cpu, 0x8011A7ACu, g_fog_load_texmtx) && stayer_bl_is(cpu, 0x8011A7BCu, g_fog_load_texmtx) &&
+        stayer_bl_is(cpu, 0x801E7664u, g_fog_load_texmtx)) {
+        texmtx->notify = fog_texmtx_load;
+        if (texmtx->intercept != NULL)  // (a notify runs only when the intercept passes through)
+            fprintf(stderr, "[fog] GXLoadTexMtxImm has an intercept: A7 sees only the calls it passes through to the game\n");
+    } else {
+        fprintf(stderr, "[fog] GXLoadTexMtxImm not watched: effects keep the last actor's mist matrices\n");
+        g_fog_load_texmtx = 0u;
+    }
+    const struct {
+        u32 at, first, site;
+        HleHandler fn;
+        const char* what;
+    } kDoor[4] = {{FOG_DOOR_SETUP, 0x9421FFE0u, 0x80152160u, fog_door_setup, "the change's mist setup"},
+                  {FOG_NOISE_FILL, 0x9421FFF0u, 0x80152168u, fog_noise_fill, "the noise"},
+                  {FOG_NOISE_PALETTE, 0x80EDA994u, 0x80152170u, fog_noise_palette, "the noise palette's refill"},
+                  {FOG_HEIGHT_SET, 0x906DAA60u, 0x801521DCu, fog_height_set, "the mist height's ease"}};
+    for (int i = 0; i < 4; i++) {
+        HleDispatchEntry* e = hle_dispatch_entry(kDoor[i].at);
+        if (mem_read32(cpu, kDoor[i].at) == kDoor[i].first && stayer_bl_is(cpu, kDoor[i].site, kDoor[i].at) && e != NULL && e->intercept == NULL)
+            e->intercept = kDoor[i].fn;
+        else
+            fprintf(stderr, "[fog] %s 0x%08X not taken: %s\n", kDoor[i].what, kDoor[i].at,
+                    i < 3 ? "the stayer's mist is made again at the other's door" : "a height ease of player 2's room eases the room in play's");
+    }
+    fprintf(stderr, "[fog] the room mist per room (ED_FOG_ROOMS=%d%s%s%s)\n", g_fog_rooms, g_fog_rooms == 0 ? ": off" : g_fog_rooms == 2 ? ": the records only" : "",
+            g_fog_lists ? "" : ", ED_FOG_LISTS=0", g_fog_keep ? "" : ", ED_FOG_KEEP=0");
+}
+
+// ---- Lights per room, stage 2: the renderer's two lamp sets and its views, decided once a frame (rooms/design-lights.md H) ----
+// The renderer's shadows and haze take one set of lamps from the game's grid (room_lights_update, on every call of
+// 0x801E4BDC). Apart, player 2's half took player 1's room's lamps, and the casters of both rooms shared them. Here, once a
+// frame at the opaque pass's section 3 (room_slots_frame: before any room section is drawn and any actor registers), set 0
+// is the room in play's, set 1 player 2's room's, each read from its slot's record only while the game's own loaded test
+// passes (a record put back dead keeps a good-looking table: rooms-ch1-183.state's slot 0), and the renderer is told to
+// fill one Frame per view. Solo and the players together: set 1 never on, the views never apart, set 0 today's path.
+// A slot's grid, as the game's own fallback picks it (record+112's table, entry 0, 0x800279CC), only from a record of that
+// room the game counts loaded (+0x8140 the room, +0x8142 and +0x8143 set, as 0x80155544), lying in that slot's span, with
+// today's grid tests (the cells right after it, the count the cells across). Entry 0, not r13-22136's: the renderer's lamps
+// are for shadows and haze, and following the lightning would send the set again, and forget its casters, on every flash.
+static u32 room_light_grid(CPUState* cpu, int slot, s32 room, u32* table_out) {
+    if (table_out != NULL)
+        *table_out = 0u;
+    const u32 record = room_slot_record(cpu, slot);
+    if (record == 0u || room == -1)
+        return 0u;
+    const u32 w = mem_read32(cpu, record + 0x8140u);
+    if ((s32)(s16)(w >> 16) != room || ((w >> 8) & 0xFFu) == 0u || (w & 0xFFu) == 0u)
+        return 0u;
+    const u32 table = mem_read32(cpu, record + 112u);
+    if (!guest_ram_range_valid(cpu, table, 12u))
+        return 0u;
+    if (table_out != NULL)
+        *table_out = table;
+    const u32 grid = mem_read32(cpu, table);
+    const u32 base = mem_read32(cpu, cpu->gpr[13] - 23304u + 4u * (u32)slot);
+    if (!guest_ram_range_valid(cpu, grid, 48u) || base == 0u || grid < base || grid >= base + ROOM_SLOT_BYTES ||
+        mem_read32(cpu, grid + 32u) != grid + 36u || !guest_ram_range_valid(cpu, mem_read32(cpu, grid + 48u), 8u))
+        return 0u;
+    const u32 count = mem_read32(cpu, grid + 4u);
+    const u32 last = mem_read32(cpu, grid + 24u), across = mem_read32(cpu, grid + 28u);
+    if (count == 0u || count > 20000u || count != (last & 0xFFu) * (across >> 24) * ((across >> 16) & 0xFFu) ||
+        !guest_ram_range_valid(cpu, grid + 36u, count * 20u))
+        return 0u;
+    return grid;
+}
+// The grid's mark, as room_lights_update takes it: its first cell's first lamp and its corner (a room loaded again at the
+// same place is another grid).
+static u32 room_light_mark(CPUState* cpu, u32 grid) {
+    const u32 first = mem_read32(cpu, grid + 48u);
+    return mem_read32(cpu, first) ^ mem_read32(cpu, first + 4u) ^ mem_read32(cpu, grid + 8u);
+}
+static struct {
+    bool on;          // set 1 is with the renderer
+    s32 room;         // its room (-1: none since a state load, so it's sent again or put off)
+    u32 grid, mark;
+    bool apart;       // lights_apart at the last frame's decision (U9)
+    bool per_view;    // what the renderer was last told
+    bool a_kept_said, b_kept_said;
+} g_lights_h = {false, -1, 0u, 0u, false, false, false, false};
+// U2: what a set was sent from.
+static void lights_set_log(CPUState* cpu, char set, s32 room, int slot, u32 grid, u32 table, int lamps, const int dims[3]) {
+    fprintf(stderr, "[lights] set %c: room %d slot %d grid 0x%08X (%d lamps, %d x %d x %d) table 0x%08X [0] 0x%08X [1] 0x%08X [2] 0x%08X light set %u (frame %llu)\n",
+            set, room, slot, grid, lamps, dims[0], dims[1], dims[2], table, mem_read32(cpu, table), mem_read32(cpu, table + 4u), mem_read32(cpu, table + 8u),
+            mem_read8(cpu, cpu->gpr[13] - 22136u), (unsigned long long)(cpu->timebase / 675000ull));
+}
+// One set to the renderer from a grid room_light_grid passed: 0 the room in play's, 1 player 2's room's.
+static bool lights_set_send(CPUState* cpu, int set, s32 room, int slot, u32 grid, u32 table) {
+    static float lamps[LIGHT_GRID_LAMPS * 7];
+    float origin[3], size[3];
+    int dims[3], lamp_count = 0;
+    u8* per_cell = room_lights_walk(cpu, grid, lamps, &lamp_count, origin, size, dims);
+    if (per_cell == NULL)
+        return false;
+    lights_set_log(cpu, set == 0 ? 'A' : 'B', room, slot, grid, table, lamp_count, dims);
+    if (set == 0)
+        dol_aurora_set_room_lights(lamps, lamp_count, origin, size, dims, per_cell);
+    else
+        dol_aurora_set_room_lights_other(1, lamps, lamp_count, origin, size, dims, per_cell);
+    free(per_cell);
+    return true;
+}
+static void lights_set_b_off(CPUState* cpu, const char* why) {
+    if (!g_lights_h.on)
+        return;
+    dol_aurora_set_room_lights_other(0, NULL, 0, NULL, NULL, NULL, NULL);
+    g_lights_h.on = false;
+    g_lights_h.room = -1;
+    g_lights_h.grid = g_lights_h.mark = 0u;
+    fprintf(stderr, "[lights] set B off: %s (frame %llu)\n", why, (unsigned long long)(cpu->timebase / 675000ull));
+}
+// Once a frame, from room_slots_frame (the slots' rooms just learned). Nothing changes while a change of player 2's runs as
+// theirs (the script route's bracket could last over a draw: the frame then draws one room, with the sets as they were).
+static void lights_frame(CPUState* cpu) {
+    if (!g_lights_room_on || g_stay_bracket != 0)
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    const bool ap = lights_apart(cpu);
+    const s32 room0 = (s32)mem_read32(cpu, cpu->gpr[13] - 23276u);
+    if (ap != g_lights_h.apart) {
+        g_lights_h.apart = ap;
+        fprintf(stderr, "[lights] apart %s at section 3 (frame %llu)\n", ap ? "on" : "off", frame);
+    }
+    // Set 0. Apart: from the current record, sent when it isn't what set 0 holds; a record not loaded keeps it as it was (no
+    // send, so its casters aren't forgotten). Otherwise today's path takes it back at its next call.
+    const bool own_was = g_lights_own_a;
+    g_lights_own_a = ap;
+    if (ap) {
+        const int cur = (int)(s32)mem_read32(cpu, ROOM_SLOT_TABLE);
+        u32 table = 0u;
+        const u32 grid = room_light_grid(cpu, cur, room0, &table);
+        if (grid == 0u) {
+            if (!g_lights_h.a_kept_said)
+                fprintf(stderr, "[lights] set A kept: room %d record not loaded (frame %llu)\n", room0, frame);
+            g_lights_h.a_kept_said = true;
+        } else {
+            g_lights_h.a_kept_said = false;
+            const u32 mark = room_light_mark(cpu, grid);
+            if (grid != g_lights_sent_grid || mark != g_lights_sent_mark) {
+                if (lights_set_send(cpu, 0, room0, cur, grid, table)) {
+                    g_lights_sent_grid = grid;
+                    g_lights_sent_mark = mark;
+                }
+            } else if (!own_was) {
+                fprintf(stderr, "[lights] set A: room %d slot %d grid 0x%08X, already with the renderer (frame %llu)\n", room0, cur, grid, frame);
+            }
+        }
+    }
+    // Set 1, by the players' rooms: off once they are together (or co-op, the stay or player 2 is gone); from player 2's
+    // room's record while it passes; else kept if it is still their room's, put off if not. Never from a record not loaded.
+    const s32 room1 = g_coop_p2 != 0u ? coop_object_room(cpu, g_coop_p2) : -1;
+    if (!g_settings.mod_coop || !coop_stay() || g_coop_p2 == 0u || room1 == -1 || room1 == room0) {
+        // The one that failed, for the log: co-op put off in the menu while apart is not the players coming together.
+        lights_set_b_off(cpu, !g_settings.mod_coop ? "co-op off"
+                              : !coop_stay()       ? "the stay off"
+                              : g_coop_p2 == 0u || room1 == -1 ? "player 2 gone"
+                                                               : "the players together");
+        g_lights_h.b_kept_said = false;
+    } else {
+        const int slot = room_slot_of(cpu, room1);
+        u32 table = 0u;
+        const u32 grid = room_light_grid(cpu, slot, room1, &table);
+        if (grid != 0u) {
+            g_lights_h.b_kept_said = false;
+            const u32 mark = room_light_mark(cpu, grid);
+            if ((!g_lights_h.on || g_lights_h.room != room1 || g_lights_h.grid != grid || g_lights_h.mark != mark) &&
+                lights_set_send(cpu, 1, room1, slot, grid, table)) {
+                g_lights_h.on = true;
+                g_lights_h.room = room1;
+                g_lights_h.grid = grid;
+                g_lights_h.mark = mark;
+            }
+        } else if (g_lights_h.on && g_lights_h.room == room1) {
+            if (!g_lights_h.b_kept_said)
+                fprintf(stderr, "[lights] set B kept: room %d record not loaded (frame %llu)\n", room1, frame);
+            g_lights_h.b_kept_said = true;
+        } else {
+            lights_set_b_off(cpu, "player 2's room's record not loaded");
+        }
+    }
+    // One Frame per view while apart with set 1 on; the renderer takes it at its own frame start.
+    const bool per_view = ap && g_lights_h.on;
+    if (per_view != g_lights_h.per_view) {
+        g_lights_h.per_view = per_view;
+        dol_aurora_set_lights_per_view(per_view);
+        fprintf(stderr, "[lights] per view %s at section 3 (frame %llu)\n", per_view ? "on" : "off", frame);
+    }
+}
+// A state load: what set 1 was sent from is the old world's, so it's sent again from a record that passes, or put off
+// (it stays on with the renderer until then). Set 0's record is left as it is: today's path keeps it over a load too.
+static void lights_state_load(void) {
+    g_lights_own_a = false;
+    g_lights_h.room = -1;
+    g_lights_h.grid = g_lights_h.mark = 0u;
+    g_lights_h.a_kept_said = g_lights_h.b_kept_said = false;
+}
+
 // D1, the hit's room. The game takes every hit in three functions, each refusing a victim whose room isn't the room in
 // play (r13-23276): 0x8006255C(block), event 11's hit (victim id block +152, attacker +156; gate 0x800625A4; it sends 53
 // or 230 and 39 to the victim synchronously, inside the call), 0x80061B9C(node, message, answer*), event 39's damage
@@ -24316,11 +27330,16 @@ static struct {
 } g_r6b;
 static bool r6b_memory(CPUState* cpu) { return cpu->ram_size >= R6B_KEY + 12u - GC_RAM_BASE; }
 static void r6b_job_open(CPUState* cpu) {
-    if (cpu->lr != R6B_JOB_BUILT || g_r6b.open || !r6b_memory(cpu) || !r6_apart(cpu))
+    if (cpu->lr != R6B_JOB_BUILT || g_r6b.open || !r6b_memory(cpu) || !r6_apart(cpu)) {
+        if (!g_r6b.open)
+            split_job_open(cpu, R6B_JOB_BUILT);  // (G4: inside a door's countdown, a job R6b doesn't bracket runs whole)
         return;
+    }
     const s32 room = coop_object_room(cpu, cpu->gpr[24]);
-    if (room == -1 || room == (s32)mem_read32(cpu, cpu->gpr[13] - 23276u) || !r6_room_loaded(cpu, room))
+    if (room == -1 || room == (s32)mem_read32(cpu, cpu->gpr[13] - 23276u) || !r6_room_loaded(cpu, room)) {
+        split_job_open(cpu, R6B_JOB_BUILT);
         return;
+    }
     const int slot = room_slot_of(cpu, room);
     const bool built = mem_read32(cpu, R6B_KEY) == R6B_MAGIC && (s32)mem_read32(cpu, R6B_KEY + 4u) == room && (s32)mem_read32(cpu, R6B_KEY + 8u) == slot;
     coop_room_in(cpu, room, g_r6b.keep);
@@ -24351,6 +27370,8 @@ static void r6b_close(CPUState* cpu) {
 static void r6b_job_close(CPUState* cpu) {
     if (g_r6b.open && cpu->lr == R6B_JOB_DONE)
         r6b_close(cpu);
+    if (g_split_job.open && cpu->lr == R6B_JOB_DONE)
+        split_job_close(cpu);  // (G4's job done)
 }
 // Each frame (room_slots_frame): a bracket still open in the main thread is closed (never expected); the second graph is
 // emptied when its room is no longer in its slot (its +0 pointers point into that slot's record): a route into it then
@@ -24362,6 +27383,11 @@ static void r6b_frame(CPUState* cpu) {
         fprintf(stderr, "[enemy] WARNING: a route job of room %d was still open in the frame: closed (frame %llu)\n", g_r6b.room,
                 (unsigned long long)(cpu->timebase / 675000ull));
         r6b_close(cpu);
+    }
+    if (g_split_job.open) {  // (G4's, the same)
+        fprintf(stderr, "[split] WARNING: a route job run whole was still open in the frame: closed (frame %llu)\n",
+                (unsigned long long)(cpu->timebase / 675000ull));
+        split_job_close(cpu);
     }
     if (mem_read32(cpu, R6B_KEY) != R6B_MAGIC)
         return;
@@ -24426,6 +27452,20 @@ static void stay_waits_clear(CPUState* cpu) {
 }
 static void stay_busy_clear(CPUState* cpu) {
     g_hle_passthrough = true;
+    // The stayer's presses (design-stayer-presses §1): the busy bits 8/16/32 the stayer sets in the window, by who set them
+    // (the current id), and taken off as they clear them. Only read here; the busy set itself runs as ever.
+    if ((cpu->gpr[3] & (8u | 16u | 32u)) != 0u && split_counting(cpu)) {
+        const int who = stayer_current(cpu);
+        if (who >= 0 && stayer_window(cpu, who)) {
+            const u32 bits = cpu->gpr[3] & (8u | 16u | 32u);
+            if (cpu->gpr[4] != 0u)
+                g_stayer.bits |= bits;
+            else
+                g_stayer.bits &= ~bits;
+            if (cpu->gpr[4] != 0u && stayer_say(1, who))
+                fprintf(stderr, "[stayer] player %d set busy 0x%X (the stayer's now 0x%X; frame %llu)\n", who + 1, bits, g_stayer.bits, split_frame(cpu));
+        }
+    }
     if (g_stay_bracket == 0 || cpu->lr != STAY_BUSY_CLEAR_AT || cpu->gpr[3] != 0xFFFFFFFFu || cpu->gpr[4] != 0u ||
         !(coop_scene_on_of(0) || coop_p1_in_close_up(cpu)))
         return;
@@ -24576,6 +27616,357 @@ static void r6_enemy_roster(CPUState* cpu) {
     }
 }
 
+// ---- The other player's brief freeze when one changes room, measured (docs/research/separate-rooms/design-change-freeze.md
+// Phase 1, P1.1-P1.3; readers change-freeze-code-readers.md, change-freeze-measure-readers.md). Logging only: nothing here
+// writes the guest's memory or a register, every hook is a notify (or a stamp in a hook that was there), each returns at once
+// inside a Tome copy's turn, and with ED_CHANGE_TIME and ED_COOP_ENEMY_LOG unset none of it is installed or runs. ----
+//
+// [change-time] (ED_CHANGE_TIME=1): the host's clock (tome_copy_ns) through one change. Its notifies are installed outside the
+// two-slot block, so solo gives the baseline:
+//   t0  the ticket's tick 0x80155830 at its last count (+0 == 1: this tick fires the change)
+//   t1  the slot load 0x80154C94 (from the load 0x80152298, before its OSReceiveMessage block at 0x80152398)
+//   t2  the arrival 0x80151FDC from the load (lr 0x801523A8): the block is over
+//   t3  the tail (0x80154B54 at lr 0x80152434): notify_room_slots_tail with two slots, a notify of its own with one
+//   t4a, t4b  the lamps sent to the renderer after the tail (dol_aurora_set_room_lights is a call_sync): the first send's
+//       start, the last one's end before the present. A send is timed the same both ways, its walk of the grid, its log
+//       line and its call_sync: together and solo in room_lights_update, apart around lights_frame (when it sent)
+//   t5  that frame's VIFlush (the present), t5e its call over, t6 the next pad read's start (hle_PADRead, player 1's, as
+//       both.tsv's; before the pad, the logs and the row, so the host's own per-frame logging isn't in the game's stop)
+// With ED_COOP_ENEMY_LOG set too, [change-hold]'s rows and hold-bit lines fall inside these: time from runs without it.
+// The kind is read from both players' nodes at t0 (r6_player1_node, g_coop_p2), never from r13-26524 alone.
+enum { CT_TICK, CT_LOAD, CT_ARRIVAL, CT_TAIL, CT_LIGHTS, CT_LIGHTS_END, CT_PRESENT, CT_PRESENT_END, CT_PAD, CT_COUNT };
+static struct {
+    bool on;
+    unsigned long long frame;  // the frame of t0 (of t1 for a change not from the ticket)
+    s32 from, to;
+    int mover;
+    const char* kind;  // split, apart, rejoin, together (the follow mode), solo
+    const char* load;  // fresh, resident (in a slot and loaded), ahead (in a slot, its unpack not done)
+    u64 t[CT_COUNT];
+    u64 lights_ns;  // the time inside the sends
+    int lights_sends;
+} g_change_time;
+static bool change_time(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_CHANGE_TIME") != NULL;
+    return on != 0;
+}
+// The clock now with the switch on, outside a Tome copy's turn; else 0 (and nothing is stamped).
+static u64 change_time_now(void) { return change_time() && !g_tome_copy_turn ? tome_copy_ns() : 0u; }
+static void change_time_ms(char* out, size_t size, u64 from, u64 to) {
+    if (from == 0u || to == 0u || to < from)
+        snprintf(out, size, "-");
+    else
+        snprintf(out, size, "%.1f", (double)(to - from) / 1e6);
+}
+static void change_time_say(const char* how) {
+    const u64* t = g_change_time.t;
+    u64 last = 0u;
+    for (int i = 0; i < CT_COUNT; i++)
+        if (t[i] > last)
+            last = t[i];
+    const u64 lit = t[CT_LIGHTS_END] != 0u ? t[CT_LIGHTS_END] : t[CT_TAIL];
+    char ms[10][24];
+    change_time_ms(ms[0], sizeof ms[0], t[CT_TICK], t[CT_LOAD]);
+    change_time_ms(ms[1], sizeof ms[1], t[CT_LOAD], t[CT_ARRIVAL]);
+    change_time_ms(ms[2], sizeof ms[2], t[CT_ARRIVAL], t[CT_TAIL]);
+    change_time_ms(ms[3], sizeof ms[3], t[CT_TAIL], t[CT_LIGHTS]);
+    change_time_ms(ms[4], sizeof ms[4], t[CT_LIGHTS], t[CT_LIGHTS_END]);
+    if (g_change_time.lights_sends != 0)
+        snprintf(ms[5], sizeof ms[5], "%.1f", (double)g_change_time.lights_ns / 1e6);
+    else
+        snprintf(ms[5], sizeof ms[5], "-");
+    change_time_ms(ms[6], sizeof ms[6], lit, t[CT_PRESENT]);
+    change_time_ms(ms[7], sizeof ms[7], t[CT_PRESENT], t[CT_PRESENT_END]);
+    change_time_ms(ms[8], sizeof ms[8], t[CT_PRESENT_END], t[CT_PAD]);
+    change_time_ms(ms[9], sizeof ms[9], t[CT_TICK] != 0u ? t[CT_TICK] : t[CT_LOAD], last);
+    // The segments follow one another and add up to the total; the sends' ms is a part of the lights segment, not one more.
+    fprintf(stderr,
+            "[change-time] frame %llu room %d->%d %s (player %d's door, %s): to the load %s ms (t0-t1), block %s (t1-t2), arrival %s (t2-t3), "
+            "to the lights %s (t3-t4a), lights %s (t4a-t4b; %d sends, each its walk, log and send; %s of it in them), to the present %s (%s-t5), "
+            "the present's call %s (t5-t5e), the present to the next pad %s (t5e-t6); total %s ms%s\n",
+            g_change_time.frame, g_change_time.from, g_change_time.to, g_change_time.load, g_change_time.mover, g_change_time.kind, ms[0], ms[1], ms[2],
+            ms[3], ms[4], g_change_time.lights_sends, ms[5], ms[6], t[CT_LIGHTS_END] != 0u ? "t4b" : "t3", ms[7], ms[8], ms[9], how);
+}
+static void change_time_begin(CPUState* cpu, s32 to) {
+    if (g_change_time.on)
+        change_time_say(" (unfinished: another change began)");
+    memset(&g_change_time, 0, sizeof g_change_time);
+    g_change_time.on = true;
+    g_change_time.frame = cpu->timebase / 675000ull;
+    g_change_time.to = to;
+    const bool coop = g_settings.mod_coop && g_coop_p2 != 0u;
+    g_change_time.mover = coop && g_coop_room_p2 ? 2 : 1;
+    const s32 r1 = coop_object_room(cpu, r6_player1_node(cpu)), r2 = coop ? coop_object_room(cpu, g_coop_p2) : -1;
+    const s32 other = g_change_time.mover == 2 ? r1 : r2;
+    g_change_time.from = g_change_time.mover == 2 ? r2 : r1;
+    g_change_time.kind = !coop || r2 == -1 ? "solo" : !coop_stay() ? "together" : r1 == r2 ? "split" : to == other ? "rejoin" : "apart";
+    g_change_time.load = "?";
+}
+// t0: 0x80155830's entry. It counts +0 down and fires the change at 0 in this same call (0x80155850-0x801558F4).
+static void notify_change_tick(CPUState* cpu) {
+    if (g_tome_copy_turn || !sda_ready(cpu) || mem_read32(cpu, COOP_ROOM_TICKET) != 1u)
+        return;
+    const u64 now = tome_copy_ns();
+    change_time_begin(cpu, (s32)mem_read32(cpu, COOP_ROOM_TICKET + 8u));
+    g_change_time.t[CT_TICK] = now;
+}
+// t1: 0x80154C94(wanted, reply)'s entry. What it will find, as it asks (0x80154D84: the other record's room id; then the
+// current record's, 0x80154DB0): resident (a record has the room, loaded: it replies at once), ahead (a record has the room,
+// its unpack not done), or fresh (neither: rename and unpack, 0x80154DBC).
+static void notify_change_load(CPUState* cpu) {
+    if (g_tome_copy_turn || !sda_ready(cpu))
+        return;
+    const u64 now = tome_copy_ns();
+    const s32 wanted = (s32)cpu->gpr[3];
+    if (!g_change_time.on || g_change_time.t[CT_LOAD] != 0u)
+        change_time_begin(cpu, wanted);  // a change not from the ticket (the game's other ways into 0x80152298)
+    g_change_time.t[CT_LOAD] = now;
+    g_change_time.to = wanted;
+    const s32 cur = (s32)mem_read32(cpu, ROOM_SLOT_TABLE), other = (s32)mem_read32(cpu, ROOM_SLOT_TABLE + 4u);
+    const u32 rc = room_slot_record(cpu, cur), ro = other != cur ? room_slot_record(cpu, other) : 0u;
+    const u32 wc = rc != 0u ? mem_read32(cpu, rc + 0x8140u) : 0u, wo = ro != 0u ? mem_read32(cpu, ro + 0x8140u) : 0u;
+    // (Either record holding the room takes no unpack: the other is swapped in, 0x80154D90, the current one goes straight to
+    // the wait, 0x80154DB8; both then wait at 0x80154E1C, at once when loaded, else on the unpack already running.)
+    if (ro != 0u && (s32)(s16)(wo >> 16) == wanted)
+        g_change_time.load = ((wo >> 8) & 0xFFu) != 0u ? "resident" : "ahead";
+    else if (rc != 0u && (s32)(s16)(wc >> 16) == wanted)
+        g_change_time.load = ((wc >> 8) & 0xFFu) != 0u ? "resident" : "ahead";
+    else
+        g_change_time.load = "fresh";
+}
+// t2: 0x80151FDC's entry from the load (lr 0x801523A8): the OSReceiveMessage block before it is over.
+static void notify_change_arrival(CPUState* cpu) {
+    if (g_tome_copy_turn || cpu->lr != 0x801523A8u || !g_change_time.on || g_change_time.t[CT_LOAD] == 0u || g_change_time.t[CT_ARRIVAL] != 0u)
+        return;
+    g_change_time.t[CT_ARRIVAL] = tome_copy_ns();
+}
+// t4a/t4b: a send of the lamps (began: the clock before it), counted between the tail and the present.
+static void change_time_lights(CPUState* cpu, u64 began) {
+    (void)cpu;
+    if (g_tome_copy_turn || began == 0u || !g_change_time.on || g_change_time.t[CT_TAIL] == 0u || g_change_time.t[CT_PRESENT] != 0u)
+        return;
+    const u64 now = tome_copy_ns();
+    if (g_change_time.t[CT_LIGHTS] == 0u)
+        g_change_time.t[CT_LIGHTS] = began;
+    g_change_time.t[CT_LIGHTS_END] = now;
+    g_change_time.lights_ns += now - began;
+    g_change_time.lights_sends++;
+}
+// What lights_frame last sent (set 0's grid and mark, set 1's, the views), read only: a change across its call is a send.
+static u64 change_time_lights_seen(void) {
+    u64 h = 1469598103934665603ull;
+    const u64 parts[7] = {g_lights_sent_grid, g_lights_sent_mark, g_lights_h.grid, g_lights_h.mark, (u32)g_lights_h.room,
+                          g_lights_h.on ? 1u : 0u, g_lights_h.per_view ? 1u : 0u};
+    for (int i = 0; i < 7; i++)
+        h = (h ^ parts[i]) * 1099511628211ull;
+    return h;
+}
+// t5: VIFlush's entry after the tail (after: the present's own call is over).
+static void change_time_present(CPUState* cpu, bool after) {
+    (void)cpu;
+    if (!g_change_time.on || g_tome_copy_turn || g_change_time.t[CT_TAIL] == 0u)
+        return;
+    if (!after && g_change_time.t[CT_PRESENT] == 0u)
+        g_change_time.t[CT_PRESENT] = tome_copy_ns();
+    else if (after && g_change_time.t[CT_PRESENT] != 0u && g_change_time.t[CT_PRESENT_END] == 0u)
+        g_change_time.t[CT_PRESENT_END] = tome_copy_ns();
+}
+// t6: the next pad read after the present (began: the clock at its start); the line. A change that never got that far is
+// told as far as it got.
+static void change_time_pad(CPUState* cpu, u64 began) {
+    if (!g_change_time.on || g_tome_copy_turn)
+        return;
+    if (g_change_time.t[CT_PRESENT_END] != 0u) {
+        g_change_time.t[CT_PAD] = began != 0u ? began : tome_copy_ns();
+        change_time_say("");
+        g_change_time.on = false;
+    } else if (cpu->timebase / 675000ull > g_change_time.frame + 600ull || cpu->timebase / 675000ull < g_change_time.frame) {
+        change_time_say(" (unfinished: no present after the tail within 600 frames)");
+        g_change_time.on = false;
+    }
+}
+
+// [change-hold] (ED_COOP_ENEMY_LOG): from the ticket (notify_room_ticket) to 60 frames after the tail, whether the rooms'
+// creatures and the stayer stand still through the countdown (event 102's hold, node +28's 8; goal refuter point 7):
+//   rows of every node of the asker's room, the other player's and the room asked for (the players marked P1/P2), every
+//   frame for the first 10 and then every 3: id, room, type (+8), state (+24), target, health, +28 & 8, the +32 byte and
+//   the position's step since the node's last row;
+//   the busy set's event 102 (0x801F5620 from lr 0x80155724) and whom it reaches;
+//   P1.3: each set of the hold bit (0x801F6828(node, on), its own recursion at lr 0x801F6880 left out), to find which of
+//   its 89 callers answers event 102 (none found statically).
+#define CHANGE_HOLD_AFTER 60ull     // frames after the tail
+#define CHANGE_HOLD_LONGEST 600ull  // a ticket that never came to a change: the window closes
+#define CHANGE_HOLD_SEEN 64
+static struct {
+    bool on;
+    unsigned long long ticket, tail, last_row;
+    int asker;
+    s32 rooms[3];  // the asker's, the other player's (-1: solo), the room asked for
+    struct {
+        u32 node;
+        float x, y, z;
+    } seen[CHANGE_HOLD_SEEN];
+} g_change_hold;
+// t3, and [change-hold]'s tail: from notify_room_slots_tail (two slots) or notify_change_tail (one), at lr 0x80152434.
+static void change_tail(CPUState* cpu) {
+    if (g_tome_copy_turn)
+        return;
+    if (g_change_time.on && g_change_time.t[CT_LOAD] != 0u && g_change_time.t[CT_TAIL] == 0u)
+        g_change_time.t[CT_TAIL] = tome_copy_ns();
+    if (g_change_hold.on && g_change_hold.tail == 0ull) {
+        g_change_hold.tail = cpu->timebase / 675000ull;
+        fprintf(stderr, "[change-hold] the change's tail at frame %llu (%llu frames after the ticket): rows for %llu frames more\n", g_change_hold.tail,
+                g_change_hold.tail - g_change_hold.ticket, CHANGE_HOLD_AFTER);
+    }
+}
+static void notify_change_tail(CPUState* cpu) {
+    if (cpu->lr == 0x80152434u)
+        change_tail(cpu);
+}
+static void change_hold_ticket(CPUState* cpu) {
+    if (!r6_log() || g_tome_copy_turn || !sda_ready(cpu))
+        return;
+    const bool coop = g_settings.mod_coop && g_coop_p2 != 0u;
+    const s32 r1 = coop_object_room(cpu, r6_player1_node(cpu)), r2 = coop ? coop_object_room(cpu, g_coop_p2) : -1;
+    memset(&g_change_hold, 0, sizeof g_change_hold);
+    g_change_hold.on = true;
+    g_change_hold.ticket = cpu->timebase / 675000ull;
+    g_change_hold.last_row = ~0ull;
+    g_change_hold.asker = coop && g_coop_room_p2 ? 2 : 1;
+    g_change_hold.rooms[0] = g_change_hold.asker == 2 ? r2 : r1;
+    g_change_hold.rooms[1] = g_change_hold.asker == 2 ? r1 : r2;
+    g_change_hold.rooms[2] = (s32)cpu->gpr[3];  // (0x80155770(room, ...): its +8, still to be written)
+    fprintf(stderr, "[change-hold] player %d's ticket to room %d at frame %llu (their room %d, the other's %d): rows until %llu frames after the tail\n",
+            g_change_hold.asker, g_change_hold.rooms[2], g_change_hold.ticket, g_change_hold.rooms[0], g_change_hold.rooms[1], CHANGE_HOLD_AFTER);
+}
+static void change_hold_frame(CPUState* cpu) {
+    if (!g_change_hold.on || g_tome_copy_turn || !sda_ready(cpu))
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (frame < g_change_hold.ticket) {  // (a state load took the clock back)
+        g_change_hold.on = false;
+        return;
+    }
+    const unsigned long long since = frame - g_change_hold.ticket;
+    if ((g_change_hold.tail != 0ull && frame > g_change_hold.tail + CHANGE_HOLD_AFTER) || (g_change_hold.tail == 0ull && since > CHANGE_HOLD_LONGEST)) {
+        fprintf(stderr, "[change-hold] the rows end at frame %llu (%s)\n", frame,
+                g_change_hold.tail != 0ull ? "60 frames after the tail" : "no change came of the ticket");
+        g_change_hold.on = false;
+        return;
+    }
+    if (frame == g_change_hold.last_row || (since >= 10ull && since % 3ull != 0ull))
+        return;
+    // The node rows (up to 41 lines a frame) only with ED_CHANGE_HOLD=1: play-rooms-log.bat sets ED_COOP_ENEMY_LOG for the
+    // user's plays, where that many lines at every door could themselves make the pause being reported. The one-line events
+    // (the ticket, event 102, the hold bit) stay with ED_COOP_ENEMY_LOG.
+    static int rows = -1;
+    if (rows < 0)
+        rows = getenv("ED_CHANGE_HOLD") != NULL;
+    if (!rows)
+        return;
+    g_change_hold.last_row = frame;
+    const u32 p1 = r6_player1_node(cpu);
+    // (r13-24048: the prompts' word, 0x10000 the ticket's "prompts off"; r13-23392: the byte the ticket sets to 1)
+    fprintf(stderr, "[change-hold] frame %llu (+%llu from the ticket): ticket count %d, busy 0x%X, the room in play %d, r13-24048 0x%X, r13-23392 %u\n", frame,
+            since, (s32)mem_read32(cpu, COOP_ROOM_TICKET), mem_read32(cpu, cpu->gpr[13] - 23344u), (s32)mem_read32(cpu, cpu->gpr[13] - 23276u),
+            mem_read32(cpu, cpu->gpr[13] - 24048u), mem_read8(cpu, cpu->gpr[13] - 23392u));
+    u32 node = 0u;
+    int told = 0;
+    for (int i = 0; i < 1024 && told < 40 && (node = coop_next(cpu, node)) != 0u; i++) {
+        const bool is_p1 = node == p1, is_p2 = g_coop_p2 != 0u && node == g_coop_p2;
+        if (!guest_ram_range_valid(cpu, node, 56u))
+            continue;
+        const u32 object = mem_read32(cpu, node + 52u);
+        if (!guest_ram_range_valid(cpu, object, COOP_OBJECT_ROOM + 4u))
+            continue;
+        const s32 room = (s32)mem_read32(cpu, object + COOP_OBJECT_ROOM);
+        if (!is_p1 && !is_p2 &&
+            (room == -1 || (room != g_change_hold.rooms[0] && room != g_change_hold.rooms[1] && room != g_change_hold.rooms[2])))
+            continue;
+        told++;
+        const float x = guest_read_f32(cpu, object), y = guest_read_f32(cpu, object + 4u), z = guest_read_f32(cpu, object + 8u);
+        char step[24] = "?";
+        for (int k = 0; k < CHANGE_HOLD_SEEN; k++)
+            if (g_change_hold.seen[k].node == node || g_change_hold.seen[k].node == 0u) {
+                if (g_change_hold.seen[k].node == node) {
+                    const float dx = x - g_change_hold.seen[k].x, dy = y - g_change_hold.seen[k].y, dz = z - g_change_hold.seen[k].z;
+                    snprintf(step, sizeof step, "%.1f", sqrtf(dx * dx + dy * dy + dz * dz));
+                } else {
+                    snprintf(step, sizeof step, "first");
+                }
+                g_change_hold.seen[k].node = node;
+                g_change_hold.seen[k].x = x;
+                g_change_hold.seen[k].y = y;
+                g_change_hold.seen[k].z = z;
+                break;
+            }
+        const u32 stats = g_coop_stats_offset != 0 ? mem_read32(cpu, node + (u32)(s32)g_coop_stats_offset) : 0u;
+        char after[16] = "-", health[16] = "-";
+        if (guest_ram_range_valid(cpu, stats, COOP_TARGET_B + 4u))
+            snprintf(after, sizeof after, "%u", mem_read32(cpu, stats + COOP_TARGET_B));
+        if (g_coop_health_offset != 0 && guest_ram_range_valid(cpu, stats + (u32)(s32)g_coop_health_offset, 2u))
+            snprintf(health, sizeof health, "%d", (s16)mem_read16(cpu, stats + (u32)(s32)g_coop_health_offset));
+        fprintf(stderr, "[change-hold]   %s%u room %d type %u state %u after %s health %s hold %u +32 %u at %.0f %.0f %.0f step %s\n",
+                is_p1 ? "P1 " : is_p2 ? "P2 " : "", mem_read32(cpu, node + 16u), room, mem_read32(cpu, node + 8u), mem_read32(cpu, node + COOP_NODE_STATE),
+                after, health, (mem_read32(cpu, node + 28u) & 8u) != 0u ? 1u : 0u, mem_read8(cpu, node + 32u), x, y, z, step);
+    }
+}
+// 0x801F5620(event, sender id, r5, room)'s entry from the busy set (lr 0x80155724): event 102 reaches each node whose
+// object's room (0x801F662C: object +592, -1 without one) is the room passed or -1, never the sender (+16) (0x801F5654-74).
+static void notify_change_hold_event(CPUState* cpu) {
+    if (g_tome_copy_turn || cpu->gpr[3] != 102u || cpu->lr != 0x80155724u || !sda_ready(cpu))
+        return;
+    const u32 sender = cpu->gpr[4];
+    const s32 room = (s32)cpu->gpr[6];
+    const u32 p1 = r6_player1_node(cpu);
+    const u32 id1 = guest_ram_range_valid(cpu, p1, 20u) ? mem_read32(cpu, p1 + 16u) : ~0u;
+    const u32 id2 = g_coop_p2 != 0u ? mem_read32(cpu, g_coop_p2 + 16u) : ~0u;
+    int reached = 0, kept = 0;
+    bool p1_told = false, p2_told = false;
+    u32 node = 0u;
+    for (int i = 0; i < 1024 && (node = coop_next(cpu, node)) != 0u; i++) {
+        if (!guest_ram_range_valid(cpu, node, 56u) || mem_read32(cpu, node + 16u) == sender)
+            continue;
+        const s32 theirs = coop_object_room(cpu, node);
+        if (theirs != room && theirs != -1)
+            continue;
+        if (split_send_keeps(cpu, node)) {  // (S2: not sent, split_send)
+            kept++;
+            continue;
+        }
+        reached++;
+        p1_told = p1_told || node == p1;
+        p2_told = p2_told || (g_coop_p2 != 0u && node == g_coop_p2);
+    }
+    char who[24];
+    if (sender == id1 || sender == id2)
+        snprintf(who, sizeof who, "player %d's", sender == id2 ? 2 : 1);
+    else
+        snprintf(who, sizeof who, "id %u's", sender);
+    char split[64] = "";
+    if (kept != 0)
+        snprintf(split, sizeof split, ", kept from room %d's nodes by the split rule (%d)", g_split.room, kept);
+    fprintf(stderr, "[change-hold] event 102 from %s busy set (busy 0x%X) to room %d: %d nodes told, player 1 %s, player 2 %s%s (frame %llu)\n", who,
+            mem_read32(cpu, cpu->gpr[13] - 23344u), room, reached, p1_told ? "told" : "not", g_coop_p2 == 0u ? "none" : p2_told ? "told" : "not", split,
+            (unsigned long long)(cpu->timebase / 675000ull));
+}
+// P1.3: 0x801F6828(node, on)'s entry: sets (on) or clears +28's 8 on a node and its children, kind 21 never set
+// (0x801F6828-0x801F68BC). Only from the ticket to 60 frames after the tail; the children's calls (lr 0x801F6880) left out.
+static void notify_change_hold_bit(CPUState* cpu) {
+    if (g_tome_copy_turn || !g_change_hold.on || cpu->lr == 0x801F6880u || !sda_ready(cpu))
+        return;
+    const u32 node = cpu->gpr[3];
+    if (!guest_ram_range_valid(cpu, node, 56u))
+        return;  // (0: the game's own returns at once)
+    const u32 p1 = r6_player1_node(cpu);
+    fprintf(stderr, "[change-hold] hold bit := %u on node %u%s (room %d, type %u, was %u) from lr 0x%08X%s (frame %llu)\n", cpu->gpr[4] != 0u ? 1u : 0u,
+            mem_read32(cpu, node + 16u), node == p1 ? " (P1)" : g_coop_p2 != 0u && node == g_coop_p2 ? " (P2)" : "", coop_object_room(cpu, node),
+            mem_read32(cpu, node + 8u), (mem_read32(cpu, node + 28u) & 8u) != 0u ? 1u : 0u, cpu->lr,
+            cpu->lr == 0x0BADF010u ? " (the host's own call: hle_guest_call's return)" : "", (unsigned long long)(cpu->timebase / 675000ull));
+}
+
 static void coop_enemy_target(CPUState* cpu, u32 object) {
     if (!g_settings.mod_coop || g_coop_turn || g_coop_step_running || g_coop_p2 == 0u || !g_coop_p2_state ||
         !sda_ready(cpu))
@@ -24628,16 +28019,31 @@ static void coop_enemy_target(CPUState* cpu, u32 object) {
                                : (d1 + COOP_TARGET_MARGIN < d2 ? ids[0] : ids[1]);
     // One of them held by the game (their words, close-up, Tome) and the other playing on: the other, near or far.
     const bool held[2] = {coop_player_held(cpu, 0), coop_player_held(cpu, 1)};
-    if (held[0] != held[1])
+    // A door's countdown in a split (design-split-hold.md S3): never the mover; the stayer, or nobody while the game holds
+    // the stayer (ED_SPLIT_TARGET_MOVER=1, testing: left off).
+    // The stayer's id from their own node (player 1's from r6_player1_node: r13-21492, behind ids[0], is player 2's in a swap).
+    const int stayer = split_target_stayer(cpu);
+    if (stayer >= 0) {
+        const u32 sn = split_stayer_node(cpu);
+        const u32 sid = guest_ram_range_valid(cpu, sn, 20u) ? mem_read32(cpu, sn + 16u) : 0u;
+        want = held[stayer] || sid == 0u ? 0u : sid;
+    } else if (held[0] != held[1])
         want = held[0] ? ids[1] : ids[0];
     if (want == after)
         return;
+    if (want == 0u) {
+        mem_write32(cpu, stats + COOP_TARGET_B, 0u);
+        if (log)
+            fprintf(stderr, "[coop] %u passed over: player %d is held (the other's door; frame %llu)\n", mem_read32(cpu, node + 16u), stayer + 1,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        return;
+    }
     mem_write32(cpu, stats + COOP_TARGET_B, want);
     if (mem_read32(cpu, stats + COOP_TARGET_A) == after)
         mem_write32(cpu, stats + COOP_TARGET_A, want);
     if (log)
         fprintf(stderr, "[coop] %u goes after player %d (%.0f from player 1, %.0f from player 2)\n",
-                mem_read32(cpu, node + 16u), want == ids[0] ? 1 : 2, d1, d2);
+                mem_read32(cpu, node + 16u), stayer >= 0 ? stayer + 1 : want == ids[0] ? 1 : 2, d1, d2);
 }
 
 static void coop_character_step(CPUState* cpu) {
@@ -25796,7 +29202,9 @@ static void coop_p1_press_kept(CPUState* cpu, const DolPadState* pad) {
     const bool shown_b = shown_id >= 0 && mem_read32(cpu, shown + 4u) == 2u && !g_coop_cameras.lent;
     const bool up = coop_p2_scene_or_hold(cpu);
     s32 id = -1, script = 0;
-    if (b && !b_was && up && !shown_b && !g_coop_p1_look && !(g_coop_use.active && !g_coop_use.p2) && coop_p1_own_b_prompt(cpu, &id, &script)) {
+    // (In player 2's door with player 1 staying the press route takes their B, design-stayer-presses §2.4: never both.)
+    if (b && !b_was && up && !shown_b && !g_coop_p1_look && !(g_coop_use.active && !g_coop_use.p2) && !stayer_window(cpu, 0) &&
+        coop_p1_own_b_prompt(cpu, &id, &script)) {
         if (coop_trace())
             fprintf(stderr, "[trace] player 1's B in player 2's: shown %d/%d button %u, words 24048 0x%X 24044 0x%X 25696 0x%X busy %u scene %d hold %d lent %d frame %llu\n",
                     shown_id, shown_script, mem_read32(cpu, shown + 4u), mem_read32(cpu, cpu->gpr[13] - 24048u), mem_read32(cpu, cpu->gpr[13] - 24044u),
@@ -25805,6 +29213,14 @@ static void coop_p1_press_kept(CPUState* cpu, const DolPadState* pad) {
         coop_press_keep(&g_coop_p1_kept, 1, id, script, "player 2's scene or hold is up");
     }
     b_was = b;
+    // A kept exit B of the other's door that asked no room: once more (stayer_again_due).
+    if (g_stayer_again[0].on && g_coop_p1_b_press == 0u) {
+        const StayerAgain* const a = &g_stayer_again[0];
+        const bool own_up = g_coop_p1_look || g_coop_words_free || g_coop_find_free || coop_p1_scene_on() || coop_busy(cpu) || up ||
+                            mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u;
+        if (stayer_again_due(cpu, 0, shown_b && shown_id == a->prompt && shown_script == a->script, own_up))
+            g_coop_p1_b_press = 3u;
+    }
     if (!g_coop_p1_kept.on)
         return;
     CoopPressKept* const kept = &g_coop_p1_kept;
@@ -25835,9 +29251,126 @@ static void coop_p1_press_kept(CPUState* cpu, const DolPadState* pad) {
         return;
     kept->on = false;
     g_coop_p1_b_press = 3u;  // a read with B up, then two with it down: a press, by the game's pad
+    stayer_again_arm(cpu, 0, kept);
     if (getenv("ED_COOP_LOG") != NULL)
         fprintf(stderr, "[coop] player 1's kept B goes in: prompt %d script %d (frame %llu)\n", kept->prompt, kept->script,
                 (unsigned long long)(cpu->timebase / 675000ull));
+}
+
+// Player 1 staying in player 2's door (design-stayer-presses §2.4, §2.7, §5.1), from the game's pad (the world's, theirs):
+// with L1 and P1 their B reaches the prompt use and their quick spells the cast; here a B on an exit prompt is kept (M11:
+// one ticket record) and their Start opens their Tome in a copy (the game's Start lock and fade refuse the real one; the
+// copy opens by mode words, not 0x80006CDC), as their Start in player 2's close-up does.
+// Player 2's copy Tome's item script (and a summon) kept from player 1's door (tome_copy_close): run after the tail, at the
+// loop's top (tw_mode_change, where tome_copy_close itself runs tome_copy_left), once nothing's busy and nothing of theirs or
+// a copy is up. (Design-stayer-presses §2.7 has "at the first player 2 turn": tome_copy_left runs outside any turn.)
+static void stayer_p2_left_go(CPUState* cpu) {
+    if (g_stayer_p2_left.n == 0u || g_tome_copy_turn || g_tome_copy_open || g_tome_copy_ask || !g_settings.mod_coop || g_coop_p2 == 0u ||
+        !sda_ready(cpu) || split_counting(cpu))
+        return;
+    const bool busy = coop_busy(cpu), words = mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u, own = coop_p2_own_up();
+    if (busy || g_coop_use.active || cutscene_playing(cpu) || game_menu_open(cpu) || own || words) {
+        // (Each wait ends as its condition clears; one that holds long is told once, with what holds it.)
+        if (++g_stayer_p2_left.waited == STAYER_P2_LEFT_TELL)
+            fprintf(stderr, "[stayer] player 2's kept Tome item script %d has waited %u frames after the door: busy 0x%X%s%s%s%s%s (frame %llu)\n",
+                    g_stayer_p2_left.item[0].script, STAYER_P2_LEFT_TELL, mem_read32(cpu, cpu->gpr[13] - 23344u), g_coop_use.active ? ", a use" : "",
+                    cutscene_playing(cpu) ? ", a cutscene" : "", game_menu_open(cpu) ? ", a menu" : "", own ? ", their own words, close-up or find" : "",
+                    words ? ", words in the game's window" : "", (unsigned long long)(cpu->timebase / 675000ull));
+        return;
+    }
+    StayerP2Left left = g_stayer_p2_left.item[0];
+    g_stayer_p2_left.n--;
+    memmove(g_stayer_p2_left.item, g_stayer_p2_left.item + 1, g_stayer_p2_left.n * sizeof g_stayer_p2_left.item[0]);
+    g_stayer_p2_left.waited = 0u;
+    const s32 room = coop_object_room(cpu, g_coop_p2);
+    // In another room by now: run all the same (the item's script is the item's, and asks where it's used, as a use from the
+    // Tome anywhere does), told every time.
+    if (room != left.room)
+        fprintf(stderr, "[stayer] PLAYER 2'S KEPT TOME ITEM SCRIPT %d RUNS IN ROOM %d, NOT ROOM %d WHERE IT WAS USED (frame %llu)\n", left.script, room,
+                left.room, (unsigned long long)(cpu->timebase / 675000ull));
+    fprintf(stderr, "[stayer] player 2's kept Tome item goes to the real game after the door: script %d%s (%u still waiting; frame %llu)\n", left.script,
+            left.next_cast != 0u ? ", a summon" : "", g_stayer_p2_left.n, (unsigned long long)(cpu->timebase / 675000ull));
+    // What the copy's Use asked, as at its close (another copy's Use or item may have written them since). tome_copy_left
+    // clears the script as its item's script ends; with no script (a summon alone) it returns before that, so not written.
+    if (left.script > 0) {
+        g_tome_copy_use_script = left.use_script;
+        g_tome_copy_use_item = left.use_item;
+    }
+    tome_copy_left(cpu, left.script, left.next_cast, left.spell_item);
+}
+static void stayer_p1_presses(CPUState* cpu, DolPadState* pad) {
+    static bool b_was, start_was;
+    // A B kept or a Start taken for the copy is eaten until it is let go: cleared on its first frame alone, the game saw a
+    // new press on the next (still held) frame and ran the exit's script (fn66 passed over, the kept B then let go: run
+    // logs/run-20261113-163215-stayer-s10-p1-exit, frame 3776).
+    static bool b_eat, start_eat;
+    const bool b = (pad->button & 0x0200u) != 0u && g_coop_p1_b_press == 0u && !g_coop_press_b;
+    const bool start = (pad->button & 0x1000u) != 0u;
+    const bool b_new = b && !b_was, start_new = start && !start_was;
+    b_was = b;
+    start_was = start;
+    if (!b)
+        b_eat = false;
+    if (!start)
+        start_eat = false;
+    if (b_eat)
+        pad->button &= (u16)~0x0200u;
+    if (start_eat)
+        pad->button &= (u16)~0x1000u;
+    // F3f (design-stayer-findings §F3.2, goal 1.1): in player 2's fade-in after the change's tail (F3b's tail), player 1's
+    // Start went to the game's 0x80006CDC, which refuses it while the fade is on (0x80006CF4), with no fade in their half
+    // (R4 keeps it out): a dead button for ~10 frames, where player 2's mirror opens a copy. It opens their copy here too
+    // (F3a/F3b leave the fade out of it). Their B there is the game's, as after any window.
+    if ((!b_new && !start_new) || !sda_ready(cpu))
+        return;
+    const bool window = stayer_window(cpu, 0);
+    const bool tail = !window && stayer_fade_tail(cpu, 0);
+    if (!(window || (tail && start_new)))
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    // Player 1's own look, words, find or scene up: their B is for it (left in the pad), not a kept exit.
+    const bool own_up = g_coop_p1_look || g_coop_words_free || g_coop_find_free || coop_p1_scene_on() ||
+                        (mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u && !g_coop_words_theirs);
+    if (b_new && window && !own_up) {
+        const u32 shown = PROMPT_SLOTS + 6u * 28u;
+        const s32 id = (s32)mem_read32(cpu, shown + 8u), script = (s32)mem_read32(cpu, shown + 12u);
+        const bool on_show = id >= 0 && mem_read32(cpu, shown + 4u) == 2u && !g_coop_cameras.lent;
+        if (on_show && coop_prompt_is_exit(id)) {
+            pad->button &= (u16)~0x0200u;
+            b_eat = true;
+            g_stayer.kept++;
+            coop_press_keep(&g_coop_p1_kept, 1, id, script, "player 2's door is on its way");
+            g_stayer_marks.kept[0] = true;
+            g_stayer_marks.kept_tickets[0] = g_coop_p1_kept.tickets;
+            g_stayer_marks.kept_prompt[0] = g_coop_p1_kept.prompt;
+        } else if (on_show) {
+            g_stayer.presses++;
+            if (stayer_say(4, 0))
+                fprintf(stderr, "[stayer] player 1's B on prompt %d (script %d) goes in through player 2's door (frame %llu)\n", id, script, frame);
+        }
+    }
+    if (start_new) {
+        if (tome_copy_mode() != 2) {
+            if (window)  // (in the tail the game's own refusal stands, as today)
+                fprintf(stderr, "[stayer] PLAYER 1'S START REFUSED: no Tome copy (ED_COOP_TOME_COPY != 2) (frame %llu)\n", frame);
+        } else if (g_tome_copy_open || g_tome_copy_ask || own_up || g_tome_copy_p1_left.pending) {
+            // (g_tome_copy_p1_left.pending: their last copy's item or cast still waits for the door; a second close would
+            // write over it.)
+            if (getenv("ED_COOP_LOG") != NULL)
+                fprintf(stderr, "[stayer] player 1's Start in player 2's door: their look, words, find, scene, a copy or its kept item is up (frame %llu)\n",
+                        frame);
+        } else {
+            pad->button &= (u16)~0x1000u;
+            start_eat = true;
+            g_tome_copy_p1 = true;
+            g_tome_copy_ask = true;
+            g_stayer.starts++;
+            if (split_log() && tail)
+                fprintf(stderr, "[stayer] player 1's Start in player 2's fade-in: their Tome in a copy (frame %llu)\n", frame);
+            else if (split_log())
+                fprintf(stderr, "[stayer] player 1's Start: their Tome in a copy, through player 2's door (frame %llu)\n", frame);
+        }
+    }
 }
 
 static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState* pad) {
@@ -25892,7 +29425,14 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             DolPadState theirs;
             controls_read_player2(&theirs);
             const bool down = (theirs.button & 0x1000u) != 0u;
-            if (down && !start_was && !g_tome_copy_open && !g_tome_copy_ask && !coop_room_change_other(cpu, true)) {
+            // (Staying in player 1's door, design-stayer-presses §2.7: their copy opens; under the stay their half never changes room.)
+            if (down && !start_was && !g_tome_copy_open && !g_tome_copy_ask && (!coop_room_change_other(cpu, true) || stayer_window(cpu, 1))) {
+                if (coop_room_change_other(cpu, true)) {
+                    g_stayer.starts++;
+                    if (stayer_say(6, 1))
+                        fprintf(stderr, "[stayer] player 2's Start: their Tome in a copy, through player 1's door (frame %llu)\n",
+                                (unsigned long long)(cpu->timebase / 675000ull));
+                }
                 if (coop_p2_own_up()) {  // step D: as the game refuses the player's Start while their words or close-up hold play
                     if (getenv("ED_COOP_LOG") != NULL)
                         fprintf(stderr, "[coop] player 2's Start refused: their own words, close-up or find is up (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
@@ -26040,14 +29580,19 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
         closeup_grace = 0u;
         g_coop_menu_reset = false;
     }
-    if (!coop_busy(cpu))
+    // B6 (design-stayer-presses.md §3.6): in the other's door countdown (the stayer's window) the busy word's 4 is the door's,
+    // not anything of player 2's: their hold and close-up are read by the other bits alone. With coop_busy, a script hold
+    // set before the window stayed through it, and busy 4 alone made any use of theirs a close-up with the game's pad.
+    const bool b6_window = stayer_window_on(cpu);
+    const bool b6_busy = b6_window ? (mem_read32(cpu, cpu->gpr[13] - 23344u) & ~COOP_BUSY_ROOM) != 0u : coop_busy(cpu);
+    if (!b6_busy)
         g_coop_script_hold = false;
     // Player 1's own look is never player 2's, whatever came just before it.
     // A script's own hold doesn't begin one (walking into a way out), but one begun stays theirs through
     // it (the bookshelf's lever, its scene after their Yes): it went back to player 1 as it began, and
     // the scene's camera never showed in their half.
     // (Not while player 1 is in a close-up of their own; their bare scene is no bar: player 2's examine beside it is theirs.)
-    bool closeup = !menu && !cutscene && (owner == 1 || (g_coop_assist_at != 0u && !g_coop_script_hold)) && coop_busy(cpu) && !coop_p1_in_close_up(cpu);
+    bool closeup = !menu && !cutscene && (owner == 1 || (g_coop_assist_at != 0u && !g_coop_script_hold)) && b6_busy && !coop_p1_in_close_up(cpu);
     if (closeup && owner != 1 && coop_trace())
         fprintf(stderr, "[trace] close-up for player 2: assist %u busy %u player 1's look %d frame %llu\n", g_coop_assist_at, mem_read32(cpu, cpu->gpr[13] - 23344u), g_coop_p1_look,
                 (unsigned long long)(cpu->timebase / 675000ull));
@@ -26115,7 +29660,17 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     // in the fade was taken with the room change in it and showed black in their half once the new room was in, till B
     // closed it blind (logs/run-20261106-081752-jtg-vdh6-c1p1-p2start); one opened before the ticket stays whole through it
     // (run-20261106-101418-jtg-dcm4b-c1p1-p2tome). Their B and quick spells wait the same way. A press then is not kept.
-    const bool start_room = start && !start_was && coop_room_change_other(cpu, true);
+    // Staying in player 1's door (design-stayer-presses §2.7), with the copy Tome: it opens (the path without the copy would
+    // make them the game's player in player 1's countdown, so with ED_COOP_TOME_COPY 0 or 1 it stays refused, and told).
+    const bool start_stays = start && !start_was && coop_room_change_other(cpu, true) && stayer_window(cpu, 1);
+    const bool start_room = start && !start_was && coop_room_change_other(cpu, true) && !(start_stays && tome_copy_mode() == 2);
+    if (start_stays && tome_copy_mode() != 2)
+        fprintf(stderr, "[stayer] PLAYER 2'S START REFUSED: no Tome copy (ED_COOP_TOME_COPY != 2) (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+    else if (start_stays) {
+        g_stayer.starts++;
+        if (stayer_say(6, 1))
+            fprintf(stderr, "[stayer] player 2's Start: their Tome in a copy, through player 1's door (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+    }
     if (start_room && coop_room_change_log())
         fprintf(stderr, "[coop] player 2's Start in player 1's room change: no Tome (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
     const bool start_pressed = start && !start_was && !start_room;
@@ -26137,6 +29692,7 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
             g_coop_assist_at = 0u;
         }
         coop_p1_press_kept(cpu, pad);
+        stayer_p1_presses(cpu, pad);  // (player 1 staying in player 2's door: an exit's B kept, Start their copy)
         if (g_coop_p1_b_press > 0u) {
             if (g_coop_p1_b_press-- == 3u)
                 pad->button &= (u16)~0x0200u;
@@ -26199,6 +29755,13 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
                 if (coop_p2_own_up()) {  // step D: as the game refuses the player's Start while their words or close-up hold play
                     if (getenv("ED_COOP_LOG") != NULL)
                         fprintf(stderr, "[coop] player 2's Start refused: their own words, close-up or find is up (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+                } else if (r4_own_fade_on(cpu, 2)) {
+                    // F3e (design-stayer-findings §F3.2, goal 1.3): their own door's fade is on. The game refuses the hero's
+                    // Start in a fade (0x80006CDC at 0x80006CF4: 0x801E7C98); a copy taken now reached black at ticket+60
+                    // and never ran the arrival's fade-in: a black Tome in their half till B. Refused as the game does, in a
+                    // refused window and the fade-in after the arrival too (review-safety 1: not only g_split.on).
+                    fprintf(stderr, "[stayer] player 2's Start refused: their own door's fade is on, as the game refuses the player's (frame %llu)\n",
+                            (unsigned long long)(cpu->timebase / 675000ull));
                 } else {
                     g_tome_copy_ask = true;
                 }
@@ -26349,6 +29912,27 @@ static void tome_copy_p1_left(CPUState* cpu) {
     // of after it (the user, 2026-11-10). The script runs with player 1 the player, in player 1's camera set
     // (coop_script_cameras).
     const bool p2_scene_alone = coop_p2_scene_on() && !g_coop_words_theirs && !cutscene_playing(cpu);
+    // Closed in player 2's door with player 1 staying (design-stayer-presses §2.7): the cast goes with the busy word at 4, 2
+    // and 1 alone, not a summon (kept to the tail); the script waits for the tail (one pending flag, split: cast, script).
+    if (stayer_window(cpu, 0)) {
+        const u32 busy = mem_read32(cpu, cpu->gpr[13] - 23344u), cast = g_tome_copy_p1_left.next_cast;
+        if (cast == 0u || STAYER_SUMMON(cast) || (busy & ~(COOP_BUSY_ROOM | 2u | 1u)) != 0u || g_coop_screen || coop_p2_look_up() || g_coop_p2_words.up)
+            return;
+        fprintf(stderr, "[tome-copy] player 1's cast 0x%08X goes to the real game, in player 2's door\n", cast);
+        u32 ignore = 0u;
+        mem_write32(cpu, COOP_NEXT_CAST, cast);
+        coop_bytes(cpu, COOP_SPELL_ITEM, g_tome_copy_p1_left.spell_item, 24u, false);
+        const u32 args[2] = {1u, COOP_NEXT_CAST};
+        hle_guest_call(cpu, COOP_CAST, args, 2, 0.0, &ignore);
+        mem_write32(cpu, COOP_NEXT_CAST, 0u);
+        g_tome_copy_p1_left.next_cast = 0u;
+        if (g_tome_copy_p1_left.script <= 0)
+            g_tome_copy_p1_left.pending = false;
+        else if (split_log())
+            fprintf(stderr, "[stayer] player 1's Tome item script %d waits for player 2's door (frame %llu)\n", g_tome_copy_p1_left.script,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        return;
+    }
     if ((g_coop_screen || coop_busy(cpu) || coop_p2_look_up() || g_coop_p2_words.up) && !p2_scene_alone)
         return;
     g_tome_copy_p1_left.pending = false;
@@ -26425,11 +30009,16 @@ static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* s
         return;
     fprintf(stderr, "[tome-copy] player 2's item leaves script %d for the real game\n", script);
     coop_tome_player(cpu, true);
+    coop_be_player2(cpu, true, was);
+    g_coop_turn_p1 = was[1];
+    // ED_COOP_STAY: their room in before the zone list is read (as coop_use_start): with r13-26524 their object, the
+    // getter answers the CURRENT slot's info (0x80123F8C-0x80123FA0), which apart was player 1's room's, and their zone
+    // words and set were then swapped against player 1's room's list (rooms/design-arrival-camera.md H11).
+    u32 room_keep[3];
+    const bool room_in = coop_stay_room_in(cpu, room_keep);  // their item's script runs in their room
     const u32 object = mem_read32(cpu, g_coop_p2 + 52u);
     u32 info = 0u, ignore = 0u;
     const bool zones = hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) && guest_ram_range_valid(cpu, info, 184u);
-    coop_be_player2(cpu, true, was);
-    g_coop_turn_p1 = was[1];
     g_coop_tome_cast = true;
     if (zones)
         coop_zones_swap(cpu, info, true);
@@ -26440,8 +30029,6 @@ static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* s
     // half, its records naming player 2, and the game's timers ran its later states as player 1's: each player's
     // half stayed on whoever used the block (the user, 2026-11-09).
     coop_states_swap(cpu, true);
-    u32 room_keep[3];
-    const bool room_in = coop_stay_room_in(cpu, room_keep);  // ED_COOP_STAY: their item's script runs in their room
     const bool lent_before = g_coop_cameras.lent;
     const unsigned tickets = g_coop_tickets;
     // Step D: the busy word as the script found it (player 1's own close-up, bit 2): only what the script adds is a
@@ -26607,6 +30194,7 @@ bool tome_copy_hook_off(HleHandler fn) {
         OFF(coop_enchanted_look), OFF(coop_sign_follow), OFF(coop_lasting_find), OFF(coop_spells_update),
         OFF(coop_game_camera), OFF(hle_moves_let_go), OFF(hle_moves_want), OFF(hle_find_by_id), OFF(coop_position_copy),
         OFF(coop_send_event), OFF(r6_hit_taker), OFF(r6_damage_taker), OFF(r6_hurt_taker), OFF(r6b_job_open), OFF(r6b_job_close), OFF(r6c_creature), OFF(notify_GXSetDrawDone), OFF(coop_prompt_choose), OFF(coop_prompt_set), OFF(coop_prompt_clear), OFF(coop_scan_player1), OFF(coop_camera_chosen), OFF(coop_words_hold), OFF(coop_find_hold), OFF(coop_flags_ask), OFF(coop_words_tick), OFF(coop_hide_others), OFF(coop_hide_others_end), OFF(coop_found_place), OFF(coop_found_unproject), OFF(coop_look_prompt), OFF(coop_script_sends), OFF(coop_show_asked), OFF(coop_show_main_asked), OFF(coop_found_object_draw), OFF(coop_busy_ask),
+        OFF(fog_object_draw),
 #undef OFF
     };
     static bool said[sizeof kOff / sizeof kOff[0]];
@@ -27654,6 +31242,48 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* ticket = hle_dispatch_entry(0x80155770u);
             if (ticket != NULL && ticket->notify == NULL && ticket->intercept == NULL)
                 ticket->notify = notify_room_ticket;
+            // The other player's brief freeze, measured (design-change-freeze.md Phase 1; logging only): [change-time]'s
+            // notifies under ED_CHANGE_TIME, outside the two-slot block so solo is measured too, and [change-hold]'s under
+            // ED_COOP_ENEMY_LOG. Each checks its function's first word and a call of it, and that nothing is hooked there.
+            if (change_time() || r6_log()) {
+                // The tail's stamp with one slot (stwu r1,-32(r1); its call bl at 0x80152430). Two slots: notify_room_slots_tail is
+                // there, and stamps it itself.
+                HleDispatchEntry* tail = hle_dispatch_entry(0x80154B54u);
+                if (tail != NULL && tail->notify == NULL && tail->intercept == NULL && mem_read32(cpu, 0x80154B54u) == 0x9421FFE0u &&
+                    mem_read32(cpu, 0x80152430u) == 0x48002725u)
+                    tail->notify = notify_change_tail;
+                else if (tail == NULL || (tail->notify != notify_room_slots_tail && tail->notify != notify_change_tail))
+                    fprintf(stderr, "[change-time] the tail 0x80154B54 not hooked: taken or not as expected\n");
+            }
+            {
+                const struct {
+                    u32 at, first, call, call_word;
+                    void (*fn)(CPUState*);
+                    bool on;
+                    const char* what;
+                } kChange[5] = {
+                    // the tick (stwu r1,-16(r1); addi r5,r3,-20484 at +0x10: the ticket 0x8058AFFC)
+                    {0x80155830u, 0x9421FFF0u, 0x80155840u, 0x38A3AFFCu, notify_change_tick, change_time(), "[change-time] the ticket's tick"},
+                    // the slot load (stwu r1,-32(r1); the load's bl at 0x80152388)
+                    {0x80154C94u, 0x9421FFE0u, 0x80152388u, 0x4800290Du, notify_change_load, change_time(), "[change-time] the slot load"},
+                    // the arrival (stwu r1,-32(r1); the load's bl at 0x801523A4)
+                    {0x80151FDCu, 0x9421FFE0u, 0x801523A4u, 0x4BFFFC39u, notify_change_arrival, change_time(), "[change-time] the arrival"},
+                    // the event broadcast (stwu r1,-48(r1); the busy set's bl at 0x80155720)
+                    {0x801F5620u, 0x9421FFD0u, 0x80155720u, 0x4809FF01u, notify_change_hold_event, r6_log(), "[change-hold] the event broadcast"},
+                    // the hold bit's set (stwu r1,-32(r1); its own bl for the children at 0x801F687C)
+                    {0x801F6828u, 0x9421FFE0u, 0x801F687Cu, 0x4BFFFFADu, notify_change_hold_bit, r6_log(), "[change-hold] the hold bit's set"}};
+                for (int i = 0; i < 5; i++) {
+                    HleDispatchEntry* e = hle_dispatch_entry(kChange[i].at);
+                    if (!kChange[i].on || (e != NULL && e->notify == kChange[i].fn))
+                        continue;
+                    if (e != NULL && e->notify == NULL && e->intercept == NULL && mem_read32(cpu, kChange[i].at) == kChange[i].first &&
+                        mem_read32(cpu, kChange[i].call) == kChange[i].call_word)
+                        e->notify = kChange[i].fn;
+                    else
+                        fprintf(stderr, "%s 0x%08X not hooked: taken or not as expected (first word 0x%08X)\n", kChange[i].what, kChange[i].at,
+                                mem_read32(cpu, kChange[i].at));
+                }
+            }
             if (coop_trace()) {
                 static const struct {
                     u32 at;
@@ -27789,6 +31419,21 @@ static void find_coop(CPUState* cpu) {
         hazard->intercept = coop_hazard_touch;
     else
         fprintf(stderr, "[coop] the hazards' touch not found: they hurt player 2 every frame\n");
+    // Player 2 lit as a hero (lights_hero_budget): the actor draw's light call 0x801E6244 (stwu r1,-480(r1); its call bl at
+    // 0x8011A57C), in co-op with or without the separate-rooms switches; the same intercept is lights per room's G2.
+    {
+        HleDispatchEntry* e = hle_dispatch_entry(LIGHTS_ACTOR);
+        if (mem_read32(cpu, LIGHTS_ACTOR) == 0x9421FE20u && mem_read32(cpu, 0x8011A57Cu) == 0x480CBCC9u && e != NULL &&
+            (e->intercept == NULL || e->intercept == lights_actor) && e->notify == NULL)
+            e->intercept = lights_actor;
+        else
+            fprintf(stderr, "[coop] 0x%08X not found: player 2's body is lit as a creature\n", LIGHTS_ACTOR);
+    }
+    if (getenv("ED_LIGHT_COUNT") != NULL) {
+        HleDispatchEntry* e = hle_dispatch_entry(0x801E54BCu);
+        if (mem_read32(cpu, 0x801E54BCu) == 0x9421FF50u && e != NULL && e->intercept == NULL && e->notify == NULL)
+            e->notify = light_load_count;
+    }
     // R6 (D1): the three hit takers (stwu at +0; lwz r0,-23276(r13) at each gate), only with the players able to part.
     if (getenv("ED_COOP_STAY") != NULL) {
         const struct {
@@ -27824,6 +31469,41 @@ static void find_coop(CPUState* cpu) {
             deliver->intercept = r6c_creature;
         else
             fprintf(stderr, "[coop] R6c: the handlers' delivery not found: player 2's room's creatures wait on player 1's room\n");
+        // Lights per room, stage 1 (rooms/design-lights.md G1, G2): the record getter (cmpwi r3,2; its call at 0x80027988)
+        // and the actor draw's three light calls (each its stwu, and its bl at the call site in 0x8011A278).
+        // The floor probe's wrong-room watch: the collision getter 0x80123F70 (stwu r1,-32(r1); lwz r0,-26524(r13) at +0x24),
+        // log only, always the game's answer.
+        HleDispatchEntry* getter = hle_dispatch_entry(COOP_CHARACTER_INFO);
+        if (getenv("ED_ROOM_SLOTS") != NULL && mem_read32(cpu, COOP_CHARACTER_INFO) == 0x9421FFE0u &&
+            mem_read32(cpu, COOP_CHARACTER_INFO + 0x24u) == 0x800D9864u && getter != NULL && getter->intercept == NULL && getter->notify == NULL)
+            getter->intercept = floor_wrong_room;
+        else
+            fprintf(stderr, "[coop] the floor probe's getter 0x%08X not found: no [floor] wrong room lines\n", COOP_CHARACTER_INFO);
+        if (getenv("ED_ROOM_SLOTS") != NULL && getenv("ED_LIGHTS_OFF") == NULL) {  // ED_LIGHTS_OFF (testing): today's, to compare
+            const struct {
+                u32 at, first, site, call;
+                HleHandler fn;
+            } kLights[4] = {{LIGHTS_RECORD_GET, 0x2C030002u, 0x80027988u, 0x4812D7A9u, lights_record_for_actor},
+                            {LIGHTS_ACTOR, 0x9421FE20u, 0x8011A57Cu, 0, lights_actor},
+                            {LIGHTS_ACTOR_NO_GRID, 0x9421FF00u, 0x8011A5B4u, 0, lights_actor_no_grid},
+                            {LIGHTS_ACTOR_RULE, 0x9421FF50u, 0x8011A5ECu, 0, lights_actor_rule}};
+            g_lights_room_on = true;
+            for (int i = 0; i < 4; i++) {
+                HleDispatchEntry* e = hle_dispatch_entry(kLights[i].at);
+                const u32 call = mem_read32(cpu, kLights[i].site);
+                const bool call_ok = kLights[i].call != 0u ? call == kLights[i].call
+                                                           : (call & 0xFC000003u) == 0x48000001u &&
+                                                                 kLights[i].site + (u32)(((s32)(call << 6)) >> 6 & ~3) == kLights[i].at;
+                if (mem_read32(cpu, kLights[i].at) == kLights[i].first && call_ok && e != NULL && (e->intercept == NULL || e->intercept == kLights[i].fn) && e->notify == NULL)
+                    e->intercept = kLights[i].fn;
+                else
+                    fprintf(stderr, "[coop] lights: 0x%08X not found: player 2's room is lit as the room in play\n", kLights[i].at);
+            }
+        }
+        // The room mist per room (design-fog.md Part A): with the two slots and the stay (coop_stay), after the object draw's
+        // notify (above) and the room draws' intercepts (the two-slot block).
+        if (coop_stay())
+            fog_install(cpu);
         // R4b: the arrival's two clears (the waits' clear: stwu r1,-16(r1), its call bl at 0x8015213C; the busy set: stwu
         // r1,-16(r1), lwz r0,-23344(r13) at +0x14, its call bl at 0x80152184). Their trace notifies, if any, stay.
         HleDispatchEntry* waits = hle_dispatch_entry(STAY_WAITS_CLEAR);
@@ -27836,6 +31516,57 @@ static void find_coop(CPUState* cpu) {
         } else {
             fprintf(stderr, "[coop] R4b: the arrival's clears not found: player 2's door ends player 1's scene\n");
         }
+        // The stayer's room plays on through the other's door countdown (design-split-hold.md): G1's ticket writer (stwu
+        // r1,-16(r1); stb r0,-23392(r13) at +0x38) and the request dispatcher (stwu r1,-16(r1); lwz r4,-25172(r13) at +0xC),
+        // G2's tick (stwu r1,-16(r1); addi r5,r3,-20484 at +0x10) and S2's send (stwu r1,-64(r1); the broadcast's bl at
+        // 0x801F5688). Each an intercept that passes through outside a window. The ticket's and the tick's notifies
+        // (notify_room_ticket; notify_change_tick under ED_CHANGE_TIME), installed above, stay and run on passthrough; the
+        // hurt log's notify on the send (below) accepts it. G2's lock renewal: 0x800443E4 (stwu r1,-16(r1); bl 0x800068E0
+        // at +0x14). Only with the stay's installs (coop_stay: ED_COOP_STAY and ED_ROOM_SLOTS=2).
+        HleDispatchEntry* stay_walk = hle_dispatch_entry(0x80043820u);  // (the stay's own install, above: coop_stay_strip_walk)
+        if (coop_stay() && stay_walk != NULL && stay_walk->intercept == coop_stay_strip_walk) {
+            HleDispatchEntry* writer = hle_dispatch_entry(SPLIT_TICKET_WRITER);
+            HleDispatchEntry* requests = hle_dispatch_entry(SPLIT_REQUESTS);
+            HleDispatchEntry* tick = hle_dispatch_entry(SPLIT_TICKET_TICK);
+            HleDispatchEntry* send = hle_dispatch_entry(SPLIT_SEND);
+            if (mem_read32(cpu, SPLIT_TICKET_WRITER) == 0x9421FFF0u && mem_read32(cpu, SPLIT_TICKET_WRITER + 0x38u) == 0x980DA4A0u &&
+                mem_read32(cpu, SPLIT_REQUESTS) == 0x9421FFF0u && mem_read32(cpu, SPLIT_REQUESTS + 0xCu) == 0x808D9DACu &&
+                mem_read32(cpu, SPLIT_TICKET_TICK) == 0x9421FFF0u && mem_read32(cpu, SPLIT_TICKET_TICK + 0x10u) == 0x38A3AFFCu &&
+                mem_read32(cpu, SPLIT_SEND) == 0x9421FFC0u && mem_read32(cpu, 0x801F5688u) == 0x48000139u && writer != NULL && writer->intercept == NULL &&
+                (writer->notify == NULL || writer->notify == notify_room_ticket) && requests != NULL && requests->intercept == NULL &&
+                requests->notify == NULL && tick != NULL && tick->intercept == NULL && (tick->notify == NULL || tick->notify == notify_change_tick) &&
+                send != NULL && send->intercept == NULL && send->notify == NULL) {
+                writer->intercept = split_ticket_ask;
+                requests->intercept = split_requests;
+                tick->intercept = split_tick;
+                send->intercept = split_send;
+                g_split_ready = true;
+                g_split_lock_ok = mem_read32(cpu, SPLIT_INPUT_LOCK) == 0x9421FFF0u && mem_read32(cpu, SPLIT_INPUT_LOCK + 0x14u) == 0x4BFC24E9u;
+                fprintf(stderr, "[split] the stayer's room plays on through the other's door countdown (%s%s)\n",
+                        split_switch() == 0 ? "ED_SPLIT_HOLD=0: off" : split_switch() == 1 ? "the shared room only" : "both shapes",
+                        g_split_lock_ok ? "" : "; the mover's lock NOT renewed in a wait: 0x800443E4 isn't as expected");
+                // The stayer's presses (design-stayer-presses §2.1, §2.6): L1 on the lock (stwu r1,-16(r1); bl 0x800068E0 at
+                // +0x14, bl 0x8013E99C at +0x1C; the writer's bl at 0x801557F4) and the ticket's cast end (stwu r1,-32(r1);
+                // bl 0x801F6258 at +0x1C; the writer's bl at 0x801557FC). Intercepts that pass through outside a window;
+                // ED_COOP_CAST_TRACE's notify on the cast end (installed with the Tome's hooks) stays and runs on passthrough.
+                HleDispatchEntry* lock = hle_dispatch_entry(SPLIT_INPUT_LOCK);
+                if (g_split_lock_ok && stayer_bl_is(cpu, SPLIT_INPUT_LOCK + 0x1Cu, 0x8013E99Cu) && stayer_bl_is(cpu, 0x801557F4u, SPLIT_INPUT_LOCK) &&
+                    lock != NULL && lock->intercept == NULL && lock->notify == NULL)
+                    lock->intercept = stayer_lock;
+                else
+                    fprintf(stderr, "[stayer] the ticket's input lock 0x800443E4 not as expected or taken: player 1's presses stay locked in player 2's door\n");
+                HleDispatchEntry* cast_end = hle_dispatch_entry(STAYER_CAST_END);
+                if (mem_read32(cpu, STAYER_CAST_END) == 0x9421FFE0u && stayer_bl_is(cpu, STAYER_CAST_END + 0x1Cu, 0x801F6258u) &&
+                    stayer_bl_is(cpu, 0x801557FCu, STAYER_CAST_END) &&
+                    cast_end != NULL && cast_end->intercept == NULL && (cast_end->notify == NULL || cast_end->notify == notify_cast_trace))
+                    cast_end->intercept = stayer_cast_end;
+                else
+                    fprintf(stderr, "[stayer] the ticket's cast end 0x801C5118 not as expected or taken: a stayer's cast at a walk-in door is ended\n");
+            } else {
+                fprintf(stderr, "[split] NOT installed: the ticket, its tick, the requests or the send isn't as expected or is taken: the stayer's room "
+                                "holds for the other's countdown as today\n");
+            }
+        }
     }
     if (hurt_log()) {
         HleDispatchEntry* dmg = hle_dispatch_entry(0x80061E90u);
@@ -27847,7 +31578,8 @@ static void find_coop(CPUState* cpu) {
         const HleHandler fn[2] = {hurt_note_field, hurt_note_later};
         for (int i = 0; i < 2; i++) {
             HleDispatchEntry* e = hle_dispatch_entry(at[i]);
-            if (e != NULL && e->intercept == NULL && e->notify == NULL)
+            // (the send's intercept split_send, S2, runs first; this notify on its passthrough, so a kept 102 isn't noted)
+            if (e != NULL && (e->intercept == NULL || (at[i] == SPLIT_SEND && e->intercept == split_send)) && e->notify == NULL)
                 e->notify = fn[i];
             else
                 fprintf(stderr, "[hurt] can't watch 0x%08X\n", at[i]);
@@ -28001,6 +31733,7 @@ void hle_coop_magick_load(const void* in) {
         memset(s.quick, 0, sizeof s.quick);
     memcpy(g_coop_quick, s.quick, sizeof g_coop_quick);
     memcpy(g_coop_casting, s.casting, sizeof g_coop_casting);
+    g_coop_casting_p2_in = false;  // (saved between frames, outside any swap: player 1's words in memory)
 }
 
 // While player 2's Tome is open the player's object and id are theirs
@@ -28011,8 +31744,11 @@ bool hle_save_held(void) {
     // a close script of theirs still queued (host memory a state can't keep).
     // (And the use route's words of theirs, g_coop_words_theirs: the game's window with their hold.)
     // R6b: and while a route job of player 2's room runs with their room in (its words and MSR[EE] are swapped then).
+    // G4 (design-split-hold.md §3.11): and while a route job runs whole in a door's countdown (its thread's MSR[EE] is off).
+    // The stayer's presses: and while a Tome item of player 2's kept from a door's window waits (host memory; a load drops it,
+    // and its count may already be off their list).
     return g_coop_tome_p2 || coop_p2_own_up() || g_coop_use.active || g_coop_p2_look.held || g_coop_p2_words.close_count > 0 ||
-           g_coop_words_theirs || g_r6b.open;
+           g_coop_words_theirs || g_r6b.open || g_split_job.open || g_stayer_p2_left.n > 0u;
 }
 
 // NULL: a state saved before co-op was kept; player 2 is found again as
@@ -28020,6 +31756,9 @@ bool hle_save_held(void) {
 void hle_coop_state_load(const void* in) {
     // R6b: a route job's bracket open in this run belongs to it, not to the state (saves wait for it to close): forgotten.
     memset(&g_r6b, 0, sizeof g_r6b);
+    split_state_load();  // the stayer's window (design-split-hold.md §11): a countdown loaded mid-way plays on held, as today
+    lights_state_load();  // lights per room: set 1's record and who sends set 0 decided again at the next frame
+    fog_state_load();  // the mist per room: the lists' compiles, the noise, room 1's scroll and ease unknown in a loaded state
     // The finish slot (fin_swap) is in RAM the state brings back: what it held is not known, so it's loaded again.
     g_p2_moves[FIN_MOVES_SLOT].model = g_p2_moves[FIN_MOVES_SLOT].part = -1;
     memset(g_fin, 0, sizeof g_fin);
@@ -28058,6 +31797,11 @@ void hle_coop_state_load(const void* in) {
     g_coop_turn = false;
     g_coop_zones.list = 0u;  // their zones and cameras start again, as in a new room
     g_coop_cameras.lent = false;
+    memset(&g_stay_arrived, 0, sizeof g_stay_arrived);  // the arrival camera's tag and foreign mark (design H6)
+    g_stay_bracket_chose = false;
+    g_stay_bracket_p1 = false;  // F2c (design-stayer-findings)
+    g_fade_mover = 0;  // (R4: no door of the loaded state's is the host's; review-safety 8)
+    g_stay_start.on = false;
     g_reload_tried = ~0u;
     g_coop_tome_p2 = false;
     g_coop_next_cast_p2 = false;

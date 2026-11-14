@@ -459,6 +459,8 @@ void restart_process() {
     settings_save();
     unsetenv("ED_QUICKLOAD");
     unsetenv("ED_SKIP_INTRO");
+    std::fprintf(stderr, "[frontend] starting again (the same log goes on)\n");
+    report_before_restart();  // the new process's output to the log, not to this one's tee pipe
 #ifdef _WIN32
     _execv(g_argv[0], g_argv);
 #else

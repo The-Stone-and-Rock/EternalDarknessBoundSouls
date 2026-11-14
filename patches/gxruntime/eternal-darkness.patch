@@ -10,7 +10,7 @@ index 7b681e5..59382b6 100644
 +  [iryoku/smaa](https://github.com/iryoku/smaa), MIT licence, its notice in that file. `post.cpp`'s
 +  shaders follow SMAA, AMD FidelityFX CAS and GTAO (`ssao.cpp`), written for this renderer.
 diff --git a/backends/aurora/aurora_backend.cpp b/backends/aurora/aurora_backend.cpp
-index d94f811..804ea51 100644
+index d94f811..3c947a8 100644
 --- a/backends/aurora/aurora_backend.cpp
 +++ b/backends/aurora/aurora_backend.cpp
 @@ -19,9 +19,25 @@
@@ -39,7 +39,7 @@ index d94f811..804ea51 100644
  
  #include <gx/fifo.hpp>
  #include <gx/gx.hpp>
-@@ -30,25 +46,109 @@
+@@ -30,25 +46,111 @@
  #include <cstdio>
  #include <cstdlib>
  #include <cstring>
@@ -86,6 +86,8 @@ index d94f811..804ea51 100644
 +namespace aurora::gfx::gxcore {
 +void set_spell_glow(bool on);
 +void set_room_lights(const float* lamps, int count, const float origin[3], const float size[3], const int dims[3], const uint8_t* cells);
++void set_room_lights_other(bool on, const float* lamps, int count, const float origin[3], const float size[3], const int dims[3], const uint8_t* cells);
++void set_lights_per_view(bool on);
 +}
 +namespace aurora::gfx::post {
 +void set_smaa(bool on) noexcept;
@@ -149,7 +151,7 @@ index d94f811..804ea51 100644
  // Forward for continuous EFB readback attach (fork-internal).
  namespace aurora::gfx::efb_readback {
  void set_continuous(bool enabled) noexcept;
-@@ -57,10 +157,24 @@ bool peek(const std::uint8_t** rgba, std::uint32_t* width,
+@@ -57,10 +159,24 @@ bool peek(const std::uint8_t** rgba, std::uint32_t* width,
            std::uint32_t* height) noexcept;
  } // namespace aurora::gfx::efb_readback
  
@@ -175,7 +177,7 @@ index d94f811..804ea51 100644
  bool g_graphics_log = false;
  bool g_force_untextured = false;
  bool g_gx_core_enabled = true; // gxcore is the default renderer; DOL_GX_CORE=0 opts out
-@@ -79,9 +193,213 @@ SDL_AudioStream* g_audio_stream = nullptr;
+@@ -79,9 +195,213 @@ SDL_AudioStream* g_audio_stream = nullptr;
  bool g_audio_playing = false;
  int g_audio_prebuffer_ms = 40;
  int g_audio_max_queue_ms = 250;
@@ -389,7 +391,7 @@ index d94f811..804ea51 100644
  struct PendingTextureMetadata {
      bool valid = false;
      const void* data = nullptr;
-@@ -112,6 +430,30 @@ std::array<PendingTlutMetadata, 20> g_pending_tluts{};
+@@ -112,6 +432,30 @@ std::array<PendingTlutMetadata, 20> g_pending_tluts{};
  // validating sink checked. The live Aurora path stays authoritative; this only
  // proves the consumer survives real FIFO traffic ahead of renderer cutover.
  gxruntime::aurora_recomp::RetailGxFrontend g_shadow_frontend;
@@ -420,7 +422,7 @@ index d94f811..804ea51 100644
  gxruntime::aurora_recomp::ConsumingAuroraRenderSink g_shadow_packet_sink;
  bool g_shadow_frontend_enabled = false;
  bool g_shadow_frontend_failed = false;
-@@ -124,9 +466,17 @@ bool g_shadow_frontend_failed = false;
+@@ -124,9 +468,17 @@ bool g_shadow_frontend_failed = false;
  gxruntime::gxcore::GxCoreSink g_core_sink;
  unsigned long long g_core_submitted = 0;
  unsigned long long g_core_rejected = 0;
@@ -438,7 +440,7 @@ index d94f811..804ea51 100644
      if (aurora::gfx::gxcore::submit_draw_plan(plan))
          ++g_core_submitted;
      else
-@@ -244,6 +594,7 @@ void log_callback(AuroraLogLevel level, const char* module, const char* message,
+@@ -244,6 +596,7 @@ void log_callback(AuroraLogLevel level, const char* module, const char* message,
  }
  
  void poll_events() {
@@ -446,7 +448,7 @@ index d94f811..804ea51 100644
      const AuroraEvent* event = aurora_update();
      while (event != nullptr && event->type != AURORA_NONE) {
          if (event->type == AURORA_EXIT)
-@@ -379,13 +730,39 @@ unsigned long long g_trace_present_scope_frame = 0ull;
+@@ -379,13 +732,39 @@ unsigned long long g_trace_present_scope_frame = 0ull;
  bool g_trace_frame_begun = false;
  unsigned long long g_trace_frames_recorded = 0ull;
  gxruntime::aurora_recomp::trace::TraceWriter g_trace_writer;
@@ -493,7 +495,7 @@ index d94f811..804ea51 100644
  
  unsigned long long trace_current_frame() {
      return g_trace_present_scope_frame != 0ull ? g_trace_present_scope_frame
-@@ -435,6 +812,17 @@ bool trace_should_record() {
+@@ -435,6 +814,17 @@ bool trace_should_record() {
          g_trace_writer.frame_begin(static_cast<u32>(frame));
          g_trace_frame_begun = true;
          ++g_trace_frames_recorded;
@@ -511,7 +513,7 @@ index d94f811..804ea51 100644
      }
      return true;
  }
-@@ -442,18 +830,46 @@ bool trace_should_record() {
+@@ -442,18 +832,46 @@ bool trace_should_record() {
  void trace_record_mem_update(u32 address, u32 size, const void* data) {
      if (size == 0 || data == nullptr || !trace_should_record())
          return;
@@ -567,7 +569,7 @@ index d94f811..804ea51 100644
  }
  
  void trace_close_and_log() {
-@@ -491,6 +907,10 @@ void trace_on_present() {
+@@ -491,6 +909,10 @@ void trace_on_present() {
          trace_close_and_log();
      g_trace_present_scope_frame = 0ull;
      g_trace_frame_begun = false;
@@ -578,7 +580,7 @@ index d94f811..804ea51 100644
  }
  // ---------------------------------------------------------------------------
  
-@@ -514,11 +934,64 @@ void shadow_frontend_set_array(u32 attr, u32 guest_address, u8 stride) {
+@@ -514,11 +936,64 @@ void shadow_frontend_set_array(u32 attr, u32 guest_address, u8 stride) {
      }
  }
  
@@ -643,7 +645,7 @@ index d94f811..804ea51 100644
      const void* data = nullptr;
      u32 available = 0;
      if (!g_guest_address_resolver(g_guest_address_resolver_user, address, size,
-@@ -587,6 +1060,45 @@ void shadow_frontend_call_display_list(const void* data, u32 size) {
+@@ -587,6 +1062,45 @@ void shadow_frontend_call_display_list(const void* data, u32 size) {
      }
  }
  
@@ -689,7 +691,7 @@ index d94f811..804ea51 100644
  void shadow_frontend_write(u64 value, u8 size) {
      if (!g_shadow_frontend_enabled || g_shadow_frontend_failed)
          return;
-@@ -615,24 +1127,7 @@ void shadow_frontend_write(u64 value, u8 size) {
+@@ -615,24 +1129,7 @@ void shadow_frontend_write(u64 value, u8 size) {
      }
      const std::span<const std::uint8_t> fragment(bytes, size);
      if (g_gx_core_enabled) {
@@ -715,7 +717,7 @@ index d94f811..804ea51 100644
          return;
      }
      if (!g_shadow_frontend.write_fifo(fragment) ||
-@@ -842,143 +1337,1546 @@ void shadow_transform_observer(
+@@ -842,142 +1339,1570 @@ void shadow_transform_observer(
      }
  }
  #endif
@@ -782,6 +784,7 @@ index d94f811..804ea51 100644
 +    SetXfbBlack,
 +    SplitSkipViews,
 +    SplitSetView,
++    SplitSetMist,     // co-op: the room mist's depth per view (design-fog.md Part B)
 +    Mem1Turn,         // the memory what follows reads (co-op: a Tome in a copy of it)
 +    Present,
 +    Call,             // run a function on the main thread (quick states)
@@ -831,6 +834,12 @@ index d94f811..804ea51 100644
 +    float rot[9];
 +    float x, y, z, zoom;
 +    bool hide_hud;
++};
++struct SplitMistArgs {
++    bool on;
++    float c2[3];
++    float d0, d1, k;
++    std::uint32_t frame;
 +};
  
 -    const AuroraInfo info = aurora_initialize(argc, argv, &config);
@@ -976,7 +985,6 @@ index d94f811..804ea51 100644
 -        const char* core_env = std::getenv("DOL_GX_CORE");
 -        g_gx_core_enabled = !(core_env != nullptr && core_env[0] == '0');
 -    }
--    g_shadow_frontend_enabled =
 +        };
 +        BYTE top = 0, bottom = 0xFF;
 +        each([&](const auto& cs) {
@@ -1162,6 +1170,7 @@ index d94f811..804ea51 100644
 +    SetXfbBlack,
 +    SplitSkipViews,
 +    SplitSetView,
++    SplitSetMist,
 +    Present,
 +    Call,
 +    Done,
@@ -1179,6 +1188,7 @@ index d94f811..804ea51 100644
 +    bool flag = false;
 +    int skip_views = 0;
 +    SplitViewArgs split_view{};
++    SplitMistArgs split_mist{};
 +    std::uint64_t n = 0;
 +    std::uint64_t t_game = 0;
 +    const std::function<void()>* fn = nullptr;
@@ -1610,6 +1620,10 @@ index d94f811..804ea51 100644
 +            ring_item(Item::SplitSetView).split_view = read_args<SplitViewArgs>(p);
 +            ring_commit();
 +            break;
++        case Op::SplitSetMist:
++            ring_item(Item::SplitSetMist).split_mist = read_args<SplitMistArgs>(p);
++            ring_commit();
++            break;
 +        case Op::Mem1Turn:
 +            g_mem1 = read_args<std::uint8_t*>(p);
 +            install_frontend_mem1();
@@ -1807,6 +1821,10 @@ index d94f811..804ea51 100644
 +            aurora_split_set_view(item.split_view.player, item.split_view.rot, item.split_view.x, item.split_view.y,
 +                                  item.split_view.z, item.split_view.zoom, item.split_view.hide_hud);
 +            break;
++        case Item::SplitSetMist:
++            aurora_split_set_mist(item.split_mist.on, item.split_mist.c2, item.split_mist.d0, item.split_mist.d1,
++                                  item.split_mist.k, item.split_mist.frame);
++            break;
 +        case Item::Present:
 +            if (live) {
 +                pace_present(item.t_game);
@@ -1994,6 +2012,14 @@ index d94f811..804ea51 100644
 +        append(Op::SplitSetView, &args, sizeof args);
 +    else
 +        aurora_split_set_view(args.player, args.rot, args.x, args.y, args.z, args.zoom, args.hide_hud);
++}
++
++// The same for the room mist's depth per view (co-op, design-fog.md Part B): it holds for the frame whose stream it is in.
++void split_set_mist_op(const SplitMistArgs& args) {
++    if (t_game_thread)
++        append(Op::SplitSetMist, &args, sizeof args);
++    else
++        aurora_split_set_mist(args.on, args.c2, args.d0, args.d1, args.k, args.frame);
 +}
 +
 +} // namespace gxq
@@ -2382,24 +2408,18 @@ index d94f811..804ea51 100644
 +        const char* core_env = std::getenv("DOL_GX_CORE");
 +        g_gx_core_enabled = !(core_env != nullptr && core_env[0] == '0');
 +    }
-+    g_shadow_frontend_enabled =
+     g_shadow_frontend_enabled =
          std::getenv("DOL_AURORA_RECOMP_FRONTEND_SHADOW") != nullptr ||
          g_shadow_transform_log_enabled || g_trace_armed || g_gx_core_enabled;
-     if (g_gx_core_enabled) {
-@@ -1055,69 +2953,455 @@ bool dol_aurora_initialize(int argc, char** argv,
-         std::fprintf(stderr, "[audio] SDL audio initialization failed: %s\n", SDL_GetError());
-     }
+@@ -1061,63 +2986,475 @@ bool dol_aurora_initialize(int argc, char** argv,
+     return true;
+ }
  
--    poll_events();
--    g_frame_open = !g_should_quit && aurora_begin_frame();
--    install_platform_ops();
--    return true;
-+    poll_events();
-+    g_frame_open = !g_should_quit && aurora_begin_frame();
-+    install_platform_ops();
-+    return true;
-+}
-+
+-// C2: route nonzero gxcore GapCounters into the structured report. Mirrors
+-// dolgx_replay_core.cpp print_gap_counters (full residual taxonomy, including
+-// U1/U2 counters the replay table historically omitted). Counter value IS the
+-// fire-count — gap_report_add adds that many occurrences in one call.
+-static void flush_gxcore_gap_counters() {
 +// C2: route nonzero gxcore GapCounters into the structured report. Mirrors
 +// dolgx_replay_core.cpp print_gap_counters (full residual taxonomy, including
 +// U1/U2 counters the replay table historically omitted). Counter value IS the
@@ -2660,6 +2680,32 @@ index d94f811..804ea51 100644
 +#endif
 +}
 +
++void dol_aurora_set_room_lights_other(int on, const float* lamps, int count, const float origin[3], const float size[3], const int dims[3],
++                                      const uint8_t* cells) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    // In the stream too, as set 0 is: the draws after it are the frame it's for.
++    const std::function<void()> run = [&] { aurora::gfx::gxcore::set_room_lights_other(on != 0, lamps, count, origin, size, dims, cells); };
++    if (gxq::on_game_thread())
++        gxq::call_sync(run);
++    else
++        run();
++#else
++    (void)on, (void)lamps, (void)count, (void)origin, (void)size, (void)dims, (void)cells;
++#endif
++}
++
++void dol_aurora_set_lights_per_view(bool on) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    const std::function<void()> run = [&] { aurora::gfx::gxcore::set_lights_per_view(on); };
++    if (gxq::on_game_thread())
++        gxq::call_sync(run);
++    else
++        run();
++#else
++    (void)on;
++#endif
++}
++
 +void dol_aurora_set_volumetric(float strength) {
 +#if GXRUNTIME_HAS_AURORA_RECOMP
 +    aurora::gfx::shadow::set_volumetric(strength);
@@ -2794,13 +2840,8 @@ index d94f811..804ea51 100644
 +
 +bool dol_aurora_frames_between(void) {
 +    return frame_rate::g_active;
- }
- 
--// C2: route nonzero gxcore GapCounters into the structured report. Mirrors
--// dolgx_replay_core.cpp print_gap_counters (full residual taxonomy, including
--// U1/U2 counters the replay table historically omitted). Counter value IS the
--// fire-count — gap_report_add adds that many occurrences in one call.
--static void flush_gxcore_gap_counters() {
++}
++
 +int dol_aurora_frame_rate_choices(int* out, int max) {
 +    std::vector<int> rates{60};
 +    for (const int hz : frame_rate::display_rates())
@@ -2895,7 +2936,7 @@ index d94f811..804ea51 100644
          aurora::gfx::efb_readback::set_continuous(true);
          aurora_request_framebuffer_readback();
      }
-@@ -1169,8 +3453,11 @@ void aurora_backend_present(void) {
+@@ -1169,8 +3506,11 @@ void aurora_backend_present(void) {
      // gxcore accumulates the frame's draws as their spans complete; the final
      // pending draw is only planned at the frame boundary. Submit it into the
      // still-open Aurora frame before end_frame flushes the command list.
@@ -2908,7 +2949,7 @@ index d94f811..804ea51 100644
      // TEMP DIAG: per-frame gxcore gap-counter deltas so a live
      // goal celebration reveals which skip reason dominates (missing_vcd /
      // "projection never captured" vertex_decode_failures / cull_all_draws vs.
-@@ -1197,12 +3484,21 @@ void aurora_backend_present(void) {
+@@ -1197,12 +3537,21 @@ void aurora_backend_present(void) {
      }
  #endif
      if (g_frame_open) {
@@ -2932,7 +2973,7 @@ index d94f811..804ea51 100644
          const std::uint8_t* rgba = nullptr;
          std::uint32_t w = 0;
          std::uint32_t h = 0;
-@@ -1212,6 +3508,124 @@ void aurora_backend_present(void) {
+@@ -1212,6 +3561,124 @@ void aurora_backend_present(void) {
          }
      }
      ++g_present_count;
@@ -3057,7 +3098,7 @@ index d94f811..804ea51 100644
      if (g_frame_pacing_log &&
          (g_present_count <= 10 || (g_present_count % 60) == 0)) {
          const AuroraStats* stats = aurora_get_stats();
-@@ -1432,6 +3846,7 @@ void aurora_backend_present(void) {
+@@ -1432,6 +3899,7 @@ void aurora_backend_present(void) {
      const unsigned long long present_fifo = g_fifo_bytes;
      g_fifo_bytes = 0;
      poll_events();
@@ -3065,7 +3106,7 @@ index d94f811..804ea51 100644
      if (!g_should_quit) {
          g_frame_open = aurora_begin_frame();
  #if GXRUNTIME_HAS_AURORA_RECOMP
-@@ -1482,7 +3897,13 @@ void aurora_backend_gx_write(u64 value, u8 size) {
+@@ -1482,7 +3950,13 @@ void aurora_backend_gx_write(u64 value, u8 size) {
          return;
      g_fifo_bytes += size;
  #if GXRUNTIME_HAS_AURORA_RECOMP
@@ -3080,7 +3121,7 @@ index d94f811..804ea51 100644
      // Record AFTER the shadow write so MEM_UPDATEs its resolves emitted
      // precede this GX_WRITE in the trace (replay reads them first), and
      // BEFORE the live-Aurora forwarding below so the pristine value is
-@@ -1673,6 +4094,7 @@ void aurora_backend_set_guest_address_resolver(
+@@ -1673,6 +4147,7 @@ void aurora_backend_set_guest_address_resolver(
              &frontend_resolver, frontend_guest_address_resolver_bridge,
              nullptr);
          g_shadow_frontend.reset(&frontend_resolver);
@@ -3088,7 +3129,7 @@ index d94f811..804ea51 100644
          g_shadow_frontend.set_packet_drain_enabled(g_shadow_frontend_enabled);
          g_shadow_packet_sink.reset();
          // Resolve packet guest addresses to host bytes through the frontend's
-@@ -1737,6 +4159,7 @@ void aurora_backend_set_xfb_black(bool black) {
+@@ -1737,6 +4212,7 @@ void aurora_backend_set_xfb_black(bool black) {
  }
  
  bool aurora_backend_pad_init(void) {
@@ -3096,7 +3137,7 @@ index d94f811..804ea51 100644
      if (PADInit() == FALSE)
          return false;
  
-@@ -1780,6 +4203,7 @@ bool aurora_backend_pad_init(void) {
+@@ -1780,6 +4256,7 @@ bool aurora_backend_pad_init(void) {
  }
  
  u32 aurora_backend_pad_read(DolPadState state[4]) {
@@ -3104,7 +3145,7 @@ index d94f811..804ea51 100644
      PADStatus status[4]{};
      const u32 motor_mask = PADRead(status);
      for (u32 i = 0; i < 4; i++) {
-@@ -1796,22 +4220,41 @@ u32 aurora_backend_pad_read(DolPadState state[4]) {
+@@ -1796,22 +4273,41 @@ u32 aurora_backend_pad_read(DolPadState state[4]) {
              .error = status[i].err,
          };
      }
@@ -3146,7 +3187,7 @@ index d94f811..804ea51 100644
      PADSetSpec(spec);
  }
  
-@@ -1841,13 +4284,16 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1841,13 +4337,16 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
          return;
      const int bytes_per_second =
          static_cast<int>(g_audio_sample_rate) * 2 * static_cast<int>(sizeof(s16));
@@ -3165,7 +3206,7 @@ index d94f811..804ea51 100644
      while (queued > max_queued_bytes && waited_ms < 20u) {
          g_audio_throttle_count++;
          if (g_audio_queue_log &&
-@@ -1860,11 +4306,51 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1860,11 +4359,51 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
                           max_queued_bytes);
          SDL_Delay(1);
          waited_ms++;
@@ -3217,7 +3258,7 @@ index d94f811..804ea51 100644
      if (g_audio_queue_log &&
          (g_audio_push_count <= 16 || (g_audio_push_count % 4000) == 0 ||
           (low_queue && g_audio_push_count - g_audio_low_log_push >= 4000))) {
-@@ -1876,6 +4362,21 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1876,6 +4415,21 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
                       g_audio_push_count, queued, queued + bytes,
                       g_audio_playing ? 1u : 0u, g_audio_throttle_count);
      }
@@ -3239,7 +3280,7 @@ index d94f811..804ea51 100644
      if (!SDL_PutAudioStreamData(g_audio_stream, samples, bytes))
          std::fprintf(stderr, "[audio] failed to queue samples: %s\n", SDL_GetError());
      else if (!g_audio_playing && queued + bytes >= prebuffer_bytes) {
-@@ -1886,10 +4387,492 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
+@@ -1886,10 +4440,506 @@ void aurora_backend_audio_push(const s16* samples, u32 frames) {
      }
  }
  
@@ -3329,6 +3370,20 @@ index d94f811..804ea51 100644
 +    gxq::split_set_view_op(args);
 +#else
 +    aurora_split_set_view(player, rot, x, y, z, zoom, hide_hud);
++#endif
++}
++
++void dol_aurora_split_set_mist(bool on, const float c2[3], float d0, float d1, float k, uint32_t frame) {
++#if GXRUNTIME_HAS_AURORA_RECOMP
++    gxq::SplitMistArgs args{};
++    args.on = on;
++    for (int i = 0; i < 3; ++i)
++        args.c2[i] = c2 != nullptr ? c2[i] : 0.0f;
++    args.d0 = d0, args.d1 = d1, args.k = k;
++    args.frame = frame;
++    gxq::split_set_mist_op(args);
++#else
++    aurora_split_set_mist(on, c2, d0, d1, k, frame);
 +#endif
 +}
 +
@@ -3732,7 +3787,7 @@ index d94f811..804ea51 100644
      const DolPlatformOps ops = {
          .should_quit = aurora_backend_should_quit,
          .present = aurora_backend_present,
-@@ -1918,6 +4901,7 @@ void install_platform_ops() {
+@@ -1918,6 +4968,7 @@ void install_platform_ops() {
          .audio_set_sample_rate = aurora_backend_audio_set_sample_rate,
          .audio_push = aurora_backend_audio_push,
      };
@@ -3773,10 +3828,10 @@ index b86b214..f6b70de 100644
  AuroraBackend aurora_get_backend();
  const AuroraBackend* aurora_get_available_backends(size_t* count);
 diff --git a/graphics/aurora/include/aurora/gfx.h b/graphics/aurora/include/aurora/gfx.h
-index a13ce39..d140bb7 100644
+index a13ce39..5d86681 100644
 --- a/graphics/aurora/include/aurora/gfx.h
 +++ b/graphics/aurora/include/aurora/gfx.h
-@@ -29,10 +29,93 @@ typedef struct {
+@@ -29,10 +29,97 @@ typedef struct {
  } AuroraStats;
  
  const AuroraStats* aurora_get_stats();
@@ -3844,6 +3899,10 @@ index a13ce39..d140bb7 100644
 + */
 +void aurora_split_set(bool on, int layout);
 +void aurora_split_set_view(int player, const float rot[9], float x, float y, float z, float zoom, bool hide_hud);
++/* Eternal Darkness co-op: the game's room mist's depth from each half's own camera, this frame only (in the stream with
++ * its draws): c2 the game camera's column 2, d0/d1 the room in play's and player 2's room's band shift (NaN none), k the
++ * game's 2000.0, frame the game's frame (the [fog-view] log). Off, or a frame without it: the game camera's in both. */
++void aurora_split_set_mist(bool on, const float c2[3], float d0, float d1, float k, uint32_t frame);
 +/* A menu one player opened (the Tome) in their half (0 or 1, -1 none), the
 + * other half keeping the other player's last view; layout as above. */
 +void aurora_split_menu(int player, int layout);
@@ -3871,7 +3930,7 @@ index a13ce39..d140bb7 100644
   * EFB readback (GXRuntime recomp patch): arm a one-shot copy of the next
   * submitted frame's present source; take returns tightly packed RGBA8 rows
 diff --git a/graphics/aurora/lib/aurora.cpp b/graphics/aurora/lib/aurora.cpp
-index b09ef4d..5991b62 100644
+index b09ef4d..5c480ae 100644
 --- a/graphics/aurora/lib/aurora.cpp
 +++ b/graphics/aurora/lib/aurora.cpp
 @@ -1,6 +1,17 @@
@@ -4999,7 +5058,7 @@ index b09ef4d..5991b62 100644
  
  #endif
  }
-@@ -475,6 +1337,87 @@ void aurora_set_resampler(AuroraSampler sampler) {
+@@ -475,6 +1337,90 @@ void aurora_set_resampler(AuroraSampler sampler) {
    (void)sampler;
  #endif
  }
@@ -5042,6 +5101,9 @@ index b09ef4d..5991b62 100644
 +  v.zoom = zoom;
 +  v.hideHud = hide_hud;
 +  aurora::gfx::split_set_view(player, v);
++}
++void aurora_split_set_mist(bool on, const float c2[3], float d0, float d1, float k, uint32_t frame) {
++  aurora::gfx::split_set_mist(on, c2, d0, d1, k, frame);
 +}
 +unsigned aurora_photo_saved(void) { return aurora::gfx::photo_saved(); }
 +void aurora_glow_add_texture(uint32_t format, uint32_t width, uint32_t height, uint64_t hash, float strength) {
@@ -5253,7 +5315,7 @@ index 421bd9e..69b25fd 100644
 +bool DisplayShowsHDR(SDL_Window*) { return true; }  // EDR: SDR white stays 1.0, any display
  } // namespace aurora::webgpu::utils
 diff --git a/graphics/aurora/lib/gfx/common.cpp b/graphics/aurora/lib/gfx/common.cpp
-index a64dd2d..f53ba6d 100644
+index a64dd2d..836886a 100644
 --- a/graphics/aurora/lib/gfx/common.cpp
 +++ b/graphics/aurora/lib/gfx/common.cpp
 @@ -1,3 +1,4 @@
@@ -5496,7 +5558,7 @@ index a64dd2d..f53ba6d 100644
    render_worker::enqueue_begin_frame(frame.frameId, [frameSlot] {
      static constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "Redraw encoder"};
      g_framePackets[frameSlot].encoder = g_device.CreateCommandEncoder(&EncoderDescriptor);
-@@ -1309,7 +1463,621 @@ void finish() {
+@@ -1309,7 +1463,674 @@ void finish() {
    }
  }
  
@@ -5521,6 +5583,32 @@ index a64dd2d..f53ba6d 100644
 +PhotoView g_views[2];
 +PhotoView g_lastViews[2];  // as the frame before used them
 +bool g_haveLast = false;
++// The room mist per view (split_set_mist): as sent in this frame's stream, and as this frame's views take it (plan).
++struct MistSent {
++  bool on = false, fresh = false;
++  float c2[3]{0.f, 0.f, 0.f};
++  float d[2]{0.f, 0.f};
++  float k = 0.f;
++  uint32_t frame = 0;
++} g_mist, g_frameMist;
++
++#ifdef AURORA_ENABLE_GXCORE
++// The mist for one player's view: the frame's, with that view's back axis (its rotation's column 2) and position.
++interp::Mist mist_for(const PhotoView& view) {
++  interp::Mist m;
++  m.on = g_frameMist.on;
++  m.k = g_frameMist.k;
++  for (int i = 0; i < 3; ++i) {
++    m.c2[i] = g_frameMist.c2[i];
++    m.back[i] = view.rot[i][2];
++    m.pos[i] = view.pos[i];
++  }
++  m.d[0] = g_frameMist.d[0];
++  m.d[1] = g_frameMist.d[1];
++  m.frame = g_frameMist.frame;
++  return m;
++}
++#endif
 +
 +// Each player's view of this frame (two Split outputs) when split-screen is on
 +// and the frame was kept; empty otherwise (the frame shows whole).
@@ -5563,7 +5651,8 @@ index a64dd2d..f53ba6d 100644
 +      continue;
 +    PhotoView view = g_views[player];
 +    view.aspect = aspect;
-+    auto uniforms = interp::split_build(player, frame.uniforms.size(), photo::projection, &view, view.hideHud, photo::flare);
++    const interp::Mist mist = mist_for(view);
++    auto uniforms = interp::split_build(player, frame.uniforms.size(), photo::projection, &view, view.hideHud, photo::flare, &mist);
 +    if (!uniforms) {
 +      note_whole("no draws kept");
 +      return {};
@@ -5626,7 +5715,8 @@ index a64dd2d..f53ba6d 100644
 +        }
 +        view.zoom = from.zoom + (view.zoom - from.zoom) * t;
 +        view.aspect = aspect;
-+        auto uniforms = interp::split_between(player, blended, size, photo::projection, &view, view.hideHud, photo::flare);
++        const interp::Mist mist = mist_for(view);
++        auto uniforms = interp::split_between(player, blended, size, photo::projection, &view, view.hideHud, photo::flare, &mist);
 +        if (uniforms)
 +          outputs.push_back(FrameOutput{.kind = FrameOutput::Kind::SplitBetween,
 +                                        .uniforms = std::move(uniforms),
@@ -5666,6 +5756,11 @@ index a64dd2d..f53ba6d 100644
 +  return split::g_onlyView >= 0;
 +}
 +
++int split_only() noexcept {
++  std::lock_guard lock{split::g_mutex};
++  return split::g_onlyView;
++}
++
 +void split_only_view(int player) noexcept {
 +  std::lock_guard lock{split::g_mutex};
 +  g_noFrameStartPacing.store(player >= 0, std::memory_order_relaxed);
@@ -5697,6 +5792,19 @@ index a64dd2d..f53ba6d 100644
 +  split::g_views[player] = view;
 +}
 +
++void split_set_mist(bool on, const float c2[3], float d0, float d1, float k, uint32_t frame) noexcept {
++  std::lock_guard lock{split::g_mutex};
++  split::MistSent& m = split::g_mist;
++  m.on = on && c2 != nullptr && k > 0.f;
++  m.fresh = true;
++  for (int i = 0; i < 3; ++i)
++    m.c2[i] = c2 != nullptr ? c2[i] : 0.f;
++  m.d[0] = d0;
++  m.d[1] = d1;
++  m.k = k;
++  m.frame = frame;
++}
++
 +int split_layout() noexcept {
 +  std::lock_guard lock{split::g_mutex};
 +  return split::g_on ? split::g_layout : -1;
@@ -5704,6 +5812,13 @@ index a64dd2d..f53ba6d 100644
 +
 +std::vector<FrameOutput> plan_outputs(const float* phases, size_t count) {
 +  std::vector<FrameOutput> outputs;
++  {
++    // The room mist this frame's views take: only what this frame's stream sent (split_set_mist).
++    std::lock_guard lock{split::g_mutex};
++    split::g_frameMist = split::g_mist;
++    split::g_frameMist.on = split::g_mist.on && split::g_mist.fresh;
++    split::g_mist.fresh = false;
++  }
 +  if (g_recordingFrame == nullptr)
 +    return outputs;
 +  // Split-screen: the players' views, then the game's frame (drawn last, so
@@ -6119,7 +6234,7 @@ index a64dd2d..f53ba6d 100644
    ZoneScoped;
    ASSERT(!g_inOffscreen, "end_frame called while offscreen rendering is active");
    ASSERT(g_currentRenderPass == UINT32_MAX, "end_frame called before finish finalized the current render pass");
-@@ -1320,6 +2088,7 @@ void end_frame(EndFrameCallback callback) {
+@@ -1320,6 +2141,7 @@ void end_frame(EndFrameCallback callback) {
      TracyPlot("aurora: cpuFrameTimeMs", cpuFrameTimeMs);
    }
    auto& frame = current_frame_packet();
@@ -6127,7 +6242,7 @@ index a64dd2d..f53ba6d 100644
    frame.stats.drawCallCount = g_drawCallCount;
    frame.stats.mergedDrawCallCount = g_mergedDrawCallCount;
    frame.stats.lastVertSize = frame.verts.size();
-@@ -1352,12 +2121,125 @@ void end_frame(EndFrameCallback callback) {
+@@ -1352,12 +2174,129 @@ void end_frame(EndFrameCallback callback) {
  #endif
  
    const size_t stagingSlot = frame.stagingBuffer;
@@ -6180,7 +6295,9 @@ index a64dd2d..f53ba6d 100644
 +        shadow::probe_label(frameId, 2, output.view, 0.f, output.uniforms->data());
 +        ssao::set_view_shape(output.zoom, output.aspect);
 +        auto s_t0 = std::chrono::steady_clock::now();
++        shadow::set_encoding_view(output.view);
 +        encode_between(view, packet, !uploaded);
++        shadow::set_encoding_view(-1);
 +        ssao::set_view_shape(1.f, 0.f);
 +        s_encode += s_ms(s_t0);
 +        uploaded = true;
@@ -6211,7 +6328,9 @@ index a64dd2d..f53ba6d 100644
 +        shadow::probe_label(frameId, 1, output.view, 1.f, output.uniforms->data());
 +        ssao::set_view_shape(output.zoom, output.aspect);
 +        auto s_t0 = std::chrono::steady_clock::now();
++        shadow::set_encoding_view(output.view);
 +        encode_between(view, packet, !uploaded);
++        shadow::set_encoding_view(-1);
 +        ssao::set_view_shape(1.f, 0.f);
 +        s_encode += s_ms(s_t0);
 +        uploaded = true;
@@ -6254,7 +6373,7 @@ index a64dd2d..f53ba6d 100644
      packet = {};
      g_stats.drawCallCount = stats.drawCallCount;
      g_stats.mergedDrawCallCount = stats.mergedDrawCallCount;
-@@ -1367,7 +2249,14 @@ void end_frame(EndFrameCallback callback) {
+@@ -1367,7 +2306,14 @@ void end_frame(EndFrameCallback callback) {
      g_stats.lastStorageSize = stats.lastStorageSize;
      g_stats.lastTextureUploadSize = stats.lastTextureUploadSize;
      if (callback) {
@@ -6270,7 +6389,7 @@ index a64dd2d..f53ba6d 100644
      }
      g_frameSlots.release(frameSlot);
      expire_cached_bind_groups();
-@@ -1561,7 +2450,46 @@ static void encode_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const Frame
+@@ -1561,7 +2507,46 @@ static void encode_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const Frame
    }
  }
  
@@ -6318,7 +6437,7 @@ index a64dd2d..f53ba6d 100644
    ZoneScoped;
    if (!passInfo.sealed) {
      return;
-@@ -1570,7 +2498,7 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+@@ -1570,7 +2555,7 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
    for (const auto& conv : passInfo.paletteConvs) {
      tex_palette_conv::run(cmd, conv);
    }
@@ -6327,7 +6446,7 @@ index a64dd2d..f53ba6d 100644
      // Skip intermediate EFB render passes without observable output.
      return;
    }
-@@ -1622,15 +2550,33 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+@@ -1622,15 +2607,33 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
    auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
    render_pass(pass, frame, passInfo);
    pass.End();
@@ -6363,7 +6482,7 @@ index a64dd2d..f53ba6d 100644
      depth_peek::encode_frame_snapshot(cmd, passInfo.copySourceDepthView, passInfo.targetSize, passInfo.msaaSamples);
    }
  
-@@ -1682,9 +2628,151 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
+@@ -1682,7 +2685,152 @@ static void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& pa
        };
        cmd.CopyTextureToTexture(&src, &dst, &size);
      }
@@ -6372,9 +6491,9 @@ index a64dd2d..f53ba6d 100644
 +      glow::compose(cmd, passInfo.resolveTarget->attachmentTextureView, passInfo.resolveTarget->format,
 +                    passInfo.copySourceView);
 +#endif
-   }
- }
- 
++  }
++}
++
 +// GXRuntime recomp patch: an EFB pass's draws that add light, again into the
 +// glow buffer (glow.hpp), tested against the pass's depth without writing it.
 +static void render_glow_pass(wgpu::CommandEncoder& cmd, const RenderPass& passInfo, bool emit) {
@@ -6450,10 +6569,13 @@ index a64dd2d..f53ba6d 100644
 +}
 +
 +// GXRuntime recomp patch: each character's lit draws into their tile of the shadow atlas, then the EFB
-+// darkened by them (shadow.hpp). In the pass's own draws, so in whichever view it's drawn for.
++// darkened by them (shadow.hpp). In the pass's own draws, so in whichever view it's drawn for; with the players in two
++// rooms (a scene filled per view), from that view's own Frame, whose camera is the first draw kept in that view.
 +static void render_character_shadows(wgpu::CommandEncoder& cmd, FramePacket& packet, const RenderPass& passInfo) {
 +#ifdef AURORA_ENABLE_GXCORE
-+  const shadow::Frame frame = shadow::at_this_moment(passInfo.ssaoScene.shadow);
++  const int view = shadow::encoding_view();
++  const auto& scene = passInfo.ssaoScene;
++  const shadow::Frame frame = shadow::at_this_moment(scene.perView && view >= 0 && view < 2 ? scene.shadowView[view] : scene.shadow);
 +  if ((frame.count == 0 && frame.volCount == 0) || !shadow::wanted() || !passInfo.depthStencilView) {
 +    shadow::probe(cmd, frame);
 +    return;
@@ -6501,7 +6623,7 @@ index a64dd2d..f53ba6d 100644
 +        std::fprintf(stderr, " %d", drawnHere[t]);
 +      std::fprintf(stderr, "\n");
 +    }
-+  }
+   }
 +  const auto& s = passInfo.ssaoScene;
 +  const float viewport[4] = {s.left, s.top, s.width, s.height};
 +  shadow::apply(cmd, frame, viewport, s.minDepth, s.maxDepth, passInfo.colorView, passInfo.resolveView, passInfo.depthStencilView, passInfo.copySourceView,
@@ -6510,12 +6632,10 @@ index a64dd2d..f53ba6d 100644
 +                           passInfo.targetSize, passInfo.msaaSamples);
 +  shadow::probe(cmd, frame);
 +#endif
-+}
-+
+ }
+ 
  void after_submit() noexcept {
-   depth_peek::after_submit();
-   efb_readback::after_submit();
-@@ -1892,8 +2980,14 @@ Range push_indices(const uint8_t* data, size_t length, size_t alignment) {
+@@ -1892,8 +3040,14 @@ Range push_indices(const uint8_t* data, size_t length, size_t alignment) {
  
  Range push_uniform(const uint8_t* data, size_t length) {
    ZoneScoped;
@@ -6532,7 +6652,7 @@ index a64dd2d..f53ba6d 100644
  }
  
  Range push_storage(const uint8_t* data, size_t length) {
-@@ -1935,7 +3029,19 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
+@@ -1935,7 +3089,19 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
  wgpu::BindGroup find_bind_group(BindGroupRef id) {
    std::lock_guard lock{g_bindGroupCacheMutex};
    const auto it = g_cachedBindGroups.find(id);
@@ -6554,7 +6674,7 @@ index a64dd2d..f53ba6d 100644
  }
  
 diff --git a/graphics/aurora/lib/gfx/common.hpp b/graphics/aurora/lib/gfx/common.hpp
-index 37acf2b..c475757 100644
+index 37acf2b..48e3f41 100644
 --- a/graphics/aurora/lib/gfx/common.hpp
 +++ b/graphics/aurora/lib/gfx/common.hpp
 @@ -1,5 +1,6 @@
@@ -6616,7 +6736,7 @@ index 37acf2b..c475757 100644
  
  enum class ShaderType : uint8_t {
    Clear = 0,
-@@ -252,8 +287,65 @@ void shutdown();
+@@ -252,8 +287,70 @@ void shutdown();
  
  bool begin_frame();
  void finish();
@@ -6657,8 +6777,13 @@ index 37acf2b..c475757 100644
 +void split_only_view(int player) noexcept;
 +bool split_skipping_views() noexcept;
 +bool split_sharing() noexcept;
++int split_only() noexcept;                 // the one view drawn while sharing (split_only_view), -1 both, 2 neither
 +void split_set(bool on, int layout) noexcept;
 +void split_set_view(int player, const PhotoView& view) noexcept;
++// Eternal Darkness co-op, the room mist's depth per view (interp::Mist): this frame's game camera column 2, the two rooms'
++// band shifts (NaN none), the game's 2000.0 and its frame. Holds for the frame it is sent in (in the stream with the
++// draws) only: a frame without it draws the rows as the game made them.
++void split_set_mist(bool on, const float c2[3], float d0, float d1, float k, uint32_t frame) noexcept;
 +// The layout while on, else -1 (the present's).
 +int split_layout() noexcept;
 +void photo_save(const char* path) noexcept;
@@ -6683,7 +6808,7 @@ index 37acf2b..c475757 100644
  void render_pass(const wgpu::RenderPassEncoder& pass, uint32_t idx);
  void after_submit() noexcept;
  void gpu_synchronize();
-@@ -276,9 +368,22 @@ struct EfbCopyFilterParams {
+@@ -276,9 +373,22 @@ struct EfbCopyFilterParams {
    std::uint32_t filter_row[3]{0, 64, 0};
  };
  
@@ -7681,7 +7806,7 @@ index 0000000..64bd328
 +
 +} // namespace aurora::gfx::glow
 diff --git a/graphics/aurora/lib/gfx/gxcore_draw.cpp b/graphics/aurora/lib/gfx/gxcore_draw.cpp
-index 71136b9..dcbee6f 100644
+index 71136b9..2a88935 100644
 --- a/graphics/aurora/lib/gfx/gxcore_draw.cpp
 +++ b/graphics/aurora/lib/gfx/gxcore_draw.cpp
 @@ -1,4 +1,14 @@
@@ -8210,7 +8335,7 @@ index 71136b9..dcbee6f 100644
    if (data.tev) {
      // group 2 = PS uniform (same dynamic-uniform bind group, its own offset);
      // group 3 = texture.
-@@ -591,18 +951,628 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+@@ -591,18 +951,766 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
  
  void reset_texture_cache() {
    g_textureCache.clear();
@@ -8263,22 +8388,34 @@ index 71136b9..dcbee6f 100644
 +// Who can cast, which is more than can show (kMaxTiles): a monster's two flattened draws can be two places, and with them
 +// four monsters took all eight places, so the players weren't found at all and had no shadow.
 +constexpr int kMaxCasters = 32;
++// Lots of lights a frame: 48, and twice that while the views are filled apart (Eternal Darkness co-op, two rooms: each
++// room's characters are their own lots, and the same lights in each room's half are two).
++constexpr int kMaxSets = 96;
++constexpr int kMaxSetsOneView = 48;
 +struct ShadowLights {
 +  uint32_t print = 0;
 +  float lo[3]{}, hi[3]{};
 +  gxc::GpuLight lights[8]{};
++  uint8_t outOf = 0;  // while per view: bit v, its draws are left out of view v (interp marked_out_of)
 +};
 +struct ShadowGroup {
 +  float lo[3]{}, hi[3]{};  // the flattened draws: where they stand
++  uint8_t outOf = 0;       // as ShadowLights
 +};
 +static struct {
 +  uint32_t frame = UINT32_MAX;
 +  int flats = 0;
 +  ShadowGroup groups[kMaxCasters];
-+  ShadowLights sets[48];  // each lot of lights seen in the frame's lit draws
++  ShadowLights sets[kMaxSets];  // each lot of lights seen in the frame's lit draws
 +  int setCount = 0;
 +  bool seenCamera = false;
 +  float view[3][4]{};  // the frame's first scene draw's matrix: a room's are in the world, so this is the camera
++  // Per view: the first scene draw with no matrix index kept in that view. Apart, the room in play is drawn marked out of
++  // player 2's half and player 2's room out of player 1's, and when the frame's first was the latter, player 1's half took
++  // a camera its replay had zeroed: every tile and haze light fell to the eye.
++  bool seenView[2]{};
++  float viewOf[2][3][4]{};
++  uint8_t firstOutOf = 0;  // the frame's first scene draw's marks (U1)
 +} g_sh;
 +
 +// The room's lamps, from the game's own light grid (host: room_lights_update): each is where the disc says, with
@@ -8293,16 +8430,37 @@ index 71136b9..dcbee6f 100644
 +  float haze;    // how far its light carries in the air
 +  float weight;  // how much of it is in the air now: it fades in and out as people come near
 +};
-+static KnownLamp g_lamps[kMaxLamps];
-+static int g_lampCount = 0;
-+static float g_gridOrigin[3]{}, g_gridSize[3]{1.f, 1.f, 1.f};
-+static int g_gridDims[3]{};
-+static std::vector<uint8_t> g_gridCells;  // three lamps a cell, 255 for none
-+static bool g_lampsFresh = false;  // a room's just come: the air's lit from its first frame, as the room is
++// Two sets: 0 the room in play's (set_room_lights), 1 the other room's while the players are in two (set_room_lights_other,
++// Eternal Darkness co-op). Alone, or in one room, only set 0 is ever filled.
++static KnownLamp g_lamps[2][kMaxLamps];
++static int g_lampCount[2] = {0, 0};
++static float g_gridOrigin[2][3]{}, g_gridSize[2][3]{{1.f, 1.f, 1.f}, {1.f, 1.f, 1.f}};
++static int g_gridDims[2][3]{};
++static std::vector<uint8_t> g_gridCells[2];  // three lamps a cell, 255 for none
++static bool g_lampsFresh[2] = {false, false};  // a room's just come: the air's lit from its first frame, as the room is
++static bool g_setBOn = false;
++// The views' shadows filled apart (view 0 from set 0 and what it keeps, view 1 from set 1): what the host last asked, and
++// what this frame goes by, taken at its start (submit_draw_plan) so one frame is gathered and filled under one rule.
++static bool g_perViewNext = false, g_perView = false;
 +static int g_framesNoCharacters = 0;
 +static uint32_t g_sceneUniformOffset = 0, g_sceneSharedOffset = 0;
 +static uint32_t g_cameraUniformOffset = 0;
++static uint32_t g_cameraViewOffset[2] = {0, 0};  // per view, as g_cameraUniformOffset (g_sh.viewOf)
 +static bool g_sceneCameraCut = false;  // this frame's camera faces another way from the last's
++
++// Which views a draw is left out of (bit v: view v), by the marks on its position matrix: its own, or for a draw with
++// matrix indices the one its first vertex names, as view_bounds takes it.
++static uint8_t draw_out_of(const gxc::DrawPlan& plan) {
++  const float(*m)[4] = plan.constants.posnormalmatrix;
++  if (plan.pipeline.shader.has_pos_mtx_idx != 0 && plan.shared_constants != nullptr && plan.vertex_count > 0u) {
++    uint32_t idx = 0;
++    std::memcpy(&idx, plan.vertices.data() + 3, 4);
++    if (idx + 3u > 64u)
++      return 0;
++    m = &plan.shared_constants->transformmatrices[idx];
++  }
++  return static_cast<uint8_t>((interp::marked_out_of(m, 0) ? 1u : 0u) | (interp::marked_out_of(m, 1) ? 2u : 0u));
++}
 +
 +// The draw's bounds in the game camera's view space.
 +static void view_bounds(const gxc::DrawPlan& plan, float* lo, float* hi) {
@@ -8339,6 +8497,7 @@ index 71136b9..dcbee6f 100644
 +  float radius;
 +  int lastSeen;
 +  int lastFlat;  // the last frame the game drew them flattened
++  int set;       // whose lamps its weights are for (g_lamps): a view filled apart matches and takes only its own set's
 +  bool used;
 +  bool fresh;  // just found: their shadows are there at once, not eased in. The easing is for walking between lamps
 +};
@@ -8371,45 +8530,41 @@ index 71136b9..dcbee6f 100644
 +  }
 +}
 +
-+static void fill_shadow(gfx::ssao::Scene& scene) {
-+  auto& f = scene.shadow;
++// One Frame of shadows and haze: from the casters a view keeps (bit `view` of their marks clear; -1 every caster), the
++// lamps of `set`, and that set's slots alone, in the view space of V (the camera draw kept in that view). Alone, and with
++// the players in one room, there is one: every caster, set 0, the frame's camera, as it was before views apart.
++struct FillCount {
++  int casters = 0;   // who casts here
++  int unmarked = 0;  // of the flattened, those with no mark: in both views (U7, the views apart)
++};
++static FillCount fill_one(gfx::shadow::Frame& f, int set, int view, const float (&V)[3][4], uint32_t cameraOffset, bool s_log) {
++  FillCount counted;
 +  f = {};
 +  f.uniformOffset = g_sceneUniformOffset;
 +  f.sharedOffset = g_sceneSharedOffset;
-+  if (!gfx::shadow::wanted() || g_sh.frame != current_frame())
-+    return;
-+  std::memcpy(f.camera, g_sh.view, sizeof f.camera);
-+  f.cameraOffset = g_cameraUniformOffset;
-+  // AURORA_SHADOW_LOG=N: every Nth frame (120 if it isn't a number above 1).
-+  static const uint32_t s_logEvery = [] {
-+    const char* e = std::getenv("AURORA_SHADOW_LOG");
-+    return e == nullptr ? 0u : std::atoi(e) > 1 ? static_cast<uint32_t>(std::atoi(e)) : 120u;
-+  }();
-+  // And each frame the number of flattened draws or lots of lights changes.
-+  static int s_lastFlats = -1, s_lastSets = -1;
-+  const bool s_changed = s_logEvery != 0u && (g_sh.flats != s_lastFlats || g_sh.setCount != s_lastSets);
-+  s_lastFlats = g_sh.flats;
-+  s_lastSets = g_sh.setCount;
-+  const bool s_log = s_changed || (s_logEvery != 0u && current_frame() % s_logEvery == 0u);
-+  // A room change has a run of frames with no characters: its lamps are forgotten then.
-+  g_framesNoCharacters = g_sh.flats > 0 ? 0 : g_framesNoCharacters + 1;
-+  if (g_framesNoCharacters > 8) {
-+    for (auto& slot : g_slots)
-+      slot.used = false;
-+  }
-+  ++g_slotClock;
++  std::memcpy(f.camera, V, sizeof f.camera);
++  f.cameraOffset = cameraOffset;
++  const uint8_t outBit = view >= 0 ? static_cast<uint8_t>(1u << view) : uint8_t{0};
++  KnownLamp* const lamps = g_lamps[set];
++  const int lampCount = g_lampCount[set];
++  const std::vector<uint8_t>& gridCells = g_gridCells[set];
++  const float* gridOrigin = g_gridOrigin[set];
++  const float* gridSize = g_gridSize[set];
++  const int* gridDims = g_gridDims[set];
 +  bool anyRemembered = false;
 +  for (const auto& slot : g_slots)
-+    anyRemembered = anyRemembered || (slot.used && g_slotClock - slot.lastFlat <= kFlatMemory);
-+  if (g_sh.flats == 0 && !anyRemembered)
-+    return;
-+  const auto& V = g_sh.view;
++    anyRemembered = anyRemembered || (slot.used && slot.set == set && g_slotClock - slot.lastFlat <= kFlatMemory);
++  int flats = 0;
++  for (int g = 0; g < g_sh.flats; ++g)
++    flats += (g_sh.groups[g].outOf & outBit) == 0 ? 1 : 0;
++  if (flats == 0 && !anyRemembered)
++    return counted;
 +  // Which way is up here: the world's height in this camera. Taken from a character it was any way at all
 +  // on someone lying down.
 +  float up[3] = {V[0][2], V[1][2], V[2][2]};
 +  const float upLen = std::sqrt(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]);
 +  if (upLen < 0.5f)
-+    return;
++    return counted;
 +  for (float& u : up)
 +    u /= upLen;
 +
@@ -8425,6 +8580,9 @@ index 71136b9..dcbee6f 100644
 +  int casterCount = 0;
 +  bool flatted[kMaxCasters] = {};
 +  for (int g = 0; g < g_sh.flats; ++g) {
++    if ((g_sh.groups[g].outOf & outBit) != 0)
++      continue;  // drawn out of this view: the other room's
++    counted.unmarked += g_sh.groups[g].outOf == 0 ? 1 : 0;
 +    Caster& c = casters[casterCount];
 +    flatted[casterCount++] = true;
 +    c.printCount = 0;
@@ -8436,7 +8594,7 @@ index 71136b9..dcbee6f 100644
 +  }
 +  // Those the game left out this frame, where they last stood.
 +  for (const auto& slot : g_slots) {
-+    if (!slot.used || g_slotClock - slot.lastFlat > kFlatMemory || casterCount >= kMaxCasters)
++    if (!slot.used || slot.set != set || g_slotClock - slot.lastFlat > kFlatMemory || casterCount >= kMaxCasters)
 +      continue;
 +    float at[3];
 +    for (int i = 0; i < 3; ++i)
@@ -8459,11 +8617,13 @@ index 71136b9..dcbee6f 100644
 +    }
 +  }
 +  for (int n = 0; n < g_sh.setCount; ++n) {
-+    const ShadowLights& set = g_sh.sets[n];
++    const ShadowLights& lit = g_sh.sets[n];
++    if ((lit.outOf & outBit) != 0)
++      continue;
 +    float across = 0.f, tall = 0.f;
 +    for (int i = 0; i < 3; ++i) {
-+      across += set.hi[i] - set.lo[i];
-+      tall += std::fabs(up[i]) * (set.hi[i] - set.lo[i]);
++      across += lit.hi[i] - lit.lo[i];
++      tall += std::fabs(up[i]) * (lit.hi[i] - lit.lo[i]);
 +    }
 +    if (across > 1500.f)
 +      continue;  // the room
@@ -8475,8 +8635,8 @@ index 71136b9..dcbee6f 100644
 +      bool inside = true;
 +      float apart = 0.f;
 +      for (int i = 0; i < 3; ++i) {
-+        inside = inside && casters[c].stands[i] >= set.lo[i] - 40.f && casters[c].stands[i] <= set.hi[i] + 40.f;
-+        const float a = casters[c].stands[i] - 0.5f * (set.lo[i] + set.hi[i]);
++        inside = inside && casters[c].stands[i] >= lit.lo[i] - 40.f && casters[c].stands[i] <= lit.hi[i] + 40.f;
++        const float a = casters[c].stands[i] - 0.5f * (lit.lo[i] + lit.hi[i]);
 +        apart += a * a;
 +      }
 +      if (inside && apart < nearest) {
@@ -8486,10 +8646,10 @@ index 71136b9..dcbee6f 100644
 +    }
 +    if (owner == nullptr || owner->printCount >= gfx::shadow::kMaxPrints)
 +      continue;
-+    owner->prints[owner->printCount++] = set.print;
++    owner->prints[owner->printCount++] = lit.print;
 +    for (int i = 0; i < 3; ++i) {
-+      owner->lo[i] = std::min(owner->lo[i], set.lo[i]);
-+      owner->hi[i] = std::max(owner->hi[i], set.hi[i]);
++      owner->lo[i] = std::min(owner->lo[i], lit.lo[i]);
++      owner->hi[i] = std::max(owner->hi[i], lit.hi[i]);
 +    }
 +  }
 +  {
@@ -8509,7 +8669,8 @@ index 71136b9..dcbee6f 100644
 +    }
 +    casterCount = kept;
 +  }
-+  if (s_log) {
++  counted.casters = casterCount;
++  if (s_log && view < 0) {
 +    for (int g = 0; g < g_sh.flats; ++g)
 +      std::fprintf(stderr, "[shadow-set] frame %u flat %d lo %.0f %.0f %.0f hi %.0f %.0f %.0f\n", current_frame(), g, g_sh.groups[g].lo[0], g_sh.groups[g].lo[1], g_sh.groups[g].lo[2], g_sh.groups[g].hi[0], g_sh.groups[g].hi[1], g_sh.groups[g].hi[2]);
 +    for (int n = 0; n < g_sh.setCount; ++n) {
@@ -8518,10 +8679,10 @@ index 71136b9..dcbee6f 100644
 +    }
 +  }
 +
-+  float view[kMaxLamps][3];
-+  for (int v = 0; v < g_lampCount; ++v)
++  float lampAt[kMaxLamps][3];
++  for (int v = 0; v < lampCount; ++v)
 +    for (int i = 0; i < 3; ++i)
-+      view[v][i] = V[i][0] * g_lamps[v].world[0] + V[i][1] * g_lamps[v].world[1] + V[i][2] * g_lamps[v].world[2] + V[i][3];
++      lampAt[v][i] = V[i][0] * lamps[v].world[0] + V[i][1] * lamps[v].world[1] + V[i][2] * lamps[v].world[2] + V[i][3];
 +
 +  // The shadows all of them could show, of which the most wanted get a place in the atlas.
 +  struct Wanted {
@@ -8553,7 +8714,7 @@ index 71136b9..dcbee6f 100644
 +      if (slotOf[c] != nullptr)
 +        continue;
 +      for (auto& s : g_slots) {
-+        if (!s.used || s.lastSeen == g_slotClock)
++        if (!s.used || s.set != set || s.lastSeen == g_slotClock)
 +          continue;
 +        const float a = s.world[0] - worldOf[c][0], b = s.world[1] - worldOf[c][1], e = s.world[2] - worldOf[c][2];
 +        if (a * a + b * b + e * e < bestApart) {
@@ -8576,9 +8737,10 @@ index 71136b9..dcbee6f 100644
 +    ShadowSlot* slot = slotOf[c];
 +    if (slot == nullptr)
 +      for (auto& s : g_slots)
-+        if (!s.used || (s.lastSeen != g_slotClock && g_slotClock - s.lastSeen > 30)) {
++        if (!s.used || (s.set == set && s.lastSeen != g_slotClock && g_slotClock - s.lastSeen > 30)) {
 +          slot = &s;
 +          *slot = {};
++          slot->set = set;
 +          slot->used = true;
 +          slot->fresh = true;
 +          slot->lastFlat = g_slotClock;
@@ -8593,26 +8755,26 @@ index 71136b9..dcbee6f 100644
 +      slot->lastFlat = g_slotClock;
 +    // The three the game lights this place with, the way it finds them: a lamp beyond a wall isn't among them.
 +    uint8_t own[3] = {255, 255, 255};
-+    if (!g_gridCells.empty()) {
++    if (!gridCells.empty()) {
 +      int at[3];
 +      for (int i = 0; i < 3; ++i)
-+        at[i] = std::clamp(static_cast<int>(std::floor((world[i] - g_gridOrigin[i]) / g_gridSize[i])), 0, g_gridDims[i] - 1);
-+      const size_t cell = 3u * static_cast<size_t>(at[0] + at[1] * g_gridDims[0] + at[2] * g_gridDims[0] * g_gridDims[1]);
-+      if (cell + 2u < g_gridCells.size())
-+        std::memcpy(own, &g_gridCells[cell], 3);
++        at[i] = std::clamp(static_cast<int>(std::floor((world[i] - gridOrigin[i]) / gridSize[i])), 0, gridDims[i] - 1);
++      const size_t cell = 3u * static_cast<size_t>(at[0] + at[1] * gridDims[0] + at[2] * gridDims[0] * gridDims[1]);
++      if (cell + 2u < gridCells.size())
++        std::memcpy(own, &gridCells[cell], 3);
 +    }
 +    int nearest[2] = {-1, -1};
 +    float apart[kMaxLamps];
 +    float strong[kMaxLamps] = {};
 +    for (const uint8_t v : own) {
-+      if (v >= g_lampCount)
++      if (v >= lampCount)
 +        continue;
 +      float dist2 = 0.f, high = 0.f;
 +      bool inside = true;
 +      for (int i = 0; i < 3; ++i) {
-+        dist2 += (view[v][i] - who.center[i]) * (view[v][i] - who.center[i]);
-+        high += (view[v][i] - who.stands[i]) * up[i];
-+        inside = inside && view[v][i] > who.lo[i] && view[v][i] < who.hi[i];
++        dist2 += (lampAt[v][i] - who.center[i]) * (lampAt[v][i] - who.center[i]);
++        high += (lampAt[v][i] - who.stands[i]) * up[i];
++        inside = inside && lampAt[v][i] > who.lo[i] && lampAt[v][i] < who.hi[i];
 +      }
 +      apart[v] = std::sqrt(dist2);
 +      // In the floor they stand on (the glowing floor has one), or in their own body, it casts nothing to see.
@@ -8621,7 +8783,7 @@ index 71136b9..dcbee6f 100644
 +      if (inside || high < 30.f)
 +        continue;
 +      // It fades with its own light, so there's no edge where it stops and a bright lamp carries further.
-+      const float x = std::clamp((apart[v] - g_lamps[v].reach * 0.5f) / (g_lamps[v].reach * 0.5f), 0.f, 1.f);
++      const float x = std::clamp((apart[v] - lamps[v].reach * 0.5f) / (lamps[v].reach * 0.5f), 0.f, 1.f);
 +      strong[v] = 1.f - x * x * (3.f - 2.f * x);
 +      if (nearest[0] < 0 || strong[v] > strong[nearest[0]]) {
 +        nearest[1] = nearest[0];
@@ -8631,7 +8793,7 @@ index 71136b9..dcbee6f 100644
 +      }
 +    }
 +    bool anyLamp = false;
-+    for (int v = 0; v < g_lampCount; ++v) {
++    for (int v = 0; v < lampCount; ++v) {
 +      float want = 0.f;
 +      if (v == nearest[0] || v == nearest[1]) {
 +        want = strong[v] * (v == nearest[0] ? 1.f : 0.55f);
@@ -8683,13 +8845,16 @@ index 71136b9..dcbee6f 100644
 +      for (int i = 0; i < 3; ++i)
 +        w.lamp[i] = lamp[i] + up[i] * raise;
 +    };
-+    for (int v = 0; v < g_lampCount; ++v)
-+      emit(view[v], slot->lampWeight[v], &slot->lampShown[v]);
++    for (int v = 0; v < lampCount; ++v)
++      emit(lampAt[v], slot->lampWeight[v], &slot->lampShown[v]);
 +    const float above[3] = {who.center[0] + up[0] * 900.f, who.center[1] + up[1] * 900.f, who.center[2] + up[2] * 900.f};
 +    emit(above, slot->downWeight * 0.8f, &slot->downShown);
-+    if (s_log)
++    if (s_log && view < 0)
 +      std::fprintf(stderr, "[shadow] frame %u caster %d of %d stands %.0f %.0f %.0f radius %.0f sets %d nearest lamps %d %d weights %.2f %.2f down %.2f lamps known %d\n", current_frame(), c, casterCount, world[0], world[1], world[2], slot->radius, who.printCount,
-+                   nearest[0], nearest[1], nearest[0] >= 0 ? slot->lampWeight[nearest[0]] : 0.f, nearest[1] >= 0 ? slot->lampWeight[nearest[1]] : 0.f, slot->downWeight, g_lampCount);
++                   nearest[0], nearest[1], nearest[0] >= 0 ? slot->lampWeight[nearest[0]] : 0.f, nearest[1] >= 0 ? slot->lampWeight[nearest[1]] : 0.f, slot->downWeight, lampCount);
++    else if (s_log)
++      std::fprintf(stderr, "[shadow] frame %u caster %d of %d stands %.0f %.0f %.0f radius %.0f sets %d nearest lamps %d %d weights %.2f %.2f down %.2f lamps known %d view %d set %d\n", current_frame(), c, casterCount, world[0], world[1], world[2], slot->radius, who.printCount,
++                   nearest[0], nearest[1], nearest[0] >= 0 ? slot->lampWeight[nearest[0]] : 0.f, nearest[1] >= 0 ? slot->lampWeight[nearest[1]] : 0.f, slot->downWeight, lampCount, view, set);
 +  }
 +  // Who gets a place. Everyone's own strongest first, as with more people than places the second shadows of those here
 +  // went before the first of someone else, who lost theirs. Then the second lamps of whoever's on the move: only they
@@ -8764,50 +8929,124 @@ index 71136b9..dcbee6f 100644
 +  // characters, one player walking turned lamps on and off in the other's half, several at once.
 +  if (gfx::shadow::volumetric() <= 0.f) {
 +    add_spell_lights(f, V);
-+    return;
++    return counted;
 +  }
 +  // The lamps nearest anyone, by how far each carries, fading in and out: a room can have 57, and the air takes 12.
 +  if (casterCount > 0) {
 +    float score[kMaxLamps];
-+    for (int v = 0; v < g_lampCount; ++v) {
++    for (int v = 0; v < lampCount; ++v) {
 +      float closest = 1e18f;
 +      for (int c = 0; c < casterCount; ++c) {
 +        float d2 = 0.f;
 +        for (int i = 0; i < 3; ++i)
-+          d2 += (view[v][i] - casters[c].center[i]) * (view[v][i] - casters[c].center[i]);
++          d2 += (lampAt[v][i] - casters[c].center[i]) * (lampAt[v][i] - casters[c].center[i]);
 +        closest = std::min(closest, d2);
 +      }
-+      score[v] = g_lamps[v].reach / (std::sqrt(closest) + 100.f);
++      score[v] = lamps[v].reach / (std::sqrt(closest) + 100.f);
 +    }
-+    for (int v = 0; v < g_lampCount; ++v) {
++    for (int v = 0; v < lampCount; ++v) {
 +      int better = 0;
-+      for (int o = 0; o < g_lampCount; ++o)
++      for (int o = 0; o < lampCount; ++o)
 +        better += score[o] > score[v] || (score[o] == score[v] && o < v);
-+      g_lamps[v].weight += ((better < gfx::shadow::kMaxVolLights - 2 ? 1.f : 0.f) - g_lamps[v].weight) * (g_lampsFresh ? 1.f : 0.04f);
++      lamps[v].weight += ((better < gfx::shadow::kMaxVolLights - 2 ? 1.f : 0.f) - lamps[v].weight) * (g_lampsFresh[set] ? 1.f : 0.04f);
 +    }
-+    g_lampsFresh = false;
++    g_lampsFresh[set] = false;
 +  }
 +  int order[kMaxLamps];
-+  for (int v = 0; v < g_lampCount; ++v)
++  for (int v = 0; v < lampCount; ++v)
 +    order[v] = v;
-+  std::sort(order, order + g_lampCount, [](int a, int b) { return g_lamps[a].weight > g_lamps[b].weight; });
-+  for (int n = 0; n < g_lampCount && f.volCount < gfx::shadow::kMaxVolLights && g_lamps[order[n]].weight > 0.01f; ++n) {
-+    const KnownLamp& lamp = g_lamps[order[n]];
++  std::sort(order, order + lampCount, [lamps](int a, int b) { return lamps[a].weight > lamps[b].weight; });
++  for (int n = 0; n < lampCount && f.volCount < gfx::shadow::kMaxVolLights && lamps[order[n]].weight > 0.01f; ++n) {
++    const KnownLamp& lamp = lamps[order[n]];
 +    auto& out = f.vol[f.volCount++];
 +    out.radius = lamp.haze;
 +    for (int i = 0; i < 3; ++i) {
-+      out.pos[i] = view[order[n]][i];
++      out.pos[i] = lampAt[order[n]][i];
 +      out.color[i] = lamp.color[i] * lamp.weight;
 +    }
 +  }
 +  add_spell_lights(f, V);
++  return counted;
 +}
 +
-+void set_room_lights(const float* lamps, int count, const float origin[3], const float size[3], const int dims[3], const uint8_t* cells) {
-+  g_lampCount = std::min(count, kMaxLamps);
-+  for (int v = 0; v < g_lampCount; ++v) {
++static void fill_shadow(gfx::ssao::Scene& scene) {
++  auto& f = scene.shadow;
++  f = {};
++  f.uniformOffset = g_sceneUniformOffset;
++  f.sharedOffset = g_sceneSharedOffset;
++  scene.perView = false;
++  if (!gfx::shadow::wanted() || g_sh.frame != current_frame())
++    return;
++  std::memcpy(f.camera, g_sh.view, sizeof f.camera);
++  f.cameraOffset = g_cameraUniformOffset;
++  // AURORA_SHADOW_LOG=N: every Nth frame (120 if it isn't a number above 1).
++  static const uint32_t s_logEvery = [] {
++    const char* e = std::getenv("AURORA_SHADOW_LOG");
++    return e == nullptr ? 0u : std::atoi(e) > 1 ? static_cast<uint32_t>(std::atoi(e)) : 120u;
++  }();
++  // And each frame the number of flattened draws or lots of lights changes.
++  static int s_lastFlats = -1, s_lastSets = -1;
++  const bool s_changed = s_logEvery != 0u && (g_sh.flats != s_lastFlats || g_sh.setCount != s_lastSets);
++  s_lastFlats = g_sh.flats;
++  s_lastSets = g_sh.setCount;
++  const bool s_log = s_changed || (s_logEvery != 0u && current_frame() % s_logEvery == 0u);
++  // A room change has a run of frames with no characters: its lamps are forgotten then.
++  g_framesNoCharacters = g_sh.flats > 0 ? 0 : g_framesNoCharacters + 1;
++  if (g_framesNoCharacters > 8) {
++    for (auto& slot : g_slots)
++      slot.used = false;
++  }
++  ++g_slotClock;
++  // Per view only while set 1 is still there. The frame took per view at its first draw, and the host can put set 1 off
++  // later in it (the players together again, player 2's room not loaded): set_room_lights_other(0) has emptied it and
++  // freed its slots by now. Filled apart then, view 1 had no lamps for a frame, and took slots of set 1 that nothing frees
++  // with the players together, so solo and together had fewer than 32. So one Frame, as together: what was gathered differs
++  // only in its groups and lots kept apart by their marks.
++  if (!g_perView || !g_setBOn) {
++    fill_one(f, 0, -1, g_sh.view, g_cameraUniformOffset, s_log);
++    return;
++  }
++  // The views apart: once a frame, each with the views it's left out of. (In view 0's fill it was after view 0's early
++  // returns, and a frame with casters in view 1 alone said nothing.)
++  if (s_log) {
++    for (int g = 0; g < g_sh.flats; ++g)
++      std::fprintf(stderr, "[shadow-set] frame %u flat %d lo %.0f %.0f %.0f hi %.0f %.0f %.0f out %u\n", current_frame(), g, g_sh.groups[g].lo[0], g_sh.groups[g].lo[1], g_sh.groups[g].lo[2], g_sh.groups[g].hi[0], g_sh.groups[g].hi[1], g_sh.groups[g].hi[2], g_sh.groups[g].outOf);
++    for (int n = 0; n < g_sh.setCount; ++n) {
++      const auto& e = g_sh.sets[n];
++      std::fprintf(stderr, "[shadow-set] frame %u set %d print %08x lo %.0f %.0f %.0f hi %.0f %.0f %.0f out %u\n", current_frame(), n, e.print, e.lo[0], e.lo[1], e.lo[2], e.hi[0], e.hi[1], e.hi[2], e.outOf);
++    }
++  }
++  // The players in two rooms: each view its own room's casters (by their marks) and lamps, its own 12 tiles scored from
++  // its own casters, its own haze, with the camera draw kept in it. (A frame with the views together again, set 1's slots
++  // are left as they are, for when the views part again.)
++  for (int v = 0; v < 2; ++v) {
++    const bool own = g_sh.seenView[v];
++    // With no camera draw kept in a view, the frame's first is one it leaves out: its block is zeroed in that view's
++    // replay, and moved to it (at_this_moment) every tile and haze light fell to the eye. Offset 0 leaves the Frame as it is.
++    const FillCount n = fill_one(scene.shadowView[v], v, v, own ? g_sh.viewOf[v] : g_sh.view, own ? g_cameraViewOffset[v] : 0u, s_log);
++    if (s_log) {
++      const auto& fv = scene.shadowView[v];
++      std::fprintf(stderr, "[shadow-view] frame %u view %d casters %d tiles %d vol %d set %d lamps %d camera %u (whole %u, first draw marked 0x%x)%s unmarked %d\n", current_frame(), v,
++                   n.casters, fv.count, fv.volCount, v, g_lampCount[v], fv.cameraOffset, g_cameraUniformOffset, g_sh.firstOutOf,
++                   own ? "" : " no draw kept in it", n.unmarked);
++    }
++  }
++  scene.perView = true;
++  // What's drawn outside a view's replay (encoding_view -1) takes `shadow`. With a menu sharing the frames, the game's own
++  // frame is the one view still drawn (common.cpp plan_outputs turns its Split into the Real): view 0's there put room 0's
++  // shadows and haze in player 2's half, every other frame. Else view 0's. (A photo of a frame filled apart shows view 0's.)
++  const int only = gfx::split_only();
++  f = scene.shadowView[only == 1 ? 1 : 0];
++}
++
++
++// A set's lamps and grid (0 the room in play's, 1 the other room's), and its casters forgotten: their weights were for
++// another room's lamps.
++static void fill_lamps(int set, const float* lamps, int count, const float origin[3], const float size[3], const int dims[3], const uint8_t* cells) {
++  g_lampCount[set] = std::min(count, kMaxLamps);
++  for (int v = 0; v < g_lampCount[set]; ++v) {
 +    const float* l = lamps + v * 7;
-+    KnownLamp& out = g_lamps[v];
++    KnownLamp& out = g_lamps[set][v];
 +    for (int i = 0; i < 3; ++i) {
 +      out.world[i] = l[i];
 +      out.color[i] = l[3 + i];
@@ -8817,21 +9056,45 @@ index 71136b9..dcbee6f 100644
 +    out.reach = std::sqrt(625.f * l[6]);
 +    out.haze = 1.75f * std::sqrt(1.875f * l[6]);
 +    out.weight = 0.f;
-+    if (std::getenv("AURORA_SHADOW_LOG") != nullptr)
++    if (std::getenv("AURORA_SHADOW_LOG") != nullptr && set == 0)
 +      std::fprintf(stderr, "[shadow-lamp] %d at %.0f %.0f %.0f colour %.0f %.0f %.0f power %.0f reach %.0f\n", v, l[0], l[1], l[2], l[3] * 255.f, l[4] * 255.f, l[5] * 255.f, l[6], out.reach);
++    else if (std::getenv("AURORA_SHADOW_LOG") != nullptr)
++      std::fprintf(stderr, "[shadow-lamp] set %d %d at %.0f %.0f %.0f colour %.0f %.0f %.0f power %.0f reach %.0f\n", set, v, l[0], l[1], l[2], l[3] * 255.f, l[4] * 255.f, l[5] * 255.f, l[6], out.reach);
 +  }
 +  for (int i = 0; i < 3; ++i) {
-+    g_gridOrigin[i] = origin[i];
-+    g_gridSize[i] = std::max(size[i], 1.f);
-+    g_gridDims[i] = dims[i];
++    g_gridOrigin[set][i] = origin[i];
++    g_gridSize[set][i] = std::max(size[i], 1.f);
++    g_gridDims[set][i] = dims[i];
 +  }
 +  const size_t cellCount = static_cast<size_t>(dims[0]) * static_cast<size_t>(dims[1]) * static_cast<size_t>(dims[2]);
-+  g_gridCells.assign(cells, cells + cellCount * 3u);
++  g_gridCells[set].assign(cells, cells + cellCount * 3u);
 +  // Another room: everyone's weights were for this one's lamps.
 +  for (auto& slot : g_slots)
-+    slot.used = false;
-+  g_lampsFresh = true;
++    if (slot.set == set)
++      slot.used = false;
++  g_lampsFresh[set] = true;
 +}
++
++void set_room_lights(const float* lamps, int count, const float origin[3], const float size[3], const int dims[3], const uint8_t* cells) {
++  fill_lamps(0, lamps, count, origin, size, dims, cells);
++}
++
++void set_room_lights_other(bool on, const float* lamps, int count, const float origin[3], const float size[3], const int dims[3], const uint8_t* cells) {
++  if (on && lamps != nullptr && origin != nullptr && size != nullptr && dims != nullptr && cells != nullptr) {
++    fill_lamps(1, lamps, count, origin, size, dims, cells);
++    g_setBOn = true;
++    return;
++  }
++  // The players in one room again: set 1 and its casters gone, and with them the views apart from the next frame.
++  g_setBOn = false;
++  g_lampCount[1] = 0;
++  g_gridCells[1].clear();
++  for (auto& slot : g_slots)
++    if (slot.set == 1)
++      slot.used = false;
++}
++
++void set_lights_per_view(bool on) { g_perViewNext = on; }
 +
 +static bool scene_effects_on() { return glow::active() || gfx::ssao::strength() > 0.f || gfx::post::active() || gfx::shadow::wanted(); }
 +static bool g_glowLastWasScene = false;  // the last draw was the scene's
@@ -8839,7 +9102,7 @@ index 71136b9..dcbee6f 100644
  // Resolve the current EFB region into a texture the guest-identity path can bind
  // later, keyed by the copy's destination address (63/S16). Mirrors aurora
  // lib/dolphin/gx/GXFrameBuffer.cpp copy_tex on the same substrate: map the EFB
-@@ -612,6 +1582,8 @@ const TextureCacheStats& texture_cache_stats() { return g_textureCacheStats; }
+@@ -612,6 +1720,8 @@ const TextureCacheStats& texture_cache_stats() { return g_textureCacheStats; }
  // color/Z afterwards. The bound draw's geometry is already in the pass (the
  // sink flushed the pending draw before firing this).
  void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
@@ -8848,7 +9111,7 @@ index 71136b9..dcbee6f 100644
    // Mirror the copy-clear color/Z (BP 0x4F-0x51 at this copy) into the gx
    // state GXSetCopyClear would have written: begin_frame's pass-0 EFB clear
    // reads g_gxState.clearColor/clearDepth, and in gxcore mode the live gx
-@@ -635,11 +1607,25 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -635,11 +1745,25 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
    const auto fmt = is_xfb ? GX_TF_RGBA8 : static_cast<GXTexFmt>(cmd.format);
    // Dual dims: EFB source rect stays cmd.height; XFB dest height from
    // byte_size/stride (or cmd.xfb_height if gxcore latched it).
@@ -8875,7 +9138,7 @@ index 71136b9..dcbee6f 100644
    });
    // U8: half_scale halves destination dims (TextureEncoder box 2:1).
    const uint32_t scaleShift = cmd.half_scale ? 1u : 0u;
-@@ -660,8 +1646,9 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -660,8 +1784,9 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
        dstHeight = xfb_h;
    }
  
@@ -8887,7 +9150,7 @@ index 71136b9..dcbee6f 100644
        it->second->size.width != dstWidth || it->second->size.height != dstHeight) {
      TextureHandle handle;
      if (!is_xfb && gfx::tex_copy_conv::needs_conversion(fmt)) {
-@@ -670,7 +1657,7 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -670,7 +1795,7 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
        handle = gfx::new_render_texture(dstWidth, dstHeight, GX_TF_RGBA8,
                                         is_xfb ? "GXCore XFB" : "GXCore Copy");
      }
@@ -8896,7 +9159,7 @@ index 71136b9..dcbee6f 100644
    }
    if (!it->second) {
      return;
-@@ -709,11 +1696,49 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -709,11 +1834,49 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
    // XFB YUYV into guest RAM from this readback on every display copy, so it
    // must stay armed in product runs too (cost: one EFB readback per display
    // copy, ~1-2/frame).
@@ -8947,7 +9210,7 @@ index 71136b9..dcbee6f 100644
    gfx::resolve_pass(it->second, srcRect, do_clear && cmd.color_update,
                      do_clear && cmd.alpha_update,
                      do_clear && cmd.depth_update,
-@@ -723,73 +1748,697 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -723,73 +1886,734 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
                                  static_cast<float>(cmd.clear_a) / 255.f},
                      clearDepthValue, fmt, &filter);
  
@@ -9351,6 +9614,7 @@ index 71136b9..dcbee6f 100644
 +  // GXRuntime recomp patch: the game's own shadow, and who casts ours (shadow.hpp).
 +  uint32_t shadowLights = 0;
 +  bool cameraDraw = false;
++  bool cameraView[2] = {false, false};  // the first scene draw kept in that view (g_sh.viewOf), while per view
 +  // AURORA_SHADOW_FRAMEDRAWS (testing): all of a frame's draws, for the frames whose flattened draws changed.
 +  {
 +    static const bool s_on = std::getenv("AURORA_SHADOW_FRAMEDRAWS") != nullptr;
@@ -9386,11 +9650,23 @@ index 71136b9..dcbee6f 100644
 +      g_sh.setCount = 0;
 +      g_sh.seenCamera = false;
 +      g_cameraUniformOffset = 0;
++      // The views apart or not, for the whole of this frame: what it gathers here and what fill_shadow fills from it.
++      const bool perView = g_perViewNext && g_setBOn;
++      if (perView != g_perView)
++        std::fprintf(stderr, "[shadow-view] per view %s taken at frame start %u\n", perView ? "on" : "off", current_frame());
++      g_perView = perView;
++      g_sh.seenView[0] = g_sh.seenView[1] = false;
++      g_cameraViewOffset[0] = g_cameraViewOffset[1] = 0;
++      g_sh.firstOutOf = 0;
 +    }
++    // Per view only: the views this draw is left out of. Two rooms overlap in the world's numbers, so two characters at one
++    // place, one in each room, are two casters; and a lot of lights is the other room's when its draws are.
++    const uint8_t outOf = g_perView ? draw_out_of(plan) : uint8_t{0};
 +    // The frame's first scene draw's matrix is the room's, so the camera's.
 +    if (!g_sh.seenCamera && scene3d && plan.pipeline.shader.has_pos_mtx_idx == 0) {
 +      g_sh.seenCamera = true;
 +      cameraDraw = true;
++      g_sh.firstOutOf = outOf;
 +      std::memcpy(g_sh.view, plan.constants.posnormalmatrix, sizeof g_sh.view);
 +      const float* m = plan.constants.posnormalmatrix[2];
 +      static float s_facing[3] = {0.f, 0.f, 0.f};
@@ -9399,9 +9675,26 @@ index 71136b9..dcbee6f 100644
 +      for (int i = 0; i < 3; ++i)
 +        s_facing[i] = m[i];
 +    }
++    // And each view's: the first such draw it keeps. Apart, the frame's first can be a room the view leaves out.
++    if (g_perView && scene3d && plan.pipeline.shader.has_pos_mtx_idx == 0)
++      for (int v = 0; v < 2; ++v)
++        if (!g_sh.seenView[v] && (outOf & (1u << v)) == 0) {
++          g_sh.seenView[v] = true;
++          cameraView[v] = true;
++          std::memcpy(g_sh.viewOf[v], plan.constants.posnormalmatrix, sizeof g_sh.viewOf[v]);
++        }
 +    const auto& k = plan.pipeline;
 +    const bool persp = plan.constants.projection[3][2] == -1.f;
 +    const bool ours = gfx::shadow::strength() > 0.f;
++    // U8: what a frame had no room for, while per view (once a second at most, each on its own: with one clock between
++    // them, a second the sets were full said nothing of the casters being full too).
++    static uint32_t s_setsSaid = 0, s_castersSaid = 0;
++    const auto full = [](const char* what, int cap, uint32_t& said) {
++      if (current_frame() - said < 60u && said != 0u)
++        return;
++      said = current_frame();
++      std::fprintf(stderr, "[shadow] %s full (%d) frame %u\n", what, cap, current_frame());
++    };
 +    // A character flattened on the floor, into the EFB's alpha alone. Each has two, one after the other.
 +    if (persp && k.color_update == 0 && k.alpha_update != 0 && k.shader.lit_valid == 0 && !plan.has_texture && plan.vertex_count >= 24) {
 +      float lo[3], hi[3];
@@ -9413,7 +9706,7 @@ index 71136b9..dcbee6f 100644
 +          const float a = 0.5f * (lo[i] + hi[i]) - 0.5f * (g_sh.groups[g].lo[i] + g_sh.groups[g].hi[i]);
 +          apart += a * a;
 +        }
-+        if (apart < 80.f * 80.f)
++        if (apart < 80.f * 80.f && (!g_perView || g_sh.groups[g].outOf == outOf))
 +          group = &g_sh.groups[g];
 +      }
 +      if (group != nullptr) {
@@ -9427,6 +9720,9 @@ index 71136b9..dcbee6f 100644
 +          g.lo[i] = lo[i];
 +          g.hi[i] = hi[i];
 +        }
++        g.outOf = outOf;
++      } else if (g_perView) {
++        full("casters", kMaxCasters, s_castersSaid);
 +      }
 +      if (ours)
 +        return true;
@@ -9448,16 +9744,20 @@ index 71136b9..dcbee6f 100644
 +      shadowLights = print;
 +      ShadowLights* set = nullptr;
 +      for (int n = 0; n < g_sh.setCount; ++n)
-+        if (g_sh.sets[n].print == print)
++        if (g_sh.sets[n].print == print && (!g_perView || g_sh.sets[n].outOf == outOf))
 +          set = &g_sh.sets[n];
-+      if (set == nullptr && g_sh.setCount < 48) {
++      const int setCap = g_perView ? kMaxSets : kMaxSetsOneView;
++      if (set == nullptr && g_sh.setCount < setCap) {
 +        set = &g_sh.sets[g_sh.setCount++];
 +        set->print = print;
++        set->outOf = outOf;
 +        std::memcpy(set->lights, plan.shared_constants->lights, sizeof set->lights);
 +        for (int i = 0; i < 3; ++i) {
 +          set->lo[i] = 1e9f;
 +          set->hi[i] = -1e9f;
 +        }
++      } else if (set == nullptr && g_perView) {
++        full("sets", setCap, s_setsSaid);
 +      }
 +      if (set != nullptr) {
 +        float lo[3], hi[3];
@@ -9702,7 +10002,7 @@ index 71136b9..dcbee6f 100644
      const float sx = plan.viewport[0];
      const float sy = plan.viewport[1];
      const float sz = plan.viewport[2];
-@@ -799,13 +2448,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -799,13 +2623,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const float width = sx * 2.0f;
      const float height = -sy * 2.0f;
      gx::set_logical_viewport({
@@ -9720,7 +10020,7 @@ index 71136b9..dcbee6f 100644
    }
  
    // U4: apply DrawPlan scissor as a logical render-pass scissor. Multi-rect
-@@ -827,7 +2478,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -827,7 +2653,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
        [&](uint32_t address, uint32_t tsize, uint32_t format, uint32_t width,
            uint32_t height, const void* data, uint32_t available, bool has_tlut,
            uint32_t tlut_address, uint32_t tlut_format, uint32_t tlut_entries,
@@ -9729,7 +10029,7 @@ index 71136b9..dcbee6f 100644
      auto efbIt = g_efbCopyTextures.find(address);
      if (efbIt != g_efbCopyTextures.end() && efbIt->second) {
        ++g_textureCacheStats.hits;
-@@ -839,23 +2490,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -839,23 +2665,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const uint32_t size = std::min(tsize, available);
      // Hash the actual source texels (+ TLUT for CI) so a content change under an
      // unchanged guest identity is a distinct cache entry — see TextureKey.
@@ -10012,7 +10312,7 @@ index 71136b9..dcbee6f 100644
      // gxcore owns the decode for every format: produce tightly-packed RGBA8 and
      // upload it as a pre-decoded PC texture (no substrate re-conversion).
      std::vector<uint8_t> decoded;
-@@ -868,8 +2771,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -868,8 +2946,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      } else {
        decoded = gxc::decode_texture(format, width, height, bytes, size);
      }
@@ -10064,7 +10364,7 @@ index 71136b9..dcbee6f 100644
        handle = new_static_texture_2d(
            width, height, 1, GX_TF_RGBA8_PC,
            ArrayRef<uint8_t>{decoded.data(), decoded.size()}, false,
-@@ -892,7 +2837,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -892,7 +3012,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    };
  
    BindGroupRef textureBindGroup = 0;
@@ -10163,7 +10463,7 @@ index 71136b9..dcbee6f 100644
      if (plan.texmap_mask == 0u) {
        // Single-texmap fast path: primary texture + plan.sampler at binding 0/1.
        if (plan.has_texture) {
-@@ -903,7 +2939,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -903,7 +3114,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
              plan.tlut_data, plan.tlut_available);
          if (bound) {
            const auto sampler =
@@ -10172,7 +10472,7 @@ index 71136b9..dcbee6f 100644
            const std::array entries{
                WGPUBindGroupEntry{.binding = 0,
                                   .textureView =
-@@ -919,6 +2955,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -919,6 +3130,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            textureBindGroup = bind_group_ref(descriptor);
          }
        }
@@ -10180,7 +10480,7 @@ index 71136b9..dcbee6f 100644
      } else {
        // Multi-texmap: bind each used texmap at 2t (texture) / 2t+1 (sampler),
        // matching the WGSL declarations. Per-texmap PlanSampler from
-@@ -932,12 +2969,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -932,12 +3144,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          if ((plan.texmap_mask & (1u << t)) == 0u)
            continue;
          const gxc::PlanTexture& pt = plan.textures[t];
@@ -10197,7 +10497,7 @@ index 71136b9..dcbee6f 100644
          if (!bound) {
            complete = false;
            break;
-@@ -945,14 +2985,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -945,14 +3160,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          held.push_back(bound);
          const gxc::PlanSampler& ps =
              pt.sampler.valid ? pt.sampler : plan.samplers[t];
@@ -10216,7 +10516,7 @@ index 71136b9..dcbee6f 100644
        const WGPUBindGroupDescriptor descriptor{
            .label = {"GXCore Texture Bind Group", WGPU_STRLEN},
            .layout = texture_bind_group_layout(plan.texmap_mask).Get(),
-@@ -960,6 +3002,371 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -960,6 +3177,374 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            .entries = entries.data(),
        };
        textureBindGroup = bind_group_ref(descriptor);
@@ -10312,6 +10612,9 @@ index 71136b9..dcbee6f 100644
 +  }
 +  if (cameraDraw)
 +    g_cameraUniformOffset = uniformRange.offset;
++  for (int v = 0; v < 2; ++v)
++    if (cameraView[v])
++      g_cameraViewOffset[v] = uniformRange.offset;
 +  // This draw's own, and only a scene draw's. It was a flag for the next draw to reach here, and a scene draw
 +  // that went no further left it for the HUD's: the effects worked out every place with a flat projection (or
 +  // player 2's hidden HUD's, all zeros), and whole rooms had no character shadows at all (155, 152, 151).
@@ -10588,7 +10891,7 @@ index 71136b9..dcbee6f 100644
      }
    }
  
-@@ -969,31 +3376,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -969,31 +3554,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    const auto idxRange = push_indices(
        reinterpret_cast<const uint8_t*>(plan.indices.data()),
        plan.indices.size() * sizeof(uint16_t), 4);
@@ -10625,7 +10928,7 @@ index 71136b9..dcbee6f 100644
      });
    };
  
-@@ -1006,6 +3402,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -1006,6 +3580,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      }
    } else {
      issue_draw();
@@ -10635,7 +10938,7 @@ index 71136b9..dcbee6f 100644
    return true;
  }
 diff --git a/graphics/aurora/lib/gfx/gxcore_draw.hpp b/graphics/aurora/lib/gfx/gxcore_draw.hpp
-index 0a23a3f..16a2338 100644
+index 0a23a3f..2e3523e 100644
 --- a/graphics/aurora/lib/gfx/gxcore_draw.hpp
 +++ b/graphics/aurora/lib/gfx/gxcore_draw.hpp
 @@ -1,5 +1,8 @@
@@ -10669,7 +10972,7 @@ index 0a23a3f..16a2338 100644
  };
  
  // Bump when generate_wgsl output or the DrawData/vertex layout changes: the
-@@ -39,17 +51,37 @@ struct DrawData {
+@@ -39,17 +51,41 @@ struct DrawData {
  // length, still 3×8).
  // v8: U8 dual-source blend factors (Src1Alpha) when use_dst_alpha + device
  // DualSourceBlending; single-source fallback residual counter otherwise.
@@ -10702,13 +11005,17 @@ index 0a23a3f..16a2338 100644
 +void set_spell_glow(bool on);
 +// The room's lamps (7 floats each: place, colour 0 to 1, power) and the 3 lamps of each cell of its grid, x fastest. Run in the GX stream.
 +void set_room_lights(const float* lamps, int count, const float origin[3], const float size[3], const int dims[3], const uint8_t* cells);
++// Eternal Darkness co-op, the players in two rooms: player 2's room's lamps (set 1, the same form), off with on false; and
++// whether the split-screen views' shadows are filled apart (view 0 from set 0, view 1 from set 1), taken at a frame's start.
++void set_room_lights_other(bool on, const float* lamps, int count, const float origin[3], const float size[3], const int dims[3], const uint8_t* cells);
++void set_lights_per_view(bool on);
 +wgpu::BindGroupLayout vertex_uniform_layout_shared();
 +void bind_vertex_uniforms(const wgpu::RenderPassEncoder& pass, uint32_t constants, uint32_t shared);
 +void render_shadow_caster(const DrawData& data, const wgpu::RenderPassEncoder& pass);
  
  // Perform one EFB copy-to-texture (63/S16): resolve the current EFB region into
  // a texture keyed by the copy destination address, so a later draw binding that
-@@ -83,6 +115,74 @@ struct TextureCacheStats {
+@@ -83,6 +119,74 @@ struct TextureCacheStats {
  };
  const TextureCacheStats& texture_cache_stats();
  
@@ -10785,21 +11092,24 @@ index 0a23a3f..16a2338 100644
  unsigned long long dst_alpha_fallback_count() noexcept;
 diff --git a/graphics/aurora/lib/gfx/interp.cpp b/graphics/aurora/lib/gfx/interp.cpp
 new file mode 100644
-index 0000000..5d25dcb
+index 0000000..2d984fb
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/interp.cpp
-@@ -0,0 +1,723 @@
+@@ -0,0 +1,886 @@
 +#include "interp.hpp"
 +
 +#include <atomic>
 +#include <gxruntime/gxcore/shader.hpp>
 +
 +#include <absl/container/flat_hash_map.h>
++#include <absl/container/flat_hash_set.h>
 +#include <xxhash.h>
 +
 +#include <algorithm>
 +#include <array>
 +#include <cmath>
++#include <cstdio>
++#include <cstdlib>
 +#include <cstring>
 +#include <utility>
 +
@@ -11281,7 +11591,8 @@ index 0000000..5d25dcb
 +
 +namespace {
 +Uniforms build_view(const Frame& f, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
-+                    PhotoFlare flare, bool away = false, int player = -1, const std::vector<uint8_t>* real = nullptr);
++                    PhotoFlare flare, bool away = false, int player = -1, const std::vector<uint8_t>* real = nullptr,
++                    const Mist* mist = nullptr);
 +} // namespace
 +
 +Uniforms photo_build(size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare) {
@@ -11319,26 +11630,27 @@ index 0000000..5d25dcb
 +
 +bool split_is_on() noexcept { return g_split; }
 +
-+Uniforms split_build(int player, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare) {
++Uniforms split_build(int player, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare,
++                     const Mist* mist) {
 +  if (!g_split || !g_recording || g_frames[g_cur].draws.empty())
 +    return nullptr;
 +  // Only player 2's view brings it back, HUD hidden or not (their close-up shows the game's HUD too).
 +  // Player 2's view (the HUD hidden) shows player 2's own HUD: the game draws
 +  // it off the screen to the right (away, below).
-+  return build_view(g_frames[g_cur], uniformSize, fn, user, hideHud, flare, player == 1, player);
++  return build_view(g_frames[g_cur], uniformSize, fn, user, hideHud, flare, player == 1, player, nullptr, mist);
 +}
 +
 +Uniforms split_between(int player, const Uniforms& blended, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
-+                       PhotoFlare flare) {
++                       PhotoFlare flare, const Mist* mist) {
 +  Frame& cur = g_frames[g_cur];
 +  if (!g_split || !g_recording || cur.draws.empty())
 +    return nullptr;
 +  if (!blended)
-+    return build_view(cur, uniformSize, fn, user, hideHud, flare, player == 1, player);
++    return build_view(cur, uniformSize, fn, user, hideHud, flare, player == 1, player, nullptr, mist);
 +  // The view from the frame as it was at that moment.
 +  std::vector<uint8_t> own = *blended;
 +  own.swap(cur.uniforms);
-+  Uniforms view = build_view(cur, uniformSize, fn, user, hideHud, flare, player == 1, player, &own);
++  Uniforms view = build_view(cur, uniformSize, fn, user, hideHud, flare, player == 1, player, &own, mist);
 +  own.swap(cur.uniforms);
 +  return view;
 +}
@@ -11353,6 +11665,7 @@ index 0000000..5d25dcb
 +constexpr uint32_t kFlareSpriteVerts = 16u; // a flare's sprite is a quad or two; a line of text, many
 +constexpr float kHudAway = 4096.f; // Eternal Darkness's COOP_BAR_AWAY (hle.c)
 +constexpr float kHudFarFrom = 6000.f; // past player 2's: player 1's in player 2's close-up, COOP_PROMPT_P1_AWAY (hle.c)
++} // namespace
 +
 +// A matrix the game marks for one player's view to leave out (Eternal Darkness's co-op, a thing one
 +// player found: hle.c, coop_found_mark), in the lowest bits of its translation. Blending loses them,
@@ -11367,8 +11680,162 @@ index 0000000..5d25dcb
 +  return (a & 0xFFu) == 0xD2u && (c & 0xFFu) == 0xE5u &&
 +         ((b & 0xFFu) == 0xA0u + static_cast<uint32_t>(player) || (b & 0xFFu) == 0xA2u);
 +}
++
++namespace {
++// The room mist's depth per view (Mist, interp.hpp; Eternal Darkness co-op, design-fog.md Part B). The [fog-view] line
++// (ED_FOG_LOG or ED_COOP_LOG): every 600 game frames, the mist rows rewritten per view, the ones left as the game
++// camera's (an identity view: player 1's own half, player 2's close-up), the rows that looked like the mist's but had
++// neither room's band ("not matched"), and the self-test: each rewritten row against the view's own depth row as the
++// view's projection was built (its w row: -(row 2 of D), photo::projection), at the draw's position matrix, relative to
++// the row's size (under 1e-3 expected); and how far the view's back axis is from unit length. Also: how close a matched row
++// was to the game's own build (the match test), the rows whose band fit both rooms (the view mark took the room, or d0),
++// and texgens whose row 1 has the band's shape but whose row 0 isn't the draw's camera depth (another position matrix).
++struct MistStats {
++  uint32_t rewritten[2]{0u, 0u}, kept[2]{0u, 0u}, rooms[2]{0u, 0u}, notMatched = 0u, views = 0u;
++  uint32_t tested = 0u, ambiguous = 0u, byMark = 0u, bandOnly = 0u;
++  float residual = 0.f, match = 0.f, backOff = 0.f;
++  uint32_t said = 0u;
++  bool saidOnce = false;
++} g_mistStats;
++
++bool mist_log() {
++  static const bool on = [] {
++    const char* v = std::getenv("ED_FOG_LOG");
++    return (v != nullptr && std::strcmp(v, "0") != 0) || std::getenv("ED_COOP_LOG") != nullptr;
++  }();
++  return on;
++}
++
++void mist_say(const Mist& m) {
++  MistStats& s = g_mistStats;
++  if (!mist_log() || (s.saidOnce && m.frame < s.said + 600u && m.frame >= s.said))
++    return;
++  std::fprintf(stderr,
++               "[fog-view] frame %u: %u mist rows rewritten (view 0 %u, view 1 %u), %u left as the game camera's (view 0 %u, view 1 %u), "
++               "%u not matched; rows of the room in play %u, of player 2's room %u (%u with both rooms' band: %u by the view mark); "
++               "self-test residual %.6f%s (rewritten rows against the view's projection, %u tested), back axis off unit by %.6f%s, "
++               "match %.6f; %u band-shaped rows not of the draw's camera; over %u view builds (c2 %.3f %.3f %.3f, d %.1f %.1f)\n",
++               m.frame, s.rewritten[0] + s.rewritten[1], s.rewritten[0], s.rewritten[1], s.kept[0] + s.kept[1], s.kept[0], s.kept[1],
++               s.notMatched, s.rooms[0], s.rooms[1], s.ambiguous, s.byMark, s.residual, s.residual > 1e-3f ? " LARGE" : "", s.tested,
++               s.backOff, s.backOff > 1e-4f ? " LARGE" : "", s.match, s.bandOnly, s.views, m.c2[0], m.c2[1], m.c2[2], m.d[0], m.d[1]);
++  const uint32_t frame = m.frame;
++  s = MistStats{};
++  s.said = frame;
++  s.saidOnce = true;
++}
++
++// from: the frame's uniforms as drawn (the rows are found there; a frame in between's are blended); f.uniforms: the ones
++// this view is built from (blended for a frame in between), whose rows are rewritten into buf.
++void mist_rows(const Frame& f, const std::vector<uint8_t>& from, std::vector<uint8_t>& buf, size_t size, int player, const Mist& m) {
++  if (!m.on || !(m.k > 0.f) || player < 0 || player > 1)
++    return;
++  mist_say(m);
++  MistStats& s = g_mistStats;
++  s.views++;
++  const float k = m.k;
++  const float* b = m.back;
++  const bool identity = b[0] == 0.f && b[1] == 0.f && b[2] == 1.f && m.pos[0] == 0.f && m.pos[1] == 0.f && m.pos[2] == 0.f;
++  const float bc2 = b[0] * m.c2[0] + b[1] * m.c2[1] + b[2] * m.c2[2];
++  const float bp = b[0] * m.pos[0] + b[1] * m.pos[1] + b[2] * m.pos[2];
++  s.backOff = std::max(s.backOff, std::fabs(std::sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]) - 1.f));
++  absl::flat_hash_set<uint32_t> seen;
++  for (const Draw& d : f.draws) {
++    if (d.vs + sizeof(Vs) > from.size() || d.vs + sizeof(Vs) > f.uniforms.size() || d.vs + sizeof(Vs) > size)
++      continue;
++    if (!seen.insert(d.vs).second)
++      continue;
++    const Vs& real = vs_at(from, d.vs);
++    const float(*P)[4] = real.posnormalmatrix;
++    const float scale = std::max({std::fabs(P[2][0]), std::fabs(P[2][1]), std::fabs(P[2][2])}) / k;
++    if (!(scale > 1e-9f))
++      continue;  // no row to measure from (a matrix marked out of a view, a flattened one)
++    for (uint32_t g = 0; g < kTexGens; ++g) {
++      const float* t = real.texmatrices[3 * g];
++      // Row 0 is the mist's: -(row 2 of P)/k in x, y and z.
++      bool rows = true;
++      float residual = 0.f;
++      for (int i = 0; i < 3 && rows; ++i) {
++        const float e = std::fabs(t[i] + P[2][i] / k);
++        rows = e <= 1e-3f * scale;
++        residual = std::max(residual, e / scale);
++      }
++      if (!rows) {
++        // Row 1 of the band's shape (0, 0, 0.005 x the model's z scale, .) with a row 0 that isn't this draw's camera depth:
++        // a mist draw with another position matrix than the one its 54 was built for (counted, left).
++        const float* t1 = real.texmatrices[3 * g + 1];
++        if (t1[2] > 5e-4f && t1[2] < 5e-2f && std::fabs(t1[0]) + std::fabs(t1[1]) <= 1e-3f * t1[2] &&
++            std::fabs(t[0]) + std::fabs(t[1]) + std::fabs(t[2]) > 0.f)
++          s.bandOnly++;
++        continue;
++      }
++      // Its band: t[3] = -(P[2][3] + d c2.z)/k, d the room in play's first.
++      int room = -1, fits = 0;
++      float best = 0.f;
++      for (int r = 0; r < 2; ++r) {
++        if (!std::isfinite(m.d[r]))
++          continue;
++        const float shift = m.d[r] * m.c2[2];
++        const float e = std::fabs(k * t[3] + P[2][3] + shift);
++        if (e <= 1e-3f * (std::fabs(P[2][3]) + std::fabs(shift)) + 1e-2f) {
++          fits++;
++          if (room < 0 || e < best)
++            room = r, best = e;
++        }
++      }
++      if (room < 0) {
++        s.notMatched++;
++        continue;
++      }
++      if (fits == 2 && m.d[0] != m.d[1]) {
++        // Both rooms' bands fit (C's z axis near level: d c2.z near 0 for both): the room's draws carry the host's view mark
++        // apart (out of view 0: player 2's room's; out of view 1: the room in play's); unmarked, the room in play's.
++        s.ambiguous++;
++        const int marked = marked_out_of(P, 0) ? 1 : marked_out_of(P, 1) ? 0 : -1;
++        if (marked >= 0) {
++          room = marked;
++          s.byMark++;
++        } else {
++          room = 0;
++        }
++      }
++      s.rooms[room]++;
++      s.match = std::max({s.match, residual, best / (k * scale + std::fabs(P[2][3]) + 1e-6f)});
++      if (identity) {
++        s.kept[player]++;
++        continue;
++      }
++      const Vs& src = vs_at(f.uniforms, d.vs);
++      const float(*Q)[4] = src.posnormalmatrix;
++      float out[4];
++      for (int i = 0; i < 4; ++i)
++        out[i] = -(b[0] * Q[0][i] + b[1] * Q[1][i] + b[2] * Q[2][i]) / k;
++      out[3] -= (-bp + m.d[room] * bc2) / k;
++      Vs& dst = *reinterpret_cast<Vs*>(buf.data() + d.vs);
++      // The self-test: the view's depth row as its projection was built (build_view above: photo::projection's p x D, whose
++      // w row is -(D row 2) for a perspective draw), applied to the draw's position matrix and the band's shift, must give
++      // the row just written.
++      if (src.projection[3][2] == -1.f && src.projection[3][3] == 0.f) {
++        float D2[4];
++        for (int j = 0; j < 4; ++j)
++          D2[j] = -dst.projection[3][j];
++        float ref[4];
++        for (int i = 0; i < 4; ++i)
++          ref[i] = -(D2[0] * Q[0][i] + D2[1] * Q[1][i] + D2[2] * Q[2][i]) / k;
++        ref[3] -= (D2[3] + m.d[room] * (D2[0] * m.c2[0] + D2[1] * m.c2[1] + D2[2] * m.c2[2])) / k;
++        float e = 0.f;
++        for (int i = 0; i < 4; ++i)
++          e = std::max(e, std::fabs(out[i] - ref[i]) / (scale + (i == 3 ? std::fabs(ref[3]) : 0.f) + 1e-9f));
++        s.residual = std::max(s.residual, e);
++        s.tested++;
++      }
++      std::memcpy(dst.texmatrices[3 * g], out, sizeof out);
++      s.rewritten[player]++;
++    }
++  }
++}
++
 +Uniforms build_view(const Frame& f, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
-+                    PhotoFlare flare, bool away, int player, const std::vector<uint8_t>* real) {
++                    PhotoFlare flare, bool away, int player, const std::vector<uint8_t>* real, const Mist* mist) {
 +  const size_t size = (uniformSize + 3u) & ~size_t{3u};
 +  auto buf = pooled_buffer(size);
 +  std::memset(buf->data(), 0, size);
@@ -11492,6 +11959,9 @@ index 0000000..5d25dcb
 +      std::memcpy(dst.projection, out, sizeof out);
 +    }
 +  }
++  // The room mist's depth from this view's camera (before the marks: the rows are read from the frame's own matrices).
++  if (mist != nullptr && player >= 0)
++    mist_rows(f, real != nullptr ? *real : f.uniforms, *buf, size, player, *mist);
 +  // Matrices marked out of this view: all of what they place falls to one point.
 +  if (player >= 0) {
 +    const std::vector<uint8_t>& from = real != nullptr ? *real : f.uniforms;
@@ -11514,10 +11984,10 @@ index 0000000..5d25dcb
 +} // namespace aurora::gfx::interp
 diff --git a/graphics/aurora/lib/gfx/interp.hpp b/graphics/aurora/lib/gfx/interp.hpp
 new file mode 100644
-index 0000000..80316b7
+index 0000000..6b99030
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/interp.hpp
-@@ -0,0 +1,84 @@
+@@ -0,0 +1,103 @@
 +#pragma once
 +
 +// GXRuntime recomp patch: frame interpolation. When the screen refreshes
@@ -11597,10 +12067,29 @@ index 0000000..80316b7
 +// uniforms for one player's camera as photo_build does for the held frame.
 +// Null when this frame was not kept.
 +void set_split(bool on) noexcept;
-+Uniforms split_build(int player, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare);
++// A matrix (3 rows of 4) the game marked to be left out of that player's view (Eternal Darkness co-op: a thing one player
++// found, a room only the other player is in), as split_build leaves it out. gxcore's shadows read it too, per view.
++bool marked_out_of(const float (*m)[4], int player);
++// Eternal Darkness co-op (design-fog.md Part B): the game's room mist (its material layer 9) reads its depth from a
++// texture matrix the game builds from the game camera C, row 0 = -(row 2 of C x Trans(0,0,d) x M)/k; the renderer copies
++// texture matrices unchanged into every view, so each half took the game camera's depth. With `on`, a draw whose texgen
++// matrix has that row (from its own position matrix P = C x M, d one of the two rooms') gets the row for this view's
++// camera: t_v[i] = -(b.P[:,i] + (i == 3 ? -b.p + d (b.c2) : 0))/k, b and p the view's back axis and position in C's view
++// space, c2 = C's column 2 (world z in C's view space). Rows 1 and 2 (the band, world height) are kept.
++struct Mist {
++  bool on = false;
++  float k = 0.f;                 // the game's 2000.0
++  float c2[3]{0.f, 0.f, 0.f};    // C's column 2
++  float d[2]{0.f, 0.f};          // the band's shift (200 - top) of the room in play and of player 2's room; NaN: none
++  float back[3]{0.f, 0.f, 1.f};  // this view's back axis in C's view space (its rotation's column 2)
++  float pos[3]{0.f, 0.f, 0.f};   // this view's position in C's view space
++  uint32_t frame = 0;            // the game's frame (the log)
++};
++Uniforms split_build(int player, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud, PhotoFlare flare,
++                     const Mist* mist = nullptr);
 +// A frame in between's view: as split_build, from blended uniforms (null: the frame's own).
 +Uniforms split_between(int player, const Uniforms& blended, size_t uniformSize, PhotoProjection fn, const void* user, bool hideHud,
-+                       PhotoFlare flare);
++                       PhotoFlare flare, const Mist* mist = nullptr);
 +} // namespace aurora::gfx::interp
 diff --git a/graphics/aurora/lib/gfx/pipeline_cache.cpp b/graphics/aurora/lib/gfx/pipeline_cache.cpp
 index 822a560..16ff80d 100644
@@ -12524,10 +13013,10 @@ index 0000000..9d3c383
 +} // namespace aurora::gfx::post
 diff --git a/graphics/aurora/lib/gfx/shadow.cpp b/graphics/aurora/lib/gfx/shadow.cpp
 new file mode 100644
-index 0000000..6554d41
+index 0000000..6f779c9
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/shadow.cpp
-@@ -0,0 +1,1010 @@
+@@ -0,0 +1,1014 @@
 +#include "shadow.hpp"
 +
 +#include "gxcore_draw.hpp"
@@ -13407,6 +13896,10 @@ index 0000000..6554d41
 +  return out;
 +}
 +
++static int g_encodingView = -1;  // the render worker's
++void set_encoding_view(int view) noexcept { g_encodingView = view; }
++int encoding_view() noexcept { return g_encodingView; }
++
 +void probe_label(uint64_t frameId, int kind, int view, float phase, const uint8_t* uniforms) noexcept {
 +  g_probe.frameId = frameId;
 +  g_probe.kind = kind;
@@ -13540,10 +14033,10 @@ index 0000000..6554d41
 +} // namespace aurora::gfx::shadow
 diff --git a/graphics/aurora/lib/gfx/shadow.hpp b/graphics/aurora/lib/gfx/shadow.hpp
 new file mode 100644
-index 0000000..0dc4a22
+index 0000000..dc6ae1f
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/shadow.hpp
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,112 @@
 +#pragma once
 +
 +// GXRuntime recomp patch: character shadows from the game's own lights, and contact shadows.
@@ -13624,6 +14117,12 @@ index 0000000..0dc4a22
 +bool spell_lit() noexcept;
 +inline bool wanted() noexcept { return strength() > 0.f || contact() > 0.f || volumetric() > 0.f || spell_lit(); }
 +
++// The split-screen view being encoded (common.cpp, around each view's replay), -1 for the game's own frame and a moment
++// between frames with no split: which Frame of a scene filled per view (ssao::Scene::shadowView) its shadows are drawn
++// from. Its own word, not the probe's label: the label stays on the last view after the views are done, and the game's
++// own frame is encoded after that.
++void set_encoding_view(int view) noexcept;
++int encoding_view() noexcept;
 +// The frame for the moment being drawn: a moment between frames has the game camera blended too, and places
 +// here are in the view space of the frame's own. Else a moving camera's shadows jumped on every moment between.
 +Frame at_this_moment(const Frame& frame);
@@ -20247,10 +20746,10 @@ index 0000000..d208c5d
 +} // namespace aurora::gfx::ssao
 diff --git a/graphics/aurora/lib/gfx/ssao.hpp b/graphics/aurora/lib/gfx/ssao.hpp
 new file mode 100644
-index 0000000..5b5cf96
+index 0000000..2facd92
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/ssao.hpp
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,46 @@
 +#pragma once
 +
 +// GXRuntime recomp patch: ambient occlusion from the depth buffer (SSAO).
@@ -20274,6 +20773,10 @@ index 0000000..5b5cf96
 +  float left = 0, top = 0, width = 0, height = 0, minDepth = 0, maxDepth = 1;
 +  bool valid = false;
 +  shadow::Frame shadow;  // the characters' shadows, with the scene (shadow.hpp)
++  // Eternal Darkness co-op, the players in two rooms: one Frame per split-screen view, each from its own room's casters
++  // and lamps (gxcore_draw.cpp fill_shadow); shadow is then view 0's, for the game's own frame.
++  shadow::Frame shadowView[2];
++  bool perView = false;
 +};
 +
 +float strength() noexcept;
@@ -25220,7 +25723,7 @@ index 9c2f7bb..6dd6411 100644
 +
  #endif
 diff --git a/include/gxruntime/aurora_backend.h b/include/gxruntime/aurora_backend.h
-index 6ef4cf4..cc54d9a 100644
+index 6ef4cf4..d99218e 100644
 --- a/include/gxruntime/aurora_backend.h
 +++ b/include/gxruntime/aurora_backend.h
 @@ -5,6 +5,7 @@
@@ -25268,7 +25771,7 @@ index 6ef4cf4..cc54d9a 100644
  
  // C2: walk nonzero gxcore GapCounters into the process-global gap_report.
  // Call once before gap_report_write_json on the live Strikers path so
-@@ -40,6 +59,212 @@ void dol_aurora_set_efb_frame_fill(DolAuroraEfbFrameFillFn fn, void* user);
+@@ -40,6 +59,222 @@ void dol_aurora_set_efb_frame_fill(DolAuroraEfbFrameFillFn fn, void* user);
  // from shutdown (second call only bumps if counters grew).
  void dol_aurora_flush_gap_report(void);
  
@@ -25288,6 +25791,11 @@ index 6ef4cf4..cc54d9a 100644
 +// Split-screen: the frames from here on (in the GX stream's order) are drawn for
 +// no player's view, or are again (a menu's frames, turn about with the world's).
 +void dol_aurora_split_skip_views(int skip);
++// Split-screen, Eternal Darkness co-op (design-fog.md Part B): the room mist's depth from each half's own camera, for the
++// frame being drawn (in the GX stream's order, as dol_aurora_split_set_view): c2 the game camera's column 2, d0/d1 the
++// band shift (200 - the mist top) of the room in play and of player 2's room (NaN: no mist), k the game's 2000.0, frame
++// the game's frame (the [fog-view] log). A frame that does not send it draws the mist as the game made it.
++void dol_aurora_split_set_mist(bool on, const float c2[3], float d0, float d1, float k, uint32_t frame);
 +// The memory the draws that follow read, in their order (a Tome in a copy of it).
 +void dol_aurora_mem1_turn(void* ram);
 +// The frames from here on are not shown (the world's behind a menu): the game
@@ -25443,6 +25951,11 @@ index 6ef4cf4..cc54d9a 100644
 +void dol_aurora_set_spell_lights(const float* lights, int count);
 +// The room's lamps (7 floats each: place, colour 0 to 1, power) and its grid's 3 lamps a cell, x fastest.
 +void dol_aurora_set_room_lights(const float* lamps, int count, const float origin[3], const float size[3], const int dims[3], const uint8_t* cells);
++// Eternal Darkness co-op, the players in two rooms: the other room's lamps and grid, as above (set 1); on 0 puts them off.
++void dol_aurora_set_room_lights_other(int on, const float* lamps, int count, const float origin[3], const float size[3], const int dims[3],
++                                      const uint8_t* cells);
++// And whether each split-screen view's shadows and haze are filled apart, view 1's from set 1: taken at the next frame's start.
++void dol_aurora_set_lights_per_view(bool on);
 +void dol_aurora_set_skin_scatter(bool on);
 +void dol_aurora_set_spell_rim(bool on);
 +bool dol_aurora_hdr_available(void);

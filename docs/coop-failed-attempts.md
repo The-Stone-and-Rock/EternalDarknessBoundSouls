@@ -794,3 +794,17 @@ docs/coop-todo.md's table), a rule of its own, not a guard in step D. Open in do
   logs/run-20261112-030139-jtg-solo-returns (switches on, before the gate: six returns, each "loaded fresh"),
   -030651-jtg-solo-gate (solo: "separate rooms off for this run", the doors as the game's own), -030834-jtg-coop-gate
   (co-op: two slots, player 2 stays). Any new co-op feature that is switched by the environment must go through it too.
+
+## The stayer's kept exit B, cleared on its first frame only (2026-11-13, stayer presses; fixed)
+
+- **stayer_p1_presses (M11) cleared B from the game's pad only on the press's first frame** (`if (b_new && ...) pad->button &=
+  ~0x0200`). The button was still held on the next read, so the game saw a new B there, ran the exit's script 119 (fn66
+  passed over: "A ROOM ASKED FOR BY PLAYER 1'S SCRIPT 119 IN PLAYER 2'S DOOR"), and the kept B was then let go ("they're off
+  that prompt"): player 1 stayed behind (logs/run-20261113-163215-stayer-s10-p1-exit, frame 3776). Fixed: a kept B, and a
+  Start taken for the copy, are eaten until the button is let go (b_eat / start_eat).
+- **Then the kept B went in and still asked no room** (logs/run-20261113-164130-stayer-s10b-p1-exit, frame 3836): a door's
+  script is one state machine for both players (L01/119: the zone runs it at state 0, the prompt and state 1; the B at
+  state 1, fn66 and state 0). The mover's B set it back to 0, so the kept B only showed the prompt again. Fixed with a
+  one-shot press again (StayerAgain, only for a B kept in the other's door, 20 frames on, nothing of theirs come up, the
+  same exit prompt on show): logs/run-20261113-164514-stayer-s10c-p1-exit (pressed once more at 3857, player 1's ticket at
+  3858; the mirror -164529-stayer-s5c-p2-exit goes in at once).

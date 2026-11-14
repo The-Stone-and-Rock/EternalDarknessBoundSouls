@@ -134,17 +134,20 @@ typedef struct {
     int to;    // the original descriptor
 } Tee;
 static Tee g_tee[2];
+static atomic_int g_tees_running;  // tee threads still reading their pipe (report_before_restart waits for them)
 
 static THREAD_RET tee_main(void* arg) {
     const Tee* t = (const Tee*)arg;
+    const int to = t->to;  // (untee clears t->to; the thread keeps writing what is left in the pipe to it)
     char buf[4096];
     for (;;) {
         const int n = (int)read(t->from, buf, sizeof buf);
         if (n <= 0)
             break;
-        (void)!write(t->to, buf, (unsigned)n);
+        (void)!write(to, buf, (unsigned)n);
         ring_add(buf, (size_t)n);
     }
+    atomic_fetch_sub(&g_tees_running, 1);
     THREAD_END;
 }
 
@@ -160,7 +163,11 @@ static void log_through_pipe(int fd, Tee* t) {
 #endif
     t->from = fds[0];
     t->to = dup(fd);
+    if (t->to >= 0)
+        atomic_fetch_add(&g_tees_running, 1);
     if (t->to < 0 || !start_thread(tee_main, t)) {
+        if (t->to >= 0)
+            atomic_fetch_sub(&g_tees_running, 1);
         close(fds[0]);
         close(fds[1]);
         if (t->to >= 0)
@@ -183,6 +190,17 @@ static void untee(void) {
             dup2(g_tee[i].to, i + 1);
             g_tee[i].to = -1;
         }
+}
+
+// Before the program starts itself again (frontend.cpp restart_process): the new process inherits descriptors 1 and 2,
+// and while they are this process's tee pipes, whose threads die with it, everything the new process writes is lost
+// (logs/play.log ended at the co-op switch's restart, 2026-11-12). Put them back on the log itself, and let the tee
+// threads write out what is still in their pipes (they end when the pipe empties: its last writer was 1 or 2), at most
+// half a second.
+void report_before_restart(void) {
+    untee();
+    for (int waited = 0; atomic_load(&g_tees_running) > 0 && waited < 500; waited += 10)
+        sleep_ms(10);
 }
 
 // --- Reports ------------------------------------------------------------------
