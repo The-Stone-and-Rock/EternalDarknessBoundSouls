@@ -7,7 +7,7 @@ walked with their own room (fx_emitters, 0x80144B34), and each half's effect car
 together (fx_facing_begin in effect_draw_by_room). Karim's altar flame (room 338) burns in the stayer's half and is no
 longer a flat sliver from player 2's side; chapter 1's 180 braziers burn in player 2's half when entered apart.
 docs/coop-todo.md (the brazier item), run script rooms/build-run-fx.sh, pictures Screenshots for Claude/fx-flames/.
-- Open: player 2 stands unlit by burning braziers in a room not in play (the light records, design-lights.md).
+- Checked after: player 2's lighting by the braziers apart matches together on the same spot (not missing; coop-todo.md).
 
 # HANDOFF 2026-11-13 evening: the stayer keeps every action through the other's door, uncommitted
 

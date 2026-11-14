@@ -14880,9 +14880,28 @@ static u32 fx_call(CPUState* cpu, u32 fn, u32 a, int n) {
     hle_guest_call(cpu, fn, &arg, n, 0.0, &out);
     return out;
 }
+static void fx_lights_probe(CPUState* cpu) {  // (ED_FX_LIGHTS=1: the 12 dynamic light records every 120 frames)
+    static unsigned long long said;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (getenv("ED_FX_LIGHTS") == NULL || frame < said + 120ull || !sda_ready(cpu))
+        return;
+    said = frame;
+    char line[1024];
+    int n = snprintf(line, sizeof line, "[effects] lights (in play %d, player 2's %d):", (s32)mem_read32(cpu, cpu->gpr[13] - 23276u),
+                     g_coop_p2 != 0u ? coop_object_room(cpu, g_coop_p2) : -1);
+    for (u32 i = 0u; i < 12u && n > 0 && n < (int)sizeof line - 40; i++) {
+        const u32 r = mem_read32(cpu, 0x80604E60u + 4u * i);
+        if (!guest_ram_range_valid(cpu, r, 64u))
+            continue;
+        n += snprintf(line + n, sizeof line - (size_t)n, " %u:%s room %d type %u fl 0x%02X", i, mem_read8(cpu, r + 40u) ? "on" : "off", (s16)mem_read16(cpu, r + 42u),
+                      mem_read8(cpu, r + 45u), mem_read8(cpu, r + 41u));
+    }
+    fprintf(stderr, "%s (frame %llu)\n", line, frame);
+}
 static void fx_emitters(CPUState* cpu) {
     static bool running;
     g_hle_passthrough = true;
+    fx_lights_probe(cpu);
     if (running || g_fx_rooms != 1 || g_tome_copy_turn || !coop_stay_apart(cpu))
         return;
     const s32 room1 = coop_object_room(cpu, g_coop_p2);

@@ -143,9 +143,11 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   effect cards face its own camera, apart and together (fx_facing_begin; together each effect is drawn once per half,
   the second in the game's other vertex buffer). Checked from fresh Jump-to-Game states: Karim's altar flame (room 338)
   apart and from player 2's side view, chapter 1's 180 braziers apart, solo untouched (build-run-fx.sh; pictures in
-  Screenshots for Claude/fx-flames/). Still open: player 2 by the braziers stays unlit in a room not in play (the light
-  records, design-lights.md), not the effects. Their light is missing too: player 2 by 180's door stands unlit where solo's hero is lit
-  (Screenshots for Claude/fog-rooms/180-solo-vs-p2-half.jpg).
+  Screenshots for Claude/fx-flames/). Player 2's lighting by the braziers apart was checked the same day and is NOT
+  missing: on the same spot (2,-554 in 180) together and apart she looks the same (fx-flames/h-same-spot.jpg), and
+  apart the actor light call applies 8 lights (ED_LIGHT_COUNT). Her outfit is dark; the earlier "unlit" came from
+  comparing her with solo's silver-armoured Pius from another camera. 180's braziers are no dynamic lights (none of the
+  12 records is used there, ED_FX_LIGHTS=1): characters take them from the room's lamp grid (G1/G2, design-lights.md).
 - Saving apart, in-game saves and save states: the user is still deciding how it should work (separate, together only,
   or whether it matters). Ask before designing.
 - Later: the in-game mod menu as its own page in the Tome; the launcher's settings inside the game's title menu
