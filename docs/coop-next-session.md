@@ -1,35 +1,65 @@
-# HANDOFF 2026-11-15 early morning: the Tome trip checked; spells apart built; all uncommitted
+# HANDOFF 2026-11-15 afternoon: START HERE (all committed through b049fc3, branch tools/game-kit, nothing pushed)
 
-All from fresh Jump-to-Game states, test windows off the desktop and muted (ED_RUN_AWAY=1); nothing committed, nothing
-played by the user yet.
-- **The Tome trip** (below, 2026-11-14 night) re-run after the last fix: chapters 4, 6, 8 together and apart, both orders,
-  no WARNING; player 2 taking chapter 8's Tome door now goes back to their exact spot; solo, follow and ED_TOME_TRIP=0 show
-  no trip line (rooms/tome-trip-impl-notes.md "Runs"). Karim's ladder dissolve in the other half is this way in: both go.
-- **Spell lights per caster's room** (lights P7, Remastered spells): apart, a rune's light is in its caster's half alone
-  (host masks + renderer `set_spell_lights(..., views)`; .deps/GXRuntime changed, patch regenerated).
-- **Player 2 couldn't cast while apart** (found by those runs): their spell ended on its first step, by the game's rule
-  "a spell of another room than the room in play ends" (0x801C316C). Built: their spells step with their room current
-  (ED_SPELL_ROOMS=0 turns it off); the spell's bolt (beam, the circle's ring) runs its events in its room (r6c_creature,
-  type 36); effect requests queued in their room (the charge's sparkles) are made in it (fx_request_make); the 3D runes
-  and their flames are made in the caster's room (P7b); player 2's Tome casts are cast in their room (not run: chapter 3's
-  list had nothing to enchant). Effect log: every effect of player 2's spell in their room. docs/coop-todo.md has it all.
-  Run script rooms/build-run-spell-lights.sh (s3 a b c d).
-- **Then (the user: "whatever is still wrong you are able to correct"):** the green on player 1 during player 2's charge
-  was room 151's own blue lamp, the same with no cast and in solo (not a bug). The spell's real leak was its full-screen
-  flash quad, drawn over both halves: now drawn in the caster's half alone (fx_flash_make / fx_flash_draw, matched on the
-  pictures). docs/coop-todo.md has the runs.
-- Open for the user: Max's chapter, chapter 13 and the mansion Tome for the Tome trip; saving apart.
+## Where things stand
+Everything below is committed and checked by scripted runs from fresh Jump-to-Game states. **None of it has been played
+by the user yet**: their next step is a play test (list at the end). Commits, newest first:
+- **b049fc3 Chapter Pages.** A mansion Chapter Page used by either player plays its film full screen for both, then the
+  chapter's opening, then starts the chapter with both players side by side, as Jump to Game does (player 2 is re-made
+  beside player 1 by the usual coop_spawn after "player 2 is gone"). Player 1's page already worked; player 2's page (their
+  copy Tome) used to change chapter at once with no film. Fix: `tome_copy_film` (both players, in hle.c next to
+  tome_copy_p1_left), called when an item's use step asked the Tome's close for a film (r13-24244 == 6, ed9(script, 6,
+  film)): the film's mode (0x80018808) then the page's state keep (0x800B7208(4), ed88), as the real Tome's close does;
+  with player 1's real Tome open, nothing is forced and that Tome's close plays the film. Found on the way, a general copy
+  Tome bug: the copy writes its pages over ARAM's level-file caches and marked them gone only in its own memory, so the
+  real game read the Tome's pictures as level data (the keep halted on an assert). `tome_copy_aram_words` now carries the
+  copy's "gone" (r13-28976/-28972 = -1) to the real game after every copy turn and at the close.
+  Tested from Jump to Game chapter 12 (Alex End; its scripts hold pages 1572-1580) with the chapter 2 page spawned
+  (`ED_ITEM_SPAWN=2300,200,200,120,WHO`), runs logs/run-20261115-1149..1240-jtg-page-*. Readers:
+  docs/research/chapter-page-readers.md, chapter-page-keep-reader.md. Failed tries: coop-failed-attempts.md (last entry).
+- **fbd1ecf Max's Tome.** The Tome trip's room is now a value (`g_tome_trip.trip_room`, `TRIP_ROOM`, `tome_trip_way_in`):
+  room 5 for the seven Tome-room chapters, 255 for Max (1599's model-18 branch: film 114 in his desk room 258, the world
+  changes, 255's summon scene, back to 258 for the letter). Both go to 255, each comes back to their own room and spot.
+  Run script docs/research/separate-rooms/build-run-tome.sh (`s5 m1 m2`; `s5` sets flag 184 so 253's passage 930 opens).
+- **b42fb68 Tome trip + spells apart.** The Tome trip (both players to room 5 and back to their own spots; ch 4, 6, 8
+  checked); player 2's spells while apart (they used to die on their first step: the game ends a spell whose room isn't
+  the room in play) now step in their own room, with the bolt, queued effects, runes and rune flames in the caster's room
+  and the spell's lights and full-screen flash in the caster's half only (ED_SPELL_ROOMS=0 turns the spell part off).
+  The "green glow on player 1" seen during player 2's cast was room 151's own blue lamp (same with no cast, and in solo).
+  Run script docs/research/separate-rooms/build-run-spell-lights.sh (s3 a b c d).
 
-# HANDOFF 2026-11-14 night: the Tome trip, built and mostly checked, uncommitted (paused for a restart)
+## How the user wants this worked on (read the memory index too)
+- Take full control: trace and test without asking, no fix without evidence, check docs/coop-failed-attempts.md before a
+  fix and add every failed attempt with its code. Engine-generic fixes (the game's own functions, every chapter, both
+  players); co-op changes never change solo; test solo too.
+- **Never run `ed test` or `ed chapters`, never use old save states**: fresh Jump-to-Game states made on the current build
+  (tools/ed/jtg.sh, or the run scripts' `s*` steps), remade after each code change.
+- **Every test run with ED_RUN_AWAY=1** (window off the desktop, muted) until the user asks to see the game. To stop runs,
+  kill the whole tree: the run scripts, sh children, powershell helpers, python (pagelog, wait_frame) AND the game copies
+  (EternalDarkness.exe and EDrun*.exe); a leftover EDrun1.exe blocks every later run.
+- Commit only when told, never controls.cpp or tools/ed/.run_exe_tmp.sh; push only when asked, only to the fork's main.
+- Edits with backslashes (`\n`, `\|`) through the Edit tool, never sed or Python heredocs; Python edits keep LF. Never
+  edit a run script while sh is running it.
+- Ultracode is on: readers/refuters/reviewers as workflows for substantive work, then build, run, review, fix.
+- After .deps/GXRuntime changes: rebuild and regenerate patches/gxruntime/eternal-darkness.patch. Build: the scratchpad
+  build.bat (VS2022 tools, `cmake --build build-win --target EternalDarkness`), called from PowerShell.
 
-Both players go to the Tome room (room 5) when either takes its way in while apart, and each goes back to their own room
-and spot after (design rooms/design-tome-room.md, notes rooms/tome-trip-impl-notes.md, runs rooms/build-run-tome.sh;
-ED_TOME_TRIP, ED_TOME_BACK). Checked from fresh states: ch 4 (Karim), ch 8 apart both orders, ch 6 walk-in exit (the taker
-lands on the game's return marker when they stood in an unprompted way-in zone the marker isn't in), solo untouched.
-The Tome's pickup itself is started in tests as script 1599 (test presses don't move its EXAMINE words; real pads do).
-Last change (the marker lookup in the taker's own room, for player 2's door) is built but its rerun was stopped for the
-user's restart: run `sh docs/research/separate-rooms/build-run-tome.sh s8 z8a z8b s6 6a 6b s4 z4 solo follow off`.
-Test runs use ED_RUN_AWAY=1 (window off the desktop, muted) until the user asks to see the game (tools/ed/away.ps1).
+## Open, in order
+1. **The user's play test** (nothing above has been played): (a) the Tome trip apart and together, either player taking
+   the way in, including player 2 being the one who picks the Tome up (scripted runs can't press through the Tome's
+   EXAMINE words; they start the after-find script 1599 as player 1's); (b) Max's Tome apart; (c) spells while apart,
+   quick and from player 2's Tome (the Tome cast apart is built but unrun: chapter 3's list had nothing to enchant);
+   (d) a Chapter Page by each player in the real mansion.
+2. **Chapter 13's Tome (Alex)**, offered to the user, not yet decided: room 64, script L13/1828 saves the place and camera
+   (ed164, fn134(1,5)) and plays film 134, which loads room 5 directly (mode 6, 0x801525D4); 1413's fn66(64, EntryMkr01,
+   FightCam04, 2, 1828) brings the reader back and 1828 restores the saved place. Plan in design-tome-room.md §3 P12: start
+   the trip at notify_room_change with r3 == 5 from that film (lr 0x801525FC), both go, each back to their own spot.
+3. **Chapter Pages left:** the real mansion between chapters (level 0, reached through the prologue; JTG_NEWGAME=1 in
+   jtg.sh); the chapter 3 and 11 pages (1573, 1581: they play films in-level with ed55/ed83, then ed87 inside a use of
+   player 2's: check it); a chapter's end back to the mansion (ed89 restores the keep at 0x80307184); the mansion Tome.
+4. Smaller separate-rooms gaps (docs/coop-todo.md): a ladder's Yes answered in the other's door is lost (M13); examine
+   and pick up during the other player's cutscene; the Tome room's first-entry scene camera in player 2's half.
+5. Waiting on the user's decision: saving apart (separate, together only, or not at all). Later, theirs: "Bring X to Y"
+   in the co-op menu; the randomizer last.
 
 # HANDOFF 2026-11-14: effects per room and per camera, uncommitted on top of 96745f8
 
