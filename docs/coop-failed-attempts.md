@@ -860,3 +860,28 @@ in the real game at once (logs/run-20261115-111842-jtg-page-p2-use). Two tries t
 ```
 The keep is written without trouble in the Tome's mode (player 1's page) and at a chapter change (mode 5: the old two-step
 rerun), not in play or film mode. Read before a third try.
+**What worked (the same day, b049fc3):** the assert was not the keep's timing. The copy Tome writes its pages over ARAM's
+caches of the level's files and marked them gone only in its own memory (r13-28976/-28972), so the keep's header read got
+the Tome's pictures as level data. With the copy's "gone" carried to the real game after every copy turn and at its close
+(`tome_copy_aram_words`), try 2's calls work as they are: `tome_copy_film` asks `0x80018808(6)` then `0x800B7208(4)` from
+play mode (logs/run-20261115-123144-jtg-page-p2-film4).
+
+## The Chapter Page keep beside player 1's Tome: 2-4 s frames (2026-11-15 evening)
+Player 2's page from their copy Tome with player 1's real Tome up stalled 4 world frames at 2-4 s each before the film
+(logs/run-20261115-123551-jtg-page-both-tomes, -152853-jtg-page-both). Found by the stall watchdog's dump (ED_STALL_MS,
+ED_PCDUMP_WORDS: every slow frame in the subtitle updater 0x800088A0's scan, its record at 0x80308DE8 holding a table
+pointer 0x0000FFFF and a count of ~20M) and the word probe (ED_PROBE_WORD: written by the game's memcpy 0x800031EC from
+0x800B7750, the keep's entry writer 0x800B730C). The keep (ed88, 0x800B7100 -> 0x800ADCC0(0x80307184)) has no bound; solo's
+own fills to 0x80308D88 in Jump to Game's chapter 12; co-op added player 2's body, their weapon copy and the used page
+(still in the real inventory), 108-144 bytes, over CHAPTER_PARTS (0x80308DB8) and the subtitle record.
+Tried first, not built (refuted by its own review): when the copy's page asks a film beside player 1's Tome, force player
+1's Tome closed (write r13-24244 = 2) and run the item in play. It closes a Tome its owner did not close (the user's rule:
+nothing of either player closes because the other opened a Tome) and could overwrite player 1's own pending mode 6.
+Tried, half right: holding the keep only at the world frame's first dispatcher call (lr 0x800083F8): the keep then ran at
+the same frame's second call (lr 0x800085B4), still beside the Tome (logs/run-20261115-170334-jtg-page-p1); its contents
+were solo's only because player 2's things were already left out. And the copy's no-Tome film (tome_copy_film) wrote the
+keep straight after the mode with the used page still in the inventory (160 entries, CHAPTER_PARTS hit:
+logs/run-20261115-170750-jtg-page-p2).
+What worked: keep_request_hold (both world-frame calls, player 1's real Tome up), keep_walk/keep_filter (player 2's body and
+current copies out of the keep's own walk), tome_copy_film in the close's own order (mode, 0x80025FF0, keep). Every route
+then writes solo's keep: 159 entries ending 0x80308D40 (logs/run-20261115-1713*..1726*-jtg-page-*).

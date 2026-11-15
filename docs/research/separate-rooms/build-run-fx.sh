@@ -5,7 +5,7 @@
 #  E  Chapter 1: player 1 in 183's pit, player 2 through the door to 180 (180 entered apart: its braziers must burn).
 # Each with the fix on (1) and off (0). No ed test, no ed chapters (old saves).
 cd "/e/Eternal Darkness Recomp Fork" || exit 1
-export ED_ROOM_SLOTS=2 ED_ROOM_LOG=1 ED_RUN_SHOTS_MS=250 ED_RUN_SHOTS_W=${ED_RUN_SHOTS_W:-1920}
+export ED_RUN_AWAY=1 ED_ROOM_SLOTS=2 ED_ROOM_LOG=1 ED_RUN_SHOTS_MS=250 ED_RUN_SHOTS_W=${ED_RUN_SHOTS_W:-1920}
 rm -f saves/fx-ch4.state saves/rooms-ch1-183.state
 JTG_SLOT=1 ED_SAVE_STATE=2700:saves/fx-ch4.state ED_RUN_FRAMES=2800 sh tools/ed/jtg.sh 4 fx-s0-ch4 </dev/null
 JTG_SLOT=1 ED_RUN_SCRIPT=1950:101,2010:101,2350:105,2410:105,2750:111,2810:111,3150:29,3210:29 \

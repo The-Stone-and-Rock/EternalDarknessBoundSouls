@@ -1,6 +1,36 @@
-# HANDOFF 2026-11-15 afternoon: START HERE (all committed through b049fc3, branch tools/game-kit, nothing pushed)
+# HANDOFF 2026-11-15 evening: START HERE (committed through 821e1ac on tools/game-kit; the evening's work UNCOMMITTED)
 
-## Where things stand
+## The evening (uncommitted, unplayed): an audit of the afternoon, every check re-run, and the Chapter Page keep fix
+- **Audit** (a read-only workflow over b42fb68..821e1ac): solo safe by code, controls.cpp never committed, but several
+  checks named in the commit messages had run on builds older than the committed code, player 1's page from a copy Tome had
+  never run, Max's letter never reached its end, and ED_RUN_AWAY could not be shown from any log.
+- **Tooling:** every run folder now has env.txt (all ED_/JTG_ switches, so ED_RUN_AWAY=1 shows); build-run-fx.sh sets
+  ED_RUN_AWAY=1; Max's m1/m2 press B through the letter (flag 490 now on); a repeatable Chapter Page script,
+  docs/research/build-run-pages.sh (p1 p2 p1a p2a both bothx noitem p1copy solo door; JTG_SLOT 2, PAGE_SLOT=3 beside it).
+  Testing switches (off unless set): ED_STALL_MS (the stall watchdog's gap, dumps each slow frame), ED_PCDUMP_WORDS=ADDR[:N]
+  (registers and guest words with each dump), ED_PROBE_WORD=ADDR (which host hook changed a real-memory word: memcpys the
+  store watch can't see).
+- **Re-run on the current build from fresh states (all pass):** the Tome trip ch 4 (z4), 6 (6a, 6b), 8 (z8a, z8b), Max
+  together and apart (to the letter's end), solo, follow, off; the Chapter Pages p1, p2, p1a, p2a, both, p1copy (player 1's
+  page from a copy Tome: first run ever, works), solo (room changes identical), door. Chapter 4's second trip at ~5065 in
+  every z4 run, old and new, is the game's: the zombies knock idle player 1 back into the ladder's walk-in zone.
+- **Fixed: the Chapter Page keep overflow** (hle.c keep_request_hold, keep_requests, keep_walk, keep_filter; tome_copy_film's
+  order; the copies' own id). The game's state keep (ed88) has no bound and Jump to Game's chapter 12 already fills it to
+  0x80308D88 in solo; co-op added player 2's body, their weapon copy and the used page, onto CHAPTER_PARTS (0x80308DB8:
+  "body part ... not 262144") and the subtitle record (0x80308DE8: the both-Tomes route's 2-4 s frames, its updater scanning
+  ~20M entries). Now player 2's things are left out of the keep's own walk, the world's frames behind player 1's real Tome
+  leave the keep for that Tome's close (as solo), and the copy's no-Tome film runs the close's own order (mode,
+  0x80025FF0, keep). Every route writes solo's keep exactly: 159 entries ending 0x80308D40, no stall
+  (logs/run-20261115-1741*..1749*-jtg-page-*). The whole trace and the failed tries: coop-failed-attempts.md (last entry).
+- **Separate rooms are now co-op's default in every launch** (frontend.cpp rooms_follow_coop): a launch that names
+  neither ED_ROOM_SLOTS nor ED_COOP_STAY (the exe alone, the Mac's play.sh, a shortcut, a release) gets both, as play.bat
+  asks; one that names either keeps what it names (the scripts' follow mode: ED_ROOM_SLOTS=2, ED_COOP_STAY unset); =0 is
+  off; solo never. Checked: a co-op run with neither named logs every install (rooms, stay, fog, effects, Tome trip with
+  all hooks, split hold, keep) and nothing "NOT installed"; solo the same as before. A sweep of every getenv found no
+  other fix or feature off by default (ED_FOG_VIEWS stays off by design).
+- **Still for the user's play test** (below, item 1) plus: player 2's page while player 1's Tome is open.
+
+## Where things stood at the afternoon handoff (committed through b049fc3)
 Everything below is committed and checked by scripted runs from fresh Jump-to-Game states. **None of it has been played
 by the user yet**: their next step is a play test (list at the end). Commits, newest first:
 - **b049fc3 Chapter Pages.** A mansion Chapter Page used by either player plays its film full screen for both, then the

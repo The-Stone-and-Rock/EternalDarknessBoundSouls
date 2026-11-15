@@ -10,6 +10,8 @@
 cd "$(dirname "$0")/../.." || exit 1
 STATE=${1:?a save state}; NAME=${2:-run}
 R="logs/run-$(date +%Y%m%d-%H%M%S)-$NAME"; mkdir -p "$R/shots"; echo "$R"
+# Every ED_/JTG_ switch this run was started with (ED_RUN_AWAY, ED_SETTINGS, ED_PUT ...), kept with the run.
+env | grep -E '^(ED|JTG)_' | sort > "$R/env.txt"
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/ed/shots.ps1 -dir "$R/shots" -everyMs "${ED_RUN_SHOTS_MS:-250}" -width "${ED_RUN_SHOTS_W:-960}" >/dev/null 2>&1 &
 if [ -n "$ED_RUN_PROBE" ]; then export AURORA_SHADOW_PROBE="$R/probe.txt"; fi
 # ED_RUN_AWAY=1: the window off the visible desktop and the sound muted, while the user works (tools/ed/away.ps1)

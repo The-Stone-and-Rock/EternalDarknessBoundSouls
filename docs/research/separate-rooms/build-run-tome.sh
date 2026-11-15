@@ -33,6 +33,8 @@ EOF
 # A's presses: n presses of player 1's A (pad 0x0100) or player 2's a, `gap` frames apart from `at`.
 # The Tome's pickup: B on its EXAMINE (1413), then A on Yes; alternated, so a missed one is taken by the next pair.
 p1_presses() { at=$1; n=$2; gap=$3; out=; i=0; while [ $i -lt $n ]; do if [ $((i % 2)) = 0 ]; then k=0x0200; else k=0x0100; fi; out="$out${out:+;}$at,$((at+6)),$k"; at=$((at+gap)); i=$((i+1)); done; printf '%s' "$out"; }
+# Player 1's B alone, n presses `gap` apart from `at`: through the pages of a letter's words to their close.
+p1_b_presses() { at=$1; n=$2; gap=$3; out=; i=0; while [ $i -lt $n ]; do out="$out${out:+;}$at,$((at+6)),0x0200"; at=$((at+gap)); i=$((i+1)); done; printf '%s' "$out"; }
 p2_presses() { at=$1; n=$2; gap=$3; out=; i=0; while [ $i -lt $n ]; do if [ $((i % 2)) = 0 ]; then k=b; else k=a; fi; out="$out${out:+;}$at,$((at+6)),$k"; at=$((at+gap)); i=$((i+1)); done; printf '%s' "$out"; }
 
 # ---- The fresh states. Step 0 (design §10): a no-press run for the chapter's control frame and start room; then, when the
@@ -87,15 +89,17 @@ s5) # Max: room 258 (his desk, TomeRegion L05/2434); 930 is 253's SECRET PASSAGE
 m1) # Max (ch 5) together in 258, the Tome's after-find script 1599 started (film 114, world changes, 255's summon scene,
     # back to 258 at MaxSpawnMkr01, the letter). Pass (2026-11-15, the user): both see the film; both go to 255 and back;
     # each back where they stood; the letter and magick_give as player 1's; flags 321, 944, 490 on.
+    # (The letter's words open about S+920 (logs/run-20261115-101756-tome-m1-c5-together 3301): player 1's B from S+1000,
+    # 24 presses 50 apart, reads it to its close, where 1599 sets flag 490 and gives the magick.)
     load_env 5 || return
-    from_state 5 tome-m1-c5-together ED_RUN_SCRIPT="300:1599" ;;
+    from_state 5 tome-m1-c5-together ED_RUN_SCRIPT="300:1599" ED_INPUT_SCRIPT="$(p1_b_presses $((S + 1000)) 24 50)" ;;
 m2) # Max apart: player 2 out to 253 first (640: 258's SECRET PASSAGE, Region08), then 1599. Pass: player 2 brought to 255
     # with player 1, then back in 253 at their spot; player 1 back in 258 at theirs; the letter.
     load_env 5 || return
     # (Region08: x -188..97, y 392..697; player 2 put in it presses B on its SECRET PASSAGE, twice as the doors' runs do.)
     # (-60,600 has furniture at height 205, above the box's 171: 2026-11-15's first try never took the passage.)
     from_state 5 tome-m2-c5-apart ED_PUT="$((S + 30)),2,-120,470,10" ED_PAD2_SCRIPT="$((S + 120)),$((S + 126)),b;$((S + 180)),$((S + 186)),b" \
-        ED_RUN_SCRIPT="1300:1599" ;;
+        ED_RUN_SCRIPT="1300:1599" ED_INPUT_SCRIPT="$(p1_b_presses $((S + 2000)) 24 50)" ;;  # (the letter at ~S+1925, run 102957)
 s6) fresh 6 303 626 ;;              # Lindsey: room 303 (BoxRegion02, L06/335, the unprompted zone exit); 626 from 143
 s8) fresh 8 204 249 ;;              # Roberto: room 204 (Region02 L08/327 to 5, Region01 L08/329 to 211); 249 from 211
 s11) fresh 11 43 1036 ;;            # Michael: room 43 (Region02 L11/358 to 5, BoxRegion02 L11/360 to 60); 1036 from 60

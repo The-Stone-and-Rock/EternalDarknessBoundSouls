@@ -442,12 +442,18 @@ static THREAD_RET watchdog_main(void* arg) {
         }
         // ED_COOP_TRACE=1: the pad unread with no hang seen (the picture still, the fps counter
         // going, no report: logs/run-20261103-105156-paul-coop). Where the game is, once each time.
+        // ED_STALL_MS=N (testing): the gap that counts, 4000 ms unless given (a slow frame under 4 s is named too).
         static int stall_trace = -1;
+        static long long stall_ms = 4000;
         static bool stall_told;
-        if (stall_trace < 0)
+        if (stall_trace < 0) {
             stall_trace = getenv("ED_COOP_TRACE") != NULL;
+            const char* e = getenv("ED_STALL_MS");
+            if (e != NULL && atoll(e) > 0)
+                stall_ms = atoll(e);
+        }
         const long long pad_last = atomic_load(&g_last_pad);
-        if (stall_trace && pad_last != 0 && atomic_load(&g_pauses) == 0 && now - pad_last > 4000) {
+        if (stall_trace && pad_last != 0 && atomic_load(&g_pauses) == 0 && now - pad_last > stall_ms) {
             if (!stall_told) {
                 stall_told = true;
                 fprintf(stderr, "[stall] no pad read for %lld ms, last frame %lld ms ago\n", now - pad_last, now - atomic_load(&g_last_frame));

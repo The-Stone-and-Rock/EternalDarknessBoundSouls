@@ -166,6 +166,9 @@ while :; do
         echo "chapter $CH, base frame $BASE, closes at frame $STOP, attempt $TRY"
         echo "ED_INPUT_SCRIPT=$IN"; echo "ED_PAD2_SCRIPT=$PAD2"; echo "ED_PUT=$PUTS"
     } | tee "$R/jtg.txt"
+    # Every ED_/JTG_ switch this run was started with (ED_RUN_AWAY, ED_ITEM_SPAWN, ED_COOP_STAY ...), so a run's settings
+    # can be checked and repeated from its folder alone.
+    env | grep -E '^(ED|JTG)_' | sort > "$R/env.txt"
     powershell -NoProfile -ExecutionPolicy Bypass -File tools/ed/shots.ps1 -proc "$PROC" -dir "$R/shots" -everyMs "${ED_RUN_SHOTS_MS:-250}" -width "${ED_RUN_SHOTS_W:-960}" >/dev/null 2>&1 &
     # ED_RUN_AWAY=1: the window off the visible desktop and the sound muted, while the user works (tools/ed/away.ps1)
     if [ -n "$ED_RUN_AWAY" ]; then export ED_MUTE=1; powershell -NoProfile -ExecutionPolicy Bypass -File tools/ed/away.ps1 -proc "$PROC" >/dev/null 2>&1 & fi

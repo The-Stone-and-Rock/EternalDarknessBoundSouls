@@ -480,17 +480,27 @@ static const char* title_state_path() { return getenv("ED_ROOM_SLOTS") != nullpt
 // carried through restart_process with the environment) and the switches themselves are set only while Mods > Co-op is on,
 // and cleared otherwise: solo plays the game's own one room, its memory (48 MB) and title machine, with none of the two-room
 // hooks. A solo play with them on froze returning into a room (saves/reports/hang-20261112-025508).
+// A launch that names neither switch (the exe started on its own, the Mac's play.sh, a shortcut, a release) is asked for
+// both as play.bat asks (the user, 2026-11-15: no build may leave the fixes off): separate rooms are co-op's normal play.
+// A launch that names either one keeps what it names (the test scripts' follow mode is ED_ROOM_SLOTS=2 with ED_COOP_STAY
+// unset), and a switch given as 0 is off.
 extern "C" bool rooms_follow_coop(void) {
     static const char* const kSwitch[2] = {"ED_ROOM_SLOTS", "ED_COOP_STAY"};
     static const char* const kAsked[2] = {"ED_ROOM_SLOTS_ASKED", "ED_COOP_STAY_ASKED"};
+    static const char* const kDefault[2] = {"2", "1"};
     const bool was = getenv(kSwitch[0]) != nullptr;
+    bool named = false;
+    for (int i = 0; i < 2; i++)
+        named = named || getenv(kSwitch[i]) != nullptr || getenv(kAsked[i]) != nullptr;
     for (int i = 0; i < 2; i++) {
+        if (!named)
+            setenv(kAsked[i], kDefault[i], 1);
         if (getenv(kSwitch[i]) != nullptr && getenv(kAsked[i]) == nullptr) {
             const std::string value = getenv(kSwitch[i]);
             setenv(kAsked[i], value.c_str(), 1);
         }
         const char* asked = getenv(kAsked[i]);
-        if (g_settings.mod_coop && asked != nullptr) {
+        if (g_settings.mod_coop && asked != nullptr && std::strcmp(asked, "0") != 0) {
             const std::string value = asked;
             setenv(kSwitch[i], value.c_str(), 1);
         } else {

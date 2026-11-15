@@ -125,22 +125,23 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
 
 - The staying player keeps every action through the other's door countdown: quick spells and casting, examine and
   pickup (B and the prompts), zone looks, their Start menu / Tome. Today the split hold (docs/coop-level3-design.md
-  "Phase 1b") frees the room but these presses are still refused for that second (F4). Next.
+  "Phase 1b") frees the room; BUILT and committed 96745f8 (the stayer keeps every action through the other's door). Left: a
+  ladder's Yes answered in the other's door is lost (M13; design-stayer-presses.md 5.3, needs its read R1 first).
 - Lights per room: stage 1+2 built 2026-11-12 (unplayed). P7, spell lights by the caster's room, BUILT 2026-11-15
-  (uncommitted, unplayed; Remastered spells only): apart, a rune's light is in the half of its caster's room alone (the
+  (committed b42fb68, unplayed; Remastered spells only): apart, a rune's light is in the half of its caster's room alone (the
   rune keeps its caster's room, rune_caster_room; the renderer's set_spell_lights takes a view mask; a half a spell is kept
   out of keeps its lamps' haze strength, a review fix). Checked: player 1's cast in 153 with player 2 in 151 gives views 1;
-  together and solo unchanged (build-run-spell-lights.sh). P7b (the rune model's own room) not built.
+  together and solo unchanged (build-run-spell-lights.sh). P7b (the rune model's own room) built the same day (below).
 - **Player 2 can't cast while apart (found 2026-11-15 by the spell-lights runs):** their quick spell is cast ("cast by
   0x4C: player 2's") but leaves the spell list r13-22324 within 18 frames, so no circle, no runes and no effect; together the
   same spell runs ~4 s (logs/run-20261115-041146-spell-list-apart, -041205-spell-list-together, ED_COOP_SPELL_LIST=1).
   Cause (read, 2026-11-15): every spell step opens with the game's rule "a spell whose room (+8) is not the room in play
   ends" (0x801C316C at 0x801C31B8, 0x801CDF1C at 0x801CDF38); their records are stamped with their room in their turn but
-  were stepped by coop_spells_update with player 1's room in play. BUILT (uncommitted, unplayed; ED_SPELL_ROOMS=0 turns it
+  were stepped by coop_spells_update with player 1's room in play. BUILT (committed b42fb68, unplayed; ED_SPELL_ROOMS=0 turns it
   off): their spell steps with its room current when that room is theirs and resident. Checked (build-run-spell-lights.sh,
   fresh ch 3 state): player 2's spell apart now runs its full course as together (both records, the runes, its light in
   their half alone: views 2); player 1's apart, together and solo unchanged. Then the rest of the spell, the same day
-  (uncommitted, unplayed), each piece made in the room it belongs to: the spell's bolt (type 36, the beam to its target and
+  (committed b42fb68, unplayed), each piece made in the room it belongs to: the spell's bolt (type 36, the beam to its target and
   the circle's ring, events through the game's pump) runs its events with its room current (r6c_creature, as creatures);
   effect requests queued in player 2's room (op 16: the charge's sparkles) are made with that room current at the queue's
   drain (fx_request_make on 0x801413E8); any spell of player 2's room steps there (a creature's too), the identity swap
@@ -152,7 +153,7 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   the cyan-green fills (ED_GLOW_PROBE: player 1's own light call loads them). What WAS the spell's: its screen flash, a
   type-23 thing (0x800CC8BC, made by the charge at 0x801C3F14) drawn by the things' walk (0x800C844C -> 0x800CC4C0 ->
   0x80023D30) as a 640x480 colour quad over the whole frame, so both halves (draw 198 of
-  logs/run-20261115-070422-glow-dump2). FIXED (uncommitted): each flash is noted with its room when made, and apart its
+  logs/run-20261115-070422-glow-dump2). FIXED (committed b42fb68): each flash is noted with its room when made, and apart its
   identity matrix (loaded at 0x80023DA0) is marked out of the other room's half, as the door's fade is (fx_flash_make,
   fx_flash_draw). Measured on the pictures mid-charge: player 1's half was +2 per channel brighter under player 2's flash
   and now matches a no-cast run exactly; player 2's half keeps its flash (G 27 -> 32); player 1's flash stays in their half;
@@ -170,13 +171,13 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   changes." It follows the room in play. The game sets no GX fog per room (lights-game-readers.md), so the haze is drawn
   another way: readers in docs/research/separate-rooms/fog-game-readers.md, fog-host-readers.md, design-fog.md.
   Found: the game's own mist "layer 9" (0x801E21FC's two TEV stages, record+124 of the room in play). BUILT
-  2026-11-13, uncommitted, checked by script from a fresh Jump-to-Game state both ways round (fog-impl-notes.md "Runs"):
+  2026-11-13, committed 96745f8, checked by script from a fresh Jump-to-Game state both ways round (fog-impl-notes.md "Runs"):
   each half draws its own room's mist (ED_FOG_ROOMS, on by default with separate rooms). Not yet played by the user. Left:
   F8 (the stayer's mist across the other's door) needs a run with player 2's camera settled first; Part B (ED_FOG_VIEWS)
   is off by default, no visible change seen from it yet.
 - Separate from the fog: room 180's brazier flames and the floor glow round them are missing from the stayer's half
   whenever 180 is not the room in play (effect steps tied to the room in play; fog-host-readers.md). FIXED 2026-11-14
-  (uncommitted, not yet played by the user; ED_FX_ROOMS, default on with the stay): each effect steps with its own room
+  (committed 12e0d87, not yet played by the user; ED_FX_ROOMS, default on with the stay): each effect steps with its own room
   current (fx_ticks on 0x80182F98), the emitters are walked with theirs (fx_emitters on 0x80144B34), and each half's
   effect cards face its own camera, apart and together (fx_facing_begin; together each effect is drawn once per half,
   the second in the game's other vertex buffer). Checked from fresh Jump-to-Game states: Karim's altar flame (room 338)
@@ -188,7 +189,7 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   12 records is used there, ED_FX_LIGHTS=1): characters take them from the room's lamp grid (G1/G2, design-lights.md).
   The user's play the same day (together after being apart): the braziers' smoke columns in player 2's half leaned and
   swung with player 2's camera. Cause: the smoke builder 0x8017CCC8 aims each column with the camera's horizontal look
-  direction (0x80602340, read by 0x801E4A8C), which stayed player 1's while the view was player 2's. Fixed (uncommitted):
+  direction (0x80602340, read by 0x801E4A8C), which stayed player 1's while the view was player 2's. Fixed (committed 3542bf0):
   player 2's draw now gets their whole camera block: the view 0x8060248C, its inverse 0x806024BC [R^T | eye], the
   transposed rotation 0x806024EC (nine floats, then t) and the look word (fx_facing_begin). Checked in room 180 with
   player 2 walking, plus the Karim, side-view and 180-apart runs (build-run-fx.sh); not yet played by the user.
@@ -197,7 +198,7 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   (logs/run-*-fx-a-0 around frame 3250; Screenshots for Claude/fx-flames/a-seq.jpg).
 - The Tome room with the players apart (the user, 2026-11-14): either player taking the Tome-room way in sends both there
   with the dissolve, and after the pickup and the film each goes back to the room and spot they were at. BUILT
-  2026-11-14/15, uncommitted, checked by script from fresh Jump-to-Game states (ED_TOME_TRIP, default on with the stay;
+  2026-11-14/15, committed b42fb68 and fbd1ecf, checked by script from fresh Jump-to-Game states (ED_TOME_TRIP, default on with the stay;
   ED_TOME_BACK=marker puts the taker on the game's own return marker): chapters 4, 6 and 8, together and apart, both
   orders; solo, follow and the switch off untouched (rooms/tome-trip-impl-notes.md "Runs"). The taker who stood in an
   unprompted way-in zone (chapter 6's 335) goes back on the game's marker, so the zone doesn't take them again. Magick
@@ -212,7 +213,7 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   docs/research/chapter-page-readers.md): a page's use (1572-1580) sets its flag, takes the item, asks the state keep (ed88)
   and the film (ed9(script, 6, film)); the real Tome closes into the film (mode 6, shown whole for both), whose end runs
   the page's next step, ed87: the chapter loads (mode 5, mode 1) and player 2 is re-made beside player 1, as at Jump to Game.
-  Player 1's page already did this. Player 2's (their copy Tome) changed chapter at once with no film: FIXED (uncommitted):
+  Player 1's page already did this. Player 2's (their copy Tome) changed chapter at once with no film: FIXED (committed b049fc3):
   a use that asks for a film runs no second step; the film's mode and the keep follow as the Tome's close does them. On the
   way: the copy Tome writes its pages over ARAM's caches of the level's files and marked them gone only in its own memory,
   so the real game later read the Tome's pictures as level data (the keep halted on its assert; a room load or a save could
@@ -223,6 +224,12 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   players (player 1's page from a copy Tome, opened over player 2's close-up or door, had the same no-film fault); with
   player 1's real Tome up beside player 2's copy, nothing is forced and that Tome's own close plays the film (run
   page-both-tomes: film when player 1 closed it); the cache words follow the copy after each turn, not only at its close.
+  **2026-11-15 evening (uncommitted, unplayed): that page-both-tomes run had 4 world frames of 2-4 s before the film.** The
+  game's state keep (ed88) overflowed in co-op: no bound, solo's own already fills to 0x80308D88 here, and player 2's body,
+  their weapon copy and the used page carried it over CHAPTER_PARTS and the subtitle record. Fixed: player 2's things out
+  of the keep's walk (keep_filter), the world's frames behind player 1's Tome leave the keep for its close
+  (keep_request_hold), the copy's film in the close's order (0x80025FF0 before the keep). Every route now writes solo's
+  keep exactly; player 1's page from a copy Tome checked for the first time (docs/research/build-run-pages.sh, p1copy).
   Not yet: the real mansion between chapters (level
   0, reached through the prologue), other pages (chapters 3 and 11 play their films in-level), a chapter's end back to the
   mansion (ed89 restores the keep).

@@ -5649,6 +5649,23 @@ static bool hle_dispatch(CPUState* cpu, u32 address) {
                              (entry->notify != NULL && tome_copy_hook_off(entry->notify))))
         return false;
 
+    // ED_PROBE_WORD=ADDR (testing): which host hook changed the REAL memory's word at ADDR (a host memcpy the store
+    // watch can't see): checked round each intercept and notify, in the memory the game booted in.
+    static int probe_on = -1;
+    static u32 probe_at;
+    static u8* probe_ram;
+    if (probe_on < 0) {
+        const char* e = getenv("ED_PROBE_WORD");
+        probe_on = e != NULL && e[0] != '\0';
+        probe_at = probe_on ? (u32)strtoul(e, NULL, 16) | 0x80000000u : 0u;
+        probe_ram = cpu->ram;
+        probe_on = probe_on && probe_at >= GC_RAM_BASE && probe_at + 4u <= GC_RAM_BASE + cpu->ram_size;
+    }
+#define PROBE_WORD() (probe_on ? ((u32)probe_ram[probe_at - GC_RAM_BASE] << 24 | (u32)probe_ram[probe_at - GC_RAM_BASE + 1u] << 16 | \
+                                  (u32)probe_ram[probe_at - GC_RAM_BASE + 2u] << 8 | probe_ram[probe_at - GC_RAM_BASE + 3u]) : 0u)
+    const u32 probe_was = PROBE_WORD();
+    const u32 probe_lr = cpu->lr;
+
     if (entry->intercept != NULL) {
         if (g_hle_log) {
             const char* name = sdk_symbol_name(address);
@@ -5666,6 +5683,10 @@ static bool hle_dispatch(CPUState* cpu, u32 address) {
         g_hle_tail_call = false;
         g_hle_passthrough = false;
         entry->intercept(cpu);
+        if (probe_on && PROBE_WORD() != probe_was)
+            fprintf(stderr, "[probe] 0x%08X 0x%08X -> 0x%08X in the intercept on 0x%08X (lr 0x%08X, ram %s, frame %llu)\n", probe_at,
+                    probe_was, PROBE_WORD(), address, probe_lr, cpu->ram == probe_ram ? "real" : "other",
+                    (unsigned long long)(cpu->timebase / 675000ull));
         if (!g_hle_passthrough) {
             if (!g_hle_tail_call)
                 hle_return(cpu);
@@ -5675,8 +5696,15 @@ static bool hle_dispatch(CPUState* cpu, u32 address) {
 
     // Observe-only hooks: drive host state, then fall through so the recompiled
     // function still runs.
-    if (entry->notify != NULL)
+    if (entry->notify != NULL) {
+        const u32 probe_before = PROBE_WORD();
         entry->notify(cpu);
+        if (probe_on && PROBE_WORD() != probe_before)
+            fprintf(stderr, "[probe] 0x%08X 0x%08X -> 0x%08X in the notify on 0x%08X (lr 0x%08X, ram %s, frame %llu)\n", probe_at,
+                    probe_before, PROBE_WORD(), address, probe_lr, cpu->ram == probe_ram ? "real" : "other",
+                    (unsigned long long)(cpu->timebase / 675000ull));
+    }
+#undef PROBE_WORD
 
     if (g_hle_log) {
         const char* tn = trace_name(address);
@@ -13837,7 +13865,7 @@ static void tw_room_buffer(CPUState* cpu) {
     g_hle_tail_call = false;
 }
 
-// ---- ED_ROOM_SLOTS=2 (testing): the separate-rooms step's probe R1 (docs/coop-level3-design.md "Separate rooms") ----
+// ---- ED_ROOM_SLOTS=2 (on in co-op by default, frontend.cpp rooms_follow_coop): separate rooms' R1 (docs/coop-level3-design.md) ----
 // The game's room engine was written for N resident room slots: the slot table 0x8058AFC0 (+0 the current slot, +4 the other
 // or -1, +8 a queued room or -1, +12.. a record per slot; a record's room is an s16 at +0x8140, its "loaded" byte +0x8142,
 // +0x8143 with it, +0x8144 "an unpack pending"), 0x80154C50 swaps the two when the count is 2, the load 0x80154C94 asks
@@ -14535,7 +14563,7 @@ static void effect_draw_by_room(CPUState* cpu) {
     g_hle_tail_call = false;
 }
 
-// ---- ED_COOP_STAY=1 (testing, with ED_ROOM_SLOTS=2): R2, the other player stays in their room ----
+// ---- ED_COOP_STAY=1 (with ED_ROOM_SLOTS=2; on in co-op by default, rooms_follow_coop): R2, the other player stays ----
 // When player 1 takes a door, player 2 is not brought along (coop_follow): their room stays resident in its slot (the
 // change's tail undone for it, room_slots_tail; the slot to evict steered to player 1's old one, room_slots_return), their
 // body is spared the change's two strips (the load's level-wide 0x80043AB8, by the kind ask at lr 0x80043B00; the arrival's
@@ -27234,7 +27262,9 @@ static void split_request_after(CPUState* cpu) {
     else if (split_log())
         fprintf(stderr, "[split] the held room request %u runs in room %d (frame %llu)\n", request, in_play, split_frame(cpu));
 }
+static void keep_request_hold(CPUState* cpu);
 static void split_requests(CPUState* cpu) {
+    keep_request_hold(cpu);
     g_hle_passthrough = true;
     if (!split_counting(cpu)) {
         split_request_after(cpu);
@@ -29952,8 +29982,70 @@ static bool g_coop_tome_p2;
 // answered with their copy's node.
 static struct {
     u32 id, node;
+    u32 own;  // the copy's own id (its node's +16) when listed here: keep_filter's check that the node is still the copy
 } g_coop_copies[32];
 static u32 g_coop_copies_for;  // the player 2 they are for
+
+// The game's state keep (ed88: request 4 at r13-25172, run by the request dispatcher 0x800B7208 as 0x800B7100 ->
+// 0x800ADCC0(0x80307184)): every listed thing written one entry after another from 0x80307184, with no bound of its own
+// (docs/research/chapter-page-keep-reader.md). Two co-op rules keep it what solo's is:
+// 1) The world's frame behind a Tome (co-op only: in solo the world stops while a Tome is up) leaves a pending keep (4) or
+//    give-back (8) for the Tome's own close (0x80111784's 0x800B7208(4)), as solo has it: its own calls (0x800083F4 and
+//    0x800085B0, every world frame, mask 127) ran it beside the Tome, with the used page not yet gone, and from the copy Tome's turn
+//    (player 2's page beside player 1's Tome) while the Tome's things were in. The mask loses the request's bit, so the
+//    dispatcher passes it by without spending its countdown (0x800B7220). Once the Tome is closed (no sharing) the next
+//    world frame runs whatever is left.
+// 2) Player 2's body and their weapon copies are no part of the game's state: left out of the keep's walk (its filter
+//    0x800B7EB8, the keep's own call only: 0x800ADCC0 with dest 0x80307184; a card save's walk keeps them). Their 108 to 144
+//    bytes carried the keep past CHAPTER_PARTS (0x80308DB8: "body part ... not 262144") and over the subtitle record
+//    (0x80308DE8), whose updater 0x800088A0 then scanned a "table" of ~20M entries each world frame: the 2-4 s frames of
+//    logs/run-20261115-123551-jtg-page-both-tomes. After a give-back player 2 is re-made by coop_spawn, as at Jump to Game.
+#define KEEP_WORLD_CALL 0x800083F8u   // lr of the world frame's 0x800B7208(127) (0x800083F4)
+#define KEEP_WORLD_CALL2 0x800085B4u  // and of its second (0x800085B0, later in the same frame)
+#define KEEP_WALK 0x800ADCC0u
+#define KEEP_FILTER 0x800B7EB8u
+#define KEEP_DEST 0x80307184u
+static bool g_keep_walk;  // 0x800ADCC0 is writing the keep (not a card save)
+static void keep_request_hold(CPUState* cpu) {
+    // (Player 1's real Tome only: with player 2's copy alone standing in, the world is the game's own and player 1's
+    // requests are theirs to run now; a copy's own page writes its keep itself, tome_copy_film.)
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || (cpu->lr != KEEP_WORLD_CALL && cpu->lr != KEEP_WORLD_CALL2) ||
+        !hle_coop_player1_tome_up() || !sda_ready(cpu))
+        return;
+    const u32 request = mem_read32(cpu, cpu->gpr[13] - 25172u);
+    if ((request != 4u && request != 8u) || (cpu->gpr[3] & request) == 0u)
+        return;
+    cpu->gpr[3] &= ~request;
+    static u64 told_at;
+    const u64 frame = cpu->timebase / 675000ull;
+    if (frame > told_at + 60u)
+        fprintf(stderr, "[keep] the world's frame behind the Tome leaves request %u for the Tome's close (frame %llu)\n", request,
+                (unsigned long long)frame);
+    told_at = frame;
+}
+static void keep_requests(CPUState* cpu) {
+    keep_request_hold(cpu);
+    g_hle_passthrough = true;
+}
+static void keep_walk(CPUState* cpu) { g_keep_walk = g_settings.mod_coop && cpu->gpr[3] == KEEP_DEST; }
+static void keep_filter(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!g_keep_walk || !g_settings.mod_coop || g_coop_p2 == 0u)
+        return;
+    const u32 node = cpu->gpr[3];
+    bool theirs = node == g_coop_p2;
+    // A copy only while it is still this player 2's, and still the thing it was made as: its own id as listed (the table
+    // outlives an area change until the next copy lookup: a freed copy's address may be a real thing's by now).
+    for (int i = 0; i < 32 && !theirs && g_coop_copies_for == g_coop_p2; i++)
+        theirs = g_coop_copies[i].node != 0u && g_coop_copies[i].node == node && g_coop_copies[i].own != 0u &&
+                 mem_read32(cpu, node + 16u) == g_coop_copies[i].own && coop_listed(cpu, node);
+    if (!theirs)
+        return;
+    fprintf(stderr, "[keep] player 2's 0x%08X left out of the keep (%s)\n", node, node == g_coop_p2 ? "their body" : "their weapon copy");
+    cpu->gpr[3] = 0u;
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
 
 static void coop_copies_reset(void) {
     if (g_coop_copies_for != g_coop_p2) {  // another player 2 (another area): new copies
@@ -30082,6 +30174,7 @@ static u32 coop_weapon_copy(CPUState* cpu, u32 id, bool make) {
     coop_copy_holder(cpu, made);
     g_coop_copies[free_at].id = id;
     g_coop_copies[free_at].node = made;
+    g_coop_copies[free_at].own = mem_read32(cpu, made + 16u);
     fprintf(stderr, "[coop] player 2's copy of %u: node 0x%08X (id %u)\n", id, made, mem_read32(cpu, made + 16u));
     return made;
 }
@@ -30167,6 +30260,7 @@ static void coop_restore_held(CPUState* cpu) {
         return;
     g_coop_copies[free_at].id = id;
     g_coop_copies[free_at].node = node;
+    g_coop_copies[free_at].own = mem_read32(cpu, node + 16u);
     // How player 1's equipment lists the same thing (the hands it takes),
     // else as a sword.
     u32 hands[2] = {2u, 0u};
@@ -30315,7 +30409,7 @@ static void coop_take_held(CPUState* cpu) {
         coop_tome_player(cpu, false);
         if (guest_ram_range_valid(cpu, object, 376u) && mem_read32(cpu, object + 372u) == p2)
             mem_write32(cpu, object + 372u, 0u);
-        g_coop_copies[at].id = g_coop_copies[at].node = 0u;
+        g_coop_copies[at].id = g_coop_copies[at].node = g_coop_copies[at].own = 0u;
         const u32 gone[2] = {2u, copy};
         hle_guest_call(cpu, COOP_THING_GONE, gone, 2, 0.0, &ignore);
         fprintf(stderr, "[coop] %u taken from player 1 (fn93): player 2's copy (id %u) let go of (%u) and gone, their equipment %u -> %u (frame %llu)\n",
@@ -31517,6 +31611,10 @@ static void tome_copy_film(CPUState* cpu, int who, s32 script) {
     u32 mode = mem_read32(cpu, cpu->gpr[13] - 24244u), ignore = 0u, keep = 4u;
     const u32 lr = cpu->lr;
     hle_guest_call(cpu, 0x80018808u, &mode, 1, 0.0, &ignore);
+    // The close's own order (0x80111778..0x80111784): the mode, then 0x80025FF0, then the keep. Without the middle one the
+    // used page was still in the real inventory when the keep was written (72 bytes more, onto CHAPTER_PARTS 0x80308DB8:
+    // logs/run-20261115-170750-jtg-page-p2).
+    hle_guest_call(cpu, 0x80025FF0u, NULL, 0, 0.0, &ignore);
     hle_guest_call(cpu, 0x800B7208u, &keep, 1, 0.0, &ignore);
     cpu->lr = lr;
     fprintf(stderr, "[tome-copy] player %d's item %d: mode %u for its film and its keep written (request left %u), as the Tome's close does (frame %llu)\n",
@@ -32487,6 +32585,22 @@ static void find_coop(CPUState* cpu) {
         if (change != NULL && start != NULL && buffer != NULL) {
             change->intercept = tw_mode_change;
             start->intercept = tw_tome_start;
+            // The game's state keep with the world behind the Tome (keep_request_hold, keep_filter): the request
+            // dispatcher (split_requests takes it over with the stay and runs the same rule), the keep's walk, its filter.
+            HleDispatchEntry* requests = hle_dispatch_entry(SPLIT_REQUESTS);
+            HleDispatchEntry* walk = hle_dispatch_entry(KEEP_WALK);
+            HleDispatchEntry* filter = hle_dispatch_entry(KEEP_FILTER);
+            if (mem_read32(cpu, SPLIT_REQUESTS) == 0x9421FFF0u && mem_read32(cpu, SPLIT_REQUESTS + 0xCu) == 0x808D9DACu &&
+                mem_read32(cpu, KEEP_WALK) == 0x9421FFA0u && mem_read32(cpu, KEEP_FILTER) == 0x9421FFD0u && stayer_bl_is(cpu, 0x800083F4u, SPLIT_REQUESTS) && stayer_bl_is(cpu, 0x800085B0u, SPLIT_REQUESTS) &&
+                stayer_bl_is(cpu, 0x800B7148u, KEEP_WALK) && stayer_bl_is(cpu, 0x800B81BCu, KEEP_FILTER) && requests != NULL &&
+                requests->intercept == NULL && requests->notify == NULL && walk != NULL && walk->intercept == NULL && walk->notify == NULL &&
+                filter != NULL && filter->intercept == NULL && filter->notify == NULL) {
+                requests->intercept = keep_requests;
+                walk->notify = keep_walk;
+                filter->intercept = keep_filter;
+            } else {
+                fprintf(stderr, "[keep] NOT installed (0x800B7208/0x800ADCC0/0x800B7EB8 not as expected): the keep is written as today\n");
+            }
             if (tome_copy_mode() == 2) {
                 HleDispatchEntry* cancel = hle_dispatch_entry(COOP_CAST_CANCEL);
                 if (cancel != NULL && cancel->intercept == NULL)
@@ -33182,7 +33296,8 @@ static void find_coop(CPUState* cpu) {
                 mem_read32(cpu, SPLIT_REQUESTS) == 0x9421FFF0u && mem_read32(cpu, SPLIT_REQUESTS + 0xCu) == 0x808D9DACu &&
                 mem_read32(cpu, SPLIT_TICKET_TICK) == 0x9421FFF0u && mem_read32(cpu, SPLIT_TICKET_TICK + 0x10u) == 0x38A3AFFCu &&
                 mem_read32(cpu, SPLIT_SEND) == 0x9421FFC0u && mem_read32(cpu, 0x801F5688u) == 0x48000139u && writer != NULL && writer->intercept == NULL &&
-                (writer->notify == NULL || writer->notify == notify_room_ticket) && requests != NULL && requests->intercept == NULL &&
+                (writer->notify == NULL || writer->notify == notify_room_ticket) && requests != NULL &&
+                (requests->intercept == NULL || requests->intercept == keep_requests) &&  // (split_requests runs the keep's rule too)
                 requests->notify == NULL && tick != NULL && tick->intercept == NULL && (tick->notify == NULL || tick->notify == notify_change_tick) &&
                 send != NULL && send->intercept == NULL && send->notify == NULL) {
                 writer->intercept = split_ticket_ask;

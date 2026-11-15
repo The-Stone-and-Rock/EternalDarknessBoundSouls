@@ -358,6 +358,28 @@ static int run_loop(void* user) {
                         pc_hist[(pc_hist_i + k) % PC_HIST]);
             fprintf(stderr, "\n");
             dump_threads(cpu);
+            // ED_PCDUMP_WORDS=ADDR[:N],... (testing): N guest words (default 1) from each ADDR, with each dump.
+            if (getenv("ED_PCDUMP_WORDS") != NULL) {
+                const char* p = getenv("ED_PCDUMP_WORDS");
+                fprintf(stderr, "[pcdump] r3-r8 %08X %08X %08X %08X %08X %08X r23-r31 %08X %08X %08X %08X %08X %08X %08X %08X %08X\n",
+                        cpu->gpr[3], cpu->gpr[4], cpu->gpr[5], cpu->gpr[6], cpu->gpr[7], cpu->gpr[8], cpu->gpr[23],
+                        cpu->gpr[24], cpu->gpr[25], cpu->gpr[26], cpu->gpr[27], cpu->gpr[28], cpu->gpr[29], cpu->gpr[30],
+                        cpu->gpr[31]);
+                while (*p != '\0') {
+                    char* end = NULL;
+                    const u32 at = (u32)strtoul(p, &end, 16);
+                    if (end == p)
+                        break;
+                    unsigned n = 1u;
+                    if (*end == ':')
+                        n = (unsigned)strtoul(end + 1, &end, 10);
+                    fprintf(stderr, "[pcdump] 0x%08X:", at);
+                    for (unsigned k = 0; k < n && k < 64u; k++)
+                        fprintf(stderr, " %08X", mem_read32(cpu, at + 4u * k));
+                    fprintf(stderr, "\n");
+                    p = *end == ',' ? end + 1 : end;
+                }
+            }
             // ED_PCDUMP_MEM=path: also write raw MEM1, for tools/backchain.py.
             if (getenv("ED_PCDUMP_MEM") != NULL)
                 dump_mem1(getenv("ED_PCDUMP_MEM"), cpu);
