@@ -16288,9 +16288,27 @@ static struct {
 } g_tome_copy_p1_left;
 static u32 g_tome_copy_p1_record[COOP_MAGICK_SIZE / 4u];  // the magick record as their copy opened
 
+// ARAM is one, shared by a copy Tome and the real game (tome_copy_swap changes only cpu->ram). The Tome writes its pack over
+// ARAM's caches of the level's files (0x801116F8: 0x14F580 bytes at 0xEA5E40, over the body cache, NPCS at 0xFA63D0 and
+// ed_chrs at 0xFB63D0) and marks them gone (0x8011172C: 0x801327A4, r13-28976 and r13-28972 := -1) in its memory: the
+// copy's, thrown away. The real game still took them as cached, and its next fast read copied the Tome's pictures: a mansion
+// Chapter Page's keep (ed88) read NPCS that way and halted on its header check (saves/reports/hang-20261115-112424, the
+// reader of 2026-11-15). The copy's "gone" goes to the real game at the close, as solo's Tome leaves it.
+static void tome_copy_aram_words(CPUState* cpu, s32 copy_a, s32 copy_b, int who) {
+    if (copy_a != -1 && copy_b != -1)
+        return;
+    const s32 real_a = (s32)mem_read32(cpu, cpu->gpr[13] - 28976u), real_b = (s32)mem_read32(cpu, cpu->gpr[13] - 28972u);
+    if (real_a == -1 && real_b == -1)
+        return;
+    mem_write32(cpu, cpu->gpr[13] - 28976u, 0xFFFFFFFFu);  // (0x801327A4's two stores)
+    mem_write32(cpu, cpu->gpr[13] - 28972u, 0xFFFFFFFFu);
+    fprintf(stderr, "[tome-copy] player %d's Tome wrote over ARAM's level caches: the real game's marked gone too (they were %d %d)\n", who, real_a,
+            real_b);
+}
 static void tome_copy_p1_close(CPUState* cpu, const char* why) {
     fprintf(stderr, "[tome-copy] player 1's Tome closes (%s) after %u turns, longest %.2f ms\n", why, g_tome_copy.turns, g_tome_copy.ms_most);
     cpu->ram = g_tome_copy.copy;
+    const s32 aram_a = (s32)mem_read32(cpu, cpu->gpr[13] - 28976u), aram_b = (s32)mem_read32(cpu, cpu->gpr[13] - 28972u);
     const s32 script_left = (s32)mem_read32(cpu, cpu->gpr[13] - 26324u);
     const u32 next_cast = mem_read32(cpu, COOP_NEXT_CAST);
     u8 spell_item[24];
@@ -16299,6 +16317,7 @@ static void tome_copy_p1_close(CPUState* cpu, const char* why) {
     for (u32 i = 0u; i < COOP_MAGICK_SIZE / 4u; i++)
         record[i] = mem_read32(cpu, COOP_MAGICK_RECORD + i * 4u);
     cpu->ram = g_tome_copy.real;
+    tome_copy_aram_words(cpu, aram_a, aram_b, 1);
     // The record's theirs: what they changed (a quick spell, a spell made), and nothing else. Player 2's
     // find may have added to the real one since it opened.
     for (u32 i = 0u; i < COOP_MAGICK_SIZE / 4u; i++)
@@ -16340,6 +16359,7 @@ static void tome_copy_close(CPUState* cpu, const char* why) {
     fprintf(stderr, "[tome-copy] player 2's Tome closes (%s) after %u turns, longest %.2f ms\n", why, g_tome_copy.turns, g_tome_copy.ms_most);
     // Back as coop_tome_player leaves them, in the copy: their quick spells and counts come out of it.
     cpu->ram = g_tome_copy.copy;
+    const s32 aram_a = (s32)mem_read32(cpu, cpu->gpr[13] - 28976u), aram_b = (s32)mem_read32(cpu, cpu->gpr[13] - 28972u);
     // What the Tome left for the world as it closes: the script an item left, the spell to cast.
     const s32 script_left = (s32)mem_read32(cpu, cpu->gpr[13] - 26324u);
     const u32 next_cast = mem_read32(cpu, COOP_NEXT_CAST);
@@ -16367,6 +16387,7 @@ static void tome_copy_close(CPUState* cpu, const char* why) {
     // which the copy never reaches (it runs no way out).
     const u32 copy_handles[3] = {mem_read32(cpu, cpu->gpr[13] - 24480u), mem_read32(cpu, cpu->gpr[13] - 29056u), mem_read32(cpu, cpu->gpr[13] - 24108u)};
     cpu->ram = g_tome_copy.real;
+    tome_copy_aram_words(cpu, aram_a, aram_b, 2);
     tome_copy_sound_close(cpu, copy_handles);
     g_coop_tome_p2 = false;
     g_tome_copy_open = false;
@@ -16677,7 +16698,11 @@ static bool tome_copy_step(CPUState* cpu) {
     }
     g_tome_copy_turn = false;
     g_coop_tome_p2 = false;
+    // (The copy writes ARAM on its first page frame, 0x801116F8: the real game's cache words follow it after each turn, not
+    // only at the close, so no real frame in between reads the Tome's pictures as level data. The review, 2026-11-15.)
+    const s32 aram_a = (s32)mem_read32(cpu, cpu->gpr[13] - 28976u), aram_b = (s32)mem_read32(cpu, cpu->gpr[13] - 28972u);
     tome_copy_swap(cpu, false);
+    tome_copy_aram_words(cpu, aram_a, aram_b, g_tome_copy_p1 ? 1 : 2);
     if (tome_copy_log() && memcmp(gqr_was, cpu->gqr, sizeof gqr_was) != 0)
         fprintf(stderr, "[tome-copy] its turn left GQRs %08X %08X %08X %08X %08X %08X %08X (were %08X %08X %08X %08X %08X %08X %08X)\n", cpu->gqr[1],
                 cpu->gqr[2], cpu->gqr[3], cpu->gqr[4], cpu->gqr[5], cpu->gqr[6], cpu->gqr[7], gqr_was[1], gqr_was[2], gqr_was[3], gqr_was[4],
@@ -31473,6 +31498,30 @@ static void tome_copy_equips(CPUState* cpu) {
 
 // What player 1's Tome left for the world, with player 2's close-up over: as the world does when a Tome
 // closes, and they're the player already.
+// A copy Tome's item that asked the Tome's close for a film (ed9(script, 6, film): the mansion's Chapter Pages, L00/1572-1580),
+// its use step run in the real game: what the real Tome's close does next (0x80111740..: 0x80110DA8's 0x80018808(r13-24244) at
+// 0x80110DE8, then 0x800B7208(4) at 0x80111784, the page's state keep, ed88), so the film plays (mode 6, whole) and its end
+// runs the page's next step (ed87, the chapter) from its row (0x80026FCC). The keep left pending was written by the film's own
+// frame (0x80050D4C) with the film's room in, and the game halted on its assert (saves/reports/hang-20261115-112424). With
+// player 1's real Tome up (mode 3, player 2's copy beside it) nothing is forced: r13-24244 at 6 takes that Tome out by its
+// own way (0x80111298 -> 0x8011173C), which asks the film and writes the keep in solo's order (the review, 2026-11-15).
+static void tome_copy_film(CPUState* cpu, int who, s32 script) {
+    // (The keep's countdown r13-25176 must be spent for the write to happen at the close, 0x800B7228-0x800B7234.)
+    if ((s32)mem_read32(cpu, cpu->gpr[13] - 25176u) > 1)
+        mem_write32(cpu, cpu->gpr[13] - 25176u, 1u);
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (mem_read32(cpu, cpu->gpr[13] - 26240u) == 3u) {
+        fprintf(stderr, "[tome-copy] player %d's item %d asked for a film: player 1's Tome is up, its close plays it (frame %llu)\n", who, script, frame);
+        return;
+    }
+    u32 mode = mem_read32(cpu, cpu->gpr[13] - 24244u), ignore = 0u, keep = 4u;
+    const u32 lr = cpu->lr;
+    hle_guest_call(cpu, 0x80018808u, &mode, 1, 0.0, &ignore);
+    hle_guest_call(cpu, 0x800B7208u, &keep, 1, 0.0, &ignore);
+    cpu->lr = lr;
+    fprintf(stderr, "[tome-copy] player %d's item %d: mode %u for its film and its keep written (request left %u), as the Tome's close does (frame %llu)\n",
+            who, script, mode, mem_read32(cpu, cpu->gpr[13] - 25172u), frame);
+}
 static void tome_copy_p1_left(CPUState* cpu) {
     if (!g_tome_copy_p1_left.pending || g_coop_use.active || g_tome_copy_open || mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u)
         return;
@@ -31531,6 +31580,12 @@ static void tome_copy_p1_left(CPUState* cpu) {
     if (g_tome_copy_p1_left.use_script == script) {
         const u32 asked[3] = {(u32)script, g_tome_copy_p1_left.use_item, 0u};
         hle_guest_call(cpu, COOP_RUN_SCRIPT, asked, 3, 0.0, &ignore);
+    }
+    if (mem_read32(cpu, cpu->gpr[13] - 24244u) == 6u) {
+        // A film asked for (a Chapter Page): no second step here; the film's end runs it (their table is the game's).
+        mem_write32(cpu, COOP_SPELL_ITEM, item_was);
+        tome_copy_film(cpu, 1, script);
+        return;
     }
     if (mem_read32(cpu, cpu->gpr[13] - 25960u) == 0u) {
         const u32 args[3] = {(u32)script, 0u, 0u};
@@ -31646,9 +31701,17 @@ static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* s
         const u32 asked[3] = {(u32)script, g_tome_copy_use_item, 0u};
         hle_guest_call(cpu, COOP_RUN_SCRIPT, asked, 3, 0.0, &ignore);
     }
-    // If that opened words, going on opens them again: the first keep the game's one focus
-    // (0x8013DB1C), the close only knows the second (0x80024220), and they never close.
-    if (mem_read32(cpu, cpu->gpr[13] - 25960u) == 0u) {
+    // A use that asked the Tome's close for a film (ed9(script, 6, film): a mansion Chapter Page, L00/1572-1580; r13-24244
+    // the mode the close asks, 0x80110DE8): the real Tome closes into the film (mode 6, both players see it whole) and the
+    // film's end runs the script's next step (the chapter's ed87) from its row (+14, 0x80026FCC). Going on here ran that step
+    // at once: player 2's page changed chapter with no film (logs/run-20261115-111842-jtg-page-p2-use, 2837 -> 2883).
+    const bool film = mem_read32(cpu, cpu->gpr[13] - 24244u) == 6u;
+    if (film) {
+        fprintf(stderr, "[tome-copy] player 2's item %d asked for film %u when the Tome closes: no second step here\n", script,
+                mem_read8(cpu, 0x8031649Au));
+    } else if (mem_read32(cpu, cpu->gpr[13] - 25960u) == 0u) {
+        // If that opened words, going on opens them again: the first keep the game's one focus
+        // (0x8013DB1C), the close only knows the second (0x80024220), and they never close.
         const u32 args[3] = {(u32)script, 0u, 0u};
         hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ignore);
     } else {
@@ -31706,7 +31769,8 @@ static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* s
         // 1's RETURN never came (logs/run-20261111-064456-stepD-r5b-item-leaves-p1hole).
         g_coop_assist_at = 0u;
     }
-    coop_p2_script_mark(script, true);  // theirs until a press or zone of player 1's runs it (coop_run_script)
+    if (!film)
+        coop_p2_script_mark(script, true);  // theirs until a press or zone of player 1's runs it (coop_run_script)
     if (getenv("ED_COOP_LOG") != NULL)
         fprintf(stderr, "[coop] player 2's item script %d ran as theirs: words %d, busy %u, their hold %d, room %d, cameras lent %d (frame %llu)\n",
                 script, words_up, coop_busy(cpu), g_coop_script_hold, room, g_coop_cameras.lent, (unsigned long long)(cpu->timebase / 675000ull));
@@ -31721,6 +31785,11 @@ static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* s
     coop_be_player2(cpu, false, was);
     coop_tome_player(cpu, false);
     g_coop_next_cast_p2 = false;
+    if (film) {
+        // The film's end runs the script from the game's table (a chapter's start is everyone's): their step goes there.
+        coop_state_to_game(cpu, script);
+        tome_copy_film(cpu, 2, script);
+    }
 }
 
 // Moving while casting ends the cast: 0x801C4F48(character) sets the word its spell looks at

@@ -840,3 +840,23 @@ A probe on every call (logs/run-20261115-050911-spell-fx-a5) showed 0x801D04C0 i
 are the host's own rune flames (rune_flame, 0x8014152C(..., 0x80177588)), made from runes_frame with player 1's room in
 play. Fixed there instead (rune_flame inside coop_room_in of the rune's room); the hook was removed. Probe a maker's calls
 before hooking it.
+
+## Player 2's Chapter Page: the film asked from play mode (2026-11-15)
+Player 2's page (from their copy Tome) changed chapter with no film: tome_copy_left reran the page's state 0 then state 1
+in the real game at once (logs/run-20261115-111842-jtg-page-p2-use). Two tries to play the film as the real Tome does:
+1. Run only state 0, carry player 2's state word into the game's table (coop_state_to_game), then `0x80018808(6)` (the mode
+   the real Tome's close asks, 0x80110DE8). The film began (room 166 loaded at 2837), but the film's own frame wrote the
+   page's pending keep (ed88: r13-25172 = 4; 0x80050D4C -> 0x800B7208(127) -> 0x800B714C -> 0x800ADD7C -> 0x800B80A0 ->
+   0x8003F354) and the level-file header check at 0x801DDFE8 failed: assert, PPCHalt (saves/reports/hang-20261115-112424).
+2. The same, writing the keep first as the Tome's close does (`0x800B7208(4)`, after the mode request): the same assert,
+   now from the host's call in play mode (saves/reports/hang-20261115-112957).
+```c
+    if (film) {
+        coop_state_to_game(cpu, script);
+        u32 mode = mem_read32(cpu, cpu->gpr[13] - 24244u), ignore = 0u, keep = 4u;
+        hle_guest_call(cpu, 0x80018808u, &mode, 1, 0.0, &ignore);
+        hle_guest_call(cpu, 0x800B7208u, &keep, 1, 0.0, &ignore);  // (try 2 only)
+    }
+```
+The keep is written without trouble in the Tome's mode (player 1's page) and at a chapter change (mode 5: the old two-step
+rerun), not in play or film mode. Read before a third try.

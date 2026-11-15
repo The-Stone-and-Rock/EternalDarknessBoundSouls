@@ -207,6 +207,25 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   back where they stood, the letter as the reader's); together and apart checked (tome-trip-impl-notes.md "Max's Tome").
   Open, for the user: chapter 13 (a film takes the player there and the game brings them back), the mansion Tome (its
   film starts the next chapter).
+- The mansion's Chapter Pages in co-op (the user, 2026-11-15: "when either player uses a chapter page, a cutscene plays to
+  begin the chapter, both players should and start that chapter the same as in jump to game"). Traced (readers:
+  docs/research/chapter-page-readers.md): a page's use (1572-1580) sets its flag, takes the item, asks the state keep (ed88)
+  and the film (ed9(script, 6, film)); the real Tome closes into the film (mode 6, shown whole for both), whose end runs
+  the page's next step, ed87: the chapter loads (mode 5, mode 1) and player 2 is re-made beside player 1, as at Jump to Game.
+  Player 1's page already did this. Player 2's (their copy Tome) changed chapter at once with no film: FIXED (uncommitted):
+  a use that asks for a film runs no second step; the film's mode and the keep follow as the Tome's close does them. On the
+  way: the copy Tome writes its pages over ARAM's caches of the level's files and marked them gone only in its own memory,
+  so the real game later read the Tome's pictures as level data (the keep halted on its assert; a room load or a save could
+  too): FIXED, the copy's "gone" goes to the real game at every copy close (tome_copy_aram_words). Checked from Jump to
+  Game's chapter 12 (its scripts hold the pages; item 200 spawned): player 1's and player 2's page, together and apart (each
+  apart way round), all film 6 then chapter 2's opening then both in room 166 split; solo the same as before; a plain Tome
+  close then a door fine. Two failed tries in coop-failed-attempts.md. Reviewed (3 found, fixed): one film helper for both
+  players (player 1's page from a copy Tome, opened over player 2's close-up or door, had the same no-film fault); with
+  player 1's real Tome up beside player 2's copy, nothing is forced and that Tome's own close plays the film (run
+  page-both-tomes: film when player 1 closed it); the cache words follow the copy after each turn, not only at its close.
+  Not yet: the real mansion between chapters (level
+  0, reached through the prologue), other pages (chapters 3 and 11 play their films in-level), a chapter's end back to the
+  mansion (ed89 restores the keep).
 - Saving apart, in-game saves and save states: the user is still deciding how it should work (separate, together only,
   or whether it matters). Ask before designing.
 - Later: the in-game mod menu as its own page in the Tome; the launcher's settings inside the game's title menu
