@@ -11477,7 +11477,9 @@ static struct {
     bool bring_said;     // the bring's wait told once
     s32 way_in;          // the script that asked for room 5 (r13-23228 at the trip's ticket)
     bool taker_marker;   // the taker stood in that script's zone and the game's return marker doesn't: back at the marker
+    s32 trip_room;       // the room both go to: 5, or Max's 255 (tome_trip_way_in); 0 (cleared) reads as 5
 } g_tome_trip;
+#define TRIP_ROOM (g_tome_trip.trip_room > 0 ? g_tome_trip.trip_room : TOME_ROOM)
 static unsigned g_tome_trip_hooks;  // 1 the runner's and the behaviour pass's notifies, 2 the writer's intercept: 3 both
 // (getenv, as everywhere here; its MSVC deprecation note kept out of the build's output for these two)
 #if defined(__clang__)
@@ -15181,11 +15183,25 @@ static void tome_trip_stuck(CPUState* cpu, const char* what) {
 // 2 on the arrival spot when they asked); the fade in both halves (g_fade_mover 0, after this); no stayer window
 // (split_ticket_open). Nothing refused: a cutscene, the copy's turn, or player 1 casting or in a menu as player 2's door
 // moves them is told.
+// A trip's way in: a ticket into room 5 from another room; or Max's (chapter 5, the user 2026-11-15: "Max's tome pick up
+// should act the same way"), who has no room 5: the Tome's after-find script 1599, model 18's branch, plays film 114 and
+// sets the world's changes in his desk room 258, then takes him to 255 for the summon scene (fn66(255, SpawnMkr72,
+// HorrorCamera01, 0, 868)) and back to 258 (fn66(258, MaxSpawnMkr01, Camera01, 0, 1599): the letter, magick_give). Both
+// go to 255 as to room 5, and each goes back where they stood.
+static s32 tome_trip_way_in(CPUState* cpu, s32 to, s32 from) {
+    if (from == -1 || to == from)
+        return 0;
+    if (to == TOME_ROOM)
+        return TOME_ROOM;
+    const s32 running = (s32)(s16)mem_read32(cpu, cpu->gpr[13] - 23228u);
+    return to == 255 && from == 258 && running == 1599 ? 255 : 0;
+}
 static void tome_trip_ticket(CPUState* cpu) {
-    if ((s32)cpu->gpr[3] != TOME_ROOM || g_tome_trip.guard || !tome_trip_on(cpu))
+    if (g_tome_trip.guard || !tome_trip_on(cpu))
         return;
     const s32 from = g_coop_entered_p2 ? coop_object_room(cpu, g_coop_p2) : (s32)mem_read32(cpu, cpu->gpr[13] - 23276u);
-    if (from == TOME_ROOM || from == -1)
+    const s32 trip_room = tome_trip_way_in(cpu, (s32)cpu->gpr[3], from);
+    if (trip_room == 0)
         return;
     const unsigned long long frame = tome_frame(cpu);
     if (g_tome_trip.state != 0) {
@@ -15194,6 +15210,7 @@ static void tome_trip_ticket(CPUState* cpu) {
         tome_trip_clear(cpu);
     }
     g_tome_trip.state = 1;
+    g_tome_trip.trip_room = trip_room;
     g_tome_trip.taker = g_coop_entered_p2 ? 2 : 1;
     g_tome_trip.way_in = (s32)(s16)mem_read32(cpu, cpu->gpr[13] - 23228u);
     g_tome_trip.tickets = g_coop_tickets;
@@ -15201,7 +15218,7 @@ static void tome_trip_ticket(CPUState* cpu) {
     g_coop_room_p2 = false;
     const s32 other = coop_object_room(cpu, g_tome_trip.taker == 2 ? coop_player1_node(cpu) : g_coop_p2);
     fprintf(stderr, "[tome-trip] player %d's door from room %d to room %d: both go there (player %d in room %d; dissolve word %d; script %d, transition %d; frame %llu)\n",
-            g_tome_trip.taker, from, TOME_ROOM, 3 - g_tome_trip.taker, other, (s32)mem_read32(cpu, cpu->gpr[13] - 25680u),
+            g_tome_trip.taker, from, trip_room, 3 - g_tome_trip.taker, other, (s32)mem_read32(cpu, cpu->gpr[13] - 25680u),
             (s32)(s16)mem_read32(cpu, cpu->gpr[13] - 23228u), (s32)cpu->gpr[10], frame);
     if (cutscene_playing(cpu) || g_tome_copy_turn)
         fprintf(stderr, "[tome-trip] WARNING: the trip begun in %s (frame %llu)\n", g_tome_copy_turn ? "the Tome copy's turn" : "a cutscene", frame);
@@ -15301,9 +15318,9 @@ static bool tome_trip_inside_way_in(CPUState* cpu, u32 object, const float at[3]
 // P3: at the trip's change (0x80152298's entry, before room_slots_return and the load): each player's room, place, facing
 // and camera, as they stood when the change came.
 static void tome_trip_note(CPUState* cpu) {
-    if (g_tome_trip.state != 1 || g_tome_trip.p[0].noted || (s32)cpu->gpr[3] != TOME_ROOM || !tome_trip_on(cpu))
+    if (g_tome_trip.state != 1 || g_tome_trip.p[0].noted || (s32)cpu->gpr[3] != TRIP_ROOM || !tome_trip_on(cpu))
         return;
-    if ((s32)mem_read32(cpu, cpu->gpr[13] - 23276u) == TOME_ROOM)
+    if ((s32)mem_read32(cpu, cpu->gpr[13] - 23276u) == TRIP_ROOM)
         return;  // (a reload in the Tome room, not the change into it)
     for (int i = 0; i < 2; i++) {
         TomeTripPlayer* p = &g_tome_trip.p[i];
@@ -15339,11 +15356,11 @@ static bool tome_trip_brings(CPUState* cpu) {
         return false;
     if (!tome_trip_on(cpu))
         return false;
-    const s32 want = rescue ? g_tome_trip.target : TOME_ROOM;
+    const s32 want = rescue ? g_tome_trip.target : TRIP_ROOM;
     const u32 o1 = tome_trip_object(cpu, 1);
     if ((s32)mem_read32(cpu, cpu->gpr[13] - 23276u) != want || o1 == 0u || (s32)mem_read32(cpu, o1 + 592u) != want || tome_trip_changing(cpu))
         return false;
-    if (rescue && coop_object_room(cpu, g_coop_p2) != TOME_ROOM)
+    if (rescue && coop_object_room(cpu, g_coop_p2) != TRIP_ROOM)
         return false;  // (tome_trip_step ends it)
     const char* wait = tome_trip_casting(cpu, 2) ? "casting" : g_tome_copy_open || g_tome_copy_turn ? "in their copy of the Tome" : NULL;
     if (wait != NULL) {
@@ -15364,17 +15381,17 @@ static void tome_trip_brought(CPUState* cpu, s32 left) {
         return;
     }
     bool sent = false;
-    if (left != -1 && left != TOME_ROOM && left != g_tome_trip.p[0].room && coop_object_room(cpu, coop_player1_node(cpu)) != left) {
+    if (left != -1 && left != TRIP_ROOM && left != g_tome_trip.p[0].room && coop_object_room(cpu, coop_player1_node(cpu)) != left) {
         const u32 args[4] = {61u, 0u, 0u, (u32)left}, lr = cpu->lr;
         u32 ignore = 0u;
         sent = hle_guest_call(cpu, 0x801F5620u, args, 4, (double)guest_read_f32(cpu, cpu->gpr[2] - 22248u), &ignore);
         cpu->lr = lr;
     }
-    const int stopped = coop_streams_stop_except(cpu, TOME_ROOM);
+    const int stopped = coop_streams_stop_except(cpu, TRIP_ROOM);
     g_tome_trip.state = 2;
     g_tome_trip.frame = tome_frame(cpu);
-    fprintf(stderr, "[tome-trip] both in room 5: player 2 brought from room %d (event 61 to it: %s; %d streams stopped; frame %llu)\n", left,
-            sent ? "sent" : "not needed", stopped, g_tome_trip.frame);
+    fprintf(stderr, "[tome-trip] both in room %d: player 2 brought from room %d (event 61 to it: %s; %d streams stopped; frame %llu)\n", TRIP_ROOM,
+            left, sent ? "sent" : "not needed", stopped, g_tome_trip.frame);
 }
 
 // P6: the writer's intercept (split_ticket_ask's first branch). Our own tickets pass (true, passthrough as the caller set
@@ -15390,11 +15407,11 @@ static void tome_trip_brought(CPUState* cpu, s32 left) {
 static bool tome_trip_keep(CPUState* cpu) {
     if (g_tome_trip.guard)
         return true;
-    if ((s32)cpu->gpr[3] == TOME_ROOM || !tome_trip_on(cpu))
+    if ((s32)cpu->gpr[3] == TRIP_ROOM || !tome_trip_on(cpu))
         return false;
     const bool p2_asks = mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u);
     const s32 asker_room = p2_asks ? coop_object_room(cpu, g_coop_p2) : (s32)mem_read32(cpu, cpu->gpr[13] - 23276u);
-    if (asker_room != TOME_ROOM)
+    if (asker_room != TRIP_ROOM)
         return false;
     const unsigned long long frame = tome_frame(cpu);
     const s32 running = (s32)(s16)mem_read32(cpu, cpu->gpr[13] - 23228u);
@@ -15420,7 +15437,7 @@ static bool tome_trip_keep(CPUState* cpu) {
     }
     bool on[2];
     for (int i = 0; i < 2; i++)
-        on[i] = tome_trip_room_of(cpu, i + 1) == TOME_ROOM;
+        on[i] = tome_trip_room_of(cpu, i + 1) == TRIP_ROOM;
     const bool record = (g_tome_trip.state == 1 || g_tome_trip.state == 2) && g_tome_trip.p[0].noted && g_tome_trip.p[1].noted;
     if (!record && (script != 868 || !on[0] || !on[1])) {
         fprintf(stderr, "[tome-trip] the way out of room 5 (script %d to room %d, script %d) left to the game: %s (trip state %d, frame %llu)\n", running,
@@ -15604,7 +15621,7 @@ static void tome_trip_runner(CPUState* cpu) {
 // is then brought beside player 1 (state 6), as co-op did before separate rooms. 1599 asks once, so a kept way back is
 // never just dropped while a player is in room 5 (review-design R1, review-safety §8).
 static void tome_trip_rescue(CPUState* cpu, const char* why) {
-    const bool in1 = tome_trip_room_of(cpu, 1) == TOME_ROOM, in2 = tome_trip_room_of(cpu, 2) == TOME_ROOM;
+    const bool in1 = tome_trip_room_of(cpu, 1) == TRIP_ROOM, in2 = tome_trip_room_of(cpu, 2) == TRIP_ROOM;
     fprintf(stderr, "[tome-trip] WARNING: %s: %s (frame %llu)\n", why,
             in1 ? "player 1 goes back by the way back as the game asked it" : in2 ? "player 2 goes back by the way back as the game asked it" : "nobody in room 5: cleared",
             tome_frame(cpu));
@@ -15625,14 +15642,14 @@ static void tome_trip_next(CPUState* cpu, int st) {
     const int a = g_tome_trip.a, b = g_tome_trip.b;
     if (st == 3 && b != 0) {
         const s32 room = tome_trip_room_of(cpu, b);
-        if (room == TOME_ROOM) {
+        if (room == TRIP_ROOM) {
             tome_trip_go(cpu, 4);
             return;
         }
         fprintf(stderr, "[tome-trip] WARNING: player %d is not in room 5 (room %d): they stay where they are (frame %llu)\n", b, room, tome_frame(cpu));
         g_tome_trip.b = 0;
     }
-    if (tome_trip_room_of(cpu, a) != TOME_ROOM) {
+    if (tome_trip_room_of(cpu, a) != TRIP_ROOM) {
         tome_trip_rescue(cpu, "the one to take the way back is not in room 5");
         return;
     }
@@ -15695,7 +15712,7 @@ static void tome_trip_orphan(CPUState* cpu) {
         return;
     const int st = g_tome_trip.state;
     fprintf(stderr, "[tome-trip] WARNING: %s with the trip in state %d (frame %llu)\n", g_coop_p2 == 0u ? "player 2 gone" : "co-op off", st, frame);
-    if (st >= 3 && tome_trip_room_of(cpu, 1) == TOME_ROOM) {  // (the way back is 1599's one ask: player 1 still in room 5 needs it)
+    if (st >= 3 && tome_trip_room_of(cpu, 1) == TRIP_ROOM) {  // (the way back is 1599's one ask: player 1 still in room 5 needs it)
         u32 regs[8];
         memcpy(regs, g_tome_trip.regs, sizeof regs);
         regs[0] = (u32)g_tome_trip.asked_room;
@@ -15726,7 +15743,7 @@ static void tome_trip_step(CPUState* cpu) {
         return;
     case 2: {  // (player 1 out of room 5 with no way back kept: a game over, a reload; review-design M9)
         const s32 r1 = tome_trip_room_of(cpu, 1);
-        if (r1 != -1 && r1 != TOME_ROOM) {
+        if (r1 != -1 && r1 != TRIP_ROOM) {
             fprintf(stderr, "[tome-trip] WARNING: player 1 is in room %d with no way back kept: the trip cleared (frame %llu)\n", r1, frame);
             tome_trip_clear(cpu);
         }
@@ -15779,7 +15796,7 @@ static void tome_trip_step(CPUState* cpu) {
         if (tome_trip_changing(cpu))
             return;
         tome_trip_change_end(cpu);
-        if (g_tome_trip.a == 1 && tome_trip_room_of(cpu, 2) == TOME_ROOM) {
+        if (g_tome_trip.a == 1 && tome_trip_room_of(cpu, 2) == TRIP_ROOM) {
             // (player 2 still in room 5: the rescue, or B's ticket lost) the bring takes them to player 1.
             g_tome_trip.state = 6;
             g_tome_trip.wait_from = frame;
@@ -15797,7 +15814,7 @@ static void tome_trip_step(CPUState* cpu) {
         tome_trip_clear(cpu);
         return;
     case 6:  // the bring (tome_trip_brings) ends it
-        if (tome_trip_room_of(cpu, 2) != TOME_ROOM) {
+        if (tome_trip_room_of(cpu, 2) != TRIP_ROOM) {
             fprintf(stderr, "[tome-trip] player 2 is no longer in room 5 (room %d): over (frame %llu)\n", tome_trip_room_of(cpu, 2), frame);
             tome_trip_clear(cpu);
             return;

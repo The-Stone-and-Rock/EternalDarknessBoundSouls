@@ -82,6 +82,20 @@ TOME_AT="-1290,0,300"
 run_one() {
 case "$1" in
 s4) fresh 4 338 - ;;                # Karim: room 338 (its only way out is the ladder L04/132, Region01)
+s5) # Max: room 258 (his desk, TomeRegion L05/2434); 930 is 253's SECRET PASSAGE into it, open with flag 184 (found).
+    export ED_SET_FLAG=30:184; fresh 5 258 930; unset ED_SET_FLAG ;;
+m1) # Max (ch 5) together in 258, the Tome's after-find script 1599 started (film 114, world changes, 255's summon scene,
+    # back to 258 at MaxSpawnMkr01, the letter). Pass (2026-11-15, the user): both see the film; both go to 255 and back;
+    # each back where they stood; the letter and magick_give as player 1's; flags 321, 944, 490 on.
+    load_env 5 || return
+    from_state 5 tome-m1-c5-together ED_RUN_SCRIPT="300:1599" ;;
+m2) # Max apart: player 2 out to 253 first (640: 258's SECRET PASSAGE, Region08), then 1599. Pass: player 2 brought to 255
+    # with player 1, then back in 253 at their spot; player 1 back in 258 at theirs; the letter.
+    load_env 5 || return
+    # (Region08: x -188..97, y 392..697; player 2 put in it presses B on its SECRET PASSAGE, twice as the doors' runs do.)
+    # (-60,600 has furniture at height 205, above the box's 171: 2026-11-15's first try never took the passage.)
+    from_state 5 tome-m2-c5-apart ED_PUT="$((S + 30)),2,-120,470,10" ED_PAD2_SCRIPT="$((S + 120)),$((S + 126)),b;$((S + 180)),$((S + 186)),b" \
+        ED_RUN_SCRIPT="1300:1599" ;;
 s6) fresh 6 303 626 ;;              # Lindsey: room 303 (BoxRegion02, L06/335, the unprompted zone exit); 626 from 143
 s8) fresh 8 204 249 ;;              # Roberto: room 204 (Region02 L08/327 to 5, Region01 L08/329 to 211); 249 from 211
 s11) fresh 11 43 1036 ;;            # Michael: room 43 (Region02 L11/358 to 5, BoxRegion02 L11/360 to 60); 1036 from 60

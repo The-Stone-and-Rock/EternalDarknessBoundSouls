@@ -276,3 +276,25 @@ into the ladder's zone (-755 -23), and 132 took them to room 5 a second time, wi
 room 5 only while they carry neither thing 733 nor 831 (`fn78(5, ...)`, the player's list); the shortcut (1599 started
 directly) gives no Tome, so the ladder still leads to the Tome room. With a real pickup it leads to 339. Still to look at
 with the user's play: whose list 132 reads when player 2 holds the Tome and player 1 climbs (the two-Tome build).
+
+## Max's Tome (chapter 5), 2026-11-15
+
+The user: "Max's tome pick up should act the same way too. The flashback cutscene when he picks it up on full screen which
+loads the game world changes, players are where they were when it's picked up." Max has no room 5: 1599's model-18 branch
+plays film 114 in his desk room 258 and sets the world's changes (set_turns_into on things 871/862/658/487, flags 321 and
+944), takes the reader to 255 for the summon scene (`fn66(255, SpawnMkr72, HorrorCamera01, 0, 868)`), and back to 258
+(`fn66(258, MaxSpawnMkr01, Camera01, 0, 1599)`: the letter, flag 490, magick_give). Before: the reader went to 255 alone.
+
+Built: the trip's room is a value (`g_tome_trip.trip_room`, read through TRIP_ROOM; 0 reads as 5). `tome_trip_way_in`
+starts a trip on a ticket into room 5 from another room, or into 255 from 258 by script 1599; every test the trip made of
+room 5 now tests the trip's room. 1599's branch is picked by the reader's model, which the host already answers as the
+chapter's hero for either player (hle_object_model), so a pickup by player 2 takes Max's branch too.
+
+Runs (fresh chapter-5 state in 258: `s5`, flag 184 set so 253's SECRET PASSAGE 930 takes both in):
+- m1, together: both to 255 and back, each on their noted spot (-47 410 and 103 410), the letter as player 1's.
+- m2, apart (player 2 out through 640 to 253 first): film 114 full screen in both halves; player 2 brought from 253 to 255
+  (event 61 sent to 253); both halves show the summon; back: player 2 in 253 at 20 590 (noted 20 591), player 1 in 258
+  at -47 410 with the letter's words. Pictures: logs/run-20261115-102957-tome-m2-c5-apart/shots/000059, 069, 088.
+- z4 (Karim, room 5) after the change: as before.
+Not run: player 2 as the one who picks the Tome up (test presses can't press through its EXAMINE words; 1599 is started as
+player 1's).

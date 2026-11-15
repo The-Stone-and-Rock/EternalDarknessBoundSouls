@@ -202,9 +202,11 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   orders; solo, follow and the switch off untouched (rooms/tome-trip-impl-notes.md "Runs"). The taker who stood in an
   unprompted way-in zone (chapter 6's 335) goes back on the game's marker, so the zone doesn't take them again. Magick
   needs no new code: either player's Tome answers for both. Not yet played by the user. Karim's ladder dissolve that ate
-  room 338 in the staying player's half (below) is this way in: now both go, so both halves dissolve. Open, for the user:
-  Max's chapter (no Tome room: 258 to 255 and back), chapter 13 (a film takes the player there and the game brings them
-  back), the mansion Tome (its film starts the next chapter).
+  room 338 in the staying player's half (below) is this way in: now both go, so both halves dissolve. Max's chapter
+  (2026-11-15, the user's ask): the same trip with 255 as its room (film 114 full screen, both to 255's summon scene, each
+  back where they stood, the letter as the reader's); together and apart checked (tome-trip-impl-notes.md "Max's Tome").
+  Open, for the user: chapter 13 (a film takes the player there and the game brings them back), the mansion Tome (its
+  film starts the next chapter).
 - Saving apart, in-game saves and save states: the user is still deciding how it should work (separate, together only,
   or whether it matters). Ask before designing.
 - Later: the in-game mod menu as its own page in the Tome; the launcher's settings inside the game's title menu
