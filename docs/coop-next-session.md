@@ -1,3 +1,36 @@
+# HANDOFF 2026-11-15 early morning: the Tome trip checked; spells apart built; all uncommitted
+
+All from fresh Jump-to-Game states, test windows off the desktop and muted (ED_RUN_AWAY=1); nothing committed, nothing
+played by the user yet.
+- **The Tome trip** (below, 2026-11-14 night) re-run after the last fix: chapters 4, 6, 8 together and apart, both orders,
+  no WARNING; player 2 taking chapter 8's Tome door now goes back to their exact spot; solo, follow and ED_TOME_TRIP=0 show
+  no trip line (rooms/tome-trip-impl-notes.md "Runs"). Karim's ladder dissolve in the other half is this way in: both go.
+- **Spell lights per caster's room** (lights P7, Remastered spells): apart, a rune's light is in its caster's half alone
+  (host masks + renderer `set_spell_lights(..., views)`; .deps/GXRuntime changed, patch regenerated).
+- **Player 2 couldn't cast while apart** (found by those runs): their spell ended on its first step, by the game's rule
+  "a spell of another room than the room in play ends" (0x801C316C). Built: their spells step with their room current
+  (ED_SPELL_ROOMS=0 turns it off); the spell's bolt (beam, the circle's ring) runs its events in its room (r6c_creature,
+  type 36); effect requests queued in their room (the charge's sparkles) are made in it (fx_request_make); the 3D runes
+  and their flames are made in the caster's room (P7b); player 2's Tome casts are cast in their room (not run: chapter 3's
+  list had nothing to enchant). Effect log: every effect of player 2's spell in their room. docs/coop-todo.md has it all.
+  Run script rooms/build-run-spell-lights.sh (s3 a b c d).
+- **Then (the user: "whatever is still wrong you are able to correct"):** the green on player 1 during player 2's charge
+  was room 151's own blue lamp, the same with no cast and in solo (not a bug). The spell's real leak was its full-screen
+  flash quad, drawn over both halves: now drawn in the caster's half alone (fx_flash_make / fx_flash_draw, matched on the
+  pictures). docs/coop-todo.md has the runs.
+- Open for the user: Max's chapter, chapter 13 and the mansion Tome for the Tome trip; saving apart.
+
+# HANDOFF 2026-11-14 night: the Tome trip, built and mostly checked, uncommitted (paused for a restart)
+
+Both players go to the Tome room (room 5) when either takes its way in while apart, and each goes back to their own room
+and spot after (design rooms/design-tome-room.md, notes rooms/tome-trip-impl-notes.md, runs rooms/build-run-tome.sh;
+ED_TOME_TRIP, ED_TOME_BACK). Checked from fresh states: ch 4 (Karim), ch 8 apart both orders, ch 6 walk-in exit (the taker
+lands on the game's return marker when they stood in an unprompted way-in zone the marker isn't in), solo untouched.
+The Tome's pickup itself is started in tests as script 1599 (test presses don't move its EXAMINE words; real pads do).
+Last change (the marker lookup in the taker's own room, for player 2's door) is built but its rerun was stopped for the
+user's restart: run `sh docs/research/separate-rooms/build-run-tome.sh s8 z8a z8b s6 6a 6b s4 z4 solo follow off`.
+Test runs use ED_RUN_AWAY=1 (window off the desktop, muted) until the user asks to see the game (tools/ed/away.ps1).
+
 # HANDOFF 2026-11-14: effects per room and per camera, uncommitted on top of 96745f8
 
 **Built and checked by script from fresh Jump-to-Game states, NOT committed, NOT yet played by the user** (ED_FX_ROOMS,

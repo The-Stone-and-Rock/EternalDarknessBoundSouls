@@ -167,6 +167,8 @@ while :; do
         echo "ED_INPUT_SCRIPT=$IN"; echo "ED_PAD2_SCRIPT=$PAD2"; echo "ED_PUT=$PUTS"
     } | tee "$R/jtg.txt"
     powershell -NoProfile -ExecutionPolicy Bypass -File tools/ed/shots.ps1 -proc "$PROC" -dir "$R/shots" -everyMs "${ED_RUN_SHOTS_MS:-250}" -width "${ED_RUN_SHOTS_W:-960}" >/dev/null 2>&1 &
+    # ED_RUN_AWAY=1: the window off the visible desktop and the sound muted, while the user works (tools/ed/away.ps1)
+    if [ -n "$ED_RUN_AWAY" ]; then export ED_MUTE=1; powershell -NoProfile -ExecutionPolicy Bypass -File tools/ed/away.ps1 -proc "$PROC" >/dev/null 2>&1 & fi
     ED_SETTINGS="$R/settings.ini" ED_NO_LAUNCHER=1 ED_SKIP_INTRO=1 ED_INPUT_SCRIPT="$IN" ED_PAD2_SCRIPT="$PAD2" ED_PUT="$PUTS" \
     ED_BOTH="$R/both.tsv" ED_DETAIL_LOG=1 ED_ROOM_LOG=1 ED_COOP_LOG=1 ED_COOP_CAST_LOG=1 ED_COOP_PAD_LOG=1 ED_COOP_TRACE=1 \
         "build-win/$EXE_NAME" generated/main.dol --iso dump/GEDP01.iso --no-launcher \

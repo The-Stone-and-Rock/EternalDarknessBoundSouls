@@ -126,7 +126,45 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
 - The staying player keeps every action through the other's door countdown: quick spells and casting, examine and
   pickup (B and the prompts), zone looks, their Start menu / Tome. Today the split hold (docs/coop-level3-design.md
   "Phase 1b") frees the room but these presses are still refused for that second (F4). Next.
-- Lights per room: stage 1+2 built 2026-11-12 (unplayed); P7, spell lights by the caster's room, still to do.
+- Lights per room: stage 1+2 built 2026-11-12 (unplayed). P7, spell lights by the caster's room, BUILT 2026-11-15
+  (uncommitted, unplayed; Remastered spells only): apart, a rune's light is in the half of its caster's room alone (the
+  rune keeps its caster's room, rune_caster_room; the renderer's set_spell_lights takes a view mask; a half a spell is kept
+  out of keeps its lamps' haze strength, a review fix). Checked: player 1's cast in 153 with player 2 in 151 gives views 1;
+  together and solo unchanged (build-run-spell-lights.sh). P7b (the rune model's own room) not built.
+- **Player 2 can't cast while apart (found 2026-11-15 by the spell-lights runs):** their quick spell is cast ("cast by
+  0x4C: player 2's") but leaves the spell list r13-22324 within 18 frames, so no circle, no runes and no effect; together the
+  same spell runs ~4 s (logs/run-20261115-041146-spell-list-apart, -041205-spell-list-together, ED_COOP_SPELL_LIST=1).
+  Cause (read, 2026-11-15): every spell step opens with the game's rule "a spell whose room (+8) is not the room in play
+  ends" (0x801C316C at 0x801C31B8, 0x801CDF1C at 0x801CDF38); their records are stamped with their room in their turn but
+  were stepped by coop_spells_update with player 1's room in play. BUILT (uncommitted, unplayed; ED_SPELL_ROOMS=0 turns it
+  off): their spell steps with its room current when that room is theirs and resident. Checked (build-run-spell-lights.sh,
+  fresh ch 3 state): player 2's spell apart now runs its full course as together (both records, the runes, its light in
+  their half alone: views 2); player 1's apart, together and solo unchanged. Then the rest of the spell, the same day
+  (uncommitted, unplayed), each piece made in the room it belongs to: the spell's bolt (type 36, the beam to its target and
+  the circle's ring, events through the game's pump) runs its events with its room current (r6c_creature, as creatures);
+  effect requests queued in player 2's room (op 16: the charge's sparkles) are made with that room current at the queue's
+  drain (fx_request_make on 0x801413E8); any spell of player 2's room steps there (a creature's too), the identity swap
+  theirs alone; the 3D runes (Remastered spells) and their rising flames are made in the caster's room (P7b). Effect log
+  of player 2's cast apart (logs/run-20261115-051342-spell-fx-a6): every effect of the spell in room 153; player 1's
+  cast apart, together and solo as before. "Player 1 glows green during player 2's charge" (seen 2026-11-15) was NOT the
+  spell: with no cast at all player 1 looks the same at that spot (-250 127 in 151; logs/run-20261115-072935-flash-nocast),
+  and so does solo Anthony there (logs/run-20261115-073005-jtg-solo-151-spot): room 151's own blue lamps (17,142,188) give
+  the cyan-green fills (ED_GLOW_PROBE: player 1's own light call loads them). What WAS the spell's: its screen flash, a
+  type-23 thing (0x800CC8BC, made by the charge at 0x801C3F14) drawn by the things' walk (0x800C844C -> 0x800CC4C0 ->
+  0x80023D30) as a 640x480 colour quad over the whole frame, so both halves (draw 198 of
+  logs/run-20261115-070422-glow-dump2). FIXED (uncommitted): each flash is noted with its room when made, and apart its
+  identity matrix (loaded at 0x80023DA0) is marked out of the other room's half, as the door's fade is (fx_flash_make,
+  fx_flash_draw). Measured on the pictures mid-charge: player 1's half was +2 per channel brighter under player 2's flash
+  and now matches a no-cast run exactly; player 2's half keeps its flash (G 27 -> 32); player 1's flash stays in their half;
+  their HUD draws. Probes kept for later (testing, off unless set): ED_GLOW_PROBE=F1,F2 (light loads, masks, actor light
+  calls, matrix loads), ED_GRID_PROBE=F1,F2 (each resident room's grid lamp colours). Player 2's Tome casts are cast in
+  their room too (coop_cast, tome_copy_left) but not run: chapter 3's Enchant list had nothing that can be enchanted.
+  Reviewed the same morning (three lenses, each finding verified; 6 confirmed, all fixed): player 1's own spell left in
+  the room they went out of ends there again (the room swap leaves their records out); a bolt's events take all five
+  player words (its caster test reads r13-21488); the rune spawn and flame brackets use the spell steps' test, not the
+  per-frame lights one; the effect-request notes and flash rooms are cleared on a state load and a note "from the
+  future" is refused; the renderer's spell haze follows "a spell shown in this view" whether or not its light won one of
+  the 12 air slots. Re-run after: the spell set, the effects set and the Tome trip (ch 8 z8b, ch 4 z4) all as before.
 - Fog/haze apart (the user, 2026-11-13): "fog from the block room is seen in the other player's screen (the room right
   next to the block room) where fog is not present, and vice versa ... depending on which player leaves the room, the fog
   changes." It follows the room in play. The game sets no GX fog per room (lights-game-readers.md), so the haze is drawn
@@ -157,6 +195,16 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
 - Seen while checking (with the effect code off too, so not from it): when player 1 takes Karim's ladder out of 338,
   the game's burn-away dissolve of the transition also eats room 338 in the staying player 2's half for about a second
   (logs/run-*-fx-a-0 around frame 3250; Screenshots for Claude/fx-flames/a-seq.jpg).
+- The Tome room with the players apart (the user, 2026-11-14): either player taking the Tome-room way in sends both there
+  with the dissolve, and after the pickup and the film each goes back to the room and spot they were at. BUILT
+  2026-11-14/15, uncommitted, checked by script from fresh Jump-to-Game states (ED_TOME_TRIP, default on with the stay;
+  ED_TOME_BACK=marker puts the taker on the game's own return marker): chapters 4, 6 and 8, together and apart, both
+  orders; solo, follow and the switch off untouched (rooms/tome-trip-impl-notes.md "Runs"). The taker who stood in an
+  unprompted way-in zone (chapter 6's 335) goes back on the game's marker, so the zone doesn't take them again. Magick
+  needs no new code: either player's Tome answers for both. Not yet played by the user. Karim's ladder dissolve that ate
+  room 338 in the staying player's half (below) is this way in: now both go, so both halves dissolve. Open, for the user:
+  Max's chapter (no Tome room: 258 to 255 and back), chapter 13 (a film takes the player there and the game brings them
+  back), the mansion Tome (its film starts the next chapter).
 - Saving apart, in-game saves and save states: the user is still deciding how it should work (separate, together only,
   or whether it matters). Ask before designing.
 - Later: the in-game mod menu as its own page in the Tome; the launcher's settings inside the game's title menu

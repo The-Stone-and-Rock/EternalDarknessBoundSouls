@@ -353,6 +353,14 @@ Files: `graphics/aurora/lib/gfx/gxcore_draw.cpp`, `gxcore_draw.hpp`, `shadow.hpp
    `cameraOffset`, with `frame.camera` that view's camera matrix: this fixes P4.
 
 ### P7. Spell lights per view, by the caster's room (host + renderer)
+**Built 2026-11-15 (uncommitted).** As below, with these differences: one call carries the lights and their masks
+(`dol_aurora_set_spell_lights_views`; `set_spell_lights(lights, count, views)`, views null = all), so the two can't be out
+of step; `add_spell_lights(f, V, view)` skips a light whose mask lacks the view (view -1 all); and, from the review, the
+volumetric pass's spell strength (write_params' misc[0]) now follows the Frame's own spell lights (a radius below 0), not
+the global count, so the half a spell is kept out of keeps its lamps' haze. Runs (build-run-spell-lights.sh, fresh ch 3
+state): player 1's cast in 153 with player 2 in 151: `[lights] rune 0's light (caster's room 153): views 1, rooms 153 and
+151`; together and solo no apart line (views 3, as before; solo's runes made). Player 2's own cast apart could not be
+checked: their spell leaves the list within 18 frames apart (docs/coop-todo.md), a separate fault.
 - **Renderer:** `dol_aurora_set_spell_light_views(const uint8_t* views, int n)`: bit v = shown in view v, default 3, stored
   next to `g_spell` (shadow.cpp:676-692). `add_spell_lights` skips a light whose mask lacks the view (view -1: all).
 - **Host, the rune's room** (new field `g_runes[i].room`, set once when the rune is made in runes_frame, hle.c:9845-9903,

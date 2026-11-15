@@ -820,3 +820,23 @@ Also wrong on the way: matrix 60's rotation built as R1 x R2 instead of R1 x R2^
 Player 2's eye position was written into 0x80602340 for their effect draw. A logged run showed the word holds the
 camera's look direction along the floor (z dropped, made unit: (-0.904, 0.428, 0) for a -row 2 of (-0.645, 0.305,
 -0.701)), not a position: writing an eye there would have thrown the smoke columns far off. Fixed before it was played.
+
+## Player 2's rune sparks apart: a hook on the wrong maker (2026-11-15)
+Player 2's cast apart left two effects (draw 0x8017FF6C, steps 0x8017790C/0x80177990) stamped player 1's room 151, on
+the 3D rune models (Remastered spells). A reader traced 0x80177588 (their kind) to the spell record maker 0x801D04C0 called
+from type 56's animation callback (0x800A5250, r3 = r13-23276), so an intercept rewrote r3 to the rune thing's room:
+```c
+static void fx_rune_record(CPUState* cpu) {  // installed on 0x801D04C0 (0x9421FFA0, bl at 0x800A5250)
+    g_hle_passthrough = true;
+    if (g_fx_rooms != 1 || cpu->lr != 0x800A5254u || !g_settings.mod_coop || g_coop_p2 == 0u || !coop_stay_apart(cpu))
+        return;
+    const s32 room = coop_object_room(cpu, r6_node_of_id(cpu, mem_read32(cpu, cpu->gpr[13] - 25292u)));
+    if (room == -1 || room == (s32)cpu->gpr[3] || room != coop_object_room(cpu, g_coop_p2) || room_slot_of(cpu, room) < 0)
+        return;
+    cpu->gpr[3] = (u32)room;
+}
+```
+A probe on every call (logs/run-20261115-050911-spell-fx-a5) showed 0x801D04C0 is never called in that run: the sparks
+are the host's own rune flames (rune_flame, 0x8014152C(..., 0x80177588)), made from runes_frame with player 1's room in
+play. Fixed there instead (rune_flame inside coop_room_in of the rune's room); the hook was removed. Probe a maker's calls
+before hooking it.
