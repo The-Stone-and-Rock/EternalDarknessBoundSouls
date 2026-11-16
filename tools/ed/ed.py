@@ -25,6 +25,8 @@ The game, not a room:
   cinematic [N|TEXT]    a cinematic (ed55 n): level, room, its start and end scripts, files, what plays next, who plays it
   film [N]              a film (ed83 n): its fmv files, end script, alignment, who plays it
   mode [N]              an input mode (ed56 n): what it is, its handlers, which read the room in play, who starts it
+  catalogue [--level N] writes docs/game/catalogue/: every level, room and region with what each script does, the tests
+                        guarding each call, a room's own branch of a shared script. --script L00/ID [--room N]: one script
   door [ROOM]           every way in and out of a room: from where, prompt, entry, camera, what its transition does
   transition [N]        what each door transition number does: motion, fade, ticks, what it looks like
   item TEXT|ID          an item by name, label or type id: words, Use/Check/Mix scripts, ammo, where placed, its examine

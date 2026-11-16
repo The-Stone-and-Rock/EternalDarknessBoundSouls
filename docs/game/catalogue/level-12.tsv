@@ -1,0 +1,1935 @@
+level	room	script	from	line	kind	call	what	if	via
+12	51	1021	Region01 enter	1	door	fn71	room 137 queued (loaded ahead)		
+12	51	1021	Region01 enter	2	door	fn66	door to room 137 at EntryMkr02, camera Camera01, transition 3		
+12	51	1020	Region12 enter	2	flag	fn30	asks flag 6	fn0() == 0	
+12	51	1020	Region12 enter	3	flag	fn30	asks flag 7	fn0() == 0 and fn30(6) == 1	
+12	51	1020	Region12 enter	4	flag	fn30	asks flag 5	fn0() == 0 and fn30(6) == 1 and fn30(7) == 1	
+12	51	1020	Region12 enter	5	other	fn78	handle	fn0() == 0 and fn30(6) == 1 and fn30(7) == 1 and fn30(5) == 1	
+12	51	1020	Region12 enter	6	other	ed166	model_of	fn0() == 0 and fn30(6) == 1 and fn30(7) == 1 and fn30(5) == 1	
+12	51	1020	Region12 enter	7	flag	fn29	flag 418 off	fn0() == 0 and fn30(6) == 1 and fn30(7) == 1 and fn30(5) == 1 and ed166(L0) == 9	
+12	51	1020	Region12 enter	8	flag	fn29	flag 787 on	fn0() == 0 and fn30(6) == 1 and fn30(7) == 1 and fn30(5) == 1 and ed166(L0) == 9	
+12	51	1020	Region12 enter	9	other	fn168	music_set	fn0() == 0 and fn30(6) == 1 and fn30(7) == 1 and fn30(5) == 1 and ed166(L0) == 9	
+12	51	1020	Region12 enter	10	other	ed241	load_level_pack	fn0() == 0 and fn30(6) == 1 and fn30(7) == 1 and fn30(5) == 1 and ed166(L0) == 9	
+12	51	1020	Region12 enter	11	door	fn71	room 100 queued (loaded ahead)	fn0() == 0 and fn30(6) == 1 and fn30(7) == 1 and fn30(5) == 1 and ed166(L0) == 9	
+12	51	1020	Region12 enter	12	other	fn78	handle	fn0() == 0 and fn30(6) == 1 and fn30(7) == 1 and fn30(5) == 1 and ed166(L0) == 9	
+12	51	1020	Region12 enter	13	other	fn79	send_event	fn0() == 0 and fn30(6) == 1 and fn30(7) == 1 and fn30(5) == 1 and ed166(L0) == 9	
+12	51	1020	Region12 enter	14	door	fn66	door to room 100 at EntryMkr01, camera Camera01, transition 3, then script 1161	fn0() == 0 and fn30(6) == 1 and fn30(7) == 1 and fn30(5) == 1 and ed166(L0) == 9	
+12	51	1020	Region12 enter	18	words	ed12	room words WARNING "Alex recalls her grandfather's notes: To fight the Liche Pious Augustus, she needs to Summ"	(fn30(6) ~= 1) or (fn30(7) ~= 1) or (fn30(5) ~= 1)	
+12	90	2477	the room's arrival	1	other	fn78	handle		
+12	90	2477	the room's arrival	2	other	fn79	send_event		
+12	90	2477	the room's arrival	3	other	ed113	room_spell_flag		
+12	90	2477	the room's arrival	4	room_test	fn25	asks the room in play		
+12	90	2477	the room's arrival	5	other	ed17	alignment	fn25() == 90	
+12	90	2477	the room's arrival	6	flag	fn30	asks flag 741	fn25() == 90	
+12	90	2477	the room's arrival	7	other	ed70	barrier_make	fn25() == 90 and fn30(741) == 0	
+12	90	596	Region01 enter	1	door	fn71	room 100 queued (loaded ahead)		
+12	90	596	Region01 enter	2	door	fn66	door to room 100 at EntryMkr05, camera Camera05, transition 3		
+12	90	595	Region02 enter	1	door	fn71	room 91 queued (loaded ahead)		
+12	90	595	Region02 enter	2	door	fn66	door to room 91 at EntryMkr02, camera Camera04, transition 3		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	2	other	fn78	handle		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	3	other	fn104	place_of		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	4	other	ed24	nearest_class2		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	6	other	fn23	in_zone	fn0() == 0	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	8	camera	fn8	camera Camera01	fn0() == 0 and fn23(CameraRgn05) and L2 == -1	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	9	chain	fn36	waits 40 frames	fn0() == 0 and fn23(CameraRgn05) and L2 == -1	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	13	camera	fn8	camera Camera01	L2 ~= -1 and L2 > 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	14	chain	fn36	waits 40 frames	L2 ~= -1 and L2 > 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	17	camera	fn8	camera Camera04	L2 <= 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	18	chain	fn36	waits 40 frames	L2 <= 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	21	other	fn23	in_zone	not fn23(CameraRgn05)	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	23	camera	fn8	camera Camera01	not fn23(CameraRgn05) and fn23(CameraRgn01) and L2 == -1	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	24	chain	fn36	waits 40 frames	not fn23(CameraRgn05) and fn23(CameraRgn01) and L2 == -1	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	28	camera	fn8	camera Camera01	L2 ~= -1 and L2 > 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	29	chain	fn36	waits 40 frames	L2 ~= -1 and L2 > 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	32	camera	fn8	camera Camera05	L2 <= 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	33	chain	fn36	waits 40 frames	L2 <= 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	36	hold	fn22	cutscene(1, 1)	LastArrayOn == 1	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	37	other	ed17	alignment	LastArrayOn == 1	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	38	other	ed152	spell_slot	LastArrayOn == 1	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	42	other	ed152	spell_slot	ed152(4) ~= 0	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	46	other	ed152	spell_slot	ed152(4) ~= 1	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	49	other	fn63	marker_pos		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	50	other	ed115	appear_effect		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	51	other	fn132	stops_on_hold		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	52	other	fn133	gear_stops_on_hold		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	53	other	ed280	spell_node_acts_in_hold		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	54	other	fn88	model_on		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	55	other	ed287	show_held		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	56	other	ed117	fade_model		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	58	state	fn1	its state to 1		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	59	chain	fn36	waits 128 frames		
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	62	other	fn23	in_zone	not fn23(CameraRgn01)	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	64	camera	fn8	camera Camera01	not fn23(CameraRgn01) and fn23(CameraRgn06) and L2 == -1	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	65	chain	fn36	waits 40 frames	not fn23(CameraRgn01) and fn23(CameraRgn06) and L2 == -1	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	69	camera	fn8	camera Camera01	L2 ~= -1 and L2 > 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	70	chain	fn36	waits 40 frames	L2 ~= -1 and L2 > 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	73	camera	fn8	camera Camera06	L2 <= 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	74	chain	fn36	waits 40 frames	L2 <= 1000	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	78	hold	fn22	cutscene(0, 1)	fn0() ~= 0 and fn0() == 1	
+12	90	1452	CameraRgn01 enter; CameraRgn05 enter; CameraRgn06 enter	79	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	90	2315	BoxRegion01 enter; BoxRegion02 enter	1	flag	fn30	asks flag 455		
+12	90	2315	BoxRegion01 enter; BoxRegion02 enter	2	examine	ed219	EXAMINE: words by a variable (29, -1), close-up camera InvisFloorCam01	fn30(455) == 1	
+12	91	2648	the room's arrival	1	other	fn78	handle		
+12	91	2648	the room's arrival	2	other	fn79	send_event		
+12	91	2648	the room's arrival	3	other	fn78	handle		
+12	91	2648	the room's arrival	4	other	ed17	alignment		
+12	91	2648	the room's arrival	5	other	fn104	place_of		
+12	91	2648	the room's arrival	6	room_test	fn25	asks the room in play		
+12	91	2648	the room's arrival	129	room_test	fn25	asks the room in play		
+12	91	2648	the room's arrival	209	room_test	fn25	asks the room in play		
+12	91	2648	the room's arrival	218	room_test	fn25	asks the room in play		
+12	91	521	ExitRgn01 enter	1	door	fn71	room 90 queued (loaded ahead)		
+12	91	521	ExitRgn01 enter	2	door	fn66	door to room 90 at EntryMkr03, camera Camera03, transition 3		
+12	91	2387	CameraRgn01 enter	1	other	fn78	handle		
+12	91	2387	CameraRgn01 enter	2	other	ed17	alignment		
+12	91	2387	CameraRgn01 enter	3	other	ed152	spell_slot		
+12	91	2387	CameraRgn01 enter	7	other	ed152	spell_slot	ed152(4) ~= 0	
+12	91	2387	CameraRgn01 enter	11	other	ed152	spell_slot	ed152(4) ~= 1	
+12	91	2387	CameraRgn01 enter	17	room_test	fn25	asks the room in play	fn0() == 0	
+12	91	2387	CameraRgn01 enter	18	room_test	fn25	asks the room in play	fn0() == 0 and fn25() ~= 272	
+12	91	2387	CameraRgn01 enter	20	camera	fn8	camera Camera01		
+12	91	2387	CameraRgn01 enter	21	other	fn3	camera_ease_eye		
+12	91	2387	CameraRgn01 enter	22	other	fn2	camera_ease_target		
+12	91	2387	CameraRgn01 enter	24	hold	fn22	cutscene(1, 1)	LastArrayOn == 2	
+12	91	2387	CameraRgn01 enter	26	state	fn1	its state to 1	LastArrayOn == 2	
+12	91	2387	CameraRgn01 enter	28	room_test	fn25	asks the room in play		
+12	91	2387	CameraRgn01 enter	29	room_test	fn25	asks the room in play	fn25() ~= 273	
+12	91	2387	CameraRgn01 enter	40	room_test	fn25	asks the room in play		
+12	91	2387	CameraRgn01 enter	41	room_test	fn25	asks the room in play	fn25() ~= 275	
+12	91	2387	CameraRgn01 enter	51	room_test	fn25	asks the room in play		
+12	91	2387	CameraRgn01 enter	52	room_test	fn25	asks the room in play	fn25() ~= 277	
+12	91	2387	CameraRgn01 enter	65	room_test	fn25	asks the room in play		
+12	91	2387	CameraRgn01 enter	66	room_test	fn25	asks the room in play	fn25() ~= 278	
+12	91	2387	CameraRgn01 enter	81	room_test	fn25	asks the room in play		
+12	91	2387	CameraRgn01 enter	82	room_test	fn25	asks the room in play	fn25() ~= 276	
+12	91	2387	CameraRgn01 enter	92	room_test	fn25	asks the room in play		
+12	91	2387	CameraRgn01 enter	101	room_test	fn25	asks the room in play		
+12	91	2387	CameraRgn01 enter	115	room_test	fn25	asks the room in play		
+12	91	2387	CameraRgn01 enter	116	room_test	fn25	asks the room in play	fn25() ~= 282	
+12	91	2387	CameraRgn01 enter	132	other	fn63	marker_pos	L2 ~= 0	
+12	91	2387	CameraRgn01 enter	133	other	ed152	spell_slot	L2 ~= 0	
+12	91	2387	CameraRgn01 enter	135	other	ed115	appear_effect	L2 ~= 0 and ed152(4) == 0	
+12	91	2387	CameraRgn01 enter	138	other	ed152	spell_slot	ed152(4) ~= 0	
+12	91	2387	CameraRgn01 enter	140	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	91	2387	CameraRgn01 enter	143	other	ed152	spell_slot	ed152(4) ~= 1	
+12	91	2387	CameraRgn01 enter	145	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	91	2387	CameraRgn01 enter	148	other	ed115	appear_effect	ed152(4) ~= 2	
+12	91	2387	CameraRgn01 enter	150	other	fn132	stops_on_hold		
+12	91	2387	CameraRgn01 enter	151	other	fn133	gear_stops_on_hold		
+12	91	2387	CameraRgn01 enter	152	other	ed280	spell_node_acts_in_hold		
+12	91	2387	CameraRgn01 enter	153	other	fn88	model_on		
+12	91	2387	CameraRgn01 enter	154	other	ed287	show_held		
+12	91	2387	CameraRgn01 enter	155	other	ed117	fade_model		
+12	91	2387	CameraRgn01 enter	157	state	fn1	its state to 1		
+12	91	2387	CameraRgn01 enter	158	chain	fn36	waits 128 frames		
+12	91	2387	CameraRgn01 enter	162	other	fn132	stops_on_hold	fn0() ~= 0 and fn0() == 1	
+12	91	2387	CameraRgn01 enter	163	hold	fn22	cutscene(0, 1)	fn0() ~= 0 and fn0() == 1	
+12	91	2387	CameraRgn01 enter	164	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	91	2387	CameraRgn01 enter	168	camera	fn10	camera IntroCam01 (its path)	fn0() ~= 1 and fn0() == 2	
+12	91	2387	CameraRgn01 enter	169	state	fn1	its state to 3	fn0() ~= 1 and fn0() == 2	
+12	91	2387	CameraRgn01 enter	170	chain	fn36	waits 120 frames	fn0() ~= 1 and fn0() == 2	
+12	91	2387	CameraRgn01 enter	175	other	fn63	marker_pos	fn0() ~= 2 and fn0() == 3	
+12	91	2387	CameraRgn01 enter	176	hold	fn111	player_on(1)	fn0() ~= 2 and fn0() == 3	
+12	91	2387	CameraRgn01 enter	177	other	ed152	spell_slot	fn0() ~= 2 and fn0() == 3	
+12	91	2387	CameraRgn01 enter	179	other	ed115	appear_effect	fn0() ~= 2 and fn0() == 3 and ed152(4) == 0	
+12	91	2387	CameraRgn01 enter	182	other	ed152	spell_slot	ed152(4) ~= 0	
+12	91	2387	CameraRgn01 enter	184	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	91	2387	CameraRgn01 enter	187	other	ed152	spell_slot	ed152(4) ~= 1	
+12	91	2387	CameraRgn01 enter	189	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	91	2387	CameraRgn01 enter	192	other	ed115	appear_effect	ed152(4) ~= 2	
+12	91	2387	CameraRgn01 enter	194	other	fn132	stops_on_hold		
+12	91	2387	CameraRgn01 enter	195	other	fn133	gear_stops_on_hold		
+12	91	2387	CameraRgn01 enter	196	other	ed280	spell_node_acts_in_hold		
+12	91	2387	CameraRgn01 enter	197	other	fn88	model_on		
+12	91	2387	CameraRgn01 enter	198	other	ed287	show_held		
+12	91	2387	CameraRgn01 enter	199	other	ed117	fade_model		
+12	91	2387	CameraRgn01 enter	201	state	fn1	its state to 1		
+12	91	2387	CameraRgn01 enter	202	chain	fn36	waits 128 frames		
+12	91	2352	Region01 enter	1	examine	ed220	EXAMINE: BLOOD_RIVER "In the streets of the damned, blood flows along channels gouged in stone. For an"		
+12	92	2648	the room's arrival	1	other	fn78	handle		
+12	92	2648	the room's arrival	2	other	fn79	send_event		
+12	92	2648	the room's arrival	3	other	fn78	handle		
+12	92	2648	the room's arrival	4	other	ed17	alignment		
+12	92	2648	the room's arrival	5	other	fn104	place_of		
+12	92	2648	the room's arrival	6	room_test	fn25	asks the room in play		
+12	92	2648	the room's arrival	8	flag	fn30	asks flag 619	fn25() == 92 and fn0() == 0	
+12	92	2648	the room's arrival	9	flag	fn30	asks flag 620	fn25() == 92 and fn0() == 0	
+12	92	2648	the room's arrival	10	flag	fn30	asks flag 621	fn25() == 92 and fn0() == 0	
+12	92	2648	the room's arrival	11	other	fn78	handle	fn25() == 92 and fn0() == 0	
+12	92	2648	the room's arrival	13	other	fn87	model_off	fn25() == 92 and fn0() == 0 and L4 == 0	
+12	92	2648	the room's arrival	16	other	fn88	model_on	L4 ~= 0	
+12	92	2648	the room's arrival	18	other	fn78	handle		
+12	92	2648	the room's arrival	20	other	fn87	model_off	L5 == 0	
+12	92	2648	the room's arrival	23	other	fn88	model_on	L5 ~= 0	
+12	92	2648	the room's arrival	25	other	fn78	handle		
+12	92	2648	the room's arrival	27	other	fn87	model_off	L6 == 0	
+12	92	2648	the room's arrival	30	other	fn88	model_on	L6 ~= 0	
+12	92	2648	the room's arrival	32	other	ed254	previous_room		
+12	92	2648	the room's arrival	37	state	fn1	its state to 1	L8 ~= 83 and L4 == 0 and L5 == 0 and L6 == 0	
+12	92	2648	the room's arrival	41	state	fn1	its state to 4	(L4 ~= 0) or (L5 ~= 0) or (L6 ~= 0)	
+12	92	2648	the room's arrival	43	other	fn132	stops_on_hold	(L4 ~= 0) or (L5 ~= 0) or (L6 ~= 0) and L8 ~= 100	
+12	92	2648	the room's arrival	44	other	fn133	gear_stops_on_hold	(L4 ~= 0) or (L5 ~= 0) or (L6 ~= 0) and L8 ~= 100	
+12	92	2648	the room's arrival	45	other	ed280	spell_node_acts_in_hold	(L4 ~= 0) or (L5 ~= 0) or (L6 ~= 0) and L8 ~= 100	
+12	92	2648	the room's arrival	46	other	fn88	model_on	(L4 ~= 0) or (L5 ~= 0) or (L6 ~= 0) and L8 ~= 100	
+12	92	2648	the room's arrival	47	other	ed287	show_held	(L4 ~= 0) or (L5 ~= 0) or (L6 ~= 0) and L8 ~= 100	
+12	92	2648	the room's arrival	48	other	ed152	spell_slot	(L4 ~= 0) or (L5 ~= 0) or (L6 ~= 0) and L8 ~= 100	
+12	92	2648	the room's arrival	52	other	ed152	spell_slot	ed152(4) ~= 0	
+12	92	2648	the room's arrival	56	other	ed152	spell_slot	ed152(4) ~= 1	
+12	92	2648	the room's arrival	59	other	ed115	appear_effect		
+12	92	2648	the room's arrival	60	other	ed117	fade_model		
+12	92	2648	the room's arrival	65	other	ed70	barrier_make		
+12	92	2648	the room's arrival	73	other	ed70	barrier_make	L8 == 83 and L4 == 0 and L5 == 0 and L6 == 0	
+12	92	2648	the room's arrival	78	camera	fn8	camera IntroCam01	fn0() ~= 0 and fn0() == 1	
+12	92	2648	the room's arrival	79	chain	fn36	waits 10 frames	fn0() ~= 0 and fn0() == 1	
+12	92	2648	the room's arrival	80	hold	fn22	cutscene(1, 1)	fn0() ~= 0 and fn0() == 1	
+12	92	2648	the room's arrival	81	state	fn1	its state to 2	fn0() ~= 0 and fn0() == 1	
+12	92	2648	the room's arrival	85	chain	fn36	waits 20 frames	fn0() ~= 1 and fn0() == 2	
+12	92	2648	the room's arrival	86	other	fn47	sound	fn0() ~= 1 and fn0() == 2	
+12	92	2648	the room's arrival	87	other	ed70	barrier_make	fn0() ~= 1 and fn0() == 2	
+12	92	2648	the room's arrival	88	state	fn1	its state to 3	fn0() ~= 1 and fn0() == 2	
+12	92	2648	the room's arrival	92	camera	fn10	camera IntroCam02 (its path)	fn0() ~= 2 and fn0() == 3	
+12	92	2648	the room's arrival	93	other	fn11	camera_end_script	fn0() ~= 2 and fn0() == 3	
+12	92	2648	the room's arrival	94	other	fn132	stops_on_hold	fn0() ~= 2 and fn0() == 3	
+12	92	2648	the room's arrival	95	other	fn133	gear_stops_on_hold	fn0() ~= 2 and fn0() == 3	
+12	92	2648	the room's arrival	96	other	ed280	spell_node_acts_in_hold	fn0() ~= 2 and fn0() == 3	
+12	92	2648	the room's arrival	97	other	fn88	model_on	fn0() ~= 2 and fn0() == 3	
+12	92	2648	the room's arrival	98	other	ed287	show_held	fn0() ~= 2 and fn0() == 3	
+12	92	2648	the room's arrival	99	other	ed152	spell_slot	fn0() ~= 2 and fn0() == 3	
+12	92	2648	the room's arrival	103	other	ed152	spell_slot	ed152(4) ~= 0	
+12	92	2648	the room's arrival	107	other	ed152	spell_slot	ed152(4) ~= 1	
+12	92	2648	the room's arrival	110	other	ed115	appear_effect		
+12	92	2648	the room's arrival	111	other	ed117	fade_model		
+12	92	2648	the room's arrival	112	state	fn1	its state to 4		
+12	92	2648	the room's arrival	116	hold	fn22	cutscene(0, 1)	fn0() ~= 3 and fn0() == 4	
+12	92	2648	the room's arrival	117	other	ed254	previous_room	fn0() ~= 3 and fn0() == 4	
+12	92	2648	the room's arrival	119	camera	fn8	camera Camera01	fn0() ~= 3 and fn0() == 4 and L4 == 100	
+12	92	2648	the room's arrival	123	camera	fn8	camera Camera04	L4 ~= 100 and L4 == 262	
+12	92	2648	the room's arrival	125	other	ed280	spell_node_acts_in_hold		
+12	92	2648	the room's arrival	126	other	fn132	stops_on_hold		
+12	92	2648	the room's arrival	127	other	fn133	gear_stops_on_hold		
+12	92	2648	the room's arrival	129	room_test	fn25	asks the room in play		
+12	92	2648	the room's arrival	209	room_test	fn25	asks the room in play		
+12	92	2648	the room's arrival	218	room_test	fn25	asks the room in play		
+12	92	192	Region01 enter	1	door	fn71	room 100 queued (loaded ahead)		
+12	92	192	Region01 enter	2	door	fn66	door to room 100 at EntryMkr06, camera Camera07, transition 3		
+12	92	2387	BoxRegion01 enter	1	other	fn78	handle		
+12	92	2387	BoxRegion01 enter	2	other	ed17	alignment		
+12	92	2387	BoxRegion01 enter	3	other	ed152	spell_slot		
+12	92	2387	BoxRegion01 enter	7	other	ed152	spell_slot	ed152(4) ~= 0	
+12	92	2387	BoxRegion01 enter	11	other	ed152	spell_slot	ed152(4) ~= 1	
+12	92	2387	BoxRegion01 enter	17	room_test	fn25	asks the room in play	fn0() == 0	
+12	92	2387	BoxRegion01 enter	18	room_test	fn25	asks the room in play	fn0() == 0 and fn25() ~= 272	
+12	92	2387	BoxRegion01 enter	28	room_test	fn25	asks the room in play		
+12	92	2387	BoxRegion01 enter	29	room_test	fn25	asks the room in play	fn25() ~= 273	
+12	92	2387	BoxRegion01 enter	31	camera	fn8	camera Camera04		
+12	92	2387	BoxRegion01 enter	32	other	fn3	camera_ease_eye		
+12	92	2387	BoxRegion01 enter	33	other	fn2	camera_ease_target		
+12	92	2387	BoxRegion01 enter	34	room_test	fn25	asks the room in play		
+12	92	2387	BoxRegion01 enter	40	room_test	fn25	asks the room in play		
+12	92	2387	BoxRegion01 enter	41	room_test	fn25	asks the room in play	fn25() ~= 275	
+12	92	2387	BoxRegion01 enter	51	room_test	fn25	asks the room in play		
+12	92	2387	BoxRegion01 enter	52	room_test	fn25	asks the room in play	fn25() ~= 277	
+12	92	2387	BoxRegion01 enter	65	room_test	fn25	asks the room in play		
+12	92	2387	BoxRegion01 enter	66	room_test	fn25	asks the room in play	fn25() ~= 278	
+12	92	2387	BoxRegion01 enter	81	room_test	fn25	asks the room in play		
+12	92	2387	BoxRegion01 enter	82	room_test	fn25	asks the room in play	fn25() ~= 276	
+12	92	2387	BoxRegion01 enter	92	room_test	fn25	asks the room in play		
+12	92	2387	BoxRegion01 enter	101	room_test	fn25	asks the room in play		
+12	92	2387	BoxRegion01 enter	115	room_test	fn25	asks the room in play		
+12	92	2387	BoxRegion01 enter	116	room_test	fn25	asks the room in play	fn25() ~= 282	
+12	92	2387	BoxRegion01 enter	132	other	fn63	marker_pos	L2 ~= 0	
+12	92	2387	BoxRegion01 enter	133	other	ed152	spell_slot	L2 ~= 0	
+12	92	2387	BoxRegion01 enter	135	other	ed115	appear_effect	L2 ~= 0 and ed152(4) == 0	
+12	92	2387	BoxRegion01 enter	138	other	ed152	spell_slot	ed152(4) ~= 0	
+12	92	2387	BoxRegion01 enter	140	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	92	2387	BoxRegion01 enter	143	other	ed152	spell_slot	ed152(4) ~= 1	
+12	92	2387	BoxRegion01 enter	145	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	92	2387	BoxRegion01 enter	148	other	ed115	appear_effect	ed152(4) ~= 2	
+12	92	2387	BoxRegion01 enter	150	other	fn132	stops_on_hold		
+12	92	2387	BoxRegion01 enter	151	other	fn133	gear_stops_on_hold		
+12	92	2387	BoxRegion01 enter	152	other	ed280	spell_node_acts_in_hold		
+12	92	2387	BoxRegion01 enter	153	other	fn88	model_on		
+12	92	2387	BoxRegion01 enter	154	other	ed287	show_held		
+12	92	2387	BoxRegion01 enter	155	other	ed117	fade_model		
+12	92	2387	BoxRegion01 enter	157	state	fn1	its state to 1		
+12	92	2387	BoxRegion01 enter	158	chain	fn36	waits 128 frames		
+12	92	2387	BoxRegion01 enter	162	other	fn132	stops_on_hold	fn0() ~= 0 and fn0() == 1	
+12	92	2387	BoxRegion01 enter	163	hold	fn22	cutscene(0, 1)	fn0() ~= 0 and fn0() == 1	
+12	92	2387	BoxRegion01 enter	164	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	92	2387	BoxRegion01 enter	168	camera	fn10	camera IntroCam01 (its path)	fn0() ~= 1 and fn0() == 2	
+12	92	2387	BoxRegion01 enter	169	state	fn1	its state to 3	fn0() ~= 1 and fn0() == 2	
+12	92	2387	BoxRegion01 enter	170	chain	fn36	waits 120 frames	fn0() ~= 1 and fn0() == 2	
+12	92	2387	BoxRegion01 enter	175	other	fn63	marker_pos	fn0() ~= 2 and fn0() == 3	
+12	92	2387	BoxRegion01 enter	176	hold	fn111	player_on(1)	fn0() ~= 2 and fn0() == 3	
+12	92	2387	BoxRegion01 enter	177	other	ed152	spell_slot	fn0() ~= 2 and fn0() == 3	
+12	92	2387	BoxRegion01 enter	179	other	ed115	appear_effect	fn0() ~= 2 and fn0() == 3 and ed152(4) == 0	
+12	92	2387	BoxRegion01 enter	182	other	ed152	spell_slot	ed152(4) ~= 0	
+12	92	2387	BoxRegion01 enter	184	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	92	2387	BoxRegion01 enter	187	other	ed152	spell_slot	ed152(4) ~= 1	
+12	92	2387	BoxRegion01 enter	189	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	92	2387	BoxRegion01 enter	192	other	ed115	appear_effect	ed152(4) ~= 2	
+12	92	2387	BoxRegion01 enter	194	other	fn132	stops_on_hold		
+12	92	2387	BoxRegion01 enter	195	other	fn133	gear_stops_on_hold		
+12	92	2387	BoxRegion01 enter	196	other	ed280	spell_node_acts_in_hold		
+12	92	2387	BoxRegion01 enter	197	other	fn88	model_on		
+12	92	2387	BoxRegion01 enter	198	other	ed287	show_held		
+12	92	2387	BoxRegion01 enter	199	other	ed117	fade_model		
+12	92	2387	BoxRegion01 enter	201	state	fn1	its state to 1		
+12	92	2387	BoxRegion01 enter	202	chain	fn36	waits 128 frames		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	1	other	ed17	alignment		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	2	other	fn78	handle		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	4	other	fn205	id_of_node	fn0() == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	5	other	fn78	handle	fn0() == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	6	other	ed166	model_of	fn0() == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	9	other	fn23	in_zone	fn0() == 0 and L4 ~= 9 and L3 == L2	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	10	other	fn23	in_zone	fn0() == 0 and L4 ~= 9 and L3 == L2	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	11	other	fn23	in_zone	fn0() == 0 and L4 ~= 9 and L3 == L2	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	12	other	ed203	count_in_zone	fn0() == 0 and L4 ~= 9 and L3 == L2	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	13	other	ed203	count_in_zone	fn0() == 0 and L4 ~= 9 and L3 == L2	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	14	other	ed203	count_in_zone	fn0() == 0 and L4 ~= 9 and L3 == L2	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	16	flag	fn30	asks flag 619	fn0() == 0 and L4 ~= 9 and L3 == L2 and L5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	17	other	fn63	marker_pos	fn0() == 0 and L4 ~= 9 and L3 == L2 and L5 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	19	other	fn12	anim_walk_to	fn0() == 0 and L4 ~= 9 and L3 == L2 and L5 and fn30(619) == 0 and L8 == NIL	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	20	other	fn17	anim_done_script	fn0() == 0 and L4 ~= 9 and L3 == L2 and L5 and fn30(619) == 0 and L8 == NIL	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	23	chain	fn36	waits 1 frames	L8 ~= NIL	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	25	state	fn1	its state to 5		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	26	other	fn132	stops_on_hold		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	27	hold	fn22	cutscene(1, 1)		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	30	flag	fn30	asks flag 620	L6	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	31	other	fn63	marker_pos	L6 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	33	other	fn12	anim_walk_to	L6 and fn30(620) == 0 and L9 == NIL	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	34	other	fn17	anim_done_script	L6 and fn30(620) == 0 and L9 == NIL	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	37	chain	fn36	waits 1 frames	L9 ~= NIL	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	39	state	fn1	its state to 5		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	40	other	fn132	stops_on_hold		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	41	hold	fn22	cutscene(1, 1)		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	44	flag	fn30	asks flag 621	L7	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	45	other	fn63	marker_pos	L7 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	47	other	fn12	anim_walk_to	L7 and fn30(621) == 0 and L10 == NIL	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	48	other	fn17	anim_done_script	L7 and fn30(621) == 0 and L10 == NIL	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	51	chain	fn36	waits 1 frames	L10 ~= NIL	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	53	state	fn1	its state to 5		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	54	other	fn132	stops_on_hold		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	55	hold	fn22	cutscene(1, 1)		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	61	other	fn78	handle	fn0() ~= 0 and fn0() == 5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	62	other	ed166	model_of	fn0() ~= 0 and fn0() == 5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	63	hold	fn22	cutscene(0, 1)	fn0() ~= 0 and fn0() == 5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	64	other	fn23	in_zone	fn0() ~= 0 and fn0() == 5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	65	other	fn23	in_zone	fn0() ~= 0 and fn0() == 5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	66	other	fn23	in_zone	fn0() ~= 0 and fn0() == 5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	67	hold	fn22	cutscene(1, 1)	fn0() ~= 0 and fn0() == 5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	68	other	fn104	place_of	fn0() ~= 0 and fn0() == 5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	71	other	ed115	appear_effect	fn0() ~= 0 and fn0() == 5 and L2 == 79 and L3	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	72	other	ed117	fade_model	fn0() ~= 0 and fn0() == 5 and L2 == 79 and L3	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	73	other	fn14	anim_play	fn0() ~= 0 and fn0() == 5 and L2 == 79 and L3	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	74	flag	fn30	asks flag 201	fn0() ~= 0 and fn0() == 5 and L2 == 79 and L3	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	75	other	fn79	send_event	fn0() ~= 0 and fn0() == 5 and L2 == 79 and L3 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	76	other	fn79	send_event	fn0() ~= 0 and fn0() == 5 and L2 == 79 and L3 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	77	camera	fn134	camera saved (key 666)	fn0() ~= 0 and fn0() == 5 and L2 == 79 and L3 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	78	other	fn23	in_zone	fn0() ~= 0 and fn0() == 5 and L2 == 79 and L3 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	79	other	fn211	prompt_slot_clear	fn0() ~= 0 and fn0() == 5 and L2 == 79 and L3 and fn30(201) == 0 and fn23(PadExamineRgn01)	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	80	other	fn211	prompt_slot_clear	fn0() ~= 0 and fn0() == 5 and L2 == 79 and L3 and fn30(201) == 0 and fn23(PadExamineRgn01)	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	82	camera	fn8	camera PadCam01		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	83	state	fn1	its state to 1		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	84	chain	fn36	waits 60 frames		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	89	other	ed115	appear_effect	(L2 ~= 79) or (not L3) and L2 == 1 and L4	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	90	other	ed117	fade_model	(L2 ~= 79) or (not L3) and L2 == 1 and L4	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	91	other	fn14	anim_play	(L2 ~= 79) or (not L3) and L2 == 1 and L4	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	92	flag	fn30	asks flag 201	(L2 ~= 79) or (not L3) and L2 == 1 and L4	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	93	other	fn79	send_event	(L2 ~= 79) or (not L3) and L2 == 1 and L4 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	94	other	fn79	send_event	(L2 ~= 79) or (not L3) and L2 == 1 and L4 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	95	camera	fn134	camera saved (key 666)	(L2 ~= 79) or (not L3) and L2 == 1 and L4 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	96	other	fn23	in_zone	(L2 ~= 79) or (not L3) and L2 == 1 and L4 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	97	other	fn211	prompt_slot_clear	(L2 ~= 79) or (not L3) and L2 == 1 and L4 and fn30(201) == 0 and fn23(PadExamineRgn02)	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	98	other	fn211	prompt_slot_clear	(L2 ~= 79) or (not L3) and L2 == 1 and L4 and fn30(201) == 0 and fn23(PadExamineRgn02)	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	100	camera	fn8	camera PadCam02		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	101	state	fn1	its state to 2		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	102	chain	fn36	waits 60 frames		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	107	other	ed115	appear_effect	(L2 ~= 1) or (not L4) and L2 == 15 and L5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	108	other	ed117	fade_model	(L2 ~= 1) or (not L4) and L2 == 15 and L5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	109	other	fn14	anim_play	(L2 ~= 1) or (not L4) and L2 == 15 and L5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	110	flag	fn30	asks flag 201	(L2 ~= 1) or (not L4) and L2 == 15 and L5	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	111	other	fn79	send_event	(L2 ~= 1) or (not L4) and L2 == 15 and L5 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	112	other	fn79	send_event	(L2 ~= 1) or (not L4) and L2 == 15 and L5 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	113	camera	fn134	camera saved (key 666)	(L2 ~= 1) or (not L4) and L2 == 15 and L5 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	114	other	fn23	in_zone	(L2 ~= 1) or (not L4) and L2 == 15 and L5 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	115	other	fn211	prompt_slot_clear	(L2 ~= 1) or (not L4) and L2 == 15 and L5 and fn30(201) == 0 and fn23(PadExamineRgn03)	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	116	other	fn211	prompt_slot_clear	(L2 ~= 1) or (not L4) and L2 == 15 and L5 and fn30(201) == 0 and fn23(PadExamineRgn03)	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	118	camera	fn8	camera PadCam03		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	119	state	fn1	its state to 3		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	120	chain	fn36	waits 60 frames		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	123	other	fn47	sound	(L2 ~= 15) or (not L5)	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	124	chain	fn36	waits 20 frames	(L2 ~= 15) or (not L5)	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	125	state	fn1	its state to 4	(L2 ~= 15) or (not L5)	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	130	other	fn78	handle	fn0() ~= 5 and fn0() == 1	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	131	other	fn63	marker_pos	fn0() ~= 5 and fn0() == 1	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	132	other	fn65	marker_angle	fn0() ~= 5 and fn0() == 1	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	133	flag	fn30	asks flag 619	fn0() ~= 5 and fn0() == 1	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	134	spawn	ed3	spawns chr 51 model 79 in the room in play	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	135	other	fn132	stops_on_hold	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	136	other	ed115	appear_effect	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	137	other	fn142	char_flags	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	138	other	ed117	fade_model	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	139	other	fn14	anim_play	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	140	other	fn137	anim_end_bit4	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	141	other	fn148	stream_prepare	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	142	camera	fn8	camera CageCam01	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	143	other	fn3	camera_ease_eye	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	144	other	fn2	camera_ease_target	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	145	flag	fn29	flag 619 on	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	146	chain	fn36	waits 100 frames	fn0() ~= 5 and fn0() == 1 and fn30(619) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	149	other	fn88	model_on	fn30(619) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	150	other	fn89	model_colour	fn30(619) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	151	other	fn144	char_glow	fn30(619) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	152	other	fn44	light_add	fn30(619) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	153	other	fn149	stream_go	fn30(619) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	154	other	fn192	no_effect	fn30(619) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	155	state	fn1	its state to 6	fn30(619) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	156	other	ed70	barrier_make	fn30(619) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	157	other	ed238	barrier_state	fn30(619) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	158	chain	fn36	waits 145 frames	fn30(619) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	163	other	fn78	handle	fn0() ~= 1 and fn0() == 2	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	164	other	fn63	marker_pos	fn0() ~= 1 and fn0() == 2	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	165	other	fn65	marker_angle	fn0() ~= 1 and fn0() == 2	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	166	flag	fn30	asks flag 620	fn0() ~= 1 and fn0() == 2	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	167	spawn	ed3	spawns chr 13 model 1 in the room in play	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	168	other	fn132	stops_on_hold	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	169	other	ed115	appear_effect	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	170	other	fn142	char_flags	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	171	other	ed117	fade_model	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	172	other	fn14	anim_play	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	173	other	fn137	anim_end_bit4	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	174	other	fn148	stream_prepare	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	175	camera	fn8	camera CageCam02	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	176	other	fn3	camera_ease_eye	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	177	other	fn2	camera_ease_target	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	178	flag	fn29	flag 620 on	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	179	chain	fn36	waits 100 frames	fn0() ~= 1 and fn0() == 2 and fn30(620) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	182	other	fn88	model_on	fn30(620) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	183	other	fn89	model_colour	fn30(620) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	184	other	fn144	char_glow	fn30(620) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	185	other	fn44	light_add	fn30(620) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	186	other	fn149	stream_go	fn30(620) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	187	state	fn1	its state to 6	fn30(620) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	188	other	ed70	barrier_make	fn30(620) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	189	other	ed238	barrier_state	fn30(620) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	190	chain	fn36	waits 145 frames	fn30(620) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	195	other	fn78	handle	fn0() ~= 2 and fn0() == 3	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	196	other	fn63	marker_pos	fn0() ~= 2 and fn0() == 3	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	197	other	fn65	marker_angle	fn0() ~= 2 and fn0() == 3	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	198	flag	fn30	asks flag 621	fn0() ~= 2 and fn0() == 3	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	199	spawn	ed3	spawns chr 38 model 15 in the room in play	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	200	other	fn132	stops_on_hold	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	201	other	ed115	appear_effect	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	202	other	fn142	char_flags	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	203	other	ed117	fade_model	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	204	other	fn14	anim_play	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	205	other	fn137	anim_end_bit4	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	206	other	fn148	stream_prepare	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	207	camera	fn8	camera CageCam03	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	208	other	fn3	camera_ease_eye	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	209	other	fn2	camera_ease_target	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	210	flag	fn29	flag 621 on	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	211	chain	fn36	waits 100 frames	fn0() ~= 2 and fn0() == 3 and fn30(621) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	214	other	fn88	model_on	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	215	other	fn89	model_colour	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	216	other	fn144	char_glow	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	217	other	fn44	light_add	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	218	other	fn149	stream_go	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	219	state	fn1	its state to 6	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	220	other	ed70	barrier_make	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	221	other	ed238	barrier_state	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	222	chain	fn36	waits 145 frames	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	227	camera	fn8	camera ForceFieldCam	fn0() ~= 3 and fn0() == 6	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	228	other	ed238	barrier_state	fn0() ~= 3 and fn0() == 6	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	229	other	ed238	barrier_state	fn0() ~= 3 and fn0() == 6	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	230	other	fn47	sound	fn0() ~= 3 and fn0() == 6	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	231	state	fn1	its state to 7	fn0() ~= 3 and fn0() == 6	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	232	chain	fn36	waits 30 frames	fn0() ~= 3 and fn0() == 6	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	236	other	ed238	barrier_state	fn0() ~= 6 and fn0() == 7	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	237	other	ed238	barrier_state	fn0() ~= 6 and fn0() == 7	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	238	flag	fn30	asks flag 619	fn0() ~= 6 and fn0() == 7	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	239	flag	fn30	asks flag 620	fn0() ~= 6 and fn0() == 7 and fn30(619) == 1	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	240	flag	fn30	asks flag 621	fn0() ~= 6 and fn0() == 7 and fn30(619) == 1 and fn30(620) == 1	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	241	other	ed238	barrier_state	fn0() ~= 6 and fn0() == 7 and fn30(619) == 1 and fn30(620) == 1 and fn30(621) == 1	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	242	other	ed76	barrier_remove	fn0() ~= 6 and fn0() == 7 and fn30(619) == 1 and fn30(620) == 1 and fn30(621) == 1	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	244	other	fn47	sound		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	245	state	fn1	its state to 8		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	246	chain	fn36	waits 30 frames		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	250	other	ed76	barrier_remove	fn0() ~= 7 and fn0() == 8	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	251	flag	fn30	asks flag 619	fn0() ~= 7 and fn0() == 8	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	252	flag	fn30	asks flag 620	fn0() ~= 7 and fn0() == 8 and fn30(619) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	253	flag	fn30	asks flag 621	fn0() ~= 7 and fn0() == 8 and fn30(619) ~= 0 and fn30(620) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	255	other	ed70	barrier_make		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	256	state	fn1	its state to 0		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	257	hold	fn22	cutscene(0, 1)		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	258	flag	fn30	asks flag 201		
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	259	camera	fn134	camera put back (key 666)	fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	263	other	fn79	send_event	fn30(201) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	264	other	fn79	send_event	fn30(201) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	267	state	fn1	its state to 9	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	268	chain	fn36	waits 60 frames	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	269	other	fn47	sound	fn30(621) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	273	other	fn78	handle	fn0() ~= 8 and fn0() == 4	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	274	hold	fn22	cutscene(0, 1)	fn0() ~= 8 and fn0() == 4	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	275	other	fn79	send_event	fn0() ~= 8 and fn0() == 4	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	279	hold	fn22	cutscene(0, 1)	fn0() ~= 4 and fn0() == 9	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	280	state	fn1	its state to 0	fn0() ~= 4 and fn0() == 9	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	281	flag	fn30	asks flag 201	fn0() ~= 4 and fn0() == 9	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	282	camera	fn134	camera put back (key 666)	fn0() ~= 4 and fn0() == 9 and fn30(201) == 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	285	other	fn79	send_event	fn30(201) ~= 0	
+12	92	2778	Teleport01 enter; Teleport02 enter; Teleport03 enter	286	other	fn79	send_event	fn30(201) ~= 0	
+12	92	1321	PadExamineRgn01 enter; PadExamineRgn02 enter; PadExamineRgn03 enter	1	other	fn23	in_zone		
+12	92	1321	PadExamineRgn01 enter; PadExamineRgn02 enter; PadExamineRgn03 enter	2	flag	fn30	asks flag 619	fn23(PadExamineRgn01)	
+12	92	1321	PadExamineRgn01 enter; PadExamineRgn02 enter; PadExamineRgn03 enter	3	examine	ed219	EXAMINE: TRAPPER "Attached to the monolith is a metal plaque inscribed with a symbol that looks cu", close-up camera ExamineCamPad01	fn23(PadExamineRgn01) and fn30(619) == 0	
+12	92	1321	PadExamineRgn01 enter; PadExamineRgn02 enter; PadExamineRgn03 enter	6	other	fn23	in_zone	not fn23(PadExamineRgn01)	
+12	92	1321	PadExamineRgn01 enter; PadExamineRgn02 enter; PadExamineRgn03 enter	7	flag	fn30	asks flag 620	not fn23(PadExamineRgn01) and fn23(PadExamineRgn02)	
+12	92	1321	PadExamineRgn01 enter; PadExamineRgn02 enter; PadExamineRgn03 enter	8	examine	ed219	EXAMINE: ZOMBIE "A metal plaque is mounted on the monolith. It depicts a silhouette of a lumberin", close-up camera ExamineCamPad02	not fn23(PadExamineRgn01) and fn23(PadExamineRgn02) and fn30(620) == 0	
+12	92	1321	PadExamineRgn01 enter; PadExamineRgn02 enter; PadExamineRgn03 enter	11	other	fn23	in_zone	not fn23(PadExamineRgn02)	
+12	92	1321	PadExamineRgn01 enter; PadExamineRgn02 enter; PadExamineRgn03 enter	12	flag	fn30	asks flag 621	not fn23(PadExamineRgn02) and fn23(PadExamineRgn03)	
+12	92	1321	PadExamineRgn01 enter; PadExamineRgn02 enter; PadExamineRgn03 enter	13	examine	ed219	EXAMINE: HORROR "Attached to the monolith is a metal plaque marked with a symbol that looks like ", close-up camera ExamineCamPad03	not fn23(PadExamineRgn02) and fn23(PadExamineRgn03) and fn30(621) == 0	
+12	93	2196	the room's arrival	1	room_test	fn25	asks the room in play		
+12	93	2196	the room's arrival	6	room_test	fn25	asks the room in play	fn25() ~= 274	
+12	93	2196	the room's arrival	7	flag	fn29	flag 659 off	fn25() ~= 274 and fn25() == 93	
+12	93	2196	the room's arrival	8	other	fn78	handle	fn25() ~= 274 and fn25() == 93	
+12	93	2196	the room's arrival	9	flag	fn30	asks flag 738	fn25() ~= 274 and fn25() == 93	
+12	93	2196	the room's arrival	10	other	fn87	model_off	fn25() ~= 274 and fn25() == 93 and fn30(738) == 0	
+12	93	2196	the room's arrival	13	other	fn88	model_on	fn30(738) ~= 0	
+12	93	2196	the room's arrival	15	flag	fn30	asks flag 623		
+12	93	2196	the room's arrival	16	other	fn52	track_volume	fn30(623) == 1	
+12	93	2196	the room's arrival	19	other	fn52	track_volume	fn30(623) ~= 1	
+12	93	2196	the room's arrival	22	chain	ed177	on_play_script(1427)		
+12	93	2196	the room's arrival	23	flag	fn30	asks flag 657		
+12	93	2196	the room's arrival	24	chain	fn73	runs script 2781 next	fn30(657) == 1	
+12	93	2196	the room's arrival	26	flag	fn30	asks flag 34		
+12	93	2196	the room's arrival	27	other	fn41	texture_anim	fn30(34) == 1	
+12	93	2196	the room's arrival	28	other	fn41	texture_anim	fn30(34) == 1	
+12	93	2196	the room's arrival	29	other	fn41	texture_anim	fn30(34) == 1	
+12	93	2196	the room's arrival	30	other	fn41	texture_anim	fn30(34) == 1	
+12	93	2196	the room's arrival	32	other	fn41	texture_anim		
+12	93	2196	the room's arrival	33	other	fn41	texture_anim		
+12	93	2196	the room's arrival	34	other	fn41	texture_anim		
+12	93	2196	the room's arrival	35	other	fn41	texture_anim		
+12	93	2196	the room's arrival	36	room_test	fn25	asks the room in play		
+12	93	2196	the room's arrival	139	flag	fn30	asks flag 37	fn25() ~= 274	
+12	93	2196	the room's arrival	140	flag	fn29	flag 24 on	fn25() ~= 274 and fn30(37) == 1	
+12	93	2196	the room's arrival	141	flag	fn29	flag 25 on	fn25() ~= 274 and fn30(37) == 1	
+12	93	2196	the room's arrival	142	flag	fn29	flag 26 on	fn25() ~= 274 and fn30(37) == 1	
+12	93	2196	the room's arrival	143	flag	fn29	flag 27 on	fn25() ~= 274 and fn30(37) == 1	
+12	93	2196	the room's arrival	144	flag	fn29	flag 28 on	fn25() ~= 274 and fn30(37) == 1	
+12	93	2196	the room's arrival	145	flag	fn29	flag 29 on	fn25() ~= 274 and fn30(37) == 1	
+12	93	2196	the room's arrival	146	flag	fn29	flag 30 on	fn25() ~= 274 and fn30(37) == 1	
+12	93	2196	the room's arrival	147	flag	fn29	flag 31 on	fn25() ~= 274 and fn30(37) == 1	
+12	93	2196	the room's arrival	148	flag	fn29	flag 32 on	fn25() ~= 274 and fn30(37) == 1	
+12	93	2196	the room's arrival	150	flag	fn30	asks flag 623		
+12	93	2196	the room's arrival	151	other	fn45	room_look_2	fn30(623) == 0	
+12	93	2196	the room's arrival	152	other	fn186	texture_anim_global	fn30(623) == 0	
+12	93	2196	the room's arrival	153	other	fn186	texture_anim_global	fn30(623) == 0	
+12	93	2196	the room's arrival	156	other	fn186	texture_anim_global	fn30(623) ~= 0	
+12	93	2196	the room's arrival	157	other	fn186	texture_anim_global	fn30(623) ~= 0	
+12	93	2196	the room's arrival	159	flag	fn30	asks flag 24		
+12	93	2196	the room's arrival	160	other	fn41	texture_anim	fn30(24) == 0	
+12	93	2196	the room's arrival	161	other	fn41	texture_anim	fn30(24) == 0	
+12	93	2196	the room's arrival	162	other	fn41	texture_anim	fn30(24) == 0	
+12	93	2196	the room's arrival	163	other	fn41	texture_anim	fn30(24) == 0	
+12	93	2196	the room's arrival	166	other	fn41	texture_anim	fn30(24) ~= 0	
+12	93	2196	the room's arrival	167	other	fn41	texture_anim	fn30(24) ~= 0	
+12	93	2196	the room's arrival	169	flag	fn30	asks flag 25		
+12	93	2196	the room's arrival	170	other	fn41	texture_anim	fn30(25) == 0	
+12	93	2196	the room's arrival	171	other	fn41	texture_anim	fn30(25) == 0	
+12	93	2196	the room's arrival	172	other	fn41	texture_anim	fn30(25) == 0	
+12	93	2196	the room's arrival	173	other	fn41	texture_anim	fn30(25) == 0	
+12	93	2196	the room's arrival	176	other	fn41	texture_anim	fn30(25) ~= 0	
+12	93	2196	the room's arrival	177	other	fn41	texture_anim	fn30(25) ~= 0	
+12	93	2196	the room's arrival	179	flag	fn30	asks flag 26		
+12	93	2196	the room's arrival	180	other	fn41	texture_anim	fn30(26) == 0	
+12	93	2196	the room's arrival	181	other	fn41	texture_anim	fn30(26) == 0	
+12	93	2196	the room's arrival	182	other	fn41	texture_anim	fn30(26) == 0	
+12	93	2196	the room's arrival	183	other	fn41	texture_anim	fn30(26) == 0	
+12	93	2196	the room's arrival	186	other	fn41	texture_anim	fn30(26) ~= 0	
+12	93	2196	the room's arrival	187	other	fn41	texture_anim	fn30(26) ~= 0	
+12	93	2196	the room's arrival	189	flag	fn30	asks flag 27		
+12	93	2196	the room's arrival	190	other	fn41	texture_anim	fn30(27) == 0	
+12	93	2196	the room's arrival	191	other	fn41	texture_anim	fn30(27) == 0	
+12	93	2196	the room's arrival	192	other	fn41	texture_anim	fn30(27) == 0	
+12	93	2196	the room's arrival	193	other	fn41	texture_anim	fn30(27) == 0	
+12	93	2196	the room's arrival	196	other	fn41	texture_anim	fn30(27) ~= 0	
+12	93	2196	the room's arrival	197	other	fn41	texture_anim	fn30(27) ~= 0	
+12	93	2196	the room's arrival	199	flag	fn30	asks flag 28		
+12	93	2196	the room's arrival	200	other	fn41	texture_anim	fn30(28) == 0	
+12	93	2196	the room's arrival	201	other	fn41	texture_anim	fn30(28) == 0	
+12	93	2196	the room's arrival	202	other	fn41	texture_anim	fn30(28) == 0	
+12	93	2196	the room's arrival	203	other	fn41	texture_anim	fn30(28) == 0	
+12	93	2196	the room's arrival	206	other	fn41	texture_anim	fn30(28) ~= 0	
+12	93	2196	the room's arrival	207	other	fn41	texture_anim	fn30(28) ~= 0	
+12	93	2196	the room's arrival	209	flag	fn30	asks flag 29		
+12	93	2196	the room's arrival	210	other	fn41	texture_anim	fn30(29) == 0	
+12	93	2196	the room's arrival	211	other	fn41	texture_anim	fn30(29) == 0	
+12	93	2196	the room's arrival	212	other	fn41	texture_anim	fn30(29) == 0	
+12	93	2196	the room's arrival	213	other	fn41	texture_anim	fn30(29) == 0	
+12	93	2196	the room's arrival	216	other	fn41	texture_anim	fn30(29) ~= 0	
+12	93	2196	the room's arrival	217	other	fn41	texture_anim	fn30(29) ~= 0	
+12	93	2196	the room's arrival	219	flag	fn30	asks flag 30		
+12	93	2196	the room's arrival	220	other	fn41	texture_anim	fn30(30) == 0	
+12	93	2196	the room's arrival	221	other	fn41	texture_anim	fn30(30) == 0	
+12	93	2196	the room's arrival	222	other	fn41	texture_anim	fn30(30) == 0	
+12	93	2196	the room's arrival	223	other	fn41	texture_anim	fn30(30) == 0	
+12	93	2196	the room's arrival	226	other	fn41	texture_anim	fn30(30) ~= 0	
+12	93	2196	the room's arrival	227	other	fn41	texture_anim	fn30(30) ~= 0	
+12	93	2196	the room's arrival	229	flag	fn30	asks flag 31		
+12	93	2196	the room's arrival	230	other	fn41	texture_anim	fn30(31) == 0	
+12	93	2196	the room's arrival	231	other	fn41	texture_anim	fn30(31) == 0	
+12	93	2196	the room's arrival	232	other	fn41	texture_anim	fn30(31) == 0	
+12	93	2196	the room's arrival	233	other	fn41	texture_anim	fn30(31) == 0	
+12	93	2196	the room's arrival	236	other	fn41	texture_anim	fn30(31) ~= 0	
+12	93	2196	the room's arrival	237	other	fn41	texture_anim	fn30(31) ~= 0	
+12	93	2196	the room's arrival	239	flag	fn30	asks flag 32		
+12	93	2196	the room's arrival	240	other	fn41	texture_anim	fn30(32) == 0	
+12	93	2196	the room's arrival	241	other	fn41	texture_anim	fn30(32) == 0	
+12	93	2196	the room's arrival	242	other	fn41	texture_anim	fn30(32) == 0	
+12	93	2196	the room's arrival	243	other	fn41	texture_anim	fn30(32) == 0	
+12	93	2196	the room's arrival	246	other	fn41	texture_anim	fn30(32) ~= 0	
+12	93	2196	the room's arrival	247	other	fn41	texture_anim	fn30(32) ~= 0	
+12	93	2196	the room's arrival	251	other	ed152	spell_slot		
+12	93	2196	the room's arrival	252	other	ed152	spell_slot	ed152(4)	
+12	93	2196	the room's arrival	254	other	ed152	spell_slot		
+12	93	2196	the room's arrival	255	other	ed120	spell_object_show	ed152(0)	
+12	93	2196	the room's arrival	255	other	ed152	spell_slot	ed152(0)	
+12	93	2196	the room's arrival	256	other	fn41	texture_anim	ed152(0)	
+12	93	2196	the room's arrival	257	other	fn41	texture_anim	ed152(0)	
+12	93	2196	the room's arrival	260	other	fn41	texture_anim	not ed152(0)	
+12	93	2196	the room's arrival	261	other	fn41	texture_anim	not ed152(0)	
+12	93	2196	the room's arrival	262	other	fn41	texture_anim	not ed152(0)	
+12	93	2196	the room's arrival	263	other	fn41	texture_anim	not ed152(0)	
+12	93	2196	the room's arrival	265	other	ed152	spell_slot		
+12	93	2196	the room's arrival	266	other	ed120	spell_object_show	ed152(1)	
+12	93	2196	the room's arrival	266	other	ed152	spell_slot	ed152(1)	
+12	93	2196	the room's arrival	267	other	fn41	texture_anim	ed152(1)	
+12	93	2196	the room's arrival	268	other	fn41	texture_anim	ed152(1)	
+12	93	2196	the room's arrival	271	other	fn41	texture_anim	not ed152(1)	
+12	93	2196	the room's arrival	272	other	fn41	texture_anim	not ed152(1)	
+12	93	2196	the room's arrival	273	other	fn41	texture_anim	not ed152(1)	
+12	93	2196	the room's arrival	274	other	fn41	texture_anim	not ed152(1)	
+12	93	2196	the room's arrival	276	other	ed152	spell_slot		
+12	93	2196	the room's arrival	277	other	ed120	spell_object_show	ed152(2)	
+12	93	2196	the room's arrival	277	other	ed152	spell_slot	ed152(2)	
+12	93	2196	the room's arrival	278	other	fn41	texture_anim	ed152(2)	
+12	93	2196	the room's arrival	279	other	fn41	texture_anim	ed152(2)	
+12	93	2196	the room's arrival	282	other	fn41	texture_anim	not ed152(2)	
+12	93	2196	the room's arrival	283	other	fn41	texture_anim	not ed152(2)	
+12	93	2196	the room's arrival	284	other	fn41	texture_anim	not ed152(2)	
+12	93	2196	the room's arrival	285	other	fn41	texture_anim	not ed152(2)	
+12	93	2196	the room's arrival	287	other	ed152	spell_slot		
+12	93	2196	the room's arrival	288	other	ed120	spell_object_show	ed152(3)	
+12	93	2196	the room's arrival	288	other	ed152	spell_slot	ed152(3)	
+12	93	2196	the room's arrival	289	other	fn41	texture_anim	ed152(3)	
+12	93	2196	the room's arrival	290	other	fn41	texture_anim	ed152(3)	
+12	93	2196	the room's arrival	293	other	fn41	texture_anim	not ed152(3)	
+12	93	2196	the room's arrival	294	other	fn41	texture_anim	not ed152(3)	
+12	93	2196	the room's arrival	295	other	fn41	texture_anim	not ed152(3)	
+12	93	2196	the room's arrival	296	other	fn41	texture_anim	not ed152(3)	
+12	93	2196	the room's arrival	298	other	ed152	spell_slot		
+12	93	2196	the room's arrival	299	other	ed120	spell_object_show	ed152(4)	
+12	93	2196	the room's arrival	299	other	ed152	spell_slot	ed152(4)	
+12	93	2196	the room's arrival	300	other	fn41	texture_anim	ed152(4)	
+12	93	2196	the room's arrival	301	other	fn41	texture_anim	ed152(4)	
+12	93	2196	the room's arrival	304	other	fn41	texture_anim	not ed152(4)	
+12	93	2196	the room's arrival	305	other	fn41	texture_anim	not ed152(4)	
+12	93	2196	the room's arrival	306	other	fn41	texture_anim	not ed152(4)	
+12	93	2196	the room's arrival	307	other	fn41	texture_anim	not ed152(4)	
+12	93	2196	the room's arrival	309	other	ed152	spell_slot		
+12	93	2196	the room's arrival	310	other	ed120	spell_object_show	ed152(5)	
+12	93	2196	the room's arrival	310	other	ed152	spell_slot	ed152(5)	
+12	93	2196	the room's arrival	311	other	fn41	texture_anim	ed152(5)	
+12	93	2196	the room's arrival	312	other	fn41	texture_anim	ed152(5)	
+12	93	2196	the room's arrival	315	other	fn41	texture_anim	not ed152(5)	
+12	93	2196	the room's arrival	316	other	fn41	texture_anim	not ed152(5)	
+12	93	2196	the room's arrival	317	other	fn41	texture_anim	not ed152(5)	
+12	93	2196	the room's arrival	318	other	fn41	texture_anim	not ed152(5)	
+12	93	2196	the room's arrival	320	other	ed152	spell_slot		
+12	93	2196	the room's arrival	321	other	ed120	spell_object_show	ed152(6)	
+12	93	2196	the room's arrival	321	other	ed152	spell_slot	ed152(6)	
+12	93	2196	the room's arrival	322	other	fn41	texture_anim	ed152(6)	
+12	93	2196	the room's arrival	323	other	fn41	texture_anim	ed152(6)	
+12	93	2196	the room's arrival	326	other	fn41	texture_anim	not ed152(6)	
+12	93	2196	the room's arrival	327	other	fn41	texture_anim	not ed152(6)	
+12	93	2196	the room's arrival	328	other	fn41	texture_anim	not ed152(6)	
+12	93	2196	the room's arrival	329	other	fn41	texture_anim	not ed152(6)	
+12	93	2196	the room's arrival	331	other	ed152	spell_slot		
+12	93	2196	the room's arrival	332	other	ed120	spell_object_show	ed152(7)	
+12	93	2196	the room's arrival	332	other	ed152	spell_slot	ed152(7)	
+12	93	2196	the room's arrival	333	other	fn41	texture_anim	ed152(7)	
+12	93	2196	the room's arrival	334	other	fn41	texture_anim	ed152(7)	
+12	93	2196	the room's arrival	337	other	fn41	texture_anim	not ed152(7)	
+12	93	2196	the room's arrival	338	other	fn41	texture_anim	not ed152(7)	
+12	93	2196	the room's arrival	339	other	fn41	texture_anim	not ed152(7)	
+12	93	2196	the room's arrival	340	other	fn41	texture_anim	not ed152(7)	
+12	93	2196	the room's arrival	342	other	ed152	spell_slot		
+12	93	2196	the room's arrival	343	other	ed120	spell_object_show	ed152(8)	
+12	93	2196	the room's arrival	343	other	ed152	spell_slot	ed152(8)	
+12	93	2196	the room's arrival	344	other	fn41	texture_anim	ed152(8)	
+12	93	2196	the room's arrival	345	other	fn41	texture_anim	ed152(8)	
+12	93	2196	the room's arrival	348	other	fn41	texture_anim	not ed152(8)	
+12	93	2196	the room's arrival	349	other	fn41	texture_anim	not ed152(8)	
+12	93	2196	the room's arrival	350	other	fn41	texture_anim	not ed152(8)	
+12	93	2196	the room's arrival	351	other	fn41	texture_anim	not ed152(8)	
+12	93	2196	the room's arrival	1	flag	fn30	asks flag 657		2781
+12	93	2196	the room's arrival	2	other	fn63	marker_pos	fn30(657) == 1	2781
+12	93	2196	the room's arrival	3	other	fn78	handle	fn30(657) == 1	2781
+12	93	2196	the room's arrival	4	other	ed17	alignment	fn30(657) == 1	2781
+12	93	2196	the room's arrival	5	other	ed152	spell_slot	fn30(657) == 1	2781
+12	93	2196	the room's arrival	9	other	ed152	spell_slot	ed152(4) ~= 0	2781
+12	93	2196	the room's arrival	13	other	ed152	spell_slot	ed152(4) ~= 1	2781
+12	93	2196	the room's arrival	16	other	ed116	vanish_effect		2781
+12	93	2196	the room's arrival	17	chain	fn36	waits 150 frames		2781
+12	93	2201	the room's leave	1	other	ed121	spell_object_remove		
+12	93	2201	the room's leave	2	other	ed121	spell_object_remove		
+12	93	2201	the room's leave	3	other	ed121	spell_object_remove		
+12	93	2201	the room's leave	4	other	ed121	spell_object_remove		
+12	93	2201	the room's leave	5	other	ed121	spell_object_remove		
+12	93	2201	the room's leave	6	other	ed121	spell_object_remove		
+12	93	2201	the room's leave	7	other	ed121	spell_object_remove		
+12	93	2201	the room's leave	8	other	ed121	spell_object_remove		
+12	93	2201	the room's leave	9	other	ed121	spell_object_remove		
+12	93	871	ButtonRgn01 enter	1	flag	fn30	asks flag 969		
+12	93	871	ButtonRgn01 enter	2	flag	fn30	asks flag 970	fn30(969) == 1	
+12	93	871	ButtonRgn01 enter	3	flag	fn30	asks flag 971	fn30(969) == 1 and fn30(970) == 1	
+12	93	871	ButtonRgn01 enter	5	other	ed65	subclass_of	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	871	ButtonRgn01 enter	5	other	fn78	handle	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	871	ButtonRgn01 enter	6	flag	fn30	asks flag 34	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	871	ButtonRgn01 enter	7	flag	fn30	asks flag 37	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0	
+12	93	871	ButtonRgn01 enter	9	prompt	ed301	prompt ENGAGE_ARRAY (button 2)	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	871	ButtonRgn01 enter	10	state	fn1	its state to 3	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	871	ButtonRgn01 enter	15	flag	fn30	asks flag 24	fn0() ~= 0 and fn0() == 3	
+12	93	871	ButtonRgn01 enter	16	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(24) == 0	
+12	93	871	ButtonRgn01 enter	17	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(24) == 0	
+12	93	871	ButtonRgn01 enter	18	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(24) == 0	
+12	93	871	ButtonRgn01 enter	19	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(24) == 0	
+12	93	871	ButtonRgn01 enter	20	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(24) == 0	
+12	93	871	ButtonRgn01 enter	21	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(24) == 0	
+12	93	871	ButtonRgn01 enter	22	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(24) == 0	
+12	93	871	ButtonRgn01 enter	23	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(24) == 0	
+12	93	871	ButtonRgn01 enter	25	other	fn47	sound		
+12	93	871	ButtonRgn01 enter	26	flag	fn29	flag 34 on		
+12	93	871	ButtonRgn01 enter	27	flag	fn29	flag 24 on		
+12	93	871	ButtonRgn01 enter	28	flag	fn29	flag 657 on		
+12	93	871	ButtonRgn01 enter	30	chain	fn73	runs script 2781 next		
+12	93	871	ButtonRgn01 enter	31	state	fn1	its state to 0		
+12	93	871	ButtonRgn01 enter	1	flag	fn30	asks flag 657		2781
+12	93	871	ButtonRgn01 enter	2	other	fn63	marker_pos	fn30(657) == 1	2781
+12	93	871	ButtonRgn01 enter	3	other	fn78	handle	fn30(657) == 1	2781
+12	93	871	ButtonRgn01 enter	4	other	ed17	alignment	fn30(657) == 1	2781
+12	93	871	ButtonRgn01 enter	5	other	ed152	spell_slot	fn30(657) == 1	2781
+12	93	871	ButtonRgn01 enter	9	other	ed152	spell_slot	ed152(4) ~= 0	2781
+12	93	871	ButtonRgn01 enter	13	other	ed152	spell_slot	ed152(4) ~= 1	2781
+12	93	871	ButtonRgn01 enter	16	other	ed116	vanish_effect		2781
+12	93	871	ButtonRgn01 enter	17	chain	fn36	waits 150 frames		2781
+12	93	872	ButtonRgn02 enter	1	flag	fn30	asks flag 969		
+12	93	872	ButtonRgn02 enter	2	flag	fn30	asks flag 970	fn30(969) == 1	
+12	93	872	ButtonRgn02 enter	3	flag	fn30	asks flag 971	fn30(969) == 1 and fn30(970) == 1	
+12	93	872	ButtonRgn02 enter	5	other	ed65	subclass_of	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	872	ButtonRgn02 enter	5	other	fn78	handle	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	872	ButtonRgn02 enter	6	flag	fn30	asks flag 34	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	872	ButtonRgn02 enter	7	flag	fn30	asks flag 37	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0	
+12	93	872	ButtonRgn02 enter	9	prompt	ed301	prompt ENGAGE_ARRAY (button 2)	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	872	ButtonRgn02 enter	10	state	fn1	its state to 3	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	872	ButtonRgn02 enter	15	flag	fn30	asks flag 25	fn0() ~= 0 and fn0() == 3	
+12	93	872	ButtonRgn02 enter	16	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(25) == 0	
+12	93	872	ButtonRgn02 enter	17	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(25) == 0	
+12	93	872	ButtonRgn02 enter	18	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(25) == 0	
+12	93	872	ButtonRgn02 enter	19	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(25) == 0	
+12	93	872	ButtonRgn02 enter	20	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(25) == 0	
+12	93	872	ButtonRgn02 enter	21	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(25) == 0	
+12	93	872	ButtonRgn02 enter	22	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(25) == 0	
+12	93	872	ButtonRgn02 enter	23	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(25) == 0	
+12	93	872	ButtonRgn02 enter	25	other	fn47	sound		
+12	93	872	ButtonRgn02 enter	26	flag	fn29	flag 34 on		
+12	93	872	ButtonRgn02 enter	27	flag	fn29	flag 25 on		
+12	93	872	ButtonRgn02 enter	28	flag	fn29	flag 657 on		
+12	93	872	ButtonRgn02 enter	30	chain	fn73	runs script 2781 next		
+12	93	872	ButtonRgn02 enter	31	state	fn1	its state to 0		
+12	93	872	ButtonRgn02 enter	1	flag	fn30	asks flag 657		2781
+12	93	872	ButtonRgn02 enter	2	other	fn63	marker_pos	fn30(657) == 1	2781
+12	93	872	ButtonRgn02 enter	3	other	fn78	handle	fn30(657) == 1	2781
+12	93	872	ButtonRgn02 enter	4	other	ed17	alignment	fn30(657) == 1	2781
+12	93	872	ButtonRgn02 enter	5	other	ed152	spell_slot	fn30(657) == 1	2781
+12	93	872	ButtonRgn02 enter	9	other	ed152	spell_slot	ed152(4) ~= 0	2781
+12	93	872	ButtonRgn02 enter	13	other	ed152	spell_slot	ed152(4) ~= 1	2781
+12	93	872	ButtonRgn02 enter	16	other	ed116	vanish_effect		2781
+12	93	872	ButtonRgn02 enter	17	chain	fn36	waits 150 frames		2781
+12	93	873	ButtonRgn03 enter	1	flag	fn30	asks flag 969		
+12	93	873	ButtonRgn03 enter	2	flag	fn30	asks flag 970	fn30(969) == 1	
+12	93	873	ButtonRgn03 enter	3	flag	fn30	asks flag 971	fn30(969) == 1 and fn30(970) == 1	
+12	93	873	ButtonRgn03 enter	5	other	ed65	subclass_of	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	873	ButtonRgn03 enter	5	other	fn78	handle	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	873	ButtonRgn03 enter	6	flag	fn30	asks flag 34	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	873	ButtonRgn03 enter	7	flag	fn30	asks flag 37	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0	
+12	93	873	ButtonRgn03 enter	9	prompt	ed301	prompt ENGAGE_ARRAY (button 2)	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	873	ButtonRgn03 enter	10	state	fn1	its state to 3	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	873	ButtonRgn03 enter	15	flag	fn30	asks flag 26	fn0() ~= 0 and fn0() == 3	
+12	93	873	ButtonRgn03 enter	16	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(26) == 0	
+12	93	873	ButtonRgn03 enter	17	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(26) == 0	
+12	93	873	ButtonRgn03 enter	18	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(26) == 0	
+12	93	873	ButtonRgn03 enter	19	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(26) == 0	
+12	93	873	ButtonRgn03 enter	20	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(26) == 0	
+12	93	873	ButtonRgn03 enter	21	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(26) == 0	
+12	93	873	ButtonRgn03 enter	22	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(26) == 0	
+12	93	873	ButtonRgn03 enter	23	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(26) == 0	
+12	93	873	ButtonRgn03 enter	25	other	fn47	sound		
+12	93	873	ButtonRgn03 enter	26	flag	fn29	flag 34 on		
+12	93	873	ButtonRgn03 enter	27	flag	fn29	flag 26 on		
+12	93	873	ButtonRgn03 enter	28	flag	fn29	flag 657 on		
+12	93	873	ButtonRgn03 enter	30	state	fn1	its state to 0		
+12	93	873	ButtonRgn03 enter	31	chain	fn73	runs script 2781 next		
+12	93	873	ButtonRgn03 enter	1	flag	fn30	asks flag 657		2781
+12	93	873	ButtonRgn03 enter	2	other	fn63	marker_pos	fn30(657) == 1	2781
+12	93	873	ButtonRgn03 enter	3	other	fn78	handle	fn30(657) == 1	2781
+12	93	873	ButtonRgn03 enter	4	other	ed17	alignment	fn30(657) == 1	2781
+12	93	873	ButtonRgn03 enter	5	other	ed152	spell_slot	fn30(657) == 1	2781
+12	93	873	ButtonRgn03 enter	9	other	ed152	spell_slot	ed152(4) ~= 0	2781
+12	93	873	ButtonRgn03 enter	13	other	ed152	spell_slot	ed152(4) ~= 1	2781
+12	93	873	ButtonRgn03 enter	16	other	ed116	vanish_effect		2781
+12	93	873	ButtonRgn03 enter	17	chain	fn36	waits 150 frames		2781
+12	93	874	ButtonRgn04 enter	1	flag	fn30	asks flag 969		
+12	93	874	ButtonRgn04 enter	2	flag	fn30	asks flag 970	fn30(969) == 1	
+12	93	874	ButtonRgn04 enter	3	flag	fn30	asks flag 971	fn30(969) == 1 and fn30(970) == 1	
+12	93	874	ButtonRgn04 enter	5	other	ed65	subclass_of	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	874	ButtonRgn04 enter	5	other	fn78	handle	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	874	ButtonRgn04 enter	6	flag	fn30	asks flag 34	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	874	ButtonRgn04 enter	7	flag	fn30	asks flag 37	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0	
+12	93	874	ButtonRgn04 enter	9	prompt	ed301	prompt ENGAGE_ARRAY (button 2)	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	874	ButtonRgn04 enter	10	state	fn1	its state to 3	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	874	ButtonRgn04 enter	15	flag	fn30	asks flag 27	fn0() ~= 0 and fn0() == 3	
+12	93	874	ButtonRgn04 enter	16	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(27) == 0	
+12	93	874	ButtonRgn04 enter	17	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(27) == 0	
+12	93	874	ButtonRgn04 enter	18	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(27) == 0	
+12	93	874	ButtonRgn04 enter	19	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(27) == 0	
+12	93	874	ButtonRgn04 enter	20	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(27) == 0	
+12	93	874	ButtonRgn04 enter	21	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(27) == 0	
+12	93	874	ButtonRgn04 enter	22	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(27) == 0	
+12	93	874	ButtonRgn04 enter	23	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(27) == 0	
+12	93	874	ButtonRgn04 enter	25	other	fn47	sound		
+12	93	874	ButtonRgn04 enter	26	flag	fn29	flag 34 on		
+12	93	874	ButtonRgn04 enter	27	flag	fn29	flag 27 on		
+12	93	874	ButtonRgn04 enter	28	flag	fn29	flag 657 on		
+12	93	874	ButtonRgn04 enter	30	state	fn1	its state to 0		
+12	93	874	ButtonRgn04 enter	31	chain	fn73	runs script 2781 next		
+12	93	874	ButtonRgn04 enter	1	flag	fn30	asks flag 657		2781
+12	93	874	ButtonRgn04 enter	2	other	fn63	marker_pos	fn30(657) == 1	2781
+12	93	874	ButtonRgn04 enter	3	other	fn78	handle	fn30(657) == 1	2781
+12	93	874	ButtonRgn04 enter	4	other	ed17	alignment	fn30(657) == 1	2781
+12	93	874	ButtonRgn04 enter	5	other	ed152	spell_slot	fn30(657) == 1	2781
+12	93	874	ButtonRgn04 enter	9	other	ed152	spell_slot	ed152(4) ~= 0	2781
+12	93	874	ButtonRgn04 enter	13	other	ed152	spell_slot	ed152(4) ~= 1	2781
+12	93	874	ButtonRgn04 enter	16	other	ed116	vanish_effect		2781
+12	93	874	ButtonRgn04 enter	17	chain	fn36	waits 150 frames		2781
+12	93	875	ButtonRgn05 enter	1	flag	fn30	asks flag 969		
+12	93	875	ButtonRgn05 enter	2	flag	fn30	asks flag 970	fn30(969) == 1	
+12	93	875	ButtonRgn05 enter	3	flag	fn30	asks flag 971	fn30(969) == 1 and fn30(970) == 1	
+12	93	875	ButtonRgn05 enter	5	other	ed65	subclass_of	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	875	ButtonRgn05 enter	5	other	fn78	handle	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	875	ButtonRgn05 enter	6	flag	fn30	asks flag 34	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	875	ButtonRgn05 enter	7	flag	fn30	asks flag 37	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0	
+12	93	875	ButtonRgn05 enter	9	prompt	ed301	prompt ENGAGE_ARRAY (button 2)	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	875	ButtonRgn05 enter	10	state	fn1	its state to 3	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	875	ButtonRgn05 enter	15	flag	fn30	asks flag 28	fn0() ~= 0 and fn0() == 3	
+12	93	875	ButtonRgn05 enter	16	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(28) == 0	
+12	93	875	ButtonRgn05 enter	17	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(28) == 0	
+12	93	875	ButtonRgn05 enter	18	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(28) == 0	
+12	93	875	ButtonRgn05 enter	19	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(28) == 0	
+12	93	875	ButtonRgn05 enter	20	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(28) == 0	
+12	93	875	ButtonRgn05 enter	21	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(28) == 0	
+12	93	875	ButtonRgn05 enter	22	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(28) == 0	
+12	93	875	ButtonRgn05 enter	23	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(28) == 0	
+12	93	875	ButtonRgn05 enter	25	other	fn47	sound		
+12	93	875	ButtonRgn05 enter	26	flag	fn29	flag 34 on		
+12	93	875	ButtonRgn05 enter	27	flag	fn29	flag 28 on		
+12	93	875	ButtonRgn05 enter	28	flag	fn29	flag 657 on		
+12	93	875	ButtonRgn05 enter	30	chain	fn73	runs script 2781 next		
+12	93	875	ButtonRgn05 enter	31	state	fn1	its state to 0		
+12	93	875	ButtonRgn05 enter	1	flag	fn30	asks flag 657		2781
+12	93	875	ButtonRgn05 enter	2	other	fn63	marker_pos	fn30(657) == 1	2781
+12	93	875	ButtonRgn05 enter	3	other	fn78	handle	fn30(657) == 1	2781
+12	93	875	ButtonRgn05 enter	4	other	ed17	alignment	fn30(657) == 1	2781
+12	93	875	ButtonRgn05 enter	5	other	ed152	spell_slot	fn30(657) == 1	2781
+12	93	875	ButtonRgn05 enter	9	other	ed152	spell_slot	ed152(4) ~= 0	2781
+12	93	875	ButtonRgn05 enter	13	other	ed152	spell_slot	ed152(4) ~= 1	2781
+12	93	875	ButtonRgn05 enter	16	other	ed116	vanish_effect		2781
+12	93	875	ButtonRgn05 enter	17	chain	fn36	waits 150 frames		2781
+12	93	876	ButtonRgn06 enter	1	flag	fn30	asks flag 969		
+12	93	876	ButtonRgn06 enter	2	flag	fn30	asks flag 970	fn30(969) == 1	
+12	93	876	ButtonRgn06 enter	3	flag	fn30	asks flag 971	fn30(969) == 1 and fn30(970) == 1	
+12	93	876	ButtonRgn06 enter	5	other	ed65	subclass_of	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	876	ButtonRgn06 enter	5	other	fn78	handle	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	876	ButtonRgn06 enter	6	flag	fn30	asks flag 34	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	876	ButtonRgn06 enter	7	flag	fn30	asks flag 37	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0	
+12	93	876	ButtonRgn06 enter	9	prompt	ed301	prompt ENGAGE_ARRAY (button 2)	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	876	ButtonRgn06 enter	10	state	fn1	its state to 3	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	876	ButtonRgn06 enter	15	flag	fn30	asks flag 29	fn0() ~= 0 and fn0() == 3	
+12	93	876	ButtonRgn06 enter	16	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(29) == 0	
+12	93	876	ButtonRgn06 enter	17	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(29) == 0	
+12	93	876	ButtonRgn06 enter	18	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(29) == 0	
+12	93	876	ButtonRgn06 enter	19	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(29) == 0	
+12	93	876	ButtonRgn06 enter	20	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(29) == 0	
+12	93	876	ButtonRgn06 enter	21	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(29) == 0	
+12	93	876	ButtonRgn06 enter	22	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(29) == 0	
+12	93	876	ButtonRgn06 enter	23	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(29) == 0	
+12	93	876	ButtonRgn06 enter	25	other	fn47	sound		
+12	93	876	ButtonRgn06 enter	26	flag	fn29	flag 34 on		
+12	93	876	ButtonRgn06 enter	27	flag	fn29	flag 29 on		
+12	93	876	ButtonRgn06 enter	28	flag	fn29	flag 657 on		
+12	93	876	ButtonRgn06 enter	30	state	fn1	its state to 0		
+12	93	876	ButtonRgn06 enter	31	chain	fn73	runs script 2781 next		
+12	93	876	ButtonRgn06 enter	1	flag	fn30	asks flag 657		2781
+12	93	876	ButtonRgn06 enter	2	other	fn63	marker_pos	fn30(657) == 1	2781
+12	93	876	ButtonRgn06 enter	3	other	fn78	handle	fn30(657) == 1	2781
+12	93	876	ButtonRgn06 enter	4	other	ed17	alignment	fn30(657) == 1	2781
+12	93	876	ButtonRgn06 enter	5	other	ed152	spell_slot	fn30(657) == 1	2781
+12	93	876	ButtonRgn06 enter	9	other	ed152	spell_slot	ed152(4) ~= 0	2781
+12	93	876	ButtonRgn06 enter	13	other	ed152	spell_slot	ed152(4) ~= 1	2781
+12	93	876	ButtonRgn06 enter	16	other	ed116	vanish_effect		2781
+12	93	876	ButtonRgn06 enter	17	chain	fn36	waits 150 frames		2781
+12	93	877	ButtonRgn07 enter	1	flag	fn30	asks flag 969		
+12	93	877	ButtonRgn07 enter	2	flag	fn30	asks flag 970	fn30(969) == 1	
+12	93	877	ButtonRgn07 enter	3	flag	fn30	asks flag 971	fn30(969) == 1 and fn30(970) == 1	
+12	93	877	ButtonRgn07 enter	5	other	ed65	subclass_of	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	877	ButtonRgn07 enter	5	other	fn78	handle	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	877	ButtonRgn07 enter	6	flag	fn30	asks flag 34	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	877	ButtonRgn07 enter	7	flag	fn30	asks flag 37	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0	
+12	93	877	ButtonRgn07 enter	9	prompt	ed301	prompt ENGAGE_ARRAY (button 2)	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	877	ButtonRgn07 enter	10	state	fn1	its state to 3	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	877	ButtonRgn07 enter	15	flag	fn30	asks flag 30	fn0() ~= 0 and fn0() == 3	
+12	93	877	ButtonRgn07 enter	16	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(30) == 0	
+12	93	877	ButtonRgn07 enter	17	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(30) == 0	
+12	93	877	ButtonRgn07 enter	18	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(30) == 0	
+12	93	877	ButtonRgn07 enter	19	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(30) == 0	
+12	93	877	ButtonRgn07 enter	20	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(30) == 0	
+12	93	877	ButtonRgn07 enter	21	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(30) == 0	
+12	93	877	ButtonRgn07 enter	22	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(30) == 0	
+12	93	877	ButtonRgn07 enter	23	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(30) == 0	
+12	93	877	ButtonRgn07 enter	25	other	fn47	sound		
+12	93	877	ButtonRgn07 enter	26	flag	fn29	flag 34 on		
+12	93	877	ButtonRgn07 enter	27	flag	fn29	flag 30 on		
+12	93	877	ButtonRgn07 enter	28	flag	fn29	flag 657 on		
+12	93	877	ButtonRgn07 enter	30	state	fn1	its state to 0		
+12	93	877	ButtonRgn07 enter	31	chain	fn73	runs script 2781 next		
+12	93	877	ButtonRgn07 enter	1	flag	fn30	asks flag 657		2781
+12	93	877	ButtonRgn07 enter	2	other	fn63	marker_pos	fn30(657) == 1	2781
+12	93	877	ButtonRgn07 enter	3	other	fn78	handle	fn30(657) == 1	2781
+12	93	877	ButtonRgn07 enter	4	other	ed17	alignment	fn30(657) == 1	2781
+12	93	877	ButtonRgn07 enter	5	other	ed152	spell_slot	fn30(657) == 1	2781
+12	93	877	ButtonRgn07 enter	9	other	ed152	spell_slot	ed152(4) ~= 0	2781
+12	93	877	ButtonRgn07 enter	13	other	ed152	spell_slot	ed152(4) ~= 1	2781
+12	93	877	ButtonRgn07 enter	16	other	ed116	vanish_effect		2781
+12	93	877	ButtonRgn07 enter	17	chain	fn36	waits 150 frames		2781
+12	93	878	ButtonRgn08 enter	1	flag	fn30	asks flag 969		
+12	93	878	ButtonRgn08 enter	2	flag	fn30	asks flag 970	fn30(969) == 1	
+12	93	878	ButtonRgn08 enter	3	flag	fn30	asks flag 971	fn30(969) == 1 and fn30(970) == 1	
+12	93	878	ButtonRgn08 enter	5	other	ed65	subclass_of	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	878	ButtonRgn08 enter	5	other	fn78	handle	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	878	ButtonRgn08 enter	6	flag	fn30	asks flag 34	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	878	ButtonRgn08 enter	7	flag	fn30	asks flag 37	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0	
+12	93	878	ButtonRgn08 enter	9	prompt	ed301	prompt ENGAGE_ARRAY (button 2)	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	878	ButtonRgn08 enter	10	state	fn1	its state to 3	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	878	ButtonRgn08 enter	15	flag	fn30	asks flag 31	fn0() ~= 0 and fn0() == 3	
+12	93	878	ButtonRgn08 enter	16	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(31) == 0	
+12	93	878	ButtonRgn08 enter	17	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(31) == 0	
+12	93	878	ButtonRgn08 enter	18	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(31) == 0	
+12	93	878	ButtonRgn08 enter	19	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(31) == 0	
+12	93	878	ButtonRgn08 enter	20	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(31) == 0	
+12	93	878	ButtonRgn08 enter	21	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(31) == 0	
+12	93	878	ButtonRgn08 enter	22	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(31) == 0	
+12	93	878	ButtonRgn08 enter	23	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(31) == 0	
+12	93	878	ButtonRgn08 enter	25	other	fn47	sound		
+12	93	878	ButtonRgn08 enter	26	flag	fn29	flag 34 on		
+12	93	878	ButtonRgn08 enter	27	flag	fn29	flag 31 on		
+12	93	878	ButtonRgn08 enter	28	flag	fn29	flag 657 on		
+12	93	878	ButtonRgn08 enter	30	state	fn1	its state to 0		
+12	93	878	ButtonRgn08 enter	31	chain	fn73	runs script 2781 next		
+12	93	878	ButtonRgn08 enter	1	flag	fn30	asks flag 657		2781
+12	93	878	ButtonRgn08 enter	2	other	fn63	marker_pos	fn30(657) == 1	2781
+12	93	878	ButtonRgn08 enter	3	other	fn78	handle	fn30(657) == 1	2781
+12	93	878	ButtonRgn08 enter	4	other	ed17	alignment	fn30(657) == 1	2781
+12	93	878	ButtonRgn08 enter	5	other	ed152	spell_slot	fn30(657) == 1	2781
+12	93	878	ButtonRgn08 enter	9	other	ed152	spell_slot	ed152(4) ~= 0	2781
+12	93	878	ButtonRgn08 enter	13	other	ed152	spell_slot	ed152(4) ~= 1	2781
+12	93	878	ButtonRgn08 enter	16	other	ed116	vanish_effect		2781
+12	93	878	ButtonRgn08 enter	17	chain	fn36	waits 150 frames		2781
+12	93	879	ButtonRgn09 enter	1	flag	fn30	asks flag 969		
+12	93	879	ButtonRgn09 enter	2	flag	fn30	asks flag 970	fn30(969) == 1	
+12	93	879	ButtonRgn09 enter	3	flag	fn30	asks flag 971	fn30(969) == 1 and fn30(970) == 1	
+12	93	879	ButtonRgn09 enter	5	other	ed65	subclass_of	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	879	ButtonRgn09 enter	5	other	fn78	handle	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	879	ButtonRgn09 enter	6	flag	fn30	asks flag 34	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0	
+12	93	879	ButtonRgn09 enter	7	flag	fn30	asks flag 37	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0	
+12	93	879	ButtonRgn09 enter	9	prompt	ed301	prompt ENGAGE_ARRAY (button 2)	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	879	ButtonRgn09 enter	10	state	fn1	its state to 3	fn30(969) == 1 and fn30(970) == 1 and fn30(971) == 1 and fn0() == 0 and fn30(34) == 0 and fn30(37) == 0 and L0 == 1	
+12	93	879	ButtonRgn09 enter	15	flag	fn30	asks flag 32	fn0() ~= 0 and fn0() == 3	
+12	93	879	ButtonRgn09 enter	16	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(32) == 0	
+12	93	879	ButtonRgn09 enter	17	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(32) == 0	
+12	93	879	ButtonRgn09 enter	18	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(32) == 0	
+12	93	879	ButtonRgn09 enter	19	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(32) == 0	
+12	93	879	ButtonRgn09 enter	20	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(32) == 0	
+12	93	879	ButtonRgn09 enter	21	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(32) == 0	
+12	93	879	ButtonRgn09 enter	22	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(32) == 0	
+12	93	879	ButtonRgn09 enter	23	other	fn41	texture_anim	fn0() ~= 0 and fn0() == 3 and fn30(32) == 0	
+12	93	879	ButtonRgn09 enter	25	other	fn47	sound		
+12	93	879	ButtonRgn09 enter	26	flag	fn29	flag 34 on		
+12	93	879	ButtonRgn09 enter	27	flag	fn29	flag 32 on		
+12	93	879	ButtonRgn09 enter	28	flag	fn29	flag 657 on		
+12	93	879	ButtonRgn09 enter	30	state	fn1	its state to 0		
+12	93	879	ButtonRgn09 enter	31	chain	fn73	runs script 2781 next		
+12	93	879	ButtonRgn09 enter	1	flag	fn30	asks flag 657		2781
+12	93	879	ButtonRgn09 enter	2	other	fn63	marker_pos	fn30(657) == 1	2781
+12	93	879	ButtonRgn09 enter	3	other	fn78	handle	fn30(657) == 1	2781
+12	93	879	ButtonRgn09 enter	4	other	ed17	alignment	fn30(657) == 1	2781
+12	93	879	ButtonRgn09 enter	5	other	ed152	spell_slot	fn30(657) == 1	2781
+12	93	879	ButtonRgn09 enter	9	other	ed152	spell_slot	ed152(4) ~= 0	2781
+12	93	879	ButtonRgn09 enter	13	other	ed152	spell_slot	ed152(4) ~= 1	2781
+12	93	879	ButtonRgn09 enter	16	other	ed116	vanish_effect		2781
+12	93	879	ButtonRgn09 enter	17	chain	fn36	waits 150 frames		2781
+12	93	1010	TeleportRgn05 enter	1	other	fn78	handle		
+12	93	1010	TeleportRgn05 enter	3	flag	fn30	asks flag 37		
+12	93	1010	TeleportRgn05 enter	6	hold	fn22	cutscene(1, 1)	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	7	other	EDCountChararactersInRegion	count_in_zone_kind	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	8	other	EDOkayToSeek	okay_to_seek	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	9	other	fn132	stops_on_hold	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	10	other	fn133	gear_stops_on_hold	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	11	other	ed280	spell_node_acts_in_hold	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	14	other	fn184	angle_to_marker	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	14	other	fn63	marker_pos	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	15	other	fn15	anim_turn_to	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	16	other	fn12	anim_walk_to	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	16	other	fn63	marker_pos	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	17	other	fn17	anim_done_script	fn30(37) == 0 and ArrayToGoTo ~= 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	20	chain	fn36	waits 1 frames	(L2 ~= 0) or (L3 ~= 1)	
+12	93	1010	TeleportRgn05 enter	22	state	fn1	its state to 1		
+12	93	1010	TeleportRgn05 enter	26	other	ed117	fade_model	fn0() ~= 0 and fn0() == 1	
+12	93	1010	TeleportRgn05 enter	27	chain	fn36	waits 127 frames	fn0() ~= 0 and fn0() == 1	
+12	93	1010	TeleportRgn05 enter	28	state	fn1	its state to 2	fn0() ~= 0 and fn0() == 1	
+12	93	1010	TeleportRgn05 enter	32	other	fn87	model_off	fn0() ~= 1 and fn0() == 2	
+12	93	1010	TeleportRgn05 enter	33	other	ed235	hide_held	fn0() ~= 1 and fn0() == 2	
+12	93	1010	TeleportRgn05 enter	34	room_test	fn25	asks the room in play	fn0() ~= 1 and fn0() == 2	
+12	93	1010	TeleportRgn05 enter	42	room_test	fn25	asks the room in play	fn25() ~= 274	
+12	93	1010	TeleportRgn05 enter	45	flag	fn29	flag 740 on	fn25() ~= 274 and fn25() == 93 and ArrayToGoTo == 1	
+12	93	1010	TeleportRgn05 enter	50	flag	fn29	flag 741 on	ArrayToGoTo ~= 1 and ArrayToGoTo == 2	
+12	93	1010	TeleportRgn05 enter	55	flag	fn29	flag 742 on	ArrayToGoTo ~= 2 and ArrayToGoTo == 3	
+12	93	1010	TeleportRgn05 enter	60	flag	fn29	flag 743 on	ArrayToGoTo ~= 3 and ArrayToGoTo == 4	
+12	93	1010	TeleportRgn05 enter	65	flag	fn29	flag 745 on	ArrayToGoTo ~= 4 and ArrayToGoTo == 5	
+12	93	1010	TeleportRgn05 enter	70	flag	fn29	flag 693 on	ArrayToGoTo ~= 5 and ArrayToGoTo == 6	
+12	93	1010	TeleportRgn05 enter	75	flag	fn29	flag 744 on	ArrayToGoTo ~= 6 and ArrayToGoTo == 7	
+12	93	1010	TeleportRgn05 enter	80	flag	fn29	flag 695 on	ArrayToGoTo ~= 7 and ArrayToGoTo == 8	
+12	93	1010	TeleportRgn05 enter	85	flag	fn29	flag 696 on	ArrayToGoTo ~= 8 and ArrayToGoTo == 9	
+12	93	1010	TeleportRgn05 enter	88	flag	fn29	flag 34 off	L0 == 1	
+12	93	1010	TeleportRgn05 enter	89	flag	fn29	flag 657 off	L0 == 1	
+12	93	1010	TeleportRgn05 enter	92	other	fn132	stops_on_hold		
+12	93	1010	TeleportRgn05 enter	93	other	fn133	gear_stops_on_hold		
+12	93	1010	TeleportRgn05 enter	94	other	ed280	spell_node_acts_in_hold		
+12	93	1010	TeleportRgn05 enter	95	other	fn165	map_room		
+12	93	1010	TeleportRgn05 enter	96	door	fn66	door to room L1 at EntryMkr01, camera Camera01, transition 2, then script 449		
+12	93	1010	TeleportRgn05 enter	97	state	fn1	its state to 0		
+12	93	1010	TeleportRgn05 enter	100	flag	fn30	asks flag 659	fn30(37) ~= 0	
+12	93	1010	TeleportRgn05 enter	102	hold	fn21	hold(0)	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	103	other	EDCountChararactersInRegion	count_in_zone_kind	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	104	other	EDOkayToSeek	okay_to_seek	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	105	other	fn132	stops_on_hold	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	106	other	fn133	gear_stops_on_hold	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	107	other	ed280	spell_node_acts_in_hold	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0	
+12	93	1010	TeleportRgn05 enter	110	other	fn184	angle_to_marker	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	110	other	fn63	marker_pos	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	111	other	fn15	anim_turn_to	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	112	other	fn12	anim_walk_to	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	112	other	fn63	marker_pos	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	113	other	fn17	anim_done_script	fn30(37) ~= 0 and fn30(659) == 0 and fn0() == 0 and L2 == 0 and L3 == 1	
+12	93	1010	TeleportRgn05 enter	116	chain	fn36	waits 1 frames	(L2 ~= 0) or (L3 ~= 1)	
+12	93	1010	TeleportRgn05 enter	118	state	fn1	its state to 1		
+12	93	1010	TeleportRgn05 enter	119	other	fn78	handle		
+12	93	1010	TeleportRgn05 enter	120	other	fn78	handle		
+12	93	1010	TeleportRgn05 enter	121	other	fn78	handle		
+12	93	1010	TeleportRgn05 enter	122	other	fn78	handle		
+12	93	1010	TeleportRgn05 enter	123	other	fn78	handle		
+12	93	1010	TeleportRgn05 enter	124	other	fn78	handle		
+12	93	1010	TeleportRgn05 enter	125	other	fn78	handle		
+12	93	1010	TeleportRgn05 enter	127	other	fn79	send_event	L4	
+12	93	1010	TeleportRgn05 enter	130	other	fn79	send_event	L5	
+12	93	1010	TeleportRgn05 enter	133	other	fn79	send_event	L6	
+12	93	1010	TeleportRgn05 enter	136	other	fn79	send_event	L7	
+12	93	1010	TeleportRgn05 enter	139	other	fn79	send_event	L8	
+12	93	1010	TeleportRgn05 enter	142	other	fn79	send_event	L9	
+12	93	1010	TeleportRgn05 enter	145	other	fn79	send_event	L10	
+12	93	1010	TeleportRgn05 enter	150	other	ed117	fade_model	fn0() ~= 0 and fn0() == 1	
+12	93	1010	TeleportRgn05 enter	151	chain	fn36	waits 127 frames	fn0() ~= 0 and fn0() == 1	
+12	93	1010	TeleportRgn05 enter	153	state	fn1	its state to 2	fn0() ~= 0 and fn0() == 1 and L0 == 1	
+12	93	1010	TeleportRgn05 enter	156	state	fn1	its state to 11	L0 ~= 1	
+12	93	1010	TeleportRgn05 enter	160	other	fn87	model_off	fn0() ~= 1 and fn0() == 2	
+12	93	1010	TeleportRgn05 enter	161	other	ed235	hide_held	fn0() ~= 1 and fn0() == 2	
+12	93	1010	TeleportRgn05 enter	162	other	ed190	unknown_190	fn0() ~= 1 and fn0() == 2	
+12	93	1010	TeleportRgn05 enter	163	other	fn112	fade	fn0() ~= 1 and fn0() == 2	
+12	93	1010	TeleportRgn05 enter	164	chain	fn36	waits 30 frames	fn0() ~= 1 and fn0() == 2	
+12	93	1010	TeleportRgn05 enter	165	state	fn1	its state to 3	fn0() ~= 1 and fn0() == 2	
+12	93	1010	TeleportRgn05 enter	166	flag	fn29	flag 657 off	fn0() ~= 1 and fn0() == 2	
+12	93	1010	TeleportRgn05 enter	170	state	fn1	its state to 4	fn0() ~= 2 and fn0() == 3	
+12	93	1010	TeleportRgn05 enter	171	state	fn35	state_keep(1)	fn0() ~= 2 and fn0() == 3	
+12	93	1010	TeleportRgn05 enter	172	other	ed17	alignment	fn0() ~= 2 and fn0() == 3	
+12	93	1010	TeleportRgn05 enter	173	cinematic	ed55	cinematic 131 (level 13 room 64, then script 1010)	fn0() ~= 2 and fn0() == 3 and ed17() == 1	
+12	93	1010	TeleportRgn05 enter	176	other	ed17	alignment	ed17() ~= 1	
+12	93	1010	TeleportRgn05 enter	177	cinematic	ed55	cinematic 132 (level 13 room 64, then script 1010)	ed17() ~= 1 and ed17() == 2	
+12	93	1010	TeleportRgn05 enter	180	other	ed17	alignment	ed17() ~= 2	
+12	93	1010	TeleportRgn05 enter	181	cinematic	ed55	cinematic 87 (level 13 room 64, then script 1010)	ed17() ~= 2 and ed17() == 3	
+12	93	1010	TeleportRgn05 enter	185	state	fn35	state_keep(0)	fn0() ~= 3 and fn0() == 4	
+12	93	1010	TeleportRgn05 enter	186	state	fn1	its state to 5	fn0() ~= 3 and fn0() == 4	
+12	93	1010	TeleportRgn05 enter	187	state	fn35	state_keep(1)	fn0() ~= 3 and fn0() == 4	
+12	93	1010	TeleportRgn05 enter	188	other	ed17	alignment	fn0() ~= 3 and fn0() == 4	
+12	93	1010	TeleportRgn05 enter	189	film	ed83	film 34 (fmv/fmv0034.avi, then script 1010)	fn0() ~= 3 and fn0() == 4 and ed17() == 1	
+12	93	1010	TeleportRgn05 enter	192	other	ed17	alignment	ed17() ~= 1	
+12	93	1010	TeleportRgn05 enter	193	film	ed83	film 35 (fmv/fmv0035.avi, then script 1010)	ed17() ~= 1 and ed17() == 2	
+12	93	1010	TeleportRgn05 enter	196	other	ed17	alignment	ed17() ~= 2	
+12	93	1010	TeleportRgn05 enter	197	film	ed83	film 36 (fmv/fmv0036.avi, then script 1010)	ed17() ~= 2 and ed17() == 3	
+12	93	1010	TeleportRgn05 enter	201	state	fn35	state_keep(0)	fn0() ~= 4 and fn0() == 5	
+12	93	1010	TeleportRgn05 enter	202	state	fn1	its state to 7	fn0() ~= 4 and fn0() == 5	
+12	93	1010	TeleportRgn05 enter	203	state	fn35	state_keep(1)	fn0() ~= 4 and fn0() == 5	
+12	93	1010	TeleportRgn05 enter	204	other	ed17	alignment	fn0() ~= 4 and fn0() == 5	
+12	93	1010	TeleportRgn05 enter	205	film	ed83	film 30 (fmv/fmv0030.avi, then script 1010)	fn0() ~= 4 and fn0() == 5 and ed17() == 1	
+12	93	1010	TeleportRgn05 enter	208	other	ed17	alignment	ed17() ~= 1	
+12	93	1010	TeleportRgn05 enter	209	film	ed83	film 31 (fmv/fmv0031.avi, then script 1010)	ed17() ~= 1 and ed17() == 2	
+12	93	1010	TeleportRgn05 enter	212	other	ed17	alignment	ed17() ~= 2	
+12	93	1010	TeleportRgn05 enter	213	film	ed83	film 32 (fmv/fmv0032.avi, then script 1010)	ed17() ~= 2 and ed17() == 3	
+12	93	1010	TeleportRgn05 enter	217	state	fn35	state_keep(0)	fn0() ~= 5 and fn0() == 7	
+12	93	1010	TeleportRgn05 enter	218	state	fn1	its state to 8	fn0() ~= 5 and fn0() == 7	
+12	93	1010	TeleportRgn05 enter	219	state	fn35	state_keep(1)	fn0() ~= 5 and fn0() == 7	
+12	93	1010	TeleportRgn05 enter	220	other	ed17	alignment	fn0() ~= 5 and fn0() == 7	
+12	93	1010	TeleportRgn05 enter	221	cinematic	ed55	cinematic 165 (level 13 room 267, then script 1010)	fn0() ~= 5 and fn0() == 7 and ed17() == 1	
+12	93	1010	TeleportRgn05 enter	224	other	ed17	alignment	ed17() ~= 1	
+12	93	1010	TeleportRgn05 enter	225	cinematic	ed55	cinematic 166 (level 13 room 267, then script 1010)	ed17() ~= 1 and ed17() == 2	
+12	93	1010	TeleportRgn05 enter	228	other	ed17	alignment	ed17() ~= 2	
+12	93	1010	TeleportRgn05 enter	229	cinematic	ed55	cinematic 156 (level 13 room 267, then script 1010)	ed17() ~= 2 and ed17() == 3	
+12	93	1010	TeleportRgn05 enter	233	state	fn35	state_keep(0)	fn0() ~= 7 and fn0() == 8	
+12	93	1010	TeleportRgn05 enter	234	state	fn1	its state to 9	fn0() ~= 7 and fn0() == 8	
+12	93	1010	TeleportRgn05 enter	235	state	fn35	state_keep(1)	fn0() ~= 7 and fn0() == 8	
+12	93	1010	TeleportRgn05 enter	236	other	ed17	alignment	fn0() ~= 7 and fn0() == 8	
+12	93	1010	TeleportRgn05 enter	237	film	ed83	film 31 (fmv/fmv0031.avi, then script 1010)	fn0() ~= 7 and fn0() == 8 and ed17() == 1	
+12	93	1010	TeleportRgn05 enter	240	other	ed17	alignment	ed17() ~= 1	
+12	93	1010	TeleportRgn05 enter	241	film	ed83	film 32 (fmv/fmv0032.avi, then script 1010)	ed17() ~= 1 and ed17() == 2	
+12	93	1010	TeleportRgn05 enter	244	other	ed17	alignment	ed17() ~= 2	
+12	93	1010	TeleportRgn05 enter	245	film	ed83	film 30 (fmv/fmv0030.avi, then script 1010)	ed17() ~= 2 and ed17() == 3	
+12	93	1010	TeleportRgn05 enter	249	other	fn78	handle	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	250	other	ed148	stat_get	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	251	other	ed149	stat_set	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	252	other	fn112	fade	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	253	flag	fn29	flag 37 off	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	254	hold	fn22	cutscene(0, 1)	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	255	state	fn35	state_keep(0)	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	256	other	ed153	spell_slot_clear	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	257	other	ed153	spell_slot_clear	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	258	other	ed153	spell_slot_clear	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	259	other	ed153	spell_slot_clear	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	260	other	ed153	spell_slot_clear	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	261	other	ed153	spell_slot_clear	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	262	other	ed153	spell_slot_clear	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	263	other	ed153	spell_slot_clear	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	264	other	ed153	spell_slot_clear	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	265	chapter	ed87	chapter_start(12, 13, 1)	fn0() ~= 8 and fn0() == 9	
+12	93	1010	TeleportRgn05 enter	269	other	fn87	model_off	fn0() ~= 9 and fn0() == 11	
+12	93	1010	TeleportRgn05 enter	270	other	ed235	hide_held	fn0() ~= 9 and fn0() == 11	
+12	93	1010	TeleportRgn05 enter	271	hold	fn21	hold(1)	fn0() ~= 9 and fn0() == 11	
+12	93	1010	TeleportRgn05 enter	272	other	fn79	send_event	fn0() ~= 9 and fn0() == 11	
+12	93	1010	TeleportRgn05 enter	273	other	fn79	send_event	fn0() ~= 9 and fn0() == 11	
+12	93	1010	TeleportRgn05 enter	274	state	fn1	its state to 0	fn0() ~= 9 and fn0() == 11	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	1	other	fn23	in_zone		
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	2	flag	fn30	asks flag 969	fn23(PodiumRgn01)	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	3	flag	fn30	asks flag 738	fn23(PodiumRgn01) and fn30(969) == 0	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	4	examine	ed219	EXAMINE: ARTIFACT_PODIUM "These plinths look like the ones Pious had encountered in the Forbidden City - w", close-up camera Podium1Cam	fn23(PodiumRgn01) and fn30(969) == 0 and fn30(738) == 1	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	7	examine	ed219	EXAMINE: BROKEN_PODIUM "The podium is heavily damaged, crumbling into rubble and dust. If it is to be us", close-up camera Podium1Cam	fn30(738) ~= 1	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	10	examine	ed219	EXAMINE: ARTIFACT_ON_PLINTH "An Artifact is set upon the plinth, channeling its power to the arrays.", close-up camera Podium1Cam	fn30(969) ~= 0	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	13	other	fn23	in_zone	not fn23(PodiumRgn01)	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	14	flag	fn30	asks flag 970	not fn23(PodiumRgn01) and fn23(PodiumRgn02)	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	15	examine	ed219	EXAMINE: ARTIFACT_PODIUM "These plinths look like the ones Pious had encountered in the Forbidden City - w", close-up camera Podium2Cam	not fn23(PodiumRgn01) and fn23(PodiumRgn02) and fn30(970) == 0	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	18	examine	ed219	EXAMINE: ARTIFACT_ON_PLINTH "An Artifact is set upon the plinth, channeling its power to the arrays.", close-up camera Podium2Cam	fn30(970) ~= 0	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	21	other	fn23	in_zone	not fn23(PodiumRgn02)	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	22	flag	fn30	asks flag 971	not fn23(PodiumRgn02) and fn23(PodiumRgn03)	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	23	examine	ed219	EXAMINE: ARTIFACT_PODIUM "These plinths look like the ones Pious had encountered in the Forbidden City - w", close-up camera Podium3Cam	not fn23(PodiumRgn02) and fn23(PodiumRgn03) and fn30(971) == 0	
+12	93	2595	PodiumRgn01 enter; PodiumRgn02 enter; PodiumRgn03 enter	26	examine	ed219	EXAMINE: ARTIFACT_ON_PLINTH "An Artifact is set upon the plinth, channeling its power to the arrays.", close-up camera Podium3Cam	fn30(971) ~= 0	
+12	93	650	Region01 enter	1	other	fn78	handle		
+12	93	650	Region01 enter	2	other	ed166	model_of		
+12	93	650	Region01 enter	4	prompt	ed301	prompt OPEN_DOOR (button 2)	ed166(L0) == 9 and fn0() == 0	
+12	93	650	Region01 enter	5	door	fn71	room 100 queued (loaded ahead)	ed166(L0) == 9 and fn0() == 0	
+12	93	650	Region01 enter	6	state	fn1	its state to 1	ed166(L0) == 9 and fn0() == 0	
+12	93	650	Region01 enter	10	door	fn66	door to room 100 at EntryMkr07, camera Camera02, transition 9, then script 1162	fn0() ~= 0 and fn0() == 1	
+12	93	650	Region01 enter	11	other	fn194	sound_later	fn0() ~= 0 and fn0() == 1	
+12	93	650	Region01 enter	12	other	fn62	sound_pair	fn0() ~= 0 and fn0() == 1	
+12	93	650	Region01 enter	13	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	93	650	Region01 enter	17	prompt	ed301	prompt OPEN_DOOR (button 2)	ed166(L0) ~= 9 and fn0() == 0	
+12	93	650	Region01 enter	18	door	fn71	room 100 queued (loaded ahead)	ed166(L0) ~= 9 and fn0() == 0	
+12	93	650	Region01 enter	19	state	fn1	its state to 1	ed166(L0) ~= 9 and fn0() == 0	
+12	93	650	Region01 enter	23	hold	fn139	hold_scene(1)	fn0() ~= 0 and fn0() == 1	
+12	93	650	Region01 enter	24	door	fn66	door to room 100 at EntryMkr07, camera Camera02, transition 9, then script 1162	fn0() ~= 0 and fn0() == 1	
+12	93	650	Region01 enter	25	other	fn62	sound_pair	fn0() ~= 0 and fn0() == 1	
+12	93	650	Region01 enter	26	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	93	650	Region01 enter	27	hold	fn139	hold_scene(0)	fn0() ~= 0 and fn0() == 1	
+12	93	960	SaveRgn enter	1	flag	fn30	asks flag 826		
+12	93	960	SaveRgn enter	2	flag	fn30	asks flag 37	fn30(826) == 0	
+12	93	960	SaveRgn enter	3	flag	fn30	asks flag 659	fn30(826) == 0 and fn30(37) == 1	
+12	93	960	SaveRgn enter	5	other	EDEndMainCharacterSpell	end_spell	fn30(826) == 0 and fn30(37) == 1 and fn30(659) == 0 and fn0() == 0	
+12	93	960	SaveRgn enter	6	words	ed11	words WOULD_YOU_LIKE_TO_SAVE_NOW "Before you proceed, would you like to save your current progress?    Yes      No"	fn30(826) == 0 and fn30(37) == 1 and fn30(659) == 0 and fn0() == 0	
+12	93	960	SaveRgn enter	7	state	fn1	its state to 1	fn30(826) == 0 and fn30(37) == 1 and fn30(659) == 0 and fn0() == 0	
+12	93	960	SaveRgn enter	12	flag	fn29	flag 823 on	fn0() ~= 0 and fn0() == 1 and ed13() == 0	
+12	93	960	SaveRgn enter	13	other	ed223	menu_request	fn0() ~= 0 and fn0() == 1 and ed13() == 0	
+12	93	960	SaveRgn enter	15	state	fn1	its state to 0		
+12	93	960	SaveRgn enter	16	flag	fn29	flag 826 on		
+12	93	2147	FragmentRegion02 enter	2	other	fn78	handle		
+12	93	2147	FragmentRegion02 enter	5	examine	ed221	EXAMINE: words by a variable (19, L0), close-up camera FragmentCam02, unless thing 2196 is carried		
+12	93	1609	ExamineRgn01 enter	1	examine	ed220	EXAMINE: HINT "Long ago, Edward Roivas used the arrays to destroy the denizens of the Guardian "		
+12	93	2146	FragmentRegion01 enter	2	other	fn78	handle		
+12	93	2146	FragmentRegion01 enter	5	examine	ed221	EXAMINE: words by a variable (19, L0), close-up camera FragmentCam01, unless thing 2195 is carried		
+12	94	2648	the room's arrival	1	other	fn78	handle		
+12	94	2648	the room's arrival	2	other	fn79	send_event		
+12	94	2648	the room's arrival	3	other	fn78	handle		
+12	94	2648	the room's arrival	4	other	ed17	alignment		
+12	94	2648	the room's arrival	5	other	fn104	place_of		
+12	94	2648	the room's arrival	6	room_test	fn25	asks the room in play		
+12	94	2648	the room's arrival	129	room_test	fn25	asks the room in play		
+12	94	2648	the room's arrival	209	room_test	fn25	asks the room in play		
+12	94	2648	the room's arrival	218	room_test	fn25	asks the room in play		
+12	94	2648	the room's arrival	219	other	fn78	handle	fn25() == 94	
+12	94	2648	the room's arrival	220	other	fn79	send_event	fn25() == 94	
+12	94	2648	the room's arrival	221	flag	fn30	asks flag 698	fn25() == 94	
+12	94	2648	the room's arrival	222	other	ed70	barrier_make	fn25() == 94 and fn30(698) == 1	
+12	94	2648	the room's arrival	223	other	fn46	unknown_46	fn25() == 94 and fn30(698) == 1	
+12	94	2648	the room's arrival	224	other	fn78	handle	fn25() == 94 and fn30(698) == 1	
+12	94	2648	the room's arrival	225	other	fn87	model_off	fn25() == 94 and fn30(698) == 1	
+12	94	590	Region05new enter	1	door	fn71	room 100 queued (loaded ahead)		
+12	94	590	Region05new enter	2	door	fn66	door to room 100 at EntryMkr04, camera Camera06, transition 3		
+12	94	1067	SKPlane02 cross_b; SKPlane05 cross_b; SKPlane06 cross_b; SKPlane07 cross_b; BoxRegion02 leave; SKPlane08 cross_a; SKPlane09 cross_b	1	camera	fn8	camera Camera07		
+12	94	1067	SKPlane02 cross_b; SKPlane05 cross_b; SKPlane06 cross_b; SKPlane07 cross_b; BoxRegion02 leave; SKPlane08 cross_a; SKPlane09 cross_b	2	other	fn3	camera_ease_eye		
+12	94	1067	SKPlane02 cross_b; SKPlane05 cross_b; SKPlane06 cross_b; SKPlane07 cross_b; BoxRegion02 leave; SKPlane08 cross_a; SKPlane09 cross_b	3	other	fn2	camera_ease_target		
+12	94	2299	BoxRegion01 enter	2	flag	fn30	asks flag 775	fn0() == 0	
+12	94	2299	BoxRegion01 enter	3	camera	fn8	camera Camera06	fn0() == 0 and fn30(775) == 0	
+12	94	2299	BoxRegion01 enter	4	other	fn3	camera_ease_eye	fn0() == 0 and fn30(775) == 0	
+12	94	2299	BoxRegion01 enter	5	other	fn2	camera_ease_target	fn0() == 0 and fn30(775) == 0	
+12	94	2299	BoxRegion01 enter	8	camera	fn8	camera Camera05	fn30(775) ~= 0	
+12	94	2299	BoxRegion01 enter	9	other	fn3	camera_ease_eye	fn30(775) ~= 0	
+12	94	2299	BoxRegion01 enter	10	other	fn2	camera_ease_target	fn30(775) ~= 0	
+12	94	2387	BoxRegion02 enter	1	other	fn78	handle		
+12	94	2387	BoxRegion02 enter	2	other	ed17	alignment		
+12	94	2387	BoxRegion02 enter	3	other	ed152	spell_slot		
+12	94	2387	BoxRegion02 enter	7	other	ed152	spell_slot	ed152(4) ~= 0	
+12	94	2387	BoxRegion02 enter	11	other	ed152	spell_slot	ed152(4) ~= 1	
+12	94	2387	BoxRegion02 enter	17	room_test	fn25	asks the room in play	fn0() == 0	
+12	94	2387	BoxRegion02 enter	18	room_test	fn25	asks the room in play	fn0() == 0 and fn25() ~= 272	
+12	94	2387	BoxRegion02 enter	28	room_test	fn25	asks the room in play		
+12	94	2387	BoxRegion02 enter	29	room_test	fn25	asks the room in play	fn25() ~= 273	
+12	94	2387	BoxRegion02 enter	40	room_test	fn25	asks the room in play		
+12	94	2387	BoxRegion02 enter	41	room_test	fn25	asks the room in play	fn25() ~= 275	
+12	94	2387	BoxRegion02 enter	43	camera	fn8	camera Camera04		
+12	94	2387	BoxRegion02 enter	44	other	fn3	camera_ease_eye		
+12	94	2387	BoxRegion02 enter	45	other	fn2	camera_ease_target		
+12	94	2387	BoxRegion02 enter	47	hold	fn22	cutscene(1, 1)	LastArrayOn == 4	
+12	94	2387	BoxRegion02 enter	49	state	fn1	its state to 1	LastArrayOn == 4	
+12	94	2387	BoxRegion02 enter	51	room_test	fn25	asks the room in play		
+12	94	2387	BoxRegion02 enter	52	room_test	fn25	asks the room in play	fn25() ~= 277	
+12	94	2387	BoxRegion02 enter	65	room_test	fn25	asks the room in play		
+12	94	2387	BoxRegion02 enter	66	room_test	fn25	asks the room in play	fn25() ~= 278	
+12	94	2387	BoxRegion02 enter	81	room_test	fn25	asks the room in play		
+12	94	2387	BoxRegion02 enter	82	room_test	fn25	asks the room in play	fn25() ~= 276	
+12	94	2387	BoxRegion02 enter	92	room_test	fn25	asks the room in play		
+12	94	2387	BoxRegion02 enter	101	room_test	fn25	asks the room in play		
+12	94	2387	BoxRegion02 enter	115	room_test	fn25	asks the room in play		
+12	94	2387	BoxRegion02 enter	116	room_test	fn25	asks the room in play	fn25() ~= 282	
+12	94	2387	BoxRegion02 enter	132	other	fn63	marker_pos	L2 ~= 0	
+12	94	2387	BoxRegion02 enter	133	other	ed152	spell_slot	L2 ~= 0	
+12	94	2387	BoxRegion02 enter	135	other	ed115	appear_effect	L2 ~= 0 and ed152(4) == 0	
+12	94	2387	BoxRegion02 enter	138	other	ed152	spell_slot	ed152(4) ~= 0	
+12	94	2387	BoxRegion02 enter	140	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	94	2387	BoxRegion02 enter	143	other	ed152	spell_slot	ed152(4) ~= 1	
+12	94	2387	BoxRegion02 enter	145	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	94	2387	BoxRegion02 enter	148	other	ed115	appear_effect	ed152(4) ~= 2	
+12	94	2387	BoxRegion02 enter	150	other	fn132	stops_on_hold		
+12	94	2387	BoxRegion02 enter	151	other	fn133	gear_stops_on_hold		
+12	94	2387	BoxRegion02 enter	152	other	ed280	spell_node_acts_in_hold		
+12	94	2387	BoxRegion02 enter	153	other	fn88	model_on		
+12	94	2387	BoxRegion02 enter	154	other	ed287	show_held		
+12	94	2387	BoxRegion02 enter	155	other	ed117	fade_model		
+12	94	2387	BoxRegion02 enter	157	state	fn1	its state to 1		
+12	94	2387	BoxRegion02 enter	158	chain	fn36	waits 128 frames		
+12	94	2387	BoxRegion02 enter	162	other	fn132	stops_on_hold	fn0() ~= 0 and fn0() == 1	
+12	94	2387	BoxRegion02 enter	163	hold	fn22	cutscene(0, 1)	fn0() ~= 0 and fn0() == 1	
+12	94	2387	BoxRegion02 enter	164	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	94	2387	BoxRegion02 enter	168	camera	fn10	camera IntroCam01 (its path)	fn0() ~= 1 and fn0() == 2	
+12	94	2387	BoxRegion02 enter	169	state	fn1	its state to 3	fn0() ~= 1 and fn0() == 2	
+12	94	2387	BoxRegion02 enter	170	chain	fn36	waits 120 frames	fn0() ~= 1 and fn0() == 2	
+12	94	2387	BoxRegion02 enter	175	other	fn63	marker_pos	fn0() ~= 2 and fn0() == 3	
+12	94	2387	BoxRegion02 enter	176	hold	fn111	player_on(1)	fn0() ~= 2 and fn0() == 3	
+12	94	2387	BoxRegion02 enter	177	other	ed152	spell_slot	fn0() ~= 2 and fn0() == 3	
+12	94	2387	BoxRegion02 enter	179	other	ed115	appear_effect	fn0() ~= 2 and fn0() == 3 and ed152(4) == 0	
+12	94	2387	BoxRegion02 enter	182	other	ed152	spell_slot	ed152(4) ~= 0	
+12	94	2387	BoxRegion02 enter	184	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	94	2387	BoxRegion02 enter	187	other	ed152	spell_slot	ed152(4) ~= 1	
+12	94	2387	BoxRegion02 enter	189	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	94	2387	BoxRegion02 enter	192	other	ed115	appear_effect	ed152(4) ~= 2	
+12	94	2387	BoxRegion02 enter	194	other	fn132	stops_on_hold		
+12	94	2387	BoxRegion02 enter	195	other	fn133	gear_stops_on_hold		
+12	94	2387	BoxRegion02 enter	196	other	ed280	spell_node_acts_in_hold		
+12	94	2387	BoxRegion02 enter	197	other	fn88	model_on		
+12	94	2387	BoxRegion02 enter	198	other	ed287	show_held		
+12	94	2387	BoxRegion02 enter	199	other	ed117	fade_model		
+12	94	2387	BoxRegion02 enter	201	state	fn1	its state to 1		
+12	94	2387	BoxRegion02 enter	202	chain	fn36	waits 128 frames		
+12	97	2648	the room's arrival	1	other	fn78	handle		
+12	97	2648	the room's arrival	2	other	fn79	send_event		
+12	97	2648	the room's arrival	3	other	fn78	handle		
+12	97	2648	the room's arrival	4	other	ed17	alignment		
+12	97	2648	the room's arrival	5	other	fn104	place_of		
+12	97	2648	the room's arrival	6	room_test	fn25	asks the room in play		
+12	97	2648	the room's arrival	129	room_test	fn25	asks the room in play		
+12	97	2648	the room's arrival	131	flag	fn30	asks flag 113	fn25() == 97 and fn0() == 0	
+12	97	2648	the room's arrival	132	hold	fn22	cutscene(1, 1)	fn25() == 97 and fn0() == 0 and fn30(113) == 0	
+12	97	2648	the room's arrival	133	camera	fn8	camera Camera01	fn25() == 97 and fn0() == 0 and fn30(113) == 0	
+12	97	2648	the room's arrival	134	other	fn132	stops_on_hold	fn25() == 97 and fn0() == 0 and fn30(113) == 0	
+12	97	2648	the room's arrival	135	other	fn133	gear_stops_on_hold	fn25() == 97 and fn0() == 0 and fn30(113) == 0	
+12	97	2648	the room's arrival	136	other	ed280	spell_node_acts_in_hold	fn25() == 97 and fn0() == 0 and fn30(113) == 0	
+12	97	2648	the room's arrival	137	other	fn88	model_on	fn25() == 97 and fn0() == 0 and fn30(113) == 0	
+12	97	2648	the room's arrival	138	other	ed287	show_held	fn25() == 97 and fn0() == 0 and fn30(113) == 0	
+12	97	2648	the room's arrival	139	other	ed152	spell_slot	fn25() == 97 and fn0() == 0 and fn30(113) == 0	
+12	97	2648	the room's arrival	143	other	ed152	spell_slot	ed152(4) ~= 0	
+12	97	2648	the room's arrival	147	other	ed152	spell_slot	ed152(4) ~= 1	
+12	97	2648	the room's arrival	150	other	ed115	appear_effect		
+12	97	2648	the room's arrival	151	other	ed117	fade_model		
+12	97	2648	the room's arrival	152	chain	fn36	waits 150 frames		
+12	97	2648	the room's arrival	153	state	fn1	its state to 3		
+12	97	2648	the room's arrival	154	flag	fn29	flag 113 on		
+12	97	2648	the room's arrival	157	other	fn78	handle	fn30(113) ~= 0	
+12	97	2648	the room's arrival	158	other	fn78	handle	fn30(113) ~= 0	
+12	97	2648	the room's arrival	159	other	fn78	handle	fn30(113) ~= 0	
+12	97	2648	the room's arrival	163	other	ed70	barrier_make	fn30(113) ~= 0 and L4 and L5 and L6	
+12	97	2648	the room's arrival	168	hold	fn22	cutscene(0, 1)	fn0() ~= 0 and fn0() == 2	
+12	97	2648	the room's arrival	169	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 2	
+12	97	2648	the room's arrival	171	other	ed280	spell_node_acts_in_hold	fn0() ~= 0 and fn0() == 2	
+12	97	2648	the room's arrival	172	other	fn132	stops_on_hold	fn0() ~= 0 and fn0() == 2	
+12	97	2648	the room's arrival	173	other	fn133	gear_stops_on_hold	fn0() ~= 0 and fn0() == 2	
+12	97	2648	the room's arrival	174	camera	fn8	camera Camera01	fn0() ~= 0 and fn0() == 2	
+12	97	2648	the room's arrival	175	other	fn3	camera_ease_eye	fn0() ~= 0 and fn0() == 2	
+12	97	2648	the room's arrival	176	other	fn2	camera_ease_target	fn0() ~= 0 and fn0() == 2	
+12	97	2648	the room's arrival	180	camera	fn8	camera StatueCam02	fn0() ~= 2 and fn0() == 3	
+12	97	2648	the room's arrival	181	chain	fn36	waits 70 frames	fn0() ~= 2 and fn0() == 3	
+12	97	2648	the room's arrival	182	state	fn1	its state to 4	fn0() ~= 2 and fn0() == 3	
+12	97	2648	the room's arrival	186	camera	fn8	camera StatueCam03	fn0() ~= 3 and fn0() == 4	
+12	97	2648	the room's arrival	187	chain	fn36	waits 70 frames	fn0() ~= 3 and fn0() == 4	
+12	97	2648	the room's arrival	188	state	fn1	its state to 5	fn0() ~= 3 and fn0() == 4	
+12	97	2648	the room's arrival	192	camera	fn8	camera IntroCam01	fn0() ~= 4 and fn0() == 5	
+12	97	2648	the room's arrival	193	chain	fn36	waits 45 frames	fn0() ~= 4 and fn0() == 5	
+12	97	2648	the room's arrival	194	state	fn1	its state to 6	fn0() ~= 4 and fn0() == 5	
+12	97	2648	the room's arrival	198	camera	fn10	camera IntroCam02 (its path)	fn0() ~= 5 and fn0() == 6	
+12	97	2648	the room's arrival	199	other	fn11	camera_end_script	fn0() ~= 5 and fn0() == 6	
+12	97	2648	the room's arrival	200	state	fn1	its state to 7	fn0() ~= 5 and fn0() == 6	
+12	97	2648	the room's arrival	204	state	fn1	its state to 2	fn0() ~= 6 and fn0() == 7	
+12	97	2648	the room's arrival	205	other	fn47	sound	fn0() ~= 6 and fn0() == 7	
+12	97	2648	the room's arrival	206	other	ed70	barrier_make	fn0() ~= 6 and fn0() == 7	
+12	97	2648	the room's arrival	207	chain	fn36	waits 100 frames	fn0() ~= 6 and fn0() == 7	
+12	97	2648	the room's arrival	209	room_test	fn25	asks the room in play		
+12	97	2648	the room's arrival	218	room_test	fn25	asks the room in play		
+12	97	733	BoxRegion03 enter	1	door	fn71	room 98 queued (loaded ahead)		
+12	97	733	BoxRegion03 enter	2	door	fn66	door to room 98 at EntryMkr02, camera Camera01, transition 3, then script 1161		
+12	97	2387	CameraRgn02 enter	1	other	fn78	handle		
+12	97	2387	CameraRgn02 enter	2	other	ed17	alignment		
+12	97	2387	CameraRgn02 enter	3	other	ed152	spell_slot		
+12	97	2387	CameraRgn02 enter	7	other	ed152	spell_slot	ed152(4) ~= 0	
+12	97	2387	CameraRgn02 enter	11	other	ed152	spell_slot	ed152(4) ~= 1	
+12	97	2387	CameraRgn02 enter	17	room_test	fn25	asks the room in play	fn0() == 0	
+12	97	2387	CameraRgn02 enter	18	room_test	fn25	asks the room in play	fn0() == 0 and fn25() ~= 272	
+12	97	2387	CameraRgn02 enter	28	room_test	fn25	asks the room in play		
+12	97	2387	CameraRgn02 enter	29	room_test	fn25	asks the room in play	fn25() ~= 273	
+12	97	2387	CameraRgn02 enter	40	room_test	fn25	asks the room in play		
+12	97	2387	CameraRgn02 enter	41	room_test	fn25	asks the room in play	fn25() ~= 275	
+12	97	2387	CameraRgn02 enter	51	room_test	fn25	asks the room in play		
+12	97	2387	CameraRgn02 enter	52	room_test	fn25	asks the room in play	fn25() ~= 277	
+12	97	2387	CameraRgn02 enter	65	room_test	fn25	asks the room in play		
+12	97	2387	CameraRgn02 enter	66	room_test	fn25	asks the room in play	fn25() ~= 278	
+12	97	2387	CameraRgn02 enter	81	room_test	fn25	asks the room in play		
+12	97	2387	CameraRgn02 enter	82	room_test	fn25	asks the room in play	fn25() ~= 276	
+12	97	2387	CameraRgn02 enter	84	camera	fn8	camera Camera01		
+12	97	2387	CameraRgn02 enter	85	other	fn3	camera_ease_eye		
+12	97	2387	CameraRgn02 enter	86	other	fn2	camera_ease_target		
+12	97	2387	CameraRgn02 enter	88	hold	fn22	cutscene(1, 1)	LastArrayOn == 7	
+12	97	2387	CameraRgn02 enter	90	state	fn1	its state to 1	LastArrayOn == 7	
+12	97	2387	CameraRgn02 enter	92	room_test	fn25	asks the room in play		
+12	97	2387	CameraRgn02 enter	101	room_test	fn25	asks the room in play		
+12	97	2387	CameraRgn02 enter	115	room_test	fn25	asks the room in play		
+12	97	2387	CameraRgn02 enter	116	room_test	fn25	asks the room in play	fn25() ~= 282	
+12	97	2387	CameraRgn02 enter	132	other	fn63	marker_pos	L2 ~= 0	
+12	97	2387	CameraRgn02 enter	133	other	ed152	spell_slot	L2 ~= 0	
+12	97	2387	CameraRgn02 enter	135	other	ed115	appear_effect	L2 ~= 0 and ed152(4) == 0	
+12	97	2387	CameraRgn02 enter	138	other	ed152	spell_slot	ed152(4) ~= 0	
+12	97	2387	CameraRgn02 enter	140	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	97	2387	CameraRgn02 enter	143	other	ed152	spell_slot	ed152(4) ~= 1	
+12	97	2387	CameraRgn02 enter	145	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	97	2387	CameraRgn02 enter	148	other	ed115	appear_effect	ed152(4) ~= 2	
+12	97	2387	CameraRgn02 enter	150	other	fn132	stops_on_hold		
+12	97	2387	CameraRgn02 enter	151	other	fn133	gear_stops_on_hold		
+12	97	2387	CameraRgn02 enter	152	other	ed280	spell_node_acts_in_hold		
+12	97	2387	CameraRgn02 enter	153	other	fn88	model_on		
+12	97	2387	CameraRgn02 enter	154	other	ed287	show_held		
+12	97	2387	CameraRgn02 enter	155	other	ed117	fade_model		
+12	97	2387	CameraRgn02 enter	157	state	fn1	its state to 1		
+12	97	2387	CameraRgn02 enter	158	chain	fn36	waits 128 frames		
+12	97	2387	CameraRgn02 enter	162	other	fn132	stops_on_hold	fn0() ~= 0 and fn0() == 1	
+12	97	2387	CameraRgn02 enter	163	hold	fn22	cutscene(0, 1)	fn0() ~= 0 and fn0() == 1	
+12	97	2387	CameraRgn02 enter	164	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	97	2387	CameraRgn02 enter	168	camera	fn10	camera IntroCam01 (its path)	fn0() ~= 1 and fn0() == 2	
+12	97	2387	CameraRgn02 enter	169	state	fn1	its state to 3	fn0() ~= 1 and fn0() == 2	
+12	97	2387	CameraRgn02 enter	170	chain	fn36	waits 120 frames	fn0() ~= 1 and fn0() == 2	
+12	97	2387	CameraRgn02 enter	175	other	fn63	marker_pos	fn0() ~= 2 and fn0() == 3	
+12	97	2387	CameraRgn02 enter	176	hold	fn111	player_on(1)	fn0() ~= 2 and fn0() == 3	
+12	97	2387	CameraRgn02 enter	177	other	ed152	spell_slot	fn0() ~= 2 and fn0() == 3	
+12	97	2387	CameraRgn02 enter	179	other	ed115	appear_effect	fn0() ~= 2 and fn0() == 3 and ed152(4) == 0	
+12	97	2387	CameraRgn02 enter	182	other	ed152	spell_slot	ed152(4) ~= 0	
+12	97	2387	CameraRgn02 enter	184	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	97	2387	CameraRgn02 enter	187	other	ed152	spell_slot	ed152(4) ~= 1	
+12	97	2387	CameraRgn02 enter	189	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	97	2387	CameraRgn02 enter	192	other	ed115	appear_effect	ed152(4) ~= 2	
+12	97	2387	CameraRgn02 enter	194	other	fn132	stops_on_hold		
+12	97	2387	CameraRgn02 enter	195	other	fn133	gear_stops_on_hold		
+12	97	2387	CameraRgn02 enter	196	other	ed280	spell_node_acts_in_hold		
+12	97	2387	CameraRgn02 enter	197	other	fn88	model_on		
+12	97	2387	CameraRgn02 enter	198	other	ed287	show_held		
+12	97	2387	CameraRgn02 enter	199	other	ed117	fade_model		
+12	97	2387	CameraRgn02 enter	201	state	fn1	its state to 1		
+12	97	2387	CameraRgn02 enter	202	chain	fn36	waits 128 frames		
+12	97	2355	SphereRegion02 enter	1	examine	ed220	EXAMINE: OVERVIEW "The room is shaped like a gladiator's arena. A pit where unnatural combatants on"		
+12	98	2476	the room's arrival	1	room_test	fn25	asks the room in play		
+12	98	2476	the room's arrival	2	other	ed155	count_things		
+12	98	2476	the room's arrival	3	other	ed169	unknown_169	ed155(2, 7, -1, L0, 0) == 0	
+12	98	2476	the room's arrival	6	other	fn78	handle	ed155(2, 7, -1, L0, 0) ~= 0	
+12	98	2476	the room's arrival	7	other	ed16	alignment_of	ed155(2, 7, -1, L0, 0) ~= 0	
+12	98	2476	the room's arrival	8	other	ed169	unknown_169	ed155(2, 7, -1, L0, 0) ~= 0	
+12	98	2476	the room's arrival	10	other	fn78	handle		
+12	98	2476	the room's arrival	11	other	fn79	send_event		
+12	98	2476	the room's arrival	12	room_test	fn25	asks the room in play		
+12	98	2476	the room's arrival	13	other	ed17	alignment	fn25() == 98	
+12	98	2476	the room's arrival	14	flag	fn30	asks flag 693	fn25() == 98	
+12	98	2476	the room's arrival	15	other	ed70	barrier_make	fn25() == 98 and fn30(693) == 0	
+12	98	2476	the room's arrival	17	flag	fn30	asks flag 744		
+12	98	2476	the room's arrival	18	other	ed70	barrier_make	fn30(744) == 0	
+12	98	2586	the room's leave	1	room_test	fn25	asks the room in play		
+12	98	2586	the room's leave	2	other	ed155	count_things		
+12	98	2586	the room's leave	3	other	fn124	room_layer_height	ed155(2, 7, -1, L0, 0) == 0	
+12	98	2586	the room's leave	5	other	ed76	barrier_remove		
+12	98	551	Region01 enter	1	door	fn71	room 100 queued (loaded ahead)		
+12	98	551	Region01 enter	2	door	fn66	door to room 100 at EntryMkr03, camera Camera03, transition 3		
+12	98	552	Region02 enter	1	door	fn71	room 97 queued (loaded ahead)		
+12	98	552	Region02 enter	2	door	fn66	door to room 97 at EntryMkr01, camera Camera03, transition 3, then script 1163		
+12	98	553	Region03 enter	1	door	fn71	room 99 queued (loaded ahead)		
+12	98	553	Region03 enter	2	door	fn66	door to room 99 at EntryMkr01, camera Camera02, transition 3		
+12	98	2387	CameraRgn03 enter	1	other	fn78	handle		
+12	98	2387	CameraRgn03 enter	2	other	ed17	alignment		
+12	98	2387	CameraRgn03 enter	3	other	ed152	spell_slot		
+12	98	2387	CameraRgn03 enter	7	other	ed152	spell_slot	ed152(4) ~= 0	
+12	98	2387	CameraRgn03 enter	11	other	ed152	spell_slot	ed152(4) ~= 1	
+12	98	2387	CameraRgn03 enter	17	room_test	fn25	asks the room in play	fn0() == 0	
+12	98	2387	CameraRgn03 enter	18	room_test	fn25	asks the room in play	fn0() == 0 and fn25() ~= 272	
+12	98	2387	CameraRgn03 enter	28	room_test	fn25	asks the room in play		
+12	98	2387	CameraRgn03 enter	29	room_test	fn25	asks the room in play	fn25() ~= 273	
+12	98	2387	CameraRgn03 enter	40	room_test	fn25	asks the room in play		
+12	98	2387	CameraRgn03 enter	41	room_test	fn25	asks the room in play	fn25() ~= 275	
+12	98	2387	CameraRgn03 enter	51	room_test	fn25	asks the room in play		
+12	98	2387	CameraRgn03 enter	52	room_test	fn25	asks the room in play	fn25() ~= 277	
+12	98	2387	CameraRgn03 enter	54	camera	fn8	camera Camera01		
+12	98	2387	CameraRgn03 enter	55	other	fn3	camera_ease_eye		
+12	98	2387	CameraRgn03 enter	56	other	fn2	camera_ease_target		
+12	98	2387	CameraRgn03 enter	57	other	fn78	handle		
+12	98	2387	CameraRgn03 enter	58	other	fn132	stops_on_hold		
+12	98	2387	CameraRgn03 enter	60	hold	fn22	cutscene(1, 1)	LastArrayOn == 5	
+12	98	2387	CameraRgn03 enter	62	state	fn1	its state to 1	LastArrayOn == 5	
+12	98	2387	CameraRgn03 enter	65	room_test	fn25	asks the room in play		
+12	98	2387	CameraRgn03 enter	66	room_test	fn25	asks the room in play	fn25() ~= 278	
+12	98	2387	CameraRgn03 enter	81	room_test	fn25	asks the room in play		
+12	98	2387	CameraRgn03 enter	82	room_test	fn25	asks the room in play	fn25() ~= 276	
+12	98	2387	CameraRgn03 enter	92	room_test	fn25	asks the room in play		
+12	98	2387	CameraRgn03 enter	101	room_test	fn25	asks the room in play		
+12	98	2387	CameraRgn03 enter	115	room_test	fn25	asks the room in play		
+12	98	2387	CameraRgn03 enter	116	room_test	fn25	asks the room in play	fn25() ~= 282	
+12	98	2387	CameraRgn03 enter	132	other	fn63	marker_pos	L2 ~= 0	
+12	98	2387	CameraRgn03 enter	133	other	ed152	spell_slot	L2 ~= 0	
+12	98	2387	CameraRgn03 enter	135	other	ed115	appear_effect	L2 ~= 0 and ed152(4) == 0	
+12	98	2387	CameraRgn03 enter	138	other	ed152	spell_slot	ed152(4) ~= 0	
+12	98	2387	CameraRgn03 enter	140	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	98	2387	CameraRgn03 enter	143	other	ed152	spell_slot	ed152(4) ~= 1	
+12	98	2387	CameraRgn03 enter	145	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	98	2387	CameraRgn03 enter	148	other	ed115	appear_effect	ed152(4) ~= 2	
+12	98	2387	CameraRgn03 enter	150	other	fn132	stops_on_hold		
+12	98	2387	CameraRgn03 enter	151	other	fn133	gear_stops_on_hold		
+12	98	2387	CameraRgn03 enter	152	other	ed280	spell_node_acts_in_hold		
+12	98	2387	CameraRgn03 enter	153	other	fn88	model_on		
+12	98	2387	CameraRgn03 enter	154	other	ed287	show_held		
+12	98	2387	CameraRgn03 enter	155	other	ed117	fade_model		
+12	98	2387	CameraRgn03 enter	157	state	fn1	its state to 1		
+12	98	2387	CameraRgn03 enter	158	chain	fn36	waits 128 frames		
+12	98	2387	CameraRgn03 enter	162	other	fn132	stops_on_hold	fn0() ~= 0 and fn0() == 1	
+12	98	2387	CameraRgn03 enter	163	hold	fn22	cutscene(0, 1)	fn0() ~= 0 and fn0() == 1	
+12	98	2387	CameraRgn03 enter	164	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	98	2387	CameraRgn03 enter	168	camera	fn10	camera IntroCam01 (its path)	fn0() ~= 1 and fn0() == 2	
+12	98	2387	CameraRgn03 enter	169	state	fn1	its state to 3	fn0() ~= 1 and fn0() == 2	
+12	98	2387	CameraRgn03 enter	170	chain	fn36	waits 120 frames	fn0() ~= 1 and fn0() == 2	
+12	98	2387	CameraRgn03 enter	175	other	fn63	marker_pos	fn0() ~= 2 and fn0() == 3	
+12	98	2387	CameraRgn03 enter	176	hold	fn111	player_on(1)	fn0() ~= 2 and fn0() == 3	
+12	98	2387	CameraRgn03 enter	177	other	ed152	spell_slot	fn0() ~= 2 and fn0() == 3	
+12	98	2387	CameraRgn03 enter	179	other	ed115	appear_effect	fn0() ~= 2 and fn0() == 3 and ed152(4) == 0	
+12	98	2387	CameraRgn03 enter	182	other	ed152	spell_slot	ed152(4) ~= 0	
+12	98	2387	CameraRgn03 enter	184	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	98	2387	CameraRgn03 enter	187	other	ed152	spell_slot	ed152(4) ~= 1	
+12	98	2387	CameraRgn03 enter	189	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	98	2387	CameraRgn03 enter	192	other	ed115	appear_effect	ed152(4) ~= 2	
+12	98	2387	CameraRgn03 enter	194	other	fn132	stops_on_hold		
+12	98	2387	CameraRgn03 enter	195	other	fn133	gear_stops_on_hold		
+12	98	2387	CameraRgn03 enter	196	other	ed280	spell_node_acts_in_hold		
+12	98	2387	CameraRgn03 enter	197	other	fn88	model_on		
+12	98	2387	CameraRgn03 enter	198	other	ed287	show_held		
+12	98	2387	CameraRgn03 enter	199	other	ed117	fade_model		
+12	98	2387	CameraRgn03 enter	201	state	fn1	its state to 1		
+12	98	2387	CameraRgn03 enter	202	chain	fn36	waits 128 frames		
+12	99	2777	the room's arrival	1	other	fn78	handle		
+12	99	2777	the room's arrival	2	other	fn79	send_event		
+12	99	2777	the room's arrival	3	other	fn78	handle		
+12	99	2777	the room's arrival	4	other	ed17	alignment		
+12	99	2777	the room's arrival	5	other	fn104	place_of		
+12	99	2777	the room's arrival	7	other	ed254	previous_room	fn0() == 0	
+12	99	2777	the room's arrival	8	hold	fn22	cutscene(1, 1)	fn0() == 0 and ed254() == 265	
+12	99	2777	the room's arrival	9	other	fn87	model_off	fn0() == 0 and ed254() == 265	
+12	99	2777	the room's arrival	10	other	ed235	hide_held	fn0() == 0 and ed254() == 265	
+12	99	2777	the room's arrival	11	hold	ed265	hold_kind6(0)	fn0() == 0 and ed254() == 265	
+12	99	2777	the room's arrival	12	flag	fn30	asks flag 690	fn0() == 0 and ed254() == 265	
+12	99	2777	the room's arrival	13	other	ed248	invisible_spell_on	fn0() == 0 and ed254() == 265 and fn30(690) == 0	
+12	99	2777	the room's arrival	14	flag	fn29	flag 690 on	fn0() == 0 and ed254() == 265 and fn30(690) == 0 and ed248(0) == 1	
+12	99	2777	the room's arrival	15	other	fn78	handle	fn0() == 0 and ed254() == 265 and fn30(690) == 0 and ed248(0) == 1	
+12	99	2777	the room's arrival	16	other	fn90	set_machine	fn0() == 0 and ed254() == 265 and fn30(690) == 0 and ed248(0) == 1	
+12	99	2777	the room's arrival	17	state	fn1	its state to 5	fn0() == 0 and ed254() == 265 and fn30(690) == 0 and ed248(0) == 1	
+12	99	2777	the room's arrival	21	flag	fn30	asks flag 74	ed248(0) ~= 1	
+12	99	2777	the room's arrival	22	flag	fn29	flag 74 on	ed248(0) ~= 1 and fn30(74) == 0	
+12	99	2777	the room's arrival	23	camera	fn8	camera IntroCam01	ed248(0) ~= 1 and fn30(74) == 0	
+12	99	2777	the room's arrival	24	other	fn78	handle	ed248(0) ~= 1 and fn30(74) == 0	
+12	99	2777	the room's arrival	25	other	fn132	stops_on_hold	ed248(0) ~= 1 and fn30(74) == 0	
+12	99	2777	the room's arrival	26	state	fn1	its state to 1	ed248(0) ~= 1 and fn30(74) == 0	
+12	99	2777	the room's arrival	27	chain	fn36	waits 5 frames	ed248(0) ~= 1 and fn30(74) == 0	
+12	99	2777	the room's arrival	30	other	ed237	fade_kind6	fn30(74) ~= 0	
+12	99	2777	the room's arrival	31	state	fn1	its state to 5	fn30(74) ~= 0	
+12	99	2777	the room's arrival	35	state	fn1	its state to 5	fn30(690) ~= 0	
+12	99	2777	the room's arrival	40	other	fn78	handle	fn0() ~= 0 and fn0() == 1	
+12	99	2777	the room's arrival	42	other	fn12	anim_walk_to	fn0() ~= 0 and fn0() == 1	
+12	99	2777	the room's arrival	42	other	fn63	marker_pos	fn0() ~= 0 and fn0() == 1	
+12	99	2777	the room's arrival	43	other	fn17	anim_done_script	fn0() ~= 0 and fn0() == 1	
+12	99	2777	the room's arrival	44	state	fn1	its state to 2	fn0() ~= 0 and fn0() == 1	
+12	99	2777	the room's arrival	48	state	fn1	its state to 3	fn0() ~= 1 and fn0() == 2	
+12	99	2777	the room's arrival	49	chain	fn36	waits 90 frames	fn0() ~= 1 and fn0() == 2	
+12	99	2777	the room's arrival	53	other	fn78	handle	fn0() ~= 2 and fn0() == 3	
+12	99	2777	the room's arrival	54	other	fn132	stops_on_hold	fn0() ~= 2 and fn0() == 3	
+12	99	2777	the room's arrival	55	other	ed237	fade_kind6	fn0() ~= 2 and fn0() == 3	
+12	99	2777	the room's arrival	56	chain	fn36	waits 80 frames	fn0() ~= 2 and fn0() == 3	
+12	99	2777	the room's arrival	57	state	fn1	its state to 4	fn0() ~= 2 and fn0() == 3	
+12	99	2777	the room's arrival	61	other	fn78	handle	fn0() ~= 3 and fn0() == 4	
+12	99	2777	the room's arrival	62	other	fn90	set_machine	fn0() ~= 3 and fn0() == 4	
+12	99	2777	the room's arrival	63	camera	fn10	camera IntroCam02 (its path)	fn0() ~= 3 and fn0() == 4	
+12	99	2777	the room's arrival	64	chain	fn36	waits 300 frames	fn0() ~= 3 and fn0() == 4	
+12	99	2777	the room's arrival	65	state	fn1	its state to 5	fn0() ~= 3 and fn0() == 4	
+12	99	2777	the room's arrival	69	other	fn132	stops_on_hold	fn0() ~= 4 and fn0() == 5	
+12	99	2777	the room's arrival	70	other	fn133	gear_stops_on_hold	fn0() ~= 4 and fn0() == 5	
+12	99	2777	the room's arrival	71	other	ed280	spell_node_acts_in_hold	fn0() ~= 4 and fn0() == 5	
+12	99	2777	the room's arrival	72	other	fn88	model_on	fn0() ~= 4 and fn0() == 5	
+12	99	2777	the room's arrival	73	other	ed287	show_held	fn0() ~= 4 and fn0() == 5	
+12	99	2777	the room's arrival	74	other	ed115	appear_effect	fn0() ~= 4 and fn0() == 5	
+12	99	2777	the room's arrival	75	other	ed117	fade_model	fn0() ~= 4 and fn0() == 5	
+12	99	2777	the room's arrival	76	chain	fn36	waits 100 frames	fn0() ~= 4 and fn0() == 5	
+12	99	2777	the room's arrival	77	state	fn1	its state to 6	fn0() ~= 4 and fn0() == 5	
+12	99	2777	the room's arrival	81	hold	fn22	cutscene(0, 1)	fn0() ~= 5 and fn0() == 6	
+12	99	2777	the room's arrival	82	other	fn132	stops_on_hold	fn0() ~= 5 and fn0() == 6	
+12	99	2777	the room's arrival	83	other	fn133	gear_stops_on_hold	fn0() ~= 5 and fn0() == 6	
+12	99	2777	the room's arrival	84	other	ed280	spell_node_acts_in_hold	fn0() ~= 5 and fn0() == 6	
+12	99	2777	the room's arrival	85	hold	ed265	hold_kind6(1)	fn0() ~= 5 and fn0() == 6	
+12	99	2777	the room's arrival	87	camera	fn8	camera Camera06	fn0() ~= 5 and fn0() == 6	
+12	99	2777	the room's arrival	88	other	fn3	camera_ease_eye	fn0() ~= 5 and fn0() == 6	
+12	99	2777	the room's arrival	89	other	fn2	camera_ease_target	fn0() ~= 5 and fn0() == 6	
+12	99	2777	the room's arrival	90	state	fn1	its state to 0	fn0() ~= 5 and fn0() == 6	
+12	99	1062	CameraRgn01 leave; CameraRgn02 enter; SKPlane05 cross_a; SKPlane03 cross_b	1	camera	fn8	camera Camera02		
+12	99	1062	CameraRgn01 leave; CameraRgn02 enter; SKPlane05 cross_a; SKPlane03 cross_b	2	other	fn3	camera_ease_eye		
+12	99	1062	CameraRgn01 leave; CameraRgn02 enter; SKPlane05 cross_a; SKPlane03 cross_b	3	other	fn2	camera_ease_target		
+12	99	568	BoxRegion01 enter	1	door	fn71	room 98 queued (loaded ahead)		
+12	99	568	BoxRegion01 enter	2	door	fn66	door to room 98 at EntryMkr03, camera Camera01, transition 3		
+12	100	1839	the room's arrival	1	flag	fn29	flag 418 on		
+12	100	1839	the room's arrival	2	other	fn78	handle		
+12	100	1839	the room's arrival	3	room_test	fn25	asks the room in play		
+12	100	1839	the room's arrival	4	other	ed17	alignment	fn25() == 100	
+12	100	1839	the room's arrival	6	flag	fn30	asks flag 618	fn25() == 100 and fn0() == 0	
+12	100	1839	the room's arrival	7	other	ed70	barrier_make	fn25() == 100 and fn0() == 0 and fn30(618) == 1	
+12	100	1839	the room's arrival	9	flag	fn30	asks flag 740		
+12	100	1839	the room's arrival	10	flag	fn30	asks flag 741	fn30(740) == 0	
+12	100	1839	the room's arrival	11	other	ed70	barrier_make	fn30(740) == 0 and fn30(741) == 0	
+12	100	1839	the room's arrival	13	flag	fn30	asks flag 742		
+12	100	1839	the room's arrival	14	other	ed70	barrier_make	fn30(742) == 0	
+12	100	1839	the room's arrival	16	flag	fn30	asks flag 743		
+12	100	1839	the room's arrival	17	other	ed70	barrier_make	fn30(743) == 0	
+12	100	1839	the room's arrival	19	flag	fn30	asks flag 693		
+12	100	1839	the room's arrival	20	flag	fn30	asks flag 745	fn30(693) == 0	
+12	100	1839	the room's arrival	21	flag	fn30	asks flag 744	fn30(693) == 0 and fn30(745) == 0	
+12	100	1839	the room's arrival	22	other	ed70	barrier_make	fn30(693) == 0 and fn30(745) == 0 and fn30(744) == 0	
+12	100	1839	the room's arrival	24	flag	fn30	asks flag 695		
+12	100	1839	the room's arrival	25	flag	fn30	asks flag 696	fn30(695) == 0	
+12	100	1839	the room's arrival	26	other	ed70	barrier_make	fn30(695) == 0 and fn30(696) == 0	
+12	100	1839	the room's arrival	28	flag	fn30	asks flag 617		
+12	100	1839	the room's arrival	29	other	fn63	marker_pos	fn30(617) == 1	
+12	100	1839	the room's arrival	30	other	ed77	damage_field_at	fn30(617) == 1	
+12	100	1839	the room's arrival	31	flag	fn30	asks flag 618	fn30(617) == 1	
+12	100	1839	the room's arrival	32	camera	fn10	camera DamageCam (its path)	fn30(617) == 1 and fn30(618) == 0	
+12	100	1839	the room's arrival	33	other	fn11	camera_end_script	fn30(617) == 1 and fn30(618) == 0	
+12	100	1839	the room's arrival	34	state	fn1	its state to 1	fn30(617) == 1 and fn30(618) == 0	
+12	100	1839	the room's arrival	35	hold	fn22	cutscene(1, 1)	fn30(617) == 1 and fn30(618) == 0	
+12	100	1839	the room's arrival	36	other	fn132	stops_on_hold	fn30(617) == 1 and fn30(618) == 0	
+12	100	1839	the room's arrival	37	other	fn133	gear_stops_on_hold	fn30(617) == 1 and fn30(618) == 0	
+12	100	1839	the room's arrival	38	other	ed280	spell_node_acts_in_hold	fn30(617) == 1 and fn30(618) == 0	
+12	100	1839	the room's arrival	43	camera	fn8	camera Camera01	fn0() ~= 0 and fn0() == 1	
+12	100	1839	the room's arrival	44	chain	fn36	waits 60 frames	fn0() ~= 0 and fn0() == 1	
+12	100	1839	the room's arrival	45	state	fn1	its state to 2	fn0() ~= 0 and fn0() == 1	
+12	100	1839	the room's arrival	49	other	fn47	sound	fn0() ~= 1 and fn0() == 2	
+12	100	1839	the room's arrival	50	other	ed70	barrier_make	fn0() ~= 1 and fn0() == 2	
+12	100	1839	the room's arrival	51	chain	fn36	waits 60 frames	fn0() ~= 1 and fn0() == 2	
+12	100	1839	the room's arrival	52	state	fn1	its state to 3	fn0() ~= 1 and fn0() == 2	
+12	100	1839	the room's arrival	56	flag	fn29	flag 618 on	fn0() ~= 2 and fn0() == 3	
+12	100	1839	the room's arrival	57	state	fn1	its state to 0	fn0() ~= 2 and fn0() == 3	
+12	100	1839	the room's arrival	58	hold	fn22	cutscene(0, 1)	fn0() ~= 2 and fn0() == 3	
+12	100	1839	the room's arrival	59	other	fn132	stops_on_hold	fn0() ~= 2 and fn0() == 3	
+12	100	1839	the room's arrival	60	other	fn133	gear_stops_on_hold	fn0() ~= 2 and fn0() == 3	
+12	100	1839	the room's arrival	61	other	ed280	spell_node_acts_in_hold	fn0() ~= 2 and fn0() == 3	
+12	100	1839	the room's arrival	62	other	fn3	camera_ease_eye	fn0() ~= 2 and fn0() == 3	
+12	100	1839	the room's arrival	63	other	fn2	camera_ease_target	fn0() ~= 2 and fn0() == 3	
+12	100	1839	the room's arrival	66	flag	fn30	asks flag 227		
+12	100	1839	the room's arrival	67	chain	fn73	runs script 488 next	fn30(227) == 0	
+12	100	1839	the room's arrival	1	other	ed17	alignment		488
+12	100	1839	the room's arrival	34	flag	fn30	asks flag 227		488
+12	100	1839	the room's arrival	35	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	37	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	38	spawn	ed3	spawns chr iDominantCharacter model iDominantGeometry in room 37	fn30(227) == 0	488
+12	100	1839	the room's arrival	39	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	40	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	41	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	42	spawn	ed3	spawns chr iSubservientCharacter model iSubservientGeometry in room 37	fn30(227) == 0	488
+12	100	1839	the room's arrival	43	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	44	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	45	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	46	spawn	ed3	spawns chr iSubservientCharacter model iSubservientGeometry in room 37	fn30(227) == 0	488
+12	100	1839	the room's arrival	47	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	48	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	49	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	50	spawn	ed3	spawns chr iSubservientCharacter model iSubservientGeometry in room 263	fn30(227) == 0	488
+12	100	1839	the room's arrival	51	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	52	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	53	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	54	spawn	ed3	spawns chr iSubservientCharacter model iSubservientGeometry in room 265	fn30(227) == 0	488
+12	100	1839	the room's arrival	55	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	56	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	57	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	58	spawn	ed3	spawns chr iDominantCharacter model iDominantGeometry in room 91	fn30(227) == 0	488
+12	100	1839	the room's arrival	59	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	60	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	61	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	62	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 91	fn30(227) == 0	488
+12	100	1839	the room's arrival	63	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	64	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	65	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	66	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 91	fn30(227) == 0	488
+12	100	1839	the room's arrival	67	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	68	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	69	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	70	spawn	ed3	spawns chr iSubservientCharacter model iSubservientGeometry in room 91	fn30(227) == 0	488
+12	100	1839	the room's arrival	71	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	72	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	73	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	74	spawn	ed3	spawns chr iSubservientCharacter model iSubservientGeometry in room 91	fn30(227) == 0	488
+12	100	1839	the room's arrival	75	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	76	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	77	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	78	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 98	fn30(227) == 0	488
+12	100	1839	the room's arrival	79	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	80	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	81	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	82	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 98	fn30(227) == 0	488
+12	100	1839	the room's arrival	83	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	84	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	85	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	86	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 98	fn30(227) == 0	488
+12	100	1839	the room's arrival	87	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	88	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	89	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	90	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 98	fn30(227) == 0	488
+12	100	1839	the room's arrival	91	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	92	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	93	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	94	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 99, tag 2176	fn30(227) == 0	488
+12	100	1839	the room's arrival	95	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	96	other	ed93	thing_flag	fn30(227) == 0	488
+12	100	1839	the room's arrival	97	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	98	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	99	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 99, tag 2182	fn30(227) == 0	488
+12	100	1839	the room's arrival	100	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	101	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	102	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	103	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 99, tag 2179	fn30(227) == 0	488
+12	100	1839	the room's arrival	104	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	105	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	106	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	107	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 99, tag 2180	fn30(227) == 0	488
+12	100	1839	the room's arrival	108	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	109	other	ed93	thing_flag	fn30(227) == 0	488
+12	100	1839	the room's arrival	110	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	111	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	112	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 99, tag 2184	fn30(227) == 0	488
+12	100	1839	the room's arrival	113	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	114	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	115	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	116	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 99, tag 2185	fn30(227) == 0	488
+12	100	1839	the room's arrival	117	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	118	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	119	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	120	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 99, tag 2183	fn30(227) == 0	488
+12	100	1839	the room's arrival	121	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	122	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	123	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	124	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 99, tag 2181	fn30(227) == 0	488
+12	100	1839	the room's arrival	125	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	126	other	ed93	thing_flag	fn30(227) == 0	488
+12	100	1839	the room's arrival	127	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	128	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	129	spawn	ed3	spawns chr iAlignedCharacter model iAlignedGeometry in room 102	fn30(227) == 0	488
+12	100	1839	the room's arrival	130	other	ed30	catch_script	fn30(227) == 0	488
+12	100	1839	the room's arrival	131	other	ed93	thing_flag	fn30(227) == 0	488
+12	100	1839	the room's arrival	132	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	133	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	134	spawn	ed3	spawns chr iAlignedHorrorCharacter model iAlignedHorrorGeometry in room 136, tag 2027	fn30(227) == 0	488
+12	100	1839	the room's arrival	135	other	ed228	needs_clear_line_set	fn30(227) == 0	488
+12	100	1839	the room's arrival	136	other	ed270	start_script_set	fn30(227) == 0	488
+12	100	1839	the room's arrival	137	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	138	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	139	spawn	ed3	spawns chr iAlignedHorrorCharacter model iAlignedHorrorGeometry in room 136, tag 2091	fn30(227) == 0	488
+12	100	1839	the room's arrival	140	other	ed228	needs_clear_line_set	fn30(227) == 0	488
+12	100	1839	the room's arrival	141	other	ed270	start_script_set	fn30(227) == 0	488
+12	100	1839	the room's arrival	142	other	fn63	marker_pos	fn30(227) == 0	488
+12	100	1839	the room's arrival	143	other	fn65	marker_angle	fn30(227) == 0	488
+12	100	1839	the room's arrival	144	spawn	ed3	spawns chr iAlignedHorrorCharacter model iAlignedHorrorGeometry in room 136, tag 2173	fn30(227) == 0	488
+12	100	1839	the room's arrival	145	other	ed228	needs_clear_line_set	fn30(227) == 0	488
+12	100	1839	the room's arrival	146	other	ed270	start_script_set	fn30(227) == 0	488
+12	100	1839	the room's arrival	147	flag	fn29	flag 227 on	fn30(227) == 0	488
+12	100	2001	the room's leave	1	other	ed76	barrier_remove		
+12	100	2001	the room's leave	2	flag	fn30	asks flag 617		
+12	100	2001	the room's leave	3	other	ed78	damage_field_remove_room	fn30(617) == 1	
+12	100	634	BoxRegion01 enter	1	door	fn71	room 98 queued (loaded ahead)		
+12	100	634	BoxRegion01 enter	2	door	fn66	door to room 98 at EntryMkr01, camera Camera02, transition 3		
+12	100	635	BoxRegion02 enter	1	door	fn71	room 90 queued (loaded ahead)		
+12	100	635	BoxRegion02 enter	2	door	fn66	door to room 90 at EntryMkr02, camera Camera02, transition 3		
+12	100	637	BoxRegion03 enter	1	door	fn71	room 94 queued (loaded ahead)		
+12	100	637	BoxRegion03 enter	2	door	fn66	door to room 94 at EntryMkr01, camera Camera01, transition 3, then script 1161		
+12	100	638	BoxRegion04 enter	1	door	fn71	room 102 queued (loaded ahead)		
+12	100	638	BoxRegion04 enter	2	door	fn66	door to room 102 at EntryMkr02, camera Camera05, transition 3, then script 1165		
+12	100	636	BoxRegion05 enter	1	door	fn71	room 92 queued (loaded ahead)		
+12	100	636	BoxRegion05 enter	2	door	fn66	door to room 92 at EntryMkr02, camera Camera01, transition 3		
+12	100	633	BoxRegion06 enter	1	door	fn71	room 51 queued (loaded ahead)		
+12	100	633	BoxRegion06 enter	2	door	fn66	door to room 51 at EntryMkr02, camera Camera03, transition 3		
+12	100	1795	ShieldRgn01 enter	1	other	fn78	handle		
+12	100	1795	ShieldRgn01 enter	2	other	ed17	alignment		
+12	100	1795	ShieldRgn01 enter	5	room_test	fn25	asks the room in play		
+12	100	567	Region01 enter	1	other	fn78	handle		
+12	100	567	Region01 enter	2	other	ed166	model_of		
+12	100	567	Region01 enter	4	prompt	ed301	prompt OPEN_DOOR (button 2)	ed166(L0) == 9 and fn0() == 0	
+12	100	567	Region01 enter	5	door	fn71	room 93 queued (loaded ahead)	ed166(L0) == 9 and fn0() == 0	
+12	100	567	Region01 enter	6	state	fn1	its state to 1	ed166(L0) == 9 and fn0() == 0	
+12	100	567	Region01 enter	10	door	fn66	door to room 93 at EntryMkr01, camera Camera01, transition 9, then script 1161	fn0() ~= 0 and fn0() == 1	
+12	100	567	Region01 enter	11	other	fn194	sound_later	fn0() ~= 0 and fn0() == 1	
+12	100	567	Region01 enter	12	other	fn62	sound_pair	fn0() ~= 0 and fn0() == 1	
+12	100	567	Region01 enter	13	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	100	567	Region01 enter	17	prompt	ed301	prompt OPEN_DOOR (button 2)	ed166(L0) ~= 9 and fn0() == 0	
+12	100	567	Region01 enter	18	door	fn71	room 93 queued (loaded ahead)	ed166(L0) ~= 9 and fn0() == 0	
+12	100	567	Region01 enter	19	state	fn1	its state to 1	ed166(L0) ~= 9 and fn0() == 0	
+12	100	567	Region01 enter	23	hold	fn139	hold_scene(1)	fn0() ~= 0 and fn0() == 1	
+12	100	567	Region01 enter	24	door	fn66	door to room 93 at EntryMkr01, camera Camera01, transition 9, then script 1161	fn0() ~= 0 and fn0() == 1	
+12	100	567	Region01 enter	25	other	fn62	sound_pair	fn0() ~= 0 and fn0() == 1	
+12	100	567	Region01 enter	26	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	100	567	Region01 enter	27	hold	fn139	hold_scene(0)	fn0() ~= 0 and fn0() == 1	
+12	102	2648	the room's arrival	1	other	fn78	handle		
+12	102	2648	the room's arrival	2	other	fn79	send_event		
+12	102	2648	the room's arrival	3	other	fn78	handle		
+12	102	2648	the room's arrival	4	other	ed17	alignment		
+12	102	2648	the room's arrival	5	other	fn104	place_of		
+12	102	2648	the room's arrival	6	room_test	fn25	asks the room in play		
+12	102	2648	the room's arrival	129	room_test	fn25	asks the room in play		
+12	102	2648	the room's arrival	209	room_test	fn25	asks the room in play		
+12	102	2648	the room's arrival	210	flag	fn30	asks flag 696	fn25() == 102	
+12	102	2648	the room's arrival	211	other	ed70	barrier_make	fn25() == 102 and fn30(696) == 0	
+12	102	2648	the room's arrival	213	flag	fn30	asks flag 706		
+12	102	2648	the room's arrival	214	other	ed17	alignment	fn30(706) == 1	
+12	102	2648	the room's arrival	215	other	fn63	marker_pos	fn30(706) == 1	
+12	102	2648	the room's arrival	216	other	ed77	damage_field_at	fn30(706) == 1	
+12	102	2648	the room's arrival	218	room_test	fn25	asks the room in play		
+12	102	2387	CameraRgn01 enter	1	other	fn78	handle		
+12	102	2387	CameraRgn01 enter	2	other	ed17	alignment		
+12	102	2387	CameraRgn01 enter	3	other	ed152	spell_slot		
+12	102	2387	CameraRgn01 enter	7	other	ed152	spell_slot	ed152(4) ~= 0	
+12	102	2387	CameraRgn01 enter	11	other	ed152	spell_slot	ed152(4) ~= 1	
+12	102	2387	CameraRgn01 enter	17	room_test	fn25	asks the room in play	fn0() == 0	
+12	102	2387	CameraRgn01 enter	18	room_test	fn25	asks the room in play	fn0() == 0 and fn25() ~= 272	
+12	102	2387	CameraRgn01 enter	28	room_test	fn25	asks the room in play		
+12	102	2387	CameraRgn01 enter	29	room_test	fn25	asks the room in play	fn25() ~= 273	
+12	102	2387	CameraRgn01 enter	40	room_test	fn25	asks the room in play		
+12	102	2387	CameraRgn01 enter	41	room_test	fn25	asks the room in play	fn25() ~= 275	
+12	102	2387	CameraRgn01 enter	51	room_test	fn25	asks the room in play		
+12	102	2387	CameraRgn01 enter	52	room_test	fn25	asks the room in play	fn25() ~= 277	
+12	102	2387	CameraRgn01 enter	65	room_test	fn25	asks the room in play		
+12	102	2387	CameraRgn01 enter	66	room_test	fn25	asks the room in play	fn25() ~= 278	
+12	102	2387	CameraRgn01 enter	81	room_test	fn25	asks the room in play		
+12	102	2387	CameraRgn01 enter	82	room_test	fn25	asks the room in play	fn25() ~= 276	
+12	102	2387	CameraRgn01 enter	92	room_test	fn25	asks the room in play		
+12	102	2387	CameraRgn01 enter	101	room_test	fn25	asks the room in play		
+12	102	2387	CameraRgn01 enter	104	hold	fn22	cutscene(1, 1)	fn25() == 102 and LastArrayOn == 8	
+12	102	2387	CameraRgn01 enter	105	room_test	fn25	asks the room in play	fn25() == 102 and LastArrayOn == 8	
+12	102	2387	CameraRgn01 enter	106	flag	fn30	asks flag 706	fn25() == 102 and LastArrayOn == 8 and fn25() == 102	
+12	102	2387	CameraRgn01 enter	107	camera	fn8	camera Camera01	fn25() == 102 and LastArrayOn == 8 and fn25() == 102 and fn30(706) == 1	
+12	102	2387	CameraRgn01 enter	110	state	fn1	its state to 1	(fn25() ~= 102) or (fn30(706) ~= 1)	
+12	102	2387	CameraRgn01 enter	111	camera	fn8	camera Camera01	(fn25() ~= 102) or (fn30(706) ~= 1)	
+12	102	2387	CameraRgn01 enter	112	other	fn3	camera_ease_eye	(fn25() ~= 102) or (fn30(706) ~= 1)	
+12	102	2387	CameraRgn01 enter	113	other	fn2	camera_ease_target	(fn25() ~= 102) or (fn30(706) ~= 1)	
+12	102	2387	CameraRgn01 enter	115	room_test	fn25	asks the room in play		
+12	102	2387	CameraRgn01 enter	116	room_test	fn25	asks the room in play	fn25() ~= 282	
+12	102	2387	CameraRgn01 enter	132	other	fn63	marker_pos	L2 ~= 0	
+12	102	2387	CameraRgn01 enter	133	other	ed152	spell_slot	L2 ~= 0	
+12	102	2387	CameraRgn01 enter	135	other	ed115	appear_effect	L2 ~= 0 and ed152(4) == 0	
+12	102	2387	CameraRgn01 enter	138	other	ed152	spell_slot	ed152(4) ~= 0	
+12	102	2387	CameraRgn01 enter	140	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	102	2387	CameraRgn01 enter	143	other	ed152	spell_slot	ed152(4) ~= 1	
+12	102	2387	CameraRgn01 enter	145	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	102	2387	CameraRgn01 enter	148	other	ed115	appear_effect	ed152(4) ~= 2	
+12	102	2387	CameraRgn01 enter	150	other	fn132	stops_on_hold		
+12	102	2387	CameraRgn01 enter	151	other	fn133	gear_stops_on_hold		
+12	102	2387	CameraRgn01 enter	152	other	ed280	spell_node_acts_in_hold		
+12	102	2387	CameraRgn01 enter	153	other	fn88	model_on		
+12	102	2387	CameraRgn01 enter	154	other	ed287	show_held		
+12	102	2387	CameraRgn01 enter	155	other	ed117	fade_model		
+12	102	2387	CameraRgn01 enter	157	state	fn1	its state to 1		
+12	102	2387	CameraRgn01 enter	158	chain	fn36	waits 128 frames		
+12	102	2387	CameraRgn01 enter	162	other	fn132	stops_on_hold	fn0() ~= 0 and fn0() == 1	
+12	102	2387	CameraRgn01 enter	163	hold	fn22	cutscene(0, 1)	fn0() ~= 0 and fn0() == 1	
+12	102	2387	CameraRgn01 enter	164	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	102	2387	CameraRgn01 enter	168	camera	fn10	camera IntroCam01 (its path)	fn0() ~= 1 and fn0() == 2	
+12	102	2387	CameraRgn01 enter	169	state	fn1	its state to 3	fn0() ~= 1 and fn0() == 2	
+12	102	2387	CameraRgn01 enter	170	chain	fn36	waits 120 frames	fn0() ~= 1 and fn0() == 2	
+12	102	2387	CameraRgn01 enter	175	other	fn63	marker_pos	fn0() ~= 2 and fn0() == 3	
+12	102	2387	CameraRgn01 enter	176	hold	fn111	player_on(1)	fn0() ~= 2 and fn0() == 3	
+12	102	2387	CameraRgn01 enter	177	other	ed152	spell_slot	fn0() ~= 2 and fn0() == 3	
+12	102	2387	CameraRgn01 enter	179	other	ed115	appear_effect	fn0() ~= 2 and fn0() == 3 and ed152(4) == 0	
+12	102	2387	CameraRgn01 enter	182	other	ed152	spell_slot	ed152(4) ~= 0	
+12	102	2387	CameraRgn01 enter	184	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	102	2387	CameraRgn01 enter	187	other	ed152	spell_slot	ed152(4) ~= 1	
+12	102	2387	CameraRgn01 enter	189	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	102	2387	CameraRgn01 enter	192	other	ed115	appear_effect	ed152(4) ~= 2	
+12	102	2387	CameraRgn01 enter	194	other	fn132	stops_on_hold		
+12	102	2387	CameraRgn01 enter	195	other	fn133	gear_stops_on_hold		
+12	102	2387	CameraRgn01 enter	196	other	ed280	spell_node_acts_in_hold		
+12	102	2387	CameraRgn01 enter	197	other	fn88	model_on		
+12	102	2387	CameraRgn01 enter	198	other	ed287	show_held		
+12	102	2387	CameraRgn01 enter	199	other	ed117	fade_model		
+12	102	2387	CameraRgn01 enter	201	state	fn1	its state to 1		
+12	102	2387	CameraRgn01 enter	202	chain	fn36	waits 128 frames		
+12	102	1063	CameraPlane02 cross_b; CameraRgn02 leave; CameraPlane04 cross_b; CameraRgn03 enter	1	camera	fn8	camera Camera03		
+12	102	1063	CameraPlane02 cross_b; CameraRgn02 leave; CameraPlane04 cross_b; CameraRgn03 enter	2	other	fn3	camera_ease_eye		
+12	102	1063	CameraPlane02 cross_b; CameraRgn02 leave; CameraPlane04 cross_b; CameraRgn03 enter	3	other	fn2	camera_ease_target		
+12	102	2025	Region01 enter	1	door	fn71	room 100 queued (loaded ahead)		
+12	102	2025	Region01 enter	2	door	fn66	door to room 100 at EntryMkr02, camera Camera04, transition 3		
+12	102	2024	Region02 enter	1	door	fn71	room 136 queued (loaded ahead)		
+12	102	2024	Region02 enter	2	door	fn66	door to room 136 at EntryMkr02, camera Camera01, transition 3, then script 1161		
+12	102	2351	Region03 enter	1	examine	ed219	EXAMINE: TOMB "A huge stone block, etched with bizarre etchings dominates the room. Is it art? ", close-up camera Camera07		
+12	136	2479	the room's arrival	1	other	fn78	handle		
+12	136	2479	the room's arrival	2	other	fn79	send_event		
+12	136	2479	the room's arrival	3	chain	fn36	waits 1 frames		
+12	136	2479	the room's arrival	4	room_test	fn25	asks the room in play		
+12	136	2479	the room's arrival	5	other	ed254	previous_room	fn25() == 136	
+12	136	2479	the room's arrival	6	flag	fn30	asks flag 625	fn25() == 136 and ed254() ~= 268	
+12	136	2479	the room's arrival	7	other	ed203	count_in_zone	fn25() == 136 and ed254() ~= 268 and fn30(625) == 0	
+12	136	2479	the room's arrival	8	other	ed17	alignment	fn25() == 136 and ed254() ~= 268 and fn30(625) == 0	
+12	136	2479	the room's arrival	11	other	ed70	barrier_make	fn25() == 136 and ed254() ~= 268 and fn30(625) == 0 and L1 and L1 > 1	
+12	136	2479	the room's arrival	12	other	ed70	barrier_make	fn25() == 136 and ed254() ~= 268 and fn30(625) == 0 and L1 and L1 > 1	
+12	136	2479	the room's arrival	13	other	ed70	barrier_make	fn25() == 136 and ed254() ~= 268 and fn30(625) == 0 and L1 and L1 > 1	
+12	136	2479	the room's arrival	14	other	ed70	barrier_make	fn25() == 136 and ed254() ~= 268 and fn30(625) == 0 and L1 and L1 > 1	
+12	136	2479	the room's arrival	15	other	ed238	barrier_state	fn25() == 136 and ed254() ~= 268 and fn30(625) == 0 and L1 and L1 > 1	
+12	136	2479	the room's arrival	16	other	ed238	barrier_state	fn25() == 136 and ed254() ~= 268 and fn30(625) == 0 and L1 and L1 > 1	
+12	136	2479	the room's arrival	17	other	ed238	barrier_state	fn25() == 136 and ed254() ~= 268 and fn30(625) == 0 and L1 and L1 > 1	
+12	136	2479	the room's arrival	18	other	ed238	barrier_state	fn25() == 136 and ed254() ~= 268 and fn30(625) == 0 and L1 and L1 > 1	
+12	136	961	the room's leave	1	other	ed76	barrier_remove		
+12	136	843	SphereRegion01 enter	1	door	fn71	room 102 queued (loaded ahead)		
+12	136	843	SphereRegion01 enter	2	door	fn66	door to room 102 at EntryMkr03, camera Camera03, transition 2		
+12	136	2387	CameraRgn05 enter	1	other	fn78	handle		
+12	136	2387	CameraRgn05 enter	2	other	ed17	alignment		
+12	136	2387	CameraRgn05 enter	3	other	ed152	spell_slot		
+12	136	2387	CameraRgn05 enter	7	other	ed152	spell_slot	ed152(4) ~= 0	
+12	136	2387	CameraRgn05 enter	11	other	ed152	spell_slot	ed152(4) ~= 1	
+12	136	2387	CameraRgn05 enter	17	room_test	fn25	asks the room in play	fn0() == 0	
+12	136	2387	CameraRgn05 enter	18	room_test	fn25	asks the room in play	fn0() == 0 and fn25() ~= 272	
+12	136	2387	CameraRgn05 enter	28	room_test	fn25	asks the room in play		
+12	136	2387	CameraRgn05 enter	29	room_test	fn25	asks the room in play	fn25() ~= 273	
+12	136	2387	CameraRgn05 enter	40	room_test	fn25	asks the room in play		
+12	136	2387	CameraRgn05 enter	41	room_test	fn25	asks the room in play	fn25() ~= 275	
+12	136	2387	CameraRgn05 enter	51	room_test	fn25	asks the room in play		
+12	136	2387	CameraRgn05 enter	52	room_test	fn25	asks the room in play	fn25() ~= 277	
+12	136	2387	CameraRgn05 enter	65	room_test	fn25	asks the room in play		
+12	136	2387	CameraRgn05 enter	66	room_test	fn25	asks the room in play	fn25() ~= 278	
+12	136	2387	CameraRgn05 enter	81	room_test	fn25	asks the room in play		
+12	136	2387	CameraRgn05 enter	82	room_test	fn25	asks the room in play	fn25() ~= 276	
+12	136	2387	CameraRgn05 enter	92	room_test	fn25	asks the room in play		
+12	136	2387	CameraRgn05 enter	101	room_test	fn25	asks the room in play		
+12	136	2387	CameraRgn05 enter	115	room_test	fn25	asks the room in play		
+12	136	2387	CameraRgn05 enter	116	room_test	fn25	asks the room in play	fn25() ~= 282	
+12	136	2387	CameraRgn05 enter	118	room_test	fn25	asks the room in play		
+12	136	2387	CameraRgn05 enter	122	camera	fn8	camera Camera03	fn25() ~= 282	
+12	136	2387	CameraRgn05 enter	124	other	fn3	camera_ease_eye		
+12	136	2387	CameraRgn05 enter	125	other	fn2	camera_ease_target		
+12	136	2387	CameraRgn05 enter	127	hold	fn22	cutscene(1, 1)	LastArrayOn == 9	
+12	136	2387	CameraRgn05 enter	129	state	fn1	its state to 1	LastArrayOn == 9	
+12	136	2387	CameraRgn05 enter	132	other	fn63	marker_pos	L2 ~= 0	
+12	136	2387	CameraRgn05 enter	133	other	ed152	spell_slot	L2 ~= 0	
+12	136	2387	CameraRgn05 enter	135	other	ed115	appear_effect	L2 ~= 0 and ed152(4) == 0	
+12	136	2387	CameraRgn05 enter	138	other	ed152	spell_slot	ed152(4) ~= 0	
+12	136	2387	CameraRgn05 enter	140	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	136	2387	CameraRgn05 enter	143	other	ed152	spell_slot	ed152(4) ~= 1	
+12	136	2387	CameraRgn05 enter	145	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	136	2387	CameraRgn05 enter	148	other	ed115	appear_effect	ed152(4) ~= 2	
+12	136	2387	CameraRgn05 enter	150	other	fn132	stops_on_hold		
+12	136	2387	CameraRgn05 enter	151	other	fn133	gear_stops_on_hold		
+12	136	2387	CameraRgn05 enter	152	other	ed280	spell_node_acts_in_hold		
+12	136	2387	CameraRgn05 enter	153	other	fn88	model_on		
+12	136	2387	CameraRgn05 enter	154	other	ed287	show_held		
+12	136	2387	CameraRgn05 enter	155	other	ed117	fade_model		
+12	136	2387	CameraRgn05 enter	157	state	fn1	its state to 1		
+12	136	2387	CameraRgn05 enter	158	chain	fn36	waits 128 frames		
+12	136	2387	CameraRgn05 enter	162	other	fn132	stops_on_hold	fn0() ~= 0 and fn0() == 1	
+12	136	2387	CameraRgn05 enter	163	hold	fn22	cutscene(0, 1)	fn0() ~= 0 and fn0() == 1	
+12	136	2387	CameraRgn05 enter	164	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	136	2387	CameraRgn05 enter	168	camera	fn10	camera IntroCam01 (its path)	fn0() ~= 1 and fn0() == 2	
+12	136	2387	CameraRgn05 enter	169	state	fn1	its state to 3	fn0() ~= 1 and fn0() == 2	
+12	136	2387	CameraRgn05 enter	170	chain	fn36	waits 120 frames	fn0() ~= 1 and fn0() == 2	
+12	136	2387	CameraRgn05 enter	175	other	fn63	marker_pos	fn0() ~= 2 and fn0() == 3	
+12	136	2387	CameraRgn05 enter	176	hold	fn111	player_on(1)	fn0() ~= 2 and fn0() == 3	
+12	136	2387	CameraRgn05 enter	177	other	ed152	spell_slot	fn0() ~= 2 and fn0() == 3	
+12	136	2387	CameraRgn05 enter	179	other	ed115	appear_effect	fn0() ~= 2 and fn0() == 3 and ed152(4) == 0	
+12	136	2387	CameraRgn05 enter	182	other	ed152	spell_slot	ed152(4) ~= 0	
+12	136	2387	CameraRgn05 enter	184	other	ed115	appear_effect	ed152(4) ~= 0 and ed152(4) == 1	
+12	136	2387	CameraRgn05 enter	187	other	ed152	spell_slot	ed152(4) ~= 1	
+12	136	2387	CameraRgn05 enter	189	other	ed115	appear_effect	ed152(4) ~= 1 and ed152(4) == 2	
+12	136	2387	CameraRgn05 enter	192	other	ed115	appear_effect	ed152(4) ~= 2	
+12	136	2387	CameraRgn05 enter	194	other	fn132	stops_on_hold		
+12	136	2387	CameraRgn05 enter	195	other	fn133	gear_stops_on_hold		
+12	136	2387	CameraRgn05 enter	196	other	ed280	spell_node_acts_in_hold		
+12	136	2387	CameraRgn05 enter	197	other	fn88	model_on		
+12	136	2387	CameraRgn05 enter	198	other	ed287	show_held		
+12	136	2387	CameraRgn05 enter	199	other	ed117	fade_model		
+12	136	2387	CameraRgn05 enter	201	state	fn1	its state to 1		
+12	136	2387	CameraRgn05 enter	202	chain	fn36	waits 128 frames		
+12	137	1039	SKPlane01 cross_b	1	door	fn71	room 51 queued (loaded ahead)		
+12	137	1039	SKPlane01 cross_b	2	door	fn66	door to room 51 at EntryMkr01, camera Camera01, transition 3		
+12	137	76	Region02 enter	2	prompt	ed301	prompt CLIMB_UP (button 2)	fn0() == 0	
+12	137	76	Region02 enter	3	door	fn71	room 74 queued (loaded ahead)	fn0() == 0	
+12	137	76	Region02 enter	4	state	fn1	its state to 1	fn0() == 0	
+12	137	76	Region02 enter	8	door	fn66	door to room 74 at EntryMkr02, camera Camera01, transition 12, then script 1161	fn0() ~= 0 and fn0() == 1	
+12	137	76	Region02 enter	9	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1	
+12	137	2349	Region01 enter	1	examine	ed220	EXAMINE: BALCONY_VIEW "As the Tome had suggested by Edward's and Maximillian's words, the city exists, "		
