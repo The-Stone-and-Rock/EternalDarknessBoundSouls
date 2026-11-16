@@ -81,7 +81,12 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
    coop_stay_room_in (the R6 bracket at hle.c ~24330 covers player 2's own events, not other_enter scripts).
    Refuted by the review's skeptics: ed10 magick_give giving player 2's rune to player 1, ed162's teleport, fn148's
    room-39 case.
-   **Next: item 3 (the patterns as named checks over these rows), or a play check of bugs (1) to (3).**
+   **Item 3 started (f7f4c38): `ed patterns`, tools/ed/patterns.py.** The nine known patterns, each with its detection
+   rule over catalogue rows, the fix in hle.c (definition line and the commit that added it, from git) and how far the
+   check can be trusted; every catalogue row tagged (TSV column `patterns`, "uncovered" when flagged), counts per
+   script, per level and in index.md's pattern table; `ed needs` names the patterns of what a function picks by. A
+   review workflow is checking the rules and the fix links (some patterns may be better counted per script).
+   **Then: a play check of bugs (1) to (3), when the user asks (runs from fresh Jump-to-Game states, ED_RUN_AWAY=1).**
    **Groundwork done 2026-11-16 (committed in ec7f923; every field read from the code that uses it, by a reader
    and a refuter each: docs/game/research/kit-groundwork.md):**
    - `ed cinematic [N|TEXT]`, `ed film [N]`, `ed mode [N]` (tools/ed/facts/cinematics.py -> facts/cinematics.json): the
