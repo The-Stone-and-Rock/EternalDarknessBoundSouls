@@ -63,7 +63,7 @@ r13	-26272	4	show word for main (fn111, 0x80043C88): 0 stops main's controller (
 r13	-23276	4	the room in play (fn25 returns it). Effects (+56), emitters (+4900) and dynamic lights (+42) carry their own room and the game compares it with this	coop_stay_room_in (player 2's room while apart), coop_room_in (any resident room, one call), coop_stay_room_out; coop_dial_run for the clock's 0x8007F254 / 0x8007F140
 abs	0x8058AFC0	20	the room slot table: +0 current slot, +4 the other or -1, +8 a queued room or -1, +12 a record per slot	coop_room_in swaps +0 and +4 with the room in play
 abs	0x80323AEB	1	the input mode in play (s8, -1 none; ed56 starts one)	one per game: coop_input_mode_start records whose it is and keeps player 2's close-up and pad; only the clock's step and end are run in their room (coop_dial_run)
-abs	0x80307184	4	the game's state keep (ed88/ed89), written with no bound by 0x800ADCC0	one per game, solo's: keep_filter leaves player 2's things out, keep_request_hold defers it to the Tome's close. ed needs can't find it where 0x800B7100 builds it (lis+addi+addi) until the scanner is fixed
+abs	0x80307184	4	the game's state keep (ed88/ed89), written with no bound by 0x800ADCC0	one per game, solo's: keep_filter leaves player 2's things out, keep_request_hold defers it to the Tome's close
 abs	0x80308DE8	24	the subtitle record (0x80008DD4 clears it, the line at +20)	none: one per game, no host fix
 r13	-22144	4	the mist's frame gate	fog_begin / fog_end (player 2's room's mist record from 0x80153998)
 r13	-21808	4	the mist's ramp bank	fog_begin / fog_end

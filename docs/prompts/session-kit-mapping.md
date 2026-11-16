@@ -42,9 +42,9 @@ rules it will hit before anyone plays it. No gameplay fixes this session unless 
 
 **The goal, in order:**
 1. **`ed needs` up to date with separate rooms.** Its table of one-player words (`tools/ed/player_data.tsv`) predates
-   the two room slots. **The rows below were added 2026-11-16 and the first two acceptance checks pass (see the to-do
-   list's item 1 in coop-next-session.md); what's left of this goal is the scanner fix, `--level`, the noise rule and the
-   label note: start there.**
+   the two room slots. **Done 2026-11-16, all three acceptance checks pass (the to-do list's item 1 in
+   coop-next-session.md has what was built and what it found): start at goal 2.** The text below is kept for what each
+   piece is.
    - Add: the room in play (r13-23276; helpers coop_stay_room_in / coop_room_in); the slot table (0x8058AFC0,
      ROOM_SLOT_TABLE: +0 current slot, +4 the other or -1, +8 queued room, +12 a record per slot; its size from the code,
      not guessed; coop_room_in swaps it); the input mode byte (0x80323AEB, an s8, -1 none); the keep (0x80307184,

@@ -20,12 +20,28 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
    with its helper or "one per game" / "none"); the busy word and running script name the newer helpers; r13-23040's two
    rows are one. Checked: `ed needs 0x8007F254` names the room in play at depth 0 under coop_stay_room_in;
    `ed needs --script 1816` names it (depth 0, through fn25 0x8016A988); 0x801E21FC's callees show the mist words.
-   **Left of item 1:** (a) the scanner fix in know.py scan() (lis+addi+addi never tests the address table, so
-   `ed needs 0x800B7100` still doesn't find the keep; clear a register's tracked value when it's overwritten or across a
-   bl); (b) `--level N` for `ed needs --script` (today it merges a script's calls over every level; `--script 1816
-   --level 0` is refused); (c) the noise rule (a depth-0 compare or write apart from a pass-through read; which matter when
-   the players can be apart); (d) "USA name" beside the decomp labels in the headers (fn_8008210C for 0x8007F254). Then
-   items 2 and 3.
+   **Item 1 done 2026-11-16 (the rows committed in f890944; the rest uncommitted, no play needed):**
+   - The scanner (know.py scan()): chained addi and lis+ori are followed and tested at every step, so `ed needs
+     0x800B7100` finds the keep; a register forgets its address on any other write, a load into it, an update-form base
+     and across a call (r0, r3-r12); a base plus an index (add) and mr copies keep it. Old against new over the 899
+     functions the script commands reach directly: nothing lost, 23 hits gained, all inside tables already listed
+     (e.g. the magick record through an mr copy in 0x80109DC8).
+   - `ed needs --script ID --level N` and `--script L00/ID`; a script id in more than one level says it's merged. Found
+     on the way: the 642 ids shared between levels call the same commands in every level, so merging never changed a
+     result; the option is for the catalogue's per-level rows.
+   - The noise rule: a read whose value the function branches on within 6 instructions of the same path (a cmp, a
+     dot-form test, or the compiler's branchless subfic/xori "is it N") is "compare" (it picks by it), else "read"; a
+     call ends r0/r3-r12, so a call's return value isn't counted; a "Picks by, within one call" line names those at
+     their shallowest compare. Of the 413 script commands, 68 reach the room in play within 3 calls, 37 compare it
+     somewhere, 21 within one call, 8 in the command itself (EDCountChararactersInRegion, EDSpecialRegionCheck, ed162,
+     ed24, ed253, ed265, ed3, fn148). fn25 only returns it: scripts compare it themselves.
+   - Reviewed by a workflow (2 reviewers, a skeptic per finding): 9 real defects found in the first version and fixed
+     (a crash on call-row roots, false compares across calls and branches, update-form loads and stores now move the
+     base instead of losing it, missing lhau/lfsu/lfdu/stfsu/stfdu/psq forms, dot-form tests, the Picks-by depth, the
+     header with an address and --script). Known limit kept: the walk is in address order, not by path.
+   - A table's hits are one row with the offsets seen; the header names the script, or says a decomp name's number is
+     the USA address (fn_8008210C is this disc's 0x8007F254).
+   Then items 2 and 3.
 2. **Kit: a per-room catalogue generated from the disc** (`build/ed-db`: 297 rooms, 2,832 regions, 2,172 script ids in
    4,404 level files): every level, room and region with what it runs (examine words, prompts, items given or taken,
    doors and where, flags, input modes, cutscenes, spawns, cameras), names and IDs, plus a co-op column (the per-player

@@ -9,8 +9,8 @@ import disc
 
 DB = disc.DB
 HERE = os.path.dirname(os.path.abspath(__file__))
-LOADS = {'lwz', 'lhz', 'lha', 'lbz', 'lfs', 'lfd', 'lwzu', 'lhzu', 'lbzu'}
-STORES = {'stw', 'sth', 'stb', 'stfs', 'stfd', 'stwu', 'sthu', 'stbu'}
+LOADS = {'lwz', 'lhz', 'lha', 'lbz', 'lfs', 'lfd', 'lwzu', 'lhzu', 'lhau', 'lbzu', 'lfsu', 'lfdu', 'psq_l', 'psq_lu'}
+STORES = {'stw', 'sth', 'stb', 'stfs', 'stfd', 'stwu', 'sthu', 'stbu', 'stfsu', 'stfdu', 'psq_st', 'psq_stu'}
 
 
 def _player_table():
@@ -100,28 +100,116 @@ def resolve(q):
     return addr, None
 
 
+GPR = re.compile(r'r\d+$')
+# Instructions whose first operand is read, not written (or isn't a register): they leave what a register holds alone.
+KEEPS = STORES | {'stmw', 'stwx', 'stbx', 'sthx', 'stfsx', 'stfdx', 'psq_stx', 'stwcx',
+                  'cmpw', 'cmplw', 'cmpwi', 'cmplwi', 'cmp', 'cmpl', 'mtlr', 'mtctr', 'mtspr', 'mtcrf', 'mtcr', 'mtxer',
+                  'mtmsr', 'mtsr', 'mtsrr', 'mtsprg', 'tw', 'twi', 'dcbf', 'dcbst', 'dcbi', 'dcbz', 'dcbt', 'icbi',
+                  'b', 'bc', 'bl', 'bla', 'blr', 'bctr', 'bctrl', 'blrl', 'bclr'}
+UPDATES = {'lwzu', 'lhzu', 'lhau', 'lbzu', 'lfsu', 'lfdu', 'psq_lu', 'stwu', 'sthu', 'stbu', 'stfsu', 'stfdu', 'psq_stu'}
+CALLS = {'bl', 'bla', 'bctrl', 'blrl'}
+ENDS = {'b', 'blr', 'bctr', 'rfi'}  # no fall-through: the next instruction in address order is another path
+VOLATILE = ['r0'] + ['r%d' % n for n in range(3, 13)]
+DOT_TESTS = {'rlwinm', 'andi', 'andis', 'or', 'and', 'extsh', 'extsb', 'srawi', 'addic', 'neg', 'add', 'subf'}
+
+
+def _compared(body, idx, reg, ahead=6):
+    """Is the value just loaded into reg branched on within the next few instructions of the same path: a cmp of it, or
+    a dot-form (rlwinm. andi. or. extsh. ...) made from it, through mr / extsh / extsb / rlwinm copies? A call ends what
+    r0 and r3-r12 hold (the callee's return value is not the word), and an unconditional branch or a gap in addresses
+    ends the path."""
+    held = {reg}
+    prev = body[idx][0]
+    for a, op in body[idx + 1:idx + 1 + ahead]:
+        if a != prev + 4:
+            return False
+        prev = a
+        p = op.replace(',', ' ').split()
+        if not p:
+            continue
+        name = p[0].rstrip('.')
+        dot = p[0].endswith('.')
+        srcs = p[2:] if len(p) > 2 else []
+        if name.startswith('cmp'):
+            if any(x in held for x in p[1:]):
+                return True
+        elif dot and name in DOT_TESTS and any(x in held for x in srcs):
+            return True  # sets cr0 from the value: a test of it
+        elif name in ('subfic', 'xori') and len(p) > 3 and p[2] in held and re.fullmatch(r'-?(0x)?[0-9A-Fa-f]+', p[3]):
+            return True  # the compiler's branchless "is it N" (0x8007F254: subfic r3,r6,78 picks the clock by room 78)
+        elif name in CALLS:
+            held -= set(VOLATILE)
+        elif name in ENDS:
+            return False
+        elif name in ('extsh', 'extsb', 'rlwinm') and srcs and srcs[0] in held:
+            held.add(p[1])
+        elif name == 'or' and len(p) > 3 and p[2] == p[3] and p[2] in held:  # mr
+            held.add(p[1])
+        elif len(p) > 1 and p[1] in held and not name.startswith('st'):
+            held.discard(p[1])  # overwritten
+        if not held:
+            return False
+    return False
+
+
+def _abs_hits(at, abst, how, a, hits):
+    for start, size, what, helper in abst:
+        if start <= at < start + size:
+            hits.append((how, '0x%08X' % at, what, helper, a))
+
+
 def scan(code, addr, r13t, abst, callt):
-    """What one function touches directly, and what it calls."""
+    """What one function touches directly, and what it calls.
+
+    A register holds a known address after lis (hi: the high half only) and lis+addi/ori, and through more addi steps
+    (value). Any other write to it, and a call (r0, r3-r12), forgets it, so a stale base can't name a word. The walk
+    is in address order, not by path: a base set on one branch can still reach a use on another."""
     hits, callees = [], []
     hi, value = {}, {}
-    for a, op in code.body(addr):
+
+    def forget(reg):
+        hi.pop(reg, None)
+        value.pop(reg, None)
+
+    body = list(code.body(addr))
+    for idx, (a, op) in enumerate(body):
         p = op.replace(',', ' ').split()
         name = p[0].rstrip('.')
+        dst = p[1] if len(p) > 1 and GPR.match(p[1]) else None
         if name == 'lis':
-            hi[p[1]] = (int(p[2], 0) << 16) & 0xFFFFFFFF
-            value.pop(p[1], None)
-        elif name == 'addi' and p[2] in hi:
-            value[p[1]] = (hi[p[2]] + int(p[3], 0)) & 0xFFFFFFFF
-            for start, size, what, helper in abst:
-                if start <= value[p[1]] < start + size:  # a base address taken, read through an index later
-                    hits.append(('addr', '0x%08X' % value[p[1]], what, helper, a))
-        elif name == 'addi' and p[2] in value:
-            value[p[1]] = (value[p[2]] + int(p[3], 0)) & 0xFFFFFFFF
+            forget(dst)
+            hi[dst] = (int(p[2], 0) << 16) & 0xFFFFFFFF
+        elif name in ('addi', 'ori') and len(p) > 3 and (p[2] in value or p[2] in hi):
+            base = value[p[2]] if p[2] in value else hi[p[2]]
+            imm = int(p[3], 0)
+            at = (base + imm) & 0xFFFFFFFF if name == 'addi' else base | (imm & 0xFFFF)
+            forget(dst)
+            value[dst] = at
+            _abs_hits(at, abst, 'addr', a, hits)  # a base address taken, read through an index later
+        elif name == 'add' and len(p) > 3 and ((p[2] in value or p[2] in hi) != (p[3] in value or p[3] in hi)):
+            # a table's address plus an index (lis; addi; add rD, base, rIndex): rD stays inside that table, the index
+            # unknown, so an access through it is counted as the table's (at the base plus its offset).
+            src = p[2] if (p[2] in value or p[2] in hi) else p[3]
+            src_hi, src_value = hi.get(src), value.get(src)
+            forget(dst)
+            if src_hi is not None:
+                hi[dst] = src_hi
+            if src_value is not None:
+                value[dst] = src_value
+        elif name == 'or' and len(p) > 3 and p[2] == p[3]:  # mr: the copy holds what the source held
+            src_hi, src_value = hi.get(p[2]), value.get(p[2])
+            forget(dst)
+            if src_hi is not None:
+                hi[dst] = src_hi
+            if src_value is not None:
+                value[dst] = src_value
         elif name in LOADS or name in STORES:
             m = re.match(r'(-?\d+)\((r\d+)\)', p[2]) if len(p) > 2 else None
             if m:
                 off, base = int(m.group(1)), m.group(2)
                 how = 'write' if name in STORES else 'read'
+                if how == 'read' and dst and _compared(body, idx, dst):
+                    how = 'compare'  # the function picks by the value: a branch on it, not just passing it on
                 if base == 'r13' and off in r13t:
                     hits.append((how, 'r13%+d' % off, *r13t[off], a))
                 else:
@@ -131,38 +219,73 @@ def scan(code, addr, r13t, abst, callt):
                     elif base in hi:
                         at = (hi[base] + off) & 0xFFFFFFFF
                     if at is not None:
-                        for start, size, what, helper in abst:
-                            if start <= at < start + size:
-                                hits.append((how, '0x%08X' % at, what, helper, a))
+                        _abs_hits(at, abst, how, a, hits)
+                    if name in UPDATES:  # the base moves to the address just used
+                        forget(base)
+                        if at is not None:
+                            value[base] = at
+            if name in LOADS and dst:
+                forget(dst)
         elif name == 'bl':
             callees.append(int(p[1], 0))
             t = p[1][2:].upper()
             if t in callt:
                 hits.append(('call', '0x' + t, *callt[t], a))
+            for reg in VOLATILE:
+                forget(reg)
+        elif name in CALLS:  # bctrl, blrl, bla: a call through a pointer, not followed, but it still ends r0, r3-r12
+            for reg in VOLATILE:
+                forget(reg)
+        elif name == 'lmw' and dst:
+            for n in range(int(dst[1:]), 32):
+                forget('r%d' % n)
+        elif dst and name not in KEEPS:
+            forget(dst)
     return hits, callees
 
 
 def cmd_needs(argv):
     if not argv:
-        raise SystemExit('ed needs ADDR|fnN [--depth N], or ed needs --script ID')
+        raise SystemExit('ed needs ADDR|fnN [--depth N], or ed needs --script ID|L00/ID [--level N]')
     depth = 3
     extra_roots = []
+    level = None
+    if '--level' in argv:
+        i = argv.index('--level')
+        level = argv[i + 1]
+        del argv[i:i + 2]
     if '--script' in argv:
         i = argv.index('--script')
         sid = argv[i + 1]
         del argv[i:i + 2]
+        m = re.fullmatch(r'[Ll](-?\d+)/(\d+)', sid)  # L00/1816: the level's own copy
+        if m:
+            level, sid = m.group(1), m.group(2)
+        per_level = json.load(open(os.path.join(DB, 'scripts.json'))).get(sid, {})
+        if not per_level:
+            raise SystemExit('script %s is in no level (`ed script %s`)' % (sid, sid))
+        if level is not None:
+            key = level if level in per_level else level.zfill(2)
+            if key not in per_level:
+                raise SystemExit('script %s is not in level %s: it is in %s' % (sid, level, ' '.join(sorted(per_level))))
+            per_level = {key: per_level[key]}
         names = set()
-        for row in json.load(open(os.path.join(DB, 'scripts.json'))).get(sid, {}).values():
+        for row in per_level.values():
             names |= set(row['globals'])
         table = {l.split('\t')[0]: int(l.split('\t')[1], 16) for l in open(os.path.join(DB, 'natives.tsv'))}
         extra_roots = sorted(table[n] for n in names if n in table)
         if not extra_roots:
             raise SystemExit('script %s calls no known function' % sid)
-        print('script %s calls %d functions: %s' % (sid, len(extra_roots), ' '.join(sorted(n for n in names if n in table))))
+        where = 'level %s' % ' '.join(sorted(per_level)) if len(per_level) == 1 else \
+            'levels %s, merged (one level: --level N or L00/%s)' % (' '.join(sorted(per_level)), sid)
+        print('script %s (%s) calls %d functions: %s' % (sid, where, len(extra_roots), ' '.join(sorted(n for n in names if n in table))))
+    elif level is not None:
+        raise SystemExit('--level goes with --script: ed needs --script ID --level N')
     if '--depth' in argv:
         i = argv.index('--depth')
         depth = int(argv[i + 1])
         del argv[i:i + 2]
+    given_addr = bool(argv)
     if extra_roots and not argv:
         argv = ['%08X' % extra_roots[0]]
     addr, name = resolve(argv[0])
@@ -180,14 +303,25 @@ def cmd_needs(argv):
     found = {}
     if '%08X' % addr in callt:
         what, helper = callt['%08X' % addr]
-        found[('0x%08X' % addr, what, helper)] = {'how': {'is'}, 'in': [addr], 'depth': 0}
+        found[('0x%08X' % addr, what, helper)] = {'how': {'is'}, 'in': [addr], 'depth': 0, 'offs': set(), 'cmp': None}
     while queue and len(seen) < 1500:
         f = queue.pop(0)
         hits, callees = scan(code, f, r13t, abst, callt)
         for how, where, what, helper, at in hits:
+            off = None
+            if how != 'call' and where.startswith('0x'):  # a table's word: one row per table, with the offsets seen
+                at_word = int(where, 16)
+                for start, size, w, h in abst:
+                    if w == what and start <= at_word < start + size:
+                        where, off = '0x%08X' % start, at_word - start
+                        break
             key = (where, what, helper)
-            row = found.setdefault(key, {'how': set(), 'in': [], 'depth': seen[f]})
+            row = found.setdefault(key, {'how': set(), 'in': [], 'depth': seen[f], 'offs': set(), 'cmp': None})
             row['how'].add(how)
+            if how == 'compare' and (row['cmp'] is None or seen[f] < row['cmp']):
+                row['cmp'] = seen[f]  # the shallowest depth it's branched on, which may be deeper than where it's first seen
+            if off is not None:
+                row['offs'].add(off)
             if len(row['in']) < 3 and f not in row['in']:
                 row['in'].append(f)
         if seen[f] < depth:
@@ -195,20 +329,39 @@ def cmd_needs(argv):
                 if c not in seen:
                     seen[c] = seen[f] + 1
                     queue.append(c)
-    print('0x%08X %s: looked through %d functions, %d calls deep' % (addr, q if q in natives else syms.get(addr, ''), len(seen), depth))
+    if extra_roots and not given_addr:
+        subject = 'script %s\'s %d functions' % (sid, len(extra_roots))
+    elif extra_roots:
+        subject = '0x%08X %s and script %s\'s %d functions' % (addr, q if q in natives else syms.get(addr, ''), sid, len(extra_roots))
+    elif q in natives:
+        subject = '0x%08X %s' % (addr, q)
+    else:
+        usa = syms.get(addr, '')
+        # Decomp names carry the USA disc's address: fn_8008210C is this disc's 0x8007F254, the same function.
+        subject = '0x%08X %s' % (addr, '%s (decomp name: its number is the USA address)' % usa if usa.startswith('fn_') else usa)
+    print('%s: looked through %d functions, %d calls deep' % (subject.rstrip(), len(seen), depth))
     if not found:
         print('None of the one-player data listed in tools/ed/player_data.tsv was found.')
         print('That list is what is known so far: a pointer the game passes around is not seen. Test it for player 2 before relying on this.')
         return
     print('It reaches this one-player data. To call it for player 2, the helper on the right must have their data in first.')
     print('This follows direct calls only: a script it runs (`ed needs --script ID`), a table, and work it leaves for later in the frame aren\'t followed.')
+    print('"compare": a function branches on the word (it picks by it: the likely co-op bug when the players are apart);'
+          ' "read": it only loads it, maybe to pass it on. Depth 0 is the function itself.')
+    picks = sorted({(row['cmp'], where, what) for (where, what, helper), row in found.items()
+                    if row.get('cmp') is not None and row['cmp'] <= 1})
+    if picks:
+        print('Picks by, within one call: %s' % '; '.join('%s (%s, depth %d)' % (where, re.split(r'[.:;(]', what)[0].strip(), d)
+                                                        for d, where, what in picks))
     groups = {}
     for (where, what, helper), row in found.items():
         groups.setdefault(helper, []).append((where, what, row))
     for helper, rows in sorted(groups.items()):
         print('\n  %s' % helper)
         for where, what, row in sorted(rows, key=lambda x: x[2]['depth']):
-            print('    %-12s %-5s %-48s depth %d, in %s' % (where, '/'.join(sorted(row['how'])), what[:48], row['depth'], ' '.join('%08X' % x for x in row['in'])))
+            offs = sorted(row['offs'])
+            at = '' if not offs or offs == [0] else ' at +%s' % ' +'.join('%d' % o for o in offs[:8]) + (' ...' if len(offs) > 8 else '')
+            print('    %-12s %-5s %-48s depth %d, in %s%s' % (where, '/'.join(sorted(row['how'])), what[:48], row['depth'], ' '.join('%08X' % x for x in row['in']), at))
 
 
 DEFINITION = re.compile(r'^(?:static |extern "C" |inline )*[A-Za-z_][\w \*]*?\b([a-z_][a-z0-9_]+)\([^;{}]*\)\s*\{', re.M)
