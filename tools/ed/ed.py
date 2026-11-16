@@ -604,6 +604,11 @@ def cmd_host(argv):
     know.cmd_host(argv)
 
 
+def cmd_catalogue(argv):
+    import catalogue
+    catalogue.cmd_catalogue(argv)
+
+
 def cmd_keep(argv):
     import know
     know.cmd_keep(argv)
