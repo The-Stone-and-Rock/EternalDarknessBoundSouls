@@ -224,7 +224,7 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   players (player 1's page from a copy Tome, opened over player 2's close-up or door, had the same no-film fault); with
   player 1's real Tome up beside player 2's copy, nothing is forced and that Tome's own close plays the film (run
   page-both-tomes: film when player 1 closed it); the cache words follow the copy after each turn, not only at its close.
-  **2026-11-15 evening (uncommitted, unplayed): that page-both-tomes run had 4 world frames of 2-4 s before the film.** The
+  **2026-11-15 evening (committed in 74a7989, unplayed): that page-both-tomes run had 4 world frames of 2-4 s before the film.** The
   game's state keep (ed88) overflowed in co-op: no bound, solo's own already fills to 0x80308D88 here, and player 2's body,
   their weapon copy and the used page carried it over CHAPTER_PARTS and the subtitle record. Fixed: player 2's things out
   of the keep's walk (keep_filter), the world's frames behind player 1's Tome leave the keep for its close
@@ -246,7 +246,7 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   Options where they make sense (Characters, Graphics, Co-op, Mods and cheats, Save states beside the game's own Save).
   The old in-game menu kept behind a hidden shortcut only as a fallback. Player 2 later: the same overlays in their half
   from their copy Tome, only what's theirs (character, camera, controller), never shared settings. First page:
-- BUILT 2026-11-16 (uncommitted, script-checked with pictures, not yet played): "Y Choose Character" drawn on player 1's
+- BUILT 2026-11-16 (committed in 5dad661, script-checked with pictures; the user, 2026-11-16: works for now): "Y Choose Character" drawn on player 1's
   Tome Options tab under its cross of four (hle.c tome_options_page/tome_options_button: Options entered at
   0x80101600, left at the other tabs' entries; frontend.cpp frontend_tome_button, a parchment plaque in IM Fell English;
   Y opens the in-game menu on player 1's roster, frontend_open_characters). Side-by-side co-op only; solo and stacked

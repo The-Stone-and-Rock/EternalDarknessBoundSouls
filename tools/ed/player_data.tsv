@@ -19,9 +19,9 @@ r13	-24032	4	interact word	coop_state (kCoopInteract)
 r13	-23196	4	interact word	coop_state (kCoopInteract)
 r13	-23192	4	interact word	coop_state (kCoopInteract)
 r13	-21996	4	interact word	coop_state (kCoopInteract)
-r13	-23344	4	busy: the play hold's word	coop_no_pause, coop_busy_ask
+r13	-23344	4	busy: the play hold's word. One per game: both players' holds share it	coop_no_pause, coop_busy_ask, coop_busy_ask_answer with split_busy_allows (the stayer's room plays on through the other's door)
 r13	-25696	4	hold word, 0x80006D0C asks it	coop_script_hold_go
-r13	-23040	4	hold word	coop_play_hold
+r13	-23040	4	hold word; also zones on (0x8019C088, fn26, a scene): a look with them off clears the looker's inside words (0x80134BE8)	coop_play_hold; coop_scan_player1
 r13	-24048	4	find's bit 2, script timers wait on it	coop_find_hold
 r13	-25932	4	find word, script timers wait on it	coop_find_hold
 r13	-23060	4	hold's input channel	coop_script_hold_go
@@ -29,7 +29,7 @@ r13	-23052	4	hold's input channel	coop_script_hold_go
 r13	-23056	4	hold's input channel	coop_play_hold
 r13	-25648	4	controller's channel	coop_player1_turn
 r13	-25960	4	the open words window	tome_copy_no_window
-r13	-23228	4	the running script	coop_run_script
+r13	-23228	4	the running script	coop_run_script (its first block runs a room's own load script queued inside player 2's change with that room current: notify_script_later)
 r13	-26188	4	the Tome's mode	coop_menu_input, tome_copy_step
 r13	-24244	4	the mode asked for (Start sets 2)	coop_menu_input, tome_copy_step
 r13	-23456	4	players shown	(see docs/coop-failed-attempts.md)
@@ -57,6 +57,15 @@ r13	-21784	4	the fade's ticks	none: both players share one fade
 abs	0x80334388	1320	the Inventory's slots, 44 bytes each	tome_copy
 abs	0x80588DF0	8160	equipment, 20 records by holder id	coop_rehold
 abs	0x8058AFFC	44	the room change's ticket	coop_follow
-r13	-23040	4	zones on (0x8019C088, fn26, a scene): a look with them off clears the looker's inside words (0x80134BE8)	coop_scan_player1
 r13	-26276	4	show word (fn111): 0 leaves r13-26524's body undrawn (0x8002794C), which is player 1's whoever asked	coop_show_asked
 r13	-26272	4	show word for main (fn111, 0x80043C88): 0 stops main's controller (0x80007460) and with it both players' turns	coop_show_asked
+# Separate rooms (ED_ROOM_SLOTS=2, two resident room slots), added 2026-11-16.
+r13	-23276	4	the room in play (fn25 returns it). Effects (+56), emitters (+4900) and dynamic lights (+42) carry their own room and the game compares it with this	coop_stay_room_in (player 2's room while apart), coop_room_in (any resident room, one call), coop_stay_room_out; coop_dial_run for the clock's 0x8007F254 / 0x8007F140
+abs	0x8058AFC0	20	the room slot table: +0 current slot, +4 the other or -1, +8 a queued room or -1, +12 a record per slot	coop_room_in swaps +0 and +4 with the room in play
+abs	0x80323AEB	1	the input mode in play (s8, -1 none; ed56 starts one)	one per game: coop_input_mode_start records whose it is and keeps player 2's close-up and pad; only the clock's step and end are run in their room (coop_dial_run)
+abs	0x80307184	4	the game's state keep (ed88/ed89), written with no bound by 0x800ADCC0	one per game, solo's: keep_filter leaves player 2's things out, keep_request_hold defers it to the Tome's close. ed needs can't find it where 0x800B7100 builds it (lis+addi+addi) until the scanner is fixed
+abs	0x80308DE8	24	the subtitle record (0x80008DD4 clears it, the line at +20)	none: one per game, no host fix
+r13	-22144	4	the mist's frame gate	fog_begin / fog_end (player 2's room's mist record from 0x80153998)
+r13	-21808	4	the mist's ramp bank	fog_begin / fog_end
+abs	0x804F0784	4	the light grid pointer (the room's lamps)	lights_room_in / lights_room_out (player 2's room and identity for the light calls), lights_record_for_actor
+abs	0x80604E60	48	the 12 dynamic light pointers (each light's room an s16 at +42)	lights_apart; fx_lights_probe (testing)

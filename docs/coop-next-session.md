@@ -1,19 +1,41 @@
-# HANDOFF 2026-11-15 evening: START HERE (committed through 821e1ac on tools/game-kit; the evening's work UNCOMMITTED)
+# HANDOFF 2026-11-15 evening: START HERE (committed through 5dad661 on tools/game-kit: the evening's work in 74a7989 and f8e5d82, the Choose Character button, the first to-do list and the kit prompt in 5dad661; the 2026-11-16 revision of the list and the prompt and kit item 1's first rows are uncommitted; controls.cpp's test edits stay uncommitted by rule)
 
 ## THE TO-DO LIST, in order (the user, 2026-11-16)
 The kit first, so later work finds each co-op rule before play instead of during it (the user will run a session
-dedicated to it; its prompt is docs/prompts/session-kit-mapping.md).
-1. **Kit: `ed needs` up to date with separate rooms.** The one-player words it knows predate the two room slots: add the
-   room in play (r13-23276), the slot table (0x8058AFC0), the input mode byte (0x80323AEB), the keep (0x80307184) and the
-   per-room words of lights, mist and effects, each with the host helper that puts player 2's in (coop_stay_room_in /
-   coop_room_in, coop_use_start, coop_cameras_lend, coop_states_swap, the prompt slots...). Test: `ed needs 0x8007F254`
-   (the clock dials' step) must name the room in play; tonight it didn't.
-2. **Kit: a per-room catalogue generated from the disc** (`build/ed-db`: 297 rooms, 2,832 regions, 2,172 scripts): every
-   level, room and region with what it runs (examine words, prompts, items given or taken, doors and where, flags, input
-   modes, cutscenes, spawns, cameras), names and IDs, plus a co-op column (the per-player words each interaction reaches
-   and which helper covers it). Written as docs per level, by one new `ed` command over the existing readers.
-3. **Kit: the known patterns as checks** flagged per interaction: asks the room in play; one global per game (busy word,
-   input mode, keep, subtitles); queued for a later frame; run inside player 2's change; drawn from one camera.
+dedicated to it; its prompt is docs/prompts/session-kit-mapping.md, revised 2026-11-16 after a read-only check of the
+plan against the code, every branch and stash, the earlier transcripts and the memories: none of items 1 to 3 was built
+before, on any branch; the addresses for lights, mist and effects were already worked out in docs/research/separate-rooms/).
+Items 1 to 3 need no play: they are built from the disc data and the code.
+Waiting on the user beside this list: the play test (the Open list below, item 1: nothing in it played yet).
+1. **Kit: `ed needs` up to date with separate rooms.** The one-player words it knows (tools/ed/player_data.tsv) predate
+   the two room slots: add the room in play (r13-23276), the slot table (0x8058AFC0), the input mode byte (0x80323AEB),
+   the keep (0x80307184), the subtitle record (0x80308DE8), the mist's r13-22144 and r13-21808, the light grid
+   (0x804F0784) and dynamic lights (0x80604E60), each with the host helper that puts player 2's in, or "one per game" /
+   "none" where nothing does; update the busy word and running script rows (already there) with the newer helpers. Also
+   the scanner's lis+addi+addi miss (the keep is never found), merged rows for r13-23040, a `--level` for
+   `--script`, and a noise rule. Test: `ed needs 0x8007F254` (the clock dials' step; the room-in-play read is at
+   0x8007F27C) must name the room in play; tonight it didn't. Details in the prompt.
+   **Part done 2026-11-16 (uncommitted, no play needed):** player_data.tsv now has the room in play, the slot table, the
+   input mode byte, the keep, the subtitle record, the mist's two words, the light grid and the 12 dynamic lights (each
+   with its helper or "one per game" / "none"); the busy word and running script name the newer helpers; r13-23040's two
+   rows are one. Checked: `ed needs 0x8007F254` names the room in play at depth 0 under coop_stay_room_in;
+   `ed needs --script 1816` names it (depth 0, through fn25 0x8016A988); 0x801E21FC's callees show the mist words.
+   **Left of item 1:** (a) the scanner fix in know.py scan() (lis+addi+addi never tests the address table, so
+   `ed needs 0x800B7100` still doesn't find the keep; clear a register's tracked value when it's overwritten or across a
+   bl); (b) `--level N` for `ed needs --script` (today it merges a script's calls over every level; `--script 1816
+   --level 0` is refused); (c) the noise rule (a depth-0 compare or write apart from a pass-through read; which matter when
+   the players can be apart); (d) "USA name" beside the decomp labels in the headers (fn_8008210C for 0x8007F254). Then
+   items 2 and 3.
+2. **Kit: a per-room catalogue generated from the disc** (`build/ed-db`: 297 rooms, 2,832 regions, 2,172 script ids in
+   4,404 level files): every level, room and region with what it runs (examine words, prompts, items given or taken,
+   doors and where, flags, input modes, cutscenes, spawns, cameras), names and IDs, plus a co-op column (the per-player
+   words each interaction reaches and which helper covers it). Written as docs per level, by one new `ed` command over
+   the existing readers. New pieces: each room's own load script (the room 81 body's path), the 25 rooms in no level,
+   flag-off calls, names for cinematics, films and input modes.
+3. **Kit: the known patterns as checks** flagged per interaction and in `ed needs`: asks the room in play; who "the
+   player" is; one global per game (busy word, input mode, keep, show and hold words, prompts, subtitles: subtitles have
+   no fix yet); one script state for both; tables player 2's things fill; stamped with the room when made; queued for a
+   later frame; run inside player 2's change; one camera. "Covered" per address, from a map of hle.c's hooks.
 4. **Code: one "run this as player N" helper** taking a game function and a player and swapping in what the kit says it
    needs (room, cameras, prompts, input copy, identity, states), for new features to reuse instead of their own swaps.
 5. **Kit: a play-check runner** from fresh Jump-to-Game states: each player into each risky region (from the catalogue),
@@ -28,11 +50,15 @@ dedicated to it; its prompt is docs/prompts/session-kit-mapping.md).
 8. **Showcase**: clips recorded with the user, a README section (media via YouTube/GitHub uploads, never in the repo); the
    README's Getting started already points to Releases (committed, not pushed yet).
 9. Open co-op items: chapter 13's Tome room, Chapter Pages in the real mansion, the ladder's Yes in the other's door
-   (M13), independent sanity effects per player.
+   (M13), independent sanity effects per player. Found by reading (2026-11-16, not run): 0x8007E508, the MOVE STAFF EXIT
+   step (input mode 0, L11/1384's ed56(0)), reads the room in play at 0x8007E7D4 with no room hook, as the clock did
+   before coop_dial_run. It isn't one of mode 0's bindings (0x80244920); it runs from ed68(0)'s stop and from a
+   per-frame room updater, 0x80083464, which picks by the room in play itself (0x8008347C). The interface code has 50
+   direct reads of that word (0x8007A968..0x80083700); the kit's catalogue should list which are uncovered.
 10. Later: reflections and the cheap visual upgrades (automatic surface detail, rounder models, a cinematic finish);
     online co-op (stream player 2's view first); sharing the PAL names with the decompilation.
 
-## The evening (uncommitted, unplayed): an audit of the afternoon, every check re-run, and the Chapter Page keep fix
+## The evening (committed in 74a7989 and f8e5d82; the dream, the body and the clock played by the user): an audit of the afternoon, every check re-run, and the Chapter Page keep fix
 - **Audit** (a read-only workflow over b42fb68..821e1ac): solo safe by code, controls.cpp never committed, but several
   checks named in the commit messages had run on builds older than the committed code, player 1's page from a copy Tome had
   never run, Max's letter never reached its end, and ED_RUN_AWAY could not be shown from any log.
@@ -60,7 +86,7 @@ dedicated to it; its prompt is docs/prompts/session-kit-mapping.md).
   off; solo never. Checked: a co-op run with neither named logs every install (rooms, stay, fog, effects, Tome trip with
   all hooks, split hold, keep) and nothing "NOT installed"; solo the same as before. A sweep of every getenv found no
   other fix or feature off by default (ED_FOG_VIEWS stays off by design).
-- **Story changes take both (uncommitted after 74a7989; the user's play 2026-11-15 evening: after a new game's dream player 1
+- **Story changes take both (committed in f8e5d82; played by the user 2026-11-15 evening: it worked, on the build before coop_follow's "left room marked gone", which the dream's bring now also takes: not re-run since; the user's play 2026-11-15 evening: after a new game's dream player 1
   went to the mansion, player 2 stayed in the dream, room 96).** The stay treated every ticket of player 1's as their door.
   Now a ticket asked by a script the game's event queue started (0x80025FF0's row, lr 0x80026FE4: a film's or cinematic's
   next script, the dream's 1920 to room 69) or by a cinematic's own ticket (lr 0x8012D2F0: the dream's end cinematic into
@@ -68,7 +94,7 @@ dedicated to it; its prompt is docs/prompts/session-kit-mapping.md).
   beside them and tells their old room (event 61) (hle.c coop_story_ticket, g_story_bring). Checked once from a new game
   (logs/run-20261115-211200-jtg-dream-end-story4: "player 2 brought from room 96 to room 69 with player 1"). Seen on the
   way: with no input the dream's end cinematic holds in room 205 a long time (the game's own; the user's play skipped it).
-- **A room player 2 enters first is set up as that room (uncommitted, UNVERIFIED; the user's play 2026-11-15 evening: the
+- **A room player 2 enters first is set up as that room (committed in f8e5d82, played fixed below; the user's play 2026-11-15 evening: the
   hanged body in room 81, L00 tag 691, by the window at the game's start).** Level 0's room script L00/1816 is queued by
   every room load (0x80152430 -> 0x80163C6C at lr 0x80153B6C) and run a frame later from the waits (lr 0x80163E5C); its
   room 81 branch hides the body (`model_off`) and shows it only for Alex at insanity tier 2. Player 2 went into 81 first
@@ -80,7 +106,7 @@ dedicated to it; its prompt is docs/prompts/session-kit-mapping.md).
   Region08 door went through only after player 1 had entered 81 first; why their door waited is not traced. The user's
   play shows it: look for that "[stay] room 81's own script 1816" line in logs/play.log.
   **Played by the user (2026-11-15 night): fixed, the body no longer there.**
-- **Player 2's clock dials (uncommitted, UNVERIFIED; the user's play 2026-11-15 night: player 2 in the study, player 1 in the
+- **Player 2's clock dials (committed in f8e5d82, played fixed below; the user's play 2026-11-15 night: player 2 in the study, player 1 in the
   main hall: the dials didn't move for player 2, the instructions were in player 1's half).** The clock (L00/1551) lets go
   of its hold and starts input mode 8 (ed56(8), 0x8007AA6C; the mode in play is byte 0x80323AEB, -1 none); with busy 0 the
   pad routing ended player 2's close-up ("play goes on: the pad is player 1's again"). Now a mode begun while player 2 has
@@ -97,7 +123,7 @@ dedicated to it; its prompt is docs/prompts/session-kit-mapping.md).
   though the sound plays.** Open, not traced: the hands are things of player 2's room (78) while player 1's (69) is in
   play; the mode's step or the hands' update likely tests the room in play (as the room script did). Next: read the
   mode-8 step (0x8007AA6C's case 8 and its per-frame handler) for room tests, and where the B prompt is drawn twice.
-- **A state saved apart loads apart (uncommitted; the user's slot 3: library things in the foyer after loading).** The
+- **A state saved apart loads apart (committed in f8e5d82; the user's slot 3: library things in the foyer after loading).** The
   host learned the two slots' rooms only at the next room draw; coop_follow ran first, didn't find player 2's room (77)
   in a slot, and "brought" them into room 69 while 77 stayed loaded and drawn. coop_state_loaded now reads both slot
   records at the load ("[rooms] the load's slots: 69 and 77"). Checked with the user's slot 3 on a copy exe
@@ -109,7 +135,7 @@ dedicated to it; its prompt is docs/prompts/session-kit-mapping.md).
   neither stepped nor drawn (also for the dream's bring). Checked with slot 3: "player 2 brought from room 77 to room
   69", "slot 1's room 77 left by both: its record marked gone", the library's table, bell jar and board gone from the
   foyer's picture (logs/run-20261115-215219-slot3-load-bring2/shots/000005.jpg).
-- **Still for the user's play test** (below, item 1) plus: player 2's page while player 1's Tome is open.
+- **Still for the user's play test** (the Open list below, item 1) plus: player 2's page while player 1's Tome is open.
 
 ## Where things stood at the afternoon handoff (committed through b049fc3)
 Everything below is committed and checked by scripted runs from fresh Jump-to-Game states. **None of it has been played
