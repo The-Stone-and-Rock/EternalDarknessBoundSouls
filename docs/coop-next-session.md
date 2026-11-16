@@ -48,6 +48,33 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
    words each interaction reaches and which helper covers it). Written as docs per level, by one new `ed` command over
    the existing readers. New pieces: each room's own load script (the room 81 body's path), the 25 rooms in no level,
    flag-off calls, names for cinematics, films and input modes.
+   **Groundwork done 2026-11-16 (uncommitted, no play needed; every field read from the code that uses it, by a reader
+   and a refuter each: docs/game/research/kit-groundwork.md):**
+   - `ed cinematic [N|TEXT]`, `ed film [N]`, `ed mode [N]` (tools/ed/facts/cinematics.py -> facts/cinematics.json): the
+     173 cinematics (ed55: level, room, start and end scripts, sound, files, alignment, seen flag, chapter, what plays
+     next, the room queued; 139 have both files on the disc, 118 are played by a script, 3 of them through a variable
+     the script sets: L01/655's ed55((L0 + 1)) plays 2, 3 or 4), the 65 films (ed83: fmv files, end script, alignment,
+     -1 any; 9 have no video on the disc, and a sound file that isn't there means no sound of its own) and the 12 input
+     modes (ed56: 0 the staff, 1 the safe, 2 piano and organ,
+     3 the mantelpiece tiles, 4 the mirror cranks, 5 the bomb countdown, 6 nothing, 7 the opening dream's B and Start,
+     8 the clocks, 9/10 scribing a rune, 11 the candles; handlers, which read the room in play, who starts each).
+   - Each room's own scripts in rooms.json (`ed build rooms`; `ed room N` shows them): arrival (+136: 191 rooms) and
+     leave (+138: 65 rooms), from no region. Room 69: 2530 / 2430; rooms 70, 81, 87: 1816 / none.
+   - The hook map (tools/ed/facts/hooks.py -> facts/hooks.json, read from hle.c without running it): 404 rows on 378
+     game addresses (260 intercept, 144 notify), none unresolved, the same set as a reader's hand check; 29 name-table
+     rows name SDK symbols this disc lacks. Each row says when it may not be in effect: 45 are logs or traces, 22 share
+     a slot with another install (which one holds it, from their == NULL checks), the GX ones need ED_GX_HLE=1. Also
+     216 return-address filters (cpu->lr == X) in 93 calling functions. `ed fn ADDR` lists a function's hooks and the
+     calls of it that a handler picks out by return address; `ed needs` marks with * the functions with a live hook. It
+     can't know whether an install's checks pass on a given run, install order beyond the == NULL checks, or the
+     return-address lists kept in arrays (coop_interface_ran's kRan).
+   - Reviewed by a workflow (3 reviewers, a skeptic per finding): 13 real defects fixed (a call by a variable missed,
+     the rune modes' tables, missing film files shown as present, the search, alignment -1, the disc's spelling, slots,
+     debug hooks, the GX switch, the arrival script's wording, return-address hooks, ed fn's "not hooked"), then a
+     re-check of those found 8 more, fixed: a comment that hid two cinematic fields, sound number 60, the room scripts'
+     wording, the search matching field names, return-address rows read backwards and filed under the wrong function
+     (function starts now include prologues after a blr), `NAME + 4u`, and debug installs taking a slot. Each
+     return-address test is now checked to follow a call (that found the fn151 bug in item 9).
 3. **Kit: the known patterns as checks** flagged per interaction and in `ed needs`: asks the room in play; who "the
    player" is; one global per game (busy word, input mode, keep, show and hold words, prompts, subtitles: subtitles have
    no fix yet); one script state for both; tables player 2's things fill; stamped with the room when made; queued for a
@@ -71,6 +98,13 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
    before coop_dial_run. It isn't one of mode 0's bindings (0x80244920); it runs from ed68(0)'s stop and from a
    per-frame room updater, 0x80083464, which picks by the room in play itself (0x8008347C). The interface code has 50
    direct reads of that word (0x8007A968..0x80083700); the kit's catalogue should list which are uncovered.
+   **Found by the kit's hook map (2026-11-16, not run): hle.c:15084, coop_sound_change_act, tests `cpu->lr ==
+   0x80164DD4u` for fn151's duck (sound_duck, 0x80164D58), but 0x80164DD4 is the `bl 0x8019E068` itself: its return
+   address is 0x80164DD8, so the test never matches.** The other return addresses in that function (0x801668FC,
+   0x80166970, 0x80152354, 0x8015206C, 0x8015207C) are right. What it means, by reading: player 2's duck while apart
+   (fn151(1) at a look's start, e.g. the clock's L00/1551) is not passed over, so player 1's music ducks with it.
+   Likely one character (0x80164DD8u); confirm in play before and after. `python -I tools/ed/facts/hooks.py` prints
+   every such test that can't match (only this one today).
 10. Later: reflections and the cheap visual upgrades (automatic surface detail, rounder models, a cinematic finish);
     online co-op (stream player 2's view first); sharing the PAL names with the decompilation.
 

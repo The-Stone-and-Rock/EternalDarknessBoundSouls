@@ -22,6 +22,9 @@ The game, not a room:
   camera NAME|HASH [--room N]  where a camera is. With a room: its keys, what names it, from which regions
   where ROOM X Y Z      which regions a place is inside, what they run, and the room's nearest cameras
   tag N                 a placed thing by its tag: which levels, rooms and items, and which scripts look for it
+  cinematic [N|TEXT]    a cinematic (ed55 n): level, room, its start and end scripts, files, what plays next, who plays it
+  film [N]              a film (ed83 n): its fmv files, end script, alignment, who plays it
+  mode [N]              an input mode (ed56 n): what it is, its handlers, which read the room in play, who starts it
   door [ROOM]           every way in and out of a room: from where, prompt, entry, camera, what its transition does
   transition [N]        what each door transition number does: motion, fade, ticks, what it looks like
   item TEXT|ID          an item by name, label or type id: words, Use/Check/Mix scripts, ammo, where placed, its examine
@@ -175,6 +178,21 @@ def cmd_room(argv):
     if not r:
         return print('no room', rid)
     print('room %s (Rooms/rmed%04d.bpe)' % (rid, int(rid)))
+    if 'arrival_script' not in r:
+        print('(rooms.json predates the room scripts: `ed build rooms`)')
+    else:
+        print('ITS OWN SCRIPTS (from no region, looked up in the current level\'s script table: a level without the id runs '
+              'nothing. arrival: queued a frame after a room change (the change\'s own call is skipped with flag 0x40, but '
+              'the loads after a cinematic or a film queue it themselves: request 32), run at once when a saved game '
+              'loads, and not while an in-engine cinematic has it off (r13-23356); request 64\'s load never runs it. '
+              'leave: before a room change (not with flag 0x40), and at a film\'s or an in-engine cinematic\'s start '
+              'only in some cases (byte 0x803162C0+476, the cinematic\'s room); its gate is r13-23360. '
+              'docs/game/research/kit-groundwork.md)')
+        index = jload('scripts.json')
+        for what in ('arrival', 'leave'):
+            sid = r[what + '_script']
+            print('  %-7s %s' % (what, ('%d (in %s)' % (sid, ' '.join('L' + l for l in sorted(index.get(str(sid), {}), key=int)) or 'no level'))
+                                 if sid else 'none'))
     print('CAMERAS (all of them, from the room\'s own array. A moving camera is only at this place on its first frame)')
     for c in r['cameras']:
         print('  %-14s hash %-10d at %6d %6d %6d  looks at %6d %6d %6d  fov %.1f%s' % (c['name'], c['hash'], *c['pos'], *c.get('target_pos', (0, 0, 0)), c['fov'], ('  (moves on a path)' if c.get('path') else '') + ('  (its target moves)' if c.get('target_path') else '')))
@@ -347,6 +365,12 @@ def cmd_fn(argv):
     calls = jload('calls.json').get(addr, [])
     print('bl sites in the game\'s code: %d%s %s' % (len(calls), ' (0 is normal for a script function or a switch case: they\'re reached by a table)' if not calls else ':', ' '.join(calls[:14])))
     pat = '0x%s' % addr
+    print('--- hooked by the host (build/ed-db/facts/hooks.json, read from hle.c; an install can still fail its checks on a run)')
+    for line in know.hook_lines(int(addr, 16)) or ['  no dispatch entry at this address (a handler can still pick out a call '
+                                                   'to it by return address, or swap words around its caller)']:
+        print(line)
+    for line in know.lr_lines(int(addr, 16)):
+        print(line)
     print('--- host code')
     for path in ('runtime/host/hle.c', 'runtime/host/camera.c', 'runtime/host/controls.cpp'):
         for line in grep_lines(os.path.join(disc.ROOT, path), pat, 10):
@@ -497,6 +521,67 @@ def cmd_graphics(argv):
 def cmd_chapters(argv):
     import chapters
     chapters.main(argv)
+
+
+def _cinematics():
+    return jload('facts/cinematics.json')
+
+
+def _next(nx):
+    return '' if not nx else ', then %s %d' % (nx['kind'], nx['n'])
+
+
+def cmd_cinematic(argv):
+    """ed cinematic [N|TEXT]: one cinematic record (ed55 n), or a line for each, or those whose files or scripts match."""
+    rows = _cinematics()['cinematics']
+    if argv and re.fullmatch(r'\d+', argv[0]) and int(argv[0]) < len(rows):  # a bigger number is searched for as text
+        c = rows[int(argv[0])]
+        for k, v in c.items():
+            print('  %-13s %s' % (k, v))
+        return
+    q = argv[0].lower() if argv else None
+    for c in rows:
+        # The search is over the record's values (not its field names); a number matches whole numbers only.
+        if q:
+            values = ' '.join(str(v) for v in c.values() if not isinstance(v, (dict, list))) + ' ' + ' '.join(c['scripts'] + c['missing'])
+            hit = re.search(r'(?<!\d)%s(?!\d)' % re.escape(q), values.lower()) if q.isdigit() else q in values.lower()
+            if not hit:
+                continue
+        print('cin %3d  level %-4s room %-4s end %-5s start %-5s %s%s%s%s' % (
+            c['n'], c['level'], c['room'], c['end_script'], c['start_script'], c['pack_file'] or '(no file)',
+            '  (not on the disc: %s)' % ' '.join(c['missing']) if c['missing'] else '', _next(c['next']),
+            ('  by ' + ' '.join(c['scripts'][:4]) + (' ... %d in all' % len(c['scripts']) if len(c['scripts']) > 4 else '')) if c['scripts'] else ''))
+
+
+def cmd_film(argv):
+    """ed film [N]: one film record (ed83 n), or a line for each."""
+    rows = _cinematics()['films']
+    if argv:
+        if not 0 <= int(argv[0]) < len(rows):
+            raise SystemExit('ed film N: films are 0 to %d' % (len(rows) - 1))
+        for k, v in rows[int(argv[0])].items():
+            print('  %-13s %s' % (k, v))
+        return
+    for f in rows:
+        print('film %2d  %s %-17s end %-5s alignment %-4s%s%s%s' % (
+            f['n'], f['avi'], f['aud'] or '(no sound)', f['end_script'], 'any' if f['alignment'] == -1 else f['alignment'],
+            '  (not on the disc: %s)' % ' '.join(f['missing']) if f['missing'] else '', _next(f['next']),
+            ('  by ' + ' '.join(f['scripts'][:4]) + (' ... %d in all' % len(f['scripts']) if len(f['scripts']) > 4 else '')) if f['scripts'] else ''))
+
+
+def cmd_mode(argv):
+    """ed mode [N]: the input modes ed56(n) starts: what each is, its handlers, who reads the room in play."""
+    rows = _cinematics()['input_modes']
+    if argv and not 0 <= int(argv[0]) < len(rows):
+        raise SystemExit('ed mode N: ed56 takes 0 to %d (above that it does nothing)' % (len(rows) - 1))
+    for m in rows if not argv else [rows[int(argv[0])]]:
+        print('mode %2d  %s%s' % (m['n'], m['name'], ('  rooms ' + ' '.join(map(str, m['rooms']))) if m['rooms'] else ''))
+        print('         case %s, bindings %s%s, handlers %s%s' % (
+            m['case'], m['bindings'], (' (%s in chapter 13)' % m['bindings_chapter13']) if m.get('bindings_chapter13') else '',
+            ' '.join(m['handlers']) or '-', (', tick ' + m['tick']) if m.get('tick') else ''))
+        print('         reads the room in play: %s' % m['room_reads'])
+        if m['scripts']:
+            print('         started by %s' % ' '.join(m['scripts']))
 
 
 def cmd_lights(argv):

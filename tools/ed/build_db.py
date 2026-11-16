@@ -126,8 +126,13 @@ def one_room(args):
         x = bytes(gametext.bpe_expand(b, first, min(first + csize, len(b))))
     except Exception as e:
         return path, {'error': repr(e), 'cameras': [], 'regions': [], 'markers': []}
+    # The room's own scripts, in the header the set-up copies into its slot record (0x80151EE0): +136 runs when the room
+    # becomes the room in play (0x80153BD8, lha 136 at 0x80153C08; queued a frame by the room change 0x80152298), +138
+    # when it's left (0x80153C20, lha 138 at 0x80153C50). -1 is none. See docs/game/research/kit-groundwork.md.
+    arrival, leave = struct.unpack_from('>hh', x, 136)
     room = {'cameras': read('cameras', lambda: roomfile.cameras(x, sec1)), 'regions': read('regions', lambda: roomfile.regions(x)),
-            'markers': read('markers', lambda: roomfile.markers(x)), 'bytes': len(x)}
+            'markers': read('markers', lambda: roomfile.markers(x)), 'bytes': len(x),
+            'arrival_script': arrival if arrival > 0 else None, 'leave_script': leave if leave > 0 else None}
     if errors:
         room['error'] = '; '.join(errors)
     return path, room
@@ -157,7 +162,8 @@ def build_rooms(d, workers=None):
 
 # The tables the kit reads, each from a verified generator in tools/ed/facts. Order matters: later ones read earlier ones.
 FACTS = ['facts/verbs_regions.py', 'facts/checks/args/cam_all.py', 'facts/checks/args/things_build.py',
-         'facts/item_table.py', 'facts/checks/args/levels_build.py', 'facts/mix_table.py', 'facts/transitions.py', 'facts/verbs.py', 'facts/completeness_checks.py']
+         'facts/item_table.py', 'facts/checks/args/levels_build.py', 'facts/mix_table.py', 'facts/transitions.py', 'facts/verbs.py', 'facts/completeness_checks.py',
+         'facts/cinematics.py', 'facts/hooks.py']
 
 
 def build_facts():

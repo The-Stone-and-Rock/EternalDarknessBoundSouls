@@ -71,6 +71,48 @@ class Code:
             yield a, self.ops[self.index[a]]
 
 
+_HOOKS = None
+
+
+def hooks():
+    """{game address: [hook rows]} from build/ed-db/facts/hooks.json (tools/ed/facts/hooks.py), or {} before it's built."""
+    global _HOOKS
+    if _HOOKS is None:
+        path = os.path.join(DB, 'facts', 'hooks.json')
+        _HOOKS = {int(a, 16): rows for a, rows in json.load(open(path, encoding='utf8'))['hooks'].items()} if os.path.exists(path) else {}
+    return _HOOKS
+
+
+def live(r):
+    """A hook that does co-op or game work on a normal run: not a log or trace, not one that loses its slot."""
+    return not r.get('debug') and not r.get('slot', '').startswith(('loses', 'installs only while')) and not r.get('when', '').startswith('only with')
+
+
+def hook_lines(addr):
+    """A line per host hook on a game address: kind, host function, hle.c line, the ED_ switches its installer reads,
+    and why it may not be in effect (a log or trace, a slot another install takes, a switch that's off by default)."""
+    out = []
+    for r in hooks().get(addr, []):
+        notes = [n for n in ('debug: a log or trace' if r.get('debug') else '', r.get('slot', ''), r.get('when', '')) if n]
+        out.append('  %-9s %s  (hle.c:%d, installed by %s%s%s)%s' % (
+            r['kind'], r['host'], r['line'], r['installed_by'] or '?', (', ' + r['pp']) if r['pp'] else '',
+            (', reads ' + ' '.join(r['switches'])) if 0 < len(r['switches']) <= 4 else
+            (', which reads %d ED_ switches' % len(r['switches'])) if r['switches'] else '',
+            ('  [%s]' % '; '.join(notes)) if notes else ''))
+    return out
+
+
+def lr_lines(addr):
+    """Calls this function makes that a host handler picks out by their return address (cpu->lr == X)."""
+    path = os.path.join(DB, 'facts', 'hooks.json')
+    rows = json.load(open(path, encoding='utf8')).get('by_return_address', {}).get('0x%08X' % addr, []) if os.path.exists(path) else []
+    # == and != are both a handler singling out that call (!= is usually "return early for every other call").
+    return ['  the call returning to %s: %s checks for it (lr %s, hle.c:%d, %s)%s' % (
+        r['lr'], r['host'], r['test'], r['line'], r['name'],
+        '  [debug: a log or trace]' if r.get('debug') else '') +
+        ('  [CAN\'T MATCH: the instruction before it is not a call]' if r.get('not_a_return_address') else '') for r in rows]
+
+
 def resolve(q):
     """A script name, a short name, or a code address: to an address and its script name. Anything else is an error, not an empty answer."""
     natives = {l.split('\t')[0]: l.split('\t')[1] for l in open(os.path.join(DB, 'natives.tsv'))}
@@ -340,6 +382,13 @@ def cmd_needs(argv):
         # Decomp names carry the USA disc's address: fn_8008210C is this disc's 0x8007F254, the same function.
         subject = '0x%08X %s' % (addr, '%s (decomp name: its number is the USA address)' % usa if usa.startswith('fn_') else usa)
     print('%s: looked through %d functions, %d calls deep' % (subject.rstrip(), len(seen), depth))
+    for line in hook_lines(addr) if not extra_roots or given_addr else []:
+        print('hooked by the host:' + line)
+    hooked_seen = sorted(a for a in seen if any(live(r) for r in hooks().get(a, [])))
+    if hooked_seen:
+        print('Of the functions looked through, %d have a live host hook (marked * below; logs, traces and hooks that lose '
+              'their slot don\'t count; `ed fn ADDR` for each): %s' % (
+            len(hooked_seen), ' '.join('%08X' % a for a in hooked_seen[:12]) + (' ...' if len(hooked_seen) > 12 else '')))
     if not found:
         print('None of the one-player data listed in tools/ed/player_data.tsv was found.')
         print('That list is what is known so far: a pointer the game passes around is not seen. Test it for player 2 before relying on this.')
@@ -361,7 +410,7 @@ def cmd_needs(argv):
         for where, what, row in sorted(rows, key=lambda x: x[2]['depth']):
             offs = sorted(row['offs'])
             at = '' if not offs or offs == [0] else ' at +%s' % ' +'.join('%d' % o for o in offs[:8]) + (' ...' if len(offs) > 8 else '')
-            print('    %-12s %-5s %-48s depth %d, in %s%s' % (where, '/'.join(sorted(row['how'])), what[:48], row['depth'], ' '.join('%08X' % x for x in row['in']), at))
+            print('    %-12s %-5s %-48s depth %d, in %s%s' % (where, '/'.join(sorted(row['how'])), what[:48], row['depth'], ' '.join('%08X%s' % (x, '*' if any(live(r) for r in hooks().get(x, [])) else '') for x in row['in']), at))
 
 
 DEFINITION = re.compile(r'^(?:static |extern "C" |inline )*[A-Za-z_][\w \*]*?\b([a-z_][a-z0-9_]+)\([^;{}]*\)\s*\{', re.M)
