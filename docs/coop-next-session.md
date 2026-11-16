@@ -48,19 +48,40 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
    words each interaction reaches and which helper covers it). Written as docs per level, by one new `ed` command over
    the existing readers. New pieces: each room's own load script (the room 81 body's path), the 25 rooms in no level,
    flag-off calls, names for cinematics, films and input modes.
-   **The catalogue, built 2026-11-16 (committed checkpoint by checkpoint: 76c7321, 29b2143, 3ec6720; no play):**
+   **The catalogue, built 2026-11-16 (committed checkpoint by checkpoint: 76c7321, 29b2143, 3ec6720, 2a4e839, 16c71af;
+   no play; item 2 done):**
    `python -I tools/ed/ed.py catalogue` writes docs/game/catalogue/ in about 2 s: index.md, level-NN.md and level-NN.tsv
    for the 15 levels with rooms, and unplaced.md (25 rooms in no level). Per room: its own scripts, doors out, every
    region's scripts grouped, call by call with the nearest tests guarding each; camera-only scripts summed; a shared
    script (L00/1816 in rooms 70, 81, 87) shows only the room's own branch, by following its fn25 tests over the jumps
    (catalogue.room_states); other calls summed per script. `ed catalogue --script L00/ID [--room N]` for one script.
-   `ed needs` is callable (know.Needs). **The co-op column (2a4e839):** each row lists the per-player words its call
-   reaches, as hooked (a live host hook where the word is read), helper (player_data.tsv names one; whether it's in
-   force on that run isn't known here) or one per game, and is flagged when a word is branched on within one call with
-   no live hook there. 888 rows flagged over all levels: the room in play 539 (mostly spawns "in the room in play"),
-   equipment records 279, script words 172, the look being set up 93, the running script 81, the magick record 2. A
-   cmp against 0 is now a "zero-test", not a compare: that took all 722 flags off the player's object. A flag is a
-   place to look, not a bug found. **Left: the review's fixes (a workflow is checking it), then item 3's patterns.**
+   `ed needs` is callable (know.Needs). **The co-op column (2a4e839, then the review's fixes in 16c71af):** each row
+   lists the per-player words its call reaches, as hooked (a live host hook on the script function or on the function
+   holding the compare), keyed, per run, routed, helper (player_data.tsv names one; whether it's in force on that run
+   isn't known here) or one per game (legend in index.md), and is flagged when a word is branched on within one call
+   and none of hooked / keyed / per run applies. A cmp against 0 or -1 is a "zero-test", not a compare.
+   **The report: 1,016 rows flagged over all levels** (level 12 199, 09 175, 00 124, 07 85, 10 68, 03 55, 02 49, 05 47,
+   08 47, 06 44, 04 41, 11 29, 13 24, 01 16, 16 13). By word: the room in play 615 (by call: ed3 spawn 285, ed24
+   nearest_class2 119, fn148 stream_prepare 69, EDCountChararactersInRegion 54, ed91 and ed155 16 each, ed162 15, ed248
+   10, ed157 9, ed156 7), the script words 173 (all fn35 state_keep), the room in play inside an input mode's own code
+   133 (ed56 86 and ed68 47: modes 9/10 rune rooms, 11 candles, 2 piano/organ, 3, 4), the look being set up 93 (all
+   ed221), the magick record 2. Per row in the TSVs' coop_flagged column. The two biggest are what the
+   brackets around player 2's own runs put in (coop_use_start, coop_run_script's first block, coop_stay_room_in with
+   coop_states_swap); a flag matters where a run happens outside them (other_enter scripts, queued scripts, timers,
+   an arrival run for player 2 with player 1 still the character). A flag is a place to look, not a bug found.
+   **The likeliest real co-op bugs the catalogue and its review found (read only, none run or fixed):**
+   (1) hle.c:15084's lr == 0x80164DD4 can never match (item 9: fn151's duck by player 2 apart ducks player 1's music).
+   (2) ed113 and ed248 in rooms' arrival scripts (L08/2079 room 202, L12/2477 room 90, L00/1672 room 67, L10/1814 room
+   27, L05/1774, L10/2238, L11/1877, L12/2777): coop_run_script's first block runs player 2's arrival with their room
+   in (coop_room_in) but not coop_be_player2, so ed113's spell test (r13-21484, main) and ed248's "is the controlled
+   character in the room in play" (0x800DC46C) answer for player 1 in player 2's room.
+   (3) ed156's trap records in L06 (2105, 2106, 2108 room 168; 1618 room 233; 1711 room 306; 1781 room 308; 1741 room
+   313) pick a record by the room in play (0x800849AC) and run from both TrapRgn enter and other_enter: player 2
+   tripping one apart through other_enter gets player 1's room's record or none, unless that region event runs inside
+   coop_stay_room_in (the R6 bracket at hle.c ~24330 covers player 2's own events, not other_enter scripts).
+   Refuted by the review's skeptics: ed10 magick_give giving player 2's rune to player 1, ed162's teleport, fn148's
+   room-39 case.
+   **Next: item 3 (the patterns as named checks over these rows), or a play check of bugs (1) to (3).**
    **Groundwork done 2026-11-16 (committed in ec7f923; every field read from the code that uses it, by a reader
    and a refuter each: docs/game/research/kit-groundwork.md):**
    - `ed cinematic [N|TEXT]`, `ed film [N]`, `ed mode [N]` (tools/ed/facts/cinematics.py -> facts/cinematics.json): the
