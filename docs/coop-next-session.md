@@ -48,7 +48,15 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
    words each interaction reaches and which helper covers it). Written as docs per level, by one new `ed` command over
    the existing readers. New pieces: each room's own load script (the room 81 body's path), the 25 rooms in no level,
    flag-off calls, names for cinematics, films and input modes.
-   **Groundwork done 2026-11-16 (uncommitted, no play needed; every field read from the code that uses it, by a reader
+   **The catalogue, built 2026-11-16 (committed checkpoint by checkpoint: 76c7321, 29b2143, 3ec6720; no play):**
+   `python -I tools/ed/ed.py catalogue` writes docs/game/catalogue/ in about 2 s: index.md, level-NN.md and level-NN.tsv
+   for the 15 levels with rooms, and unplaced.md (25 rooms in no level). Per room: its own scripts, doors out, every
+   region's scripts grouped, call by call with the nearest tests guarding each; camera-only scripts summed; a shared
+   script (L00/1816 in rooms 70, 81, 87) shows only the room's own branch, by following its fn25 tests over the jumps
+   (catalogue.room_states); other calls summed per script. `ed catalogue --script L00/ID [--room N]` for one script.
+   `ed needs` is callable (know.Needs). **Left: the co-op column (the per-player words each row reaches and which
+   helper covers each, from Needs.script and the hook map), then a review workflow, then item 3's pattern counts.**
+   **Groundwork done 2026-11-16 (committed in ec7f923; every field read from the code that uses it, by a reader
    and a refuter each: docs/game/research/kit-groundwork.md):**
    - `ed cinematic [N|TEXT]`, `ed film [N]`, `ed mode [N]` (tools/ed/facts/cinematics.py -> facts/cinematics.json): the
      173 cinematics (ed55: level, room, start and end scripts, sound, files, alignment, seen flag, chapter, what plays
