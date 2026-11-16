@@ -469,6 +469,11 @@ def cmd_needs(argv):
     if picks:
         print('Picks by, within one call: %s' % '; '.join('%s (%s, depth %d)' % (where, re.split(r'[.:;(]', what)[0].strip(), d)
                                                         for d, where, what in picks))
+        import patterns
+        hit = patterns.for_words(found)
+        for p in patterns.PATTERNS:
+            if p['key'] in hit:
+                print('Pattern "%s" (%s): fix %s' % (p['name'], ', '.join(sorted(set(hit[p['key']]))), patterns.fix_text(p)))
     groups = {}
     for (where, what, helper), row in found.items():
         groups.setdefault(helper, []).append((where, what, row))

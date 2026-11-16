@@ -27,6 +27,8 @@ The game, not a room:
   mode [N]              an input mode (ed56 n): what it is, its handlers, which read the room in play, who starts it
   catalogue [--level N] writes docs/game/catalogue/: every level, room and region with what each script does, the tests
                         guarding each call, a room's own branch of a shared script. --script L00/ID [--room N]: one script
+  patterns              the known co-op patterns: what each looks like, its fix in hle.c (line, commit), how far the
+                        check can be trusted, and how many catalogue rows show it (uncovered ones too)
   door [ROOM]           every way in and out of a room: from where, prompt, entry, camera, what its transition does
   transition [N]        what each door transition number does: motion, fade, ticks, what it looks like
   item TEXT|ID          an item by name, label or type id: words, Use/Check/Mix scripts, ammo, where placed, its examine
@@ -609,6 +611,11 @@ def cmd_host(argv):
 def cmd_catalogue(argv):
     import catalogue
     catalogue.cmd_catalogue(argv)
+
+
+def cmd_patterns(argv):
+    import patterns
+    patterns.cmd_patterns(argv)
 
 
 def cmd_keep(argv):

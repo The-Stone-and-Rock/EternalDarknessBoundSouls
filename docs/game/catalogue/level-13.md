@@ -7,6 +7,8 @@ Rooms 4, scripts read 36, rows 939. The TSV beside this file has every row.
 Co-op: 24 rows flagged (a call that branches on a per-player word within one call, with no live host hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: the room in play 14, the room in play (in an input mode's own code) 6, the script words 4.
 A flag is a place to look, not a bug found: the host can still cover it another way (a helper around the whole script run, a swap around the caller), and a word that is one per game may be fine for both.
 
+Co-op patterns (`ed patterns`; rows, of them uncovered): asks the room in play 72 (20), one global per game 114 (0), one script state for both 101 (4), a table player 2's things fill 32 (0), stamped with the room in play when made 3 (3), queued for a later frame 55 (0), run inside player 2's change 203 (9), drawn from one camera 89 (0).
+
 Rooms: [5](#room-5), [64](#room-64), [83](#room-83), [267](#room-267)
 
 ## Room 5
@@ -17,6 +19,8 @@ Doors out (fn66): 64 (script 1413, if fn0() ~= 0 and fn0() == 1).
 ### Script 2675 (the room's arrival)
 
 Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the room in play** (helper, by spawns chr 25 model 227 in the room in play, tag 733, spawns chr 25 model 6 in the room in play, tag 733).
+
+Co-op patterns (`ed patterns`): run inside player 2's change 65 (3 uncovered), drawn from one camera 1, one global per game 1, asks the room in play 3 (3 uncovered), stamped with the room in play when made 3 (3 uncovered), queued for a later frame 6.
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], control blocks [helper], asks if anyone is busy [helper], the room slot table [helper], the player's object [helper], hold's input channel [hooked], busy [hooked], equipment, 20 records by holder id [keyed], interact word [hooked], the running script [hooked], players shown [one per game], the controller's state [helper], the script words [hooked].
 
@@ -45,6 +49,8 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 1351 (CameraRgn01 enter; CameraRgn02 leave; CameraPlane01 cross_b)
 
+Co-op patterns (`ed patterns`): drawn from one camera 6, queued for a later frame 3, one script state for both 5.
+
 Co-op, reaches: control blocks [helper], asks if anyone is busy [helper], finds a node by id [helper], the room slot table [helper], the room in play [helper], the player's object [helper], hold word, 0x80006D0C asks it [hooked], the cameras' records [hooked], the spell being cast [hooked], hold word [helper], hold's input channel [hooked], busy [hooked], find's bit 2, script timers wait on it [helper], main [hooked], current [hooked], equipment, 20 records by holder id [keyed], the running script [per run], the script words [hooked], reads the zones' inside words [helper].
 
 | line | kind | what | if | co-op flagged |
@@ -70,6 +76,8 @@ Co-op, reaches: control blocks [helper], asks if anyone is busy [helper], finds 
 |  | other | also: camera_end_script, chapter x2, face_morph_to x2, handle x4, in_zone, look_at x2, look_on x2, marker_pos x2, stops_on_hold x2 |  |  |
 
 ### Script 1413 (CameraRgn02 enter)
+
+Co-op patterns (`ed patterns`): drawn from one camera 2, one global per game 2, a table player 2's things fill 2, one script state for both 7, queued for a later frame 2.
 
 Co-op, reaches: control blocks [helper], asks if anyone is busy [helper], finds a node by id [helper], the room slot table [helper], the room in play [helper], the player's object [helper], the cameras' records [helper], the running script [hooked], the six prompts [hooked], current [hooked], the script words [hooked], the room change's ticket [hooked], the fade's ticks [hooked], equipment, 20 records by holder id [hooked], the spell being cast [hooked], busy [hooked], find's bit 2, script timers wait on it [hooked], main [hooked], the pad routine's state [hooked], the open words window [hooked], raw and processed pads, the input channels [helper], hold word, 0x80006D0C asks it [hooked], hold word [helper], hold's input channel [hooked], interact word [hooked], find word, script timers wait on it [hooked], the camera's view [helper].
 
@@ -109,6 +117,8 @@ Picks by the room in play (fn25), 1 test.
 
 Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the script words** (hooked, by its state kept off, its state kept on).
 
+Co-op patterns (`ed patterns`): asks the room in play 1, one script state for both 11 (2 uncovered), queued for a later frame 4, drawn from one camera 2, one global per game 2, a table player 2's things fill 2.
+
 Co-op, reaches: the room in play [helper], finds a node by id [hooked], current [hooked], control blocks [helper], the running script [per run], the script words [hooked], the room slot table [helper], reads the zones' inside words [helper], asks if anyone is busy [helper], the player's object [helper], the cameras' records [helper], the six prompts [hooked], the room change's ticket [hooked], the fade's ticks [hooked], equipment, 20 records by holder id [hooked], the spell being cast [hooked], busy [hooked], find's bit 2, script timers wait on it [hooked], main [hooked], the pad routine's state [hooked], the open words window [hooked], raw and processed pads, the input channels [helper], hold word, 0x80006D0C asks it [hooked], hold word [helper], hold's input channel [hooked], interact word [hooked], find word, script timers wait on it [hooked], the camera's view [helper].
 
 | line | kind | what | if | co-op flagged |
@@ -146,6 +156,8 @@ Co-op, reaches: the room in play [helper], finds a node by id [hooked], current 
 
 ### Script 1190 (SphereRegion01 enter)
 
+Co-op patterns (`ed patterns`): one global per game 10, a table player 2's things fill 3, one script state for both 6, drawn from one camera 4, queued for a later frame 2.
+
 Co-op, reaches: the running script [hooked], the six prompts [hooked], current [hooked], the room slot table [hooked], the script words [hooked], the player's object [helper], hold's input channel [hooked], finds a node by id [hooked], busy [hooked], control blocks [helper], asks if anyone is busy [helper], the room in play [helper], the cameras' records [helper], main [hooked], show word for main [helper], show word [helper], equipment, 20 records by holder id [keyed].
 
 | line | kind | what | if | co-op flagged |
@@ -177,6 +189,8 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 |  | other | also: camera_ease_eye x2, camera_ease_target x2, camera_hold x2, chapter |  |  |
 
 ### Script 1191 (SphereRegion02 enter)
+
+Co-op patterns (`ed patterns`): one global per game 10, a table player 2's things fill 3, one script state for both 6, drawn from one camera 4, queued for a later frame 2.
 
 Co-op, reaches: the running script [hooked], the six prompts [hooked], current [hooked], the room slot table [hooked], the script words [hooked], the player's object [helper], hold's input channel [hooked], finds a node by id [hooked], busy [hooked], control blocks [helper], asks if anyone is busy [helper], the room in play [helper], the cameras' records [helper], main [hooked], show word for main [helper], show word [helper], equipment, 20 records by holder id [keyed].
 
@@ -210,6 +224,8 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 
 ### Script 1193 (SphereRegion04 enter)
 
+Co-op patterns (`ed patterns`): one global per game 10, a table player 2's things fill 3, one script state for both 6, drawn from one camera 4, queued for a later frame 2.
+
 Co-op, reaches: the running script [hooked], the six prompts [hooked], current [hooked], the room slot table [hooked], the script words [hooked], the player's object [helper], hold's input channel [hooked], finds a node by id [hooked], busy [hooked], control blocks [helper], asks if anyone is busy [helper], the room in play [helper], the cameras' records [helper], main [hooked], show word for main [helper], show word [helper], equipment, 20 records by holder id [keyed].
 
 | line | kind | what | if | co-op flagged |
@@ -241,6 +257,8 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 |  | other | also: camera_ease_eye x2, camera_ease_target x2, camera_hold x2, chapter x2 |  |  |
 
 ### Script 1192 (SphereRegion03 enter)
+
+Co-op patterns (`ed patterns`): one global per game 10, a table player 2's things fill 3, one script state for both 6, drawn from one camera 4, queued for a later frame 2.
 
 Co-op, reaches: the running script [hooked], the six prompts [hooked], current [hooked], the room slot table [hooked], the script words [hooked], the player's object [helper], hold's input channel [hooked], finds a node by id [hooked], busy [hooked], control blocks [helper], asks if anyone is busy [helper], the room in play [helper], the cameras' records [helper], main [hooked], show word for main [helper], show word [helper], equipment, 20 records by holder id [keyed].
 
@@ -274,6 +292,8 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 
 ### Script 1194 (SphereRegion05 enter)
 
+Co-op patterns (`ed patterns`): one global per game 10, a table player 2's things fill 3, one script state for both 6, drawn from one camera 4, queued for a later frame 2.
+
 Co-op, reaches: the running script [hooked], the six prompts [hooked], current [hooked], the room slot table [hooked], the script words [hooked], the player's object [helper], hold's input channel [hooked], finds a node by id [hooked], busy [hooked], control blocks [helper], asks if anyone is busy [helper], the room in play [helper], the cameras' records [helper], main [hooked], show word for main [helper], show word [helper], equipment, 20 records by holder id [keyed].
 
 | line | kind | what | if | co-op flagged |
@@ -305,6 +325,8 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 |  | other | also: camera_ease_eye x2, camera_ease_target x2, camera_hold x2, chapter x2 |  |  |
 
 ### Script 1195 (SphereRegion06 enter)
+
+Co-op patterns (`ed patterns`): one global per game 10, a table player 2's things fill 3, one script state for both 6, drawn from one camera 4, queued for a later frame 2.
 
 Co-op, reaches: the running script [hooked], the six prompts [hooked], current [hooked], the room slot table [hooked], the script words [hooked], the player's object [helper], hold's input channel [hooked], finds a node by id [hooked], busy [hooked], control blocks [helper], asks if anyone is busy [helper], the room in play [helper], the cameras' records [helper], main [hooked], show word for main [helper], show word [helper], equipment, 20 records by holder id [keyed].
 
@@ -338,6 +360,8 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 
 ### Script 1196 (SphereRegion07 enter)
 
+Co-op patterns (`ed patterns`): one global per game 10, a table player 2's things fill 3, one script state for both 6, drawn from one camera 4, queued for a later frame 2.
+
 Co-op, reaches: the running script [hooked], the six prompts [hooked], current [hooked], the room slot table [hooked], the script words [hooked], the player's object [helper], hold's input channel [hooked], finds a node by id [hooked], busy [hooked], control blocks [helper], asks if anyone is busy [helper], the room in play [helper], the cameras' records [helper], main [hooked], show word for main [helper], show word [helper], equipment, 20 records by holder id [keyed].
 
 | line | kind | what | if | co-op flagged |
@@ -369,6 +393,8 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 |  | other | also: camera_ease_eye x2, camera_ease_target x2, camera_hold x2, chapter x2 |  |  |
 
 ### Script 1197 (SphereRegion08 enter)
+
+Co-op patterns (`ed patterns`): one global per game 10, a table player 2's things fill 3, one script state for both 6, drawn from one camera 4, queued for a later frame 2.
 
 Co-op, reaches: the running script [hooked], the six prompts [hooked], current [hooked], the room slot table [hooked], the script words [hooked], the player's object [helper], hold's input channel [hooked], finds a node by id [hooked], busy [hooked], control blocks [helper], asks if anyone is busy [helper], the room in play [helper], the cameras' records [helper], main [hooked], show word for main [helper], show word [helper], equipment, 20 records by holder id [keyed].
 
@@ -407,6 +433,8 @@ Camera-only scripts (1: only camera moves and zone tests; their rows are in the 
 
 ### Script 939 (the room's arrival)
 
+Co-op patterns (`ed patterns`): run inside player 2's change 2, drawn from one camera 1.
+
 Co-op, reaches: control blocks [helper], asks if anyone is busy [helper], finds a node by id [helper], the room slot table [helper], the room in play [helper], the player's object [helper].
 
 | line | kind | what | if | co-op flagged |
@@ -431,6 +459,8 @@ Camera-only scripts (6: only camera moves and zone tests; their rows are in the 
 
 Picks by the room in play (fn25), 1 test.
 
+Co-op patterns (`ed patterns`): run inside player 2's change 28, asks the room in play 1, queued for a later frame 1.
+
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], the room slot table [helper], the running script [per run], the script words [hooked], reads the zones' inside words [helper].
 
 | line | kind | what | if | co-op flagged |
@@ -447,6 +477,8 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 ### Script 381 (TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter)
 
 Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the room in play** (helper, by count_in_zone_kind, teleport).
+
+Co-op patterns (`ed patterns`): one global per game 6, asks the room in play 2 (2 uncovered), one script state for both 5, queued for a later frame 3, drawn from one camera 4.
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], hold word, 0x80006D0C asks it [hooked], the player's object [hooked], hold word [helper], hold's input channel [hooked], find's bit 2, script timers wait on it [helper], busy [hooked], equipment, 20 records by holder id [keyed], main [hooked], reads the zones' inside words [helper], the room slot table [helper], control blocks [helper], the running script [per run], the script words [hooked], show word for main [helper], show word [helper], asks if anyone is busy [helper].
 
@@ -476,6 +508,8 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 1188 (HealthRgn enter; SanityRgn enter; MagicRgn enter)
 
+Co-op patterns (`ed patterns`): queued for a later frame 1.
+
 Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the room in play [helper].
 
 | line | kind | what | if | co-op flagged |
@@ -484,6 +518,8 @@ Co-op, reaches: reads the zones' inside words [helper], the room slot table [hel
 |  | other | also: in_zone x3, track_volume x3 |  |  |
 
 ### Script 1189 (HealthRgn leave; SanityRgn leave; MagicRgn leave)
+
+Co-op patterns (`ed patterns`): queued for a later frame 1.
 
 Co-op, reaches: the room in play [helper].
 
@@ -495,6 +531,8 @@ Co-op, reaches: the room in play [helper].
 ### Script 1023 (SphereRegion01 enter)
 
 Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the room in play** (helper, by count_in_zone_kind, room_class2_event57); **the script words** (hooked, by its state kept off, its state kept on).
+
+Co-op patterns (`ed patterns`): one global per game 4, asks the room in play 2 (2 uncovered), queued for a later frame 4, one script state for both 7 (2 uncovered).
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], hold word, 0x80006D0C asks it [hooked], the player's object [hooked], hold word [helper], hold's input channel [hooked], find's bit 2, script timers wait on it [helper], busy [hooked], equipment, 20 records by holder id [keyed], main [hooked], the room slot table [helper], control blocks [helper], the running script [per run], the script words [hooked], the room change's ticket [hooked], the spell being cast [hooked].
 
@@ -517,6 +555,8 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 |  | other | also: alignment, angle_to_marker, anim_done_script, anim_turn_to, anim_walk_to, appear_effect, caught_alignment, count_in_zone_kind, fade_model x2, gear_stops_on_hold x3, handle, hide_held, marker_pos, model_off, model_on, okay_to_seek, place_of, room_class2_event57, show_held, spell_node_acts_in_hold x3, stops_on_hold x3, vanish_effect, zones_on x2 |  | the room in play |
 
 ### Script 2203 (CameraRgn01 enter)
+
+Co-op patterns (`ed patterns`): drawn from one camera 3, queued for a later frame 3, one script state for both 6.
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], hold word, 0x80006D0C asks it [hooked], the player's object [hooked], the cameras' records [hooked], the spell being cast [hooked], hold word [helper], hold's input channel [hooked], busy [hooked], find's bit 2, script timers wait on it [helper], main [hooked], equipment, 20 records by holder id [keyed], control blocks [helper], asks if anyone is busy [helper], the room slot table [helper], the running script [per run], the script words [hooked], the open words window [hooked], raw and processed pads, the input channels [helper], the pad routine's state [helper].
 
@@ -556,6 +596,8 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 2403 (BodyExamine01 enter; ObeliskExamine01 enter)
 
+Co-op patterns (`ed patterns`): one global per game 2, drawn from one camera 2.
+
 Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], the six prompts [hooked].
 
 | line | kind | what | if | co-op flagged |
@@ -576,6 +618,8 @@ Doors out (fn66): L1 (script 858).
 Picks by the room in play (fn25), 17 tests; 1 rows of other rooms' branches are left out (followed over the script's jumps).
 
 Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the room in play (in mode 10's own code)** (helper, by input mode 10); **the room in play (in mode 9's own code)** (helper, by input mode 9); **the room in play** (helper, by nearest_class2).
+
+Co-op patterns (`ed patterns`): run inside player 2's change 89 (6 uncovered), asks the room in play 23 (6 uncovered), one global per game 5, queued for a later frame 3, drawn from one camera 7.
 
 Co-op, reaches: the room slot table [helper], finds a node by id [hooked], the room in play [helper], current [hooked], the input mode in play [hooked], the pad routine's state [helper], finds a node by id (in mode 10's own code) [helper], the input mode in play (in mode 10's own code) [one per game], the room in play (in mode 10's own code) [helper], the subtitle record (in mode 10's own code) [one per game], the magick record (in mode 10's own code) [helper], the six prompts (in mode 10's own code) [hooked], raw and processed pads, the input channels (in mode 10's own code) [routed], interact word (in mode 10's own code) [hooked], the running script (in mode 10's own code) [hooked], the pad routine's state (in mode 10's own code) [routed], the room slot table (in mode 10's own code) [helper], current (in mode 10's own code) [hooked], the player's object (in mode 10's own code) [hooked], the camera's view (in mode 10's own code) [helper], hold's input channel [hooked], the six prompts [hooked], interact word [hooked], the running script [hooked], busy [hooked], hold word, 0x80006D0C asks it [helper], finds a node by id (in mode 9's own code) [helper], the input mode in play (in mode 9's own code) [one per game], the room in play (in mode 9's own code) [helper], the subtitle record (in mode 9's own code) [one per game], the magick record (in mode 9's own code) [helper], the six prompts (in mode 9's own code) [hooked], raw and processed pads, the input channels (in mode 9's own code) [routed], interact word (in mode 9's own code) [hooked], the running script (in mode 9's own code) [hooked], the pad routine's state (in mode 9's own code) [routed], the room slot table (in mode 9's own code) [helper], current (in mode 9's own code) [hooked], the player's object (in mode 9's own code) [hooked], the camera's view (in mode 9's own code) [helper], the script words [hooked], the player's object [hooked], the cameras' records [hooked], the spell being cast [hooked], hold word [helper], find's bit 2, script timers wait on it [helper], main [hooked], control blocks [helper], asks if anyone is busy [helper], equipment, 20 records by holder id [keyed], the open words window [hooked], raw and processed pads, the input channels [helper], reads the zones' inside words [helper].
 
@@ -622,6 +666,8 @@ Co-op, reaches: the room slot table [helper], finds a node by id [hooked], the r
 
 Picks by the room in play (fn25), 16 tests; 10 rows of other rooms' branches are left out (followed over the script's jumps).
 
+Co-op patterns (`ed patterns`): run inside player 2's change 19, asks the room in play 16.
+
 Co-op, reaches: the room in play [helper].
 
 | line | kind | what | if | co-op flagged |
@@ -631,6 +677,8 @@ Co-op, reaches: the room in play [helper].
 ### Script 2082 (ScriptRuneRgn enter)
 
 Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the room in play (in mode 10's own code)** (helper, by input mode 10); **the room in play (in mode 9's own code)** (helper, by input mode 9); **the room in play** (helper, by nearest_class2).
+
+Co-op patterns (`ed patterns`): one global per game 11, a table player 2's things fill 4, queued for a later frame 3, one script state for both 6, drawn from one camera 9, asks the room in play 4 (4 uncovered).
 
 Co-op, reaches: finds a node by id [helper], current [hooked], the room in play [helper], the running script [hooked], the six prompts [hooked], the room slot table [hooked], busy [hooked], main [hooked], show word for main [helper], show word [helper], equipment, 20 records by holder id [keyed], the script words [hooked], the player's object [hooked], the camera's view [helper], control blocks [helper], asks if anyone is busy [helper], the input mode in play [hooked], the pad routine's state [helper], finds a node by id (in mode 10's own code) [helper], the input mode in play (in mode 10's own code) [one per game], the room in play (in mode 10's own code) [helper], the subtitle record (in mode 10's own code) [one per game], the magick record (in mode 10's own code) [helper], the six prompts (in mode 10's own code) [hooked], raw and processed pads, the input channels (in mode 10's own code) [routed], interact word (in mode 10's own code) [hooked], the running script (in mode 10's own code) [hooked], the pad routine's state (in mode 10's own code) [routed], the room slot table (in mode 10's own code) [helper], current (in mode 10's own code) [hooked], the player's object (in mode 10's own code) [hooked], the camera's view (in mode 10's own code) [helper], finds a node by id (in mode 9's own code) [helper], the input mode in play (in mode 9's own code) [one per game], the room in play (in mode 9's own code) [helper], the subtitle record (in mode 9's own code) [one per game], the magick record (in mode 9's own code) [helper], the six prompts (in mode 9's own code) [hooked], raw and processed pads, the input channels (in mode 9's own code) [routed], interact word (in mode 9's own code) [hooked], the running script (in mode 9's own code) [hooked], the pad routine's state (in mode 9's own code) [routed], the room slot table (in mode 9's own code) [helper], current (in mode 9's own code) [hooked], the player's object (in mode 9's own code) [hooked], the camera's view (in mode 9's own code) [helper], hold word, 0x80006D0C asks it [hooked], the cameras' records [hooked], the spell being cast [hooked], hold word [helper], hold's input channel [hooked], find's bit 2, script timers wait on it [helper], the open words window [hooked], raw and processed pads, the input channels [helper], reads the zones' inside words [helper].
 
@@ -692,6 +740,8 @@ Picks by the room in play (fn25), 17 tests; 18 rows of other rooms' branches are
 
 Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the room in play** (helper, by count_in_zone_kind).
 
+Co-op patterns (`ed patterns`): asks the room in play 18 (1 uncovered), queued for a later frame 3, one script state for both 2.
+
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], hold word, 0x80006D0C asks it [hooked], the player's object [hooked], the cameras' records [hooked], the spell being cast [hooked], hold word [helper], hold's input channel [hooked], busy [hooked], find's bit 2, script timers wait on it [helper], main [hooked], the room slot table [helper], control blocks [helper], equipment, 20 records by holder id [keyed], the running script [per run], the script words [hooked], the room change's ticket [helper], the fade's ticks [hooked], the pad routine's state [hooked].
 
 | line | kind | what | if | co-op flagged |
@@ -713,6 +763,8 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 ### Script 449 (CameraRgn01 enter)
 
 Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the room in play** (helper, by nearest_class2).
+
+Co-op patterns (`ed patterns`): drawn from one camera 7, queued for a later frame 2, one script state for both 4, asks the room in play 2 (2 uncovered), one global per game 1.
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], the room slot table [helper], hold word, 0x80006D0C asks it [hooked], the player's object [hooked], the cameras' records [hooked], the spell being cast [hooked], hold word [helper], hold's input channel [hooked], busy [hooked], find's bit 2, script timers wait on it [helper], main [hooked], control blocks [helper], asks if anyone is busy [helper], equipment, 20 records by holder id [keyed], the running script [per run], the script words [hooked], the open words window [hooked], raw and processed pads, the input channels [helper], the pad routine's state [helper], reads the zones' inside words [helper].
 

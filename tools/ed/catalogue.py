@@ -10,8 +10,10 @@ import os
 import re
 
 import disc
+import patterns
 
 DB = disc.DB
+PATTERN_NAME = {p['key']: p['name'] for p in patterns.PATTERNS}
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def _call_names():
@@ -568,8 +570,9 @@ def generate(only_level=None, out=OUT):
     levels = [l for l in sorted(d.levels, key=lambda x: int(x)) if level_rooms(d, l) and os.path.isdir(os.path.join(DB, 'scripts', 'L' + l))]
     placed = set()
     index = []
-    tsv_head = ['level', 'room', 'script', 'from', 'line', 'kind', 'call', 'what', 'if', 'via', 'coop_words', 'coop_flagged']
+    tsv_head = ['level', 'room', 'script', 'from', 'line', 'kind', 'call', 'what', 'if', 'via', 'coop_words', 'coop_flagged', 'patterns']
     all_flags = collections.Counter()
+    all_patterns = {p['key']: [0, 0] for p in patterns.PATTERNS}
     for level in levels:
         rooms = level_rooms(d, level)
         placed |= set(rooms)
@@ -582,6 +585,7 @@ def generate(only_level=None, out=OUT):
         tsv = ['\t'.join(tsv_head)]
         n_rows = n_scripts = n_flag_rows = 0
         level_flags = collections.Counter()
+        level_patterns = {p['key']: [0, 0] for p in patterns.PATTERNS}
         body = []
         pack = SCRIPT_PACK.get(level, level)
         not_here = []
@@ -608,7 +612,7 @@ def generate(only_level=None, out=OUT):
                 camera_only = bool(named) and all(x['kind'] == 'camera' for x in named) and all(
                     d.prims.get(x['call'], {}).get('system') in CAMERA_LIKE for x in rows if x['kind'] == 'other') and all(
                     not w.startswith('the room\'s ') for w in where)
-                script_words, script_flags = collections.OrderedDict(), collections.OrderedDict()
+                script_words, script_flags, script_patterns = collections.OrderedDict(), collections.OrderedDict(), collections.OrderedDict()
                 for x in rows:
                     if x['kind'] == 'door' and x['call'] == 'fn66':
                         doors.append('%s (script %s%s)' % (x['args'][0] if x['args'] else '?', x.get('via') or sid,
@@ -623,10 +627,18 @@ def generate(only_level=None, out=OUT):
                         n_flag_rows += 1
                         for w in x['coop_flagged']:
                             level_flags[re.sub(r" \(in mode \d+'s own code\)", " (in an input mode's own code)", w)] += 1
+                    x['patterns'] = patterns.for_row(x, co, where)
+                    for key, uncovered in x['patterns']:
+                        level_patterns[key][0] += 1
+                        level_patterns[key][1] += uncovered
+                        script_patterns.setdefault(key, [0, 0])
+                        script_patterns[key][0] += 1
+                        script_patterns[key][1] += uncovered
                     tsv.append('\t'.join(tsv_cell(v) for v in (level, rid, sid, '; '.join(where), x['line'], x['kind'], x['call'] or '',
                                                                 x['what'], ' and '.join(x['guard']), x.get('via', ''),
                                                                 '; '.join('%s [%s%s]' % (w['word'], w['status'], ', picks' if w['picks'] else '') for w in co),
-                                                                '; '.join(x['coop_flagged']))))
+                                                                '; '.join(x['coop_flagged']),
+                                                                '; '.join(k + (' (uncovered)' if u else '') for k, u in x['patterns']))))
                 n_rows += len(rows)
                 if camera_only:  # its rows are in the TSV; the page sums it up in the room's head
                     cam_only.append((sid, where, sorted({x['what'] for x in named})))
@@ -642,6 +654,9 @@ def generate(only_level=None, out=OUT):
                     part += ['Co-op, flagged (a per-player word branched on within one call, with no live host hook where '
                              'it\'s read): %s.' % '; '.join('**%s** (%s, by %s)' % (w, script_words[w], ', '.join(sorted(
                                  {short(c) for c in calls}))[:160]) for w, calls in script_flags.items()), '']
+                if script_patterns:
+                    part += ['Co-op patterns (`ed patterns`): %s.' % ', '.join(
+                        '%s %d%s' % (PATTERN_NAME[k], n, (' (%d uncovered)' % u) if u else '') for k, (n, u) in script_patterns.items()), '']
                 if script_words:
                     part += ['Co-op, reaches: %s.' % ', '.join('%s [%s]' % (w, s) for w, s in script_words.items()), '']
                 if not shown:
@@ -683,6 +698,12 @@ def generate(only_level=None, out=OUT):
                      'whole script run, a swap around the caller), and a word that is one per game may be fine for both.')
         lines.append('')
         all_flags.update(level_flags)
+        for k, (n, u) in level_patterns.items():
+            all_patterns[k][0] += n
+            all_patterns[k][1] += u
+        lines.append('Co-op patterns (`ed patterns`; rows, of them uncovered): %s.' % ', '.join(
+            '%s %d (%d)' % (PATTERN_NAME[k], n, u) for k, (n, u) in level_patterns.items() if n))
+        lines.append('')
         lines.append('Rooms: ' + ', '.join('[%d](#room-%d)' % (x, x) for x in rooms if x not in not_here))
         lines.append('')
         open(os.path.join(out, 'level-%s.md' % level), 'w', encoding='utf8', newline='\n').write('\n'.join(lines) + '\n' + '\n'.join(body))
@@ -719,6 +740,16 @@ def generate(only_level=None, out=OUT):
     for level, who, nr, ns, nrow, nflag in index:
         ix.append('| %s | %s | %d | %d | %d | %d | [level-%s.md](level-%s.md), [tsv](level-%s.tsv) |' % (
             level, md(who), nr, ns, nrow, nflag, level, level, level))
+    ix += ['', '## The known co-op patterns', '',
+           'Each row of the catalogue is tagged with the known patterns it shows (TSV column `patterns`; `ed patterns` for '
+           'the same with the fixes\' hle.c lines). "Uncovered": the row is flagged (a per-player word branched on with no '
+           'live hook where it\'s compared). The fix is what already exists for that pattern in runtime/host/hle.c, with '
+           'the commit that added it.', '',
+           '| pattern | rows | uncovered | what it is | fix in hle.c | how far the check can be trusted |', '|---|---|---|---|---|---|']
+    for p in patterns.PATTERNS:
+        n, u = all_patterns[p['key']]
+        ix.append('| %s | %d | %d | %s | %s | %s |' % (p['name'], n, u, md(p['what']), md(patterns.fix_text(p)), md(p['trust'])))
+    ix += ['', 'Run-time only, no check from the disc: %s.' % patterns.RUN_TIME_ONLY, '']
     ix += ['', 'Co-op flagged rows by word, over every level: %s.' % ', '.join('%s %d' % (w, c) for w, c in all_flags.most_common()),
            'A row is flagged when its call branches on a per-player word within one call and no live host hook sits on the '
            'function holding that compare. It\'s a place to look, not a bug found.', '',
