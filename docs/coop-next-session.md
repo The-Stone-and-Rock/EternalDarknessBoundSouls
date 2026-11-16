@@ -28,6 +28,55 @@
   off; solo never. Checked: a co-op run with neither named logs every install (rooms, stay, fog, effects, Tome trip with
   all hooks, split hold, keep) and nothing "NOT installed"; solo the same as before. A sweep of every getenv found no
   other fix or feature off by default (ED_FOG_VIEWS stays off by design).
+- **Story changes take both (uncommitted after 74a7989; the user's play 2026-11-15 evening: after a new game's dream player 1
+  went to the mansion, player 2 stayed in the dream, room 96).** The stay treated every ticket of player 1's as their door.
+  Now a ticket asked by a script the game's event queue started (0x80025FF0's row, lr 0x80026FE4: a film's or cinematic's
+  next script, the dream's 1920 to room 69) or by a cinematic's own ticket (lr 0x8012D2F0: the dream's end cinematic into
+  room 205) is a story change: no stayer window, and once player 1 is in the room it asked, coop_follow brings player 2
+  beside them and tells their old room (event 61) (hle.c coop_story_ticket, g_story_bring). Checked once from a new game
+  (logs/run-20261115-211200-jtg-dream-end-story4: "player 2 brought from room 96 to room 69 with player 1"). Seen on the
+  way: with no input the dream's end cinematic holds in room 205 a long time (the game's own; the user's play skipped it).
+- **A room player 2 enters first is set up as that room (uncommitted, UNVERIFIED; the user's play 2026-11-15 evening: the
+  hanged body in room 81, L00 tag 691, by the window at the game's start).** Level 0's room script L00/1816 is queued by
+  every room load (0x80152430 -> 0x80163C6C at lr 0x80153B6C) and run a frame later from the waits (lr 0x80163E5C); its
+  room 81 branch hides the body (`model_off`) and shows it only for Alex at insanity tier 2. Player 2 went into 81 first
+  (their change runs as theirs, R4's bracket), so 1816 ran after the bracket with player 1's room in play: room 81's
+  branch never ran and the placed body stayed shown. Now the room script queued inside player 2's change is noted
+  (notify_script_later, always installed; the log still only with ED_ROOM_LOG) and run once with that room current
+  (coop_run_script's first block: "[stay] room N's own script S (queued by player 2's arrival) ran with room N current").
+  Not reproduced by script: in three runs (logs/run-20261115-2126*..2132*-jtg-room81-body*) player 2's B on room 69's
+  Region08 door went through only after player 1 had entered 81 first; why their door waited is not traced. The user's
+  play shows it: look for that "[stay] room 81's own script 1816" line in logs/play.log.
+  **Played by the user (2026-11-15 night): fixed, the body no longer there.**
+- **Player 2's clock dials (uncommitted, UNVERIFIED; the user's play 2026-11-15 night: player 2 in the study, player 1 in the
+  main hall: the dials didn't move for player 2, the instructions were in player 1's half).** The clock (L00/1551) lets go
+  of its hold and starts input mode 8 (ed56(8), 0x8007AA6C; the mode in play is byte 0x80323AEB, -1 none); with busy 0 the
+  pad routing ended player 2's close-up ("play goes on: the pad is player 1's again"). Now a mode begun while player 2 has
+  the screen (coop_input_mode_start) keeps their close-up, pad and half until the byte leaves it ("[coop] input mode 8
+  begun in player 2's close-up: theirs" ... "is over"). Not run by script (the clock is deep in the mansion's story).
+  **Fixed and played by the user (2026-11-15 night, slot 3): the hands turn and the puzzle completes, the icons right.**
+  The dials' every press (0x8007F254) and their end (0x8007F140) ask "is the room in play 78" to pick the clock: run with
+  player 2's room current while the mode is theirs (coop_dial_run; the start was already theirs inside their use). The
+  doubled B and garbled words: their zone's own prompt (the clock's EXAMINE, prompt 6) was drawn over the mode's prompt;
+  not shown through an input mode of theirs. Open: player 1's camera "jitters for a slight moment" around player 2's
+  clock; not in the 3-a-second pictures (logs/run-20261115-220457-clock-p2-icons: player 1's half still at every
+  transition); needs a run with ED_RUN_SHOTS_MS=16 and the moment named.
+  Earlier state of it: **(the user's slot 3): their icons on their side now, BUT the B icon is doubled, and the hands don't turn
+  though the sound plays.** Open, not traced: the hands are things of player 2's room (78) while player 1's (69) is in
+  play; the mode's step or the hands' update likely tests the room in play (as the room script did). Next: read the
+  mode-8 step (0x8007AA6C's case 8 and its per-frame handler) for room tests, and where the B prompt is drawn twice.
+- **A state saved apart loads apart (uncommitted; the user's slot 3: library things in the foyer after loading).** The
+  host learned the two slots' rooms only at the next room draw; coop_follow ran first, didn't find player 2's room (77)
+  in a slot, and "brought" them into room 69 while 77 stayed loaded and drawn. coop_state_loaded now reads both slot
+  records at the load ("[rooms] the load's slots: 69 and 77"). Checked with the user's slot 3 on a copy exe
+  (logs/run-20261115-214728-slot3-load-fix: player 2 stays in 77).
+  **Then the user's rule (2026-11-15): any load of a co-op save state brings player 2 back to player 1** (as a memory card
+  save does, coop_adopt), so states saved apart need no mapping. coop_state_loaded sets the story change's bring
+  (g_story_bring) when the load is apart; coop_follow brings player 2 beside player 1, sends event 61 to the room left and
+  now marks that room's slot record gone as the change's tail does (room -1, loaded 0) and forgets it, so its things are
+  neither stepped nor drawn (also for the dream's bring). Checked with slot 3: "player 2 brought from room 77 to room
+  69", "slot 1's room 77 left by both: its record marked gone", the library's table, bell jar and board gone from the
+  foyer's picture (logs/run-20261115-215219-slot3-load-bring2/shots/000005.jpg).
 - **Still for the user's play test** (below, item 1) plus: player 2's page while player 1's Tome is open.
 
 ## Where things stood at the afternoon handoff (committed through b049fc3)

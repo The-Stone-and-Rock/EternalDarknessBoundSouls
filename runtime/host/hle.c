@@ -4052,6 +4052,65 @@ static int tome_copy_mode(void) {
 // Player 2 has a close-up their action press opened (coop_menu_input): the
 // split is off (camera.c) and the close-up shows in their half.
 static bool g_coop_screen;
+// An input mode (ed56(n), 0x8007AA6C) begun while player 2 has the screen: theirs until the game's byte for the mode in play
+// (0x80323AEB, -1 none) leaves it (coop_menu_input). -1: none of theirs.
+#define INPUT_MODE_START 0x8007AA6Cu
+#define INPUT_MODE_NOW 0x80323AEBu
+static s32 g_coop_p2_input_mode = -1;
+static bool coop_stay_room_in(CPUState* cpu, u32 keep[3]);         // (below, ED_COOP_STAY)
+static void coop_stay_room_out(CPUState* cpu, const u32 keep[3]);
+static void coop_input_mode_start(CPUState* cpu) {
+    static bool running;
+    g_hle_passthrough = true;
+    if (running || !g_settings.mod_coop || g_coop_p2 == 0u || !g_coop_screen)
+        return;
+    g_coop_p2_input_mode = (s32)cpu->gpr[3];
+    // Apart, the mode begins with their room in play: its setup finds its things in the room in play (mode 8, the clock's
+    // dials, 0x8007B478: the room is 78 or not, the hands by tags 650 and 651 in that room, 0x801F6160; and 0x8007F254 the
+    // same). With player 1's room in play the hands were not found: the dials' sounds played, the hands never turned.
+    u32 keep[3];
+    if (coop_stay_room_in(cpu, keep)) {
+        const u32 args[1] = {cpu->gpr[3]}, lr = cpu->lr;
+        u32 ignore = 0u;
+        running = true;
+        hle_guest_call(cpu, INPUT_MODE_START, args, 1, 0.0, &ignore);
+        running = false;
+        coop_stay_room_out(cpu, keep);
+        cpu->lr = lr;
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+    }
+    fprintf(stderr, "[coop] input mode %d begun in player 2's close-up: theirs%s (frame %llu)\n", g_coop_p2_input_mode,
+            g_hle_passthrough ? "" : ", begun with their room in play", (unsigned long long)(cpu->timebase / 675000ull));
+}
+// The clock dials' own steps ask the room in play each time too: 0x8007F254 (every press of the mode's input channel: the
+// room is 78 or not picks which clock's hands, the table 0x80323B04 +1052 + 8 * that) and 0x8007F140 (the mode's end).
+// The dials player 2 began, apart, ran them with player 1's room in play: the presses' sounds, no hand turned (the user's
+// play, logs/run-20261115-215836-clock-p2). Theirs: run with their room current.
+#define DIAL_STEP 0x8007F254u
+#define DIAL_END 0x8007F140u
+static void coop_dial_run(CPUState* cpu, u32 at) {
+    static bool running;
+    g_hle_passthrough = true;
+    u32 keep[3];
+    if (running || !g_settings.mod_coop || g_coop_p2 == 0u || g_coop_p2_input_mode < 0 || !coop_stay_room_in(cpu, keep))
+        return;
+    const u32 args[1] = {cpu->gpr[3]}, lr = cpu->lr;
+    u32 ret = 0u;
+    running = true;
+    hle_guest_call(cpu, at, args, 1, 0.0, &ret);
+    running = false;
+    coop_stay_room_out(cpu, keep);
+    cpu->lr = lr;
+    hle_set_u32(cpu, ret);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+    static unsigned said;
+    if (said++ < 4u)
+        fprintf(stderr, "[coop] player 2's dials: 0x%08X run with their room in play (frame %llu)\n", at, (unsigned long long)(cpu->timebase / 675000ull));
+}
+static void coop_dial_step(CPUState* cpu) { coop_dial_run(cpu, DIAL_STEP); }
+static void coop_dial_end(CPUState* cpu) { coop_dial_run(cpu, DIAL_END); }
 static bool g_coop_menu_reset;  // a state was loaded: coop_menu_input's own words start over (step E)
 static bool g_coop_words_theirs;  // (below: the lend route's words of player 2's)
 bool hle_coop_screen(void) { return g_coop_screen; }
@@ -11621,6 +11680,33 @@ static bool coop_room_change_log(void) {
     return on != 0;
 }
 
+// A story change (the user, 2026-11-15: after a new game's dream player 1 went to the mansion and player 2 stayed in the
+// dream, room 96): a ticket asked by a script the game's event queue started (0x80025FF0's run row, lr 0x80026FE4: a film's
+// or cinematic's next script, as the dream's end 2027 -> 1920 `go_to_room(69, ...)`, logs/run-20261107-142603-jtg-dream-end2
+// 3452) is nobody's door: both go, as a Chapter Page's film takes both. No stayer window at it (split_ticket_open), and after
+// the change coop_follow brings player 2 beside player 1 as at any change before separate rooms (g_story_bring).
+#define STORY_SCRIPT_RAN 0x80026FE4u
+static s32 g_story_script;  // the last script that row started
+static struct {
+    bool on;
+    unsigned tickets;  // g_coop_tickets at it
+    s32 to;            // the room asked
+} g_story_bring;
+// Also a cinematic's own ticket (0x8012D1A0's call of the writer, lr 0x8012D2F0: the dream's end played as its cinematic into
+// room 205, logs/run-20261115-210507-jtg-dream-end-story 4220): nobody's door either.
+#define STORY_CINEMATIC_TICKET 0x8012D2F0u
+static void coop_story_ticket(CPUState* cpu, s32 running) {
+    const bool cinematic = cpu->lr == STORY_CINEMATIC_TICKET;
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !coop_stay() || g_coop_room_p2 ||
+        (!cinematic && (running <= 0 || running != g_story_script)))
+        return;
+    g_story_bring.on = true;
+    g_story_bring.tickets = g_coop_tickets;
+    g_story_bring.to = (s32)cpu->gpr[3];
+    fprintf(stderr, "[stay] a story change: %s %d asks room %d: both go (frame %llu)\n",
+            cinematic ? "a cinematic's ticket, script running" : "script (run by the game's event queue)", running, g_story_bring.to,
+            (unsigned long long)(cpu->timebase / 675000ull));
+}
 static void notify_room_ticket(CPUState* cpu) {
     g_coop_room_asked = true;
     g_coop_room_asked_now = true;
@@ -11636,6 +11722,7 @@ static void notify_room_ticket(CPUState* cpu) {
     g_coop_entered_p2 = g_coop_p2 != 0u && (exit_p2 || mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u));
     g_coop_room_p2 = g_coop_entered_p2;
     tome_trip_ticket(cpu);  // P2: a ticket into the Tome room from another: player 1's change of the old kind (g_coop_room_p2 off)
+    coop_story_ticket(cpu, running);
     if (!(coop_stay() && g_coop_room_p2))
         g_coop_p1_tickets++;
     if (coop_stay() && g_coop_p2 != 0u)
@@ -11680,8 +11767,24 @@ static void notify_trace_look_step(CPUState* cpu) { trace_look(cpu, "look step")
 static void notify_trace_busy(CPUState* cpu) { trace_look(cpu, "busy"); }
 static void notify_trace_prompt_set(CPUState* cpu) { trace_look(cpu, "prompt set"); }
 
+// The room's own script, queued by a room's load (0x80152430 -> 0x80163C6C(script, -1) at 0x80153B68) inside player 2's own
+// change (R4's bracket): it runs a frame later from the script waits (0x80163E00, lr 0x80163E5C), after the bracket, with
+// player 1's room in play, so its per-room branches (`room[fn25]()`) set up player 1's room again and never the one player 2
+// loaded. The user's play, 2026-11-15: player 2 went into room 81 first, L00/1816's `model_off` of the hanged body (tag 691,
+// shown again only for Alex at insanity tier 2) never ran there, and the body stood by the window at the game's start.
+// Noted here and run with that room current (coop_run_script). (Not with player 1's own change: the room is in play.)
+#define ROOM_SCRIPT_QUEUED 0x80153B6Cu
+static struct {
+    s32 script, room;
+} g_stay_room_script;
+static int g_stay_bracket;  // (R4's bracket, below)
 static void notify_script_later(CPUState* cpu) {
-    room_log(cpu, "later");
+    if (g_stay_bracket != 0 && cpu->lr == ROOM_SCRIPT_QUEUED && (s32)cpu->gpr[3] > 0 && sda_ready(cpu)) {
+        g_stay_room_script.script = (s32)cpu->gpr[3];
+        g_stay_room_script.room = (s32)mem_read32(cpu, cpu->gpr[13] - 23276u);
+    }
+    if (getenv("ED_ROOM_LOG") != NULL)
+        room_log(cpu, "later");
 }
 
 // While the stairs script runs: each game function it calls (0x8015974C's
@@ -20374,6 +20477,33 @@ static void coop_script_cameras(CPUState* cpu) {
 }
 
 static void coop_run_script(CPUState* cpu) {
+    // The room's own script queued by player 2's own change (notify_script_later): run once with that room current, so its
+    // branch for that room sets it up (and not player 1's again). Only while the room is still resident and player 1 isn't
+    // in it (then it is the room in play and runs as the game's). (A guest call of this same address: guarded.)
+    {
+        static bool running;
+        const s32 want = g_stay_room_script.room;
+        if (!running && cpu->lr == ARRIVAL_TIMER_RAN && g_stay_room_script.script > 0 && (s32)cpu->gpr[3] == g_stay_room_script.script &&
+            g_settings.mod_coop && g_coop_p2 != 0u && sda_ready(cpu)) {
+            g_stay_room_script.script = 0;
+            if (want != (s32)mem_read32(cpu, cpu->gpr[13] - 23276u) && room_slot_of(cpu, want) >= 0) {
+                u32 keep[3], args[3] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5]}, ret = 0u;
+                const u32 lr = cpu->lr;
+                running = true;
+                coop_room_in(cpu, want, keep);
+                hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ret);
+                coop_stay_room_out(cpu, keep);
+                running = false;
+                cpu->lr = lr;
+                fprintf(stderr, "[stay] room %d's own script %d (queued by player 2's arrival) ran with room %d current (frame %llu)\n", want,
+                        (s32)args[0], want, (unsigned long long)(cpu->timebase / 675000ull));
+                hle_set_u32(cpu, ret);
+                g_hle_passthrough = false;
+                g_hle_tail_call = false;
+                return;
+            }
+        }
+    }
     // Player 2's own words closing in their tick (0x80024220 -> 0x801642D4(script)): no script runs inside the tick (a
     // script that waits would stall the frame); it is left for player 1's controller and runs as a use of theirs there
     // (coop_use_start), as a press's script of theirs does.
@@ -20457,6 +20587,8 @@ static void coop_run_script(CPUState* cpu) {
     }
     if (cpu->lr != 0x800CA940u && cpu->lr != 0x80153B84u && cpu->lr != ARRIVAL_ZONE_RAN)
         g_both_script = (s32)cpu->gpr[3];  // not the zones', which run every frame
+    if (cpu->lr == STORY_SCRIPT_RAN && (s32)cpu->gpr[3] > 0)
+        g_story_script = (s32)cpu->gpr[3];  // (coop_story_ticket)
     if (coop_trace() && sda_ready(cpu) && cpu->lr != 0x800CA940u && cpu->lr != 0x80153B84u) {
         trace_look(cpu, "script run");
         g_script_watch = 40u;  // the game functions it calls
@@ -23604,7 +23736,13 @@ static void coop_follow(CPUState* cpu, u32 player) {
     // P5: the Tome trip's change is over and player 1 is in the Tome room: the bring as before separate rooms.
     const bool trip_bring = tome_trip_brings(cpu);
     const s32 trip_left = trip_bring ? coop_object_room(cpu, g_coop_p2) : -1;
-    if (coop_stay_apart(cpu) && !trip_bring) {  // ED_COOP_STAY: they stay in their room, resident in the other slot
+    // A story change (coop_story_ticket): over, player 1 in the room it asked: the bring as before separate rooms.
+    const bool story_bring = g_story_bring.on && !trip_bring && (s32)room == g_story_bring.to &&
+                             (s32)mem_read32(cpu, cpu->gpr[13] - 23276u) == g_story_bring.to && !coop_room_change_on(cpu);
+    const s32 story_left = story_bring ? coop_object_room(cpu, g_coop_p2) : -1;
+    if (g_story_bring.on && !story_bring && g_coop_tickets != g_story_bring.tickets)
+        g_story_bring.on = false;  // (another ticket since: that one decides)
+    if (coop_stay_apart(cpu) && !trip_bring && !story_bring) {  // ED_COOP_STAY: they stay in their room, resident in the other slot
         static s32 said = -1;
         if (said != (s32)room) {
             said = (s32)room;
@@ -23681,6 +23819,30 @@ static void coop_follow(CPUState* cpu, u32 player) {
             at[2]);
     if (trip_bring)
         tome_trip_brought(cpu, trip_left);
+    if (story_bring) {
+        // The room left is told it was left (event 61, as the Tome trip's bring does), so its things let go of player 2.
+        bool sent = false;
+        if (story_left != -1 && story_left != (s32)room) {
+            const u32 args[4] = {61u, 0u, 0u, (u32)story_left}, lr = cpu->lr;
+            sent = hle_guest_call(cpu, 0x801F5620u, args, 4, (double)guest_read_f32(cpu, cpu->gpr[2] - 22248u), &ignore);
+            cpu->lr = lr;
+        }
+        g_story_bring.on = false;
+        // The room left has nobody in it now: its slot's record marked gone as the change's tail marks the room left behind
+        // (room -1, loaded 0; room_slot_put_back puts one back only while a player is in it), so its things are neither
+        // stepped nor drawn (the user's slot 3: the library's table, bell jar and board in the foyer's picture after a load).
+        const int left_slot = story_left != -1 ? room_slot_of(cpu, story_left) : -1;
+        if (left_slot >= 0 && story_left != (s32)room) {
+            const u32 rec = room_slot_record(cpu, left_slot);
+            if (rec != 0u) {
+                mem_write32(cpu, rec + 0x8140u, 0xFFFF0000u);
+                g_room_slot_room[left_slot] = -1;
+                fprintf(stderr, "[rooms] slot %d's room %d left by both: its record marked gone\n", left_slot, story_left);
+            }
+        }
+        fprintf(stderr, "[stay] a story change or a load: player 2 brought from room %d to room %u with player 1 (event 61 to it: %s)\n", story_left, room,
+                sent ? "sent" : "not needed");
+    }
 }
 
 // Player 2's detail. Each frame the game shares out detail between the
@@ -27161,6 +27323,8 @@ static void split_ticket_open(CPUState* cpu) {
     const char* no = NULL;
     if (g_tome_trip.state == 1 && g_tome_trip.tickets == g_coop_tickets)
         no = "the Tome room: both go";  // P2: no stayer window for the trip's change
+    else if (g_story_bring.on && g_story_bring.tickets == g_coop_tickets)
+        no = "a story change: both go";  // (coop_story_ticket)
     else if (g_tome_copy_turn)
         no = "the Tome copy's turn";
     else if (rs == -1)
@@ -31281,6 +31445,20 @@ static void coop_menu_input(CPUState* cpu, bool menu, bool cutscene, DolPadState
     // the scene's camera never showed in their half.
     // (Not while player 1 is in a close-up of their own; their bare scene is no bar: player 2's examine beside it is theirs.)
     bool closeup = !menu && !cutscene && (owner == 1 || (g_coop_assist_at != 0u && !g_coop_script_hold)) && b6_busy && !coop_p1_in_close_up(cpu);
+    // An input mode begun in player 2's close-up (coop_input_mode_start: the clock's dials, ed56(8) from L00/1551) is theirs
+    // till the game ends it (byte 0x80323AEB back to -1): their pad and their half, as their close-up was. The script lets go
+    // of its hold as the mode begins (busy 0), so without this the pad went back to player 1 and the instructions to their
+    // half (the user's play, 2026-11-15).
+    if (g_coop_p2_input_mode >= 0) {
+        if ((s32)(s8)mem_read8(cpu, INPUT_MODE_NOW) != g_coop_p2_input_mode || g_coop_p2 == 0u) {
+            fprintf(stderr, "[coop] player 2's input mode %d is over: the pad is theirs no more (frame %llu)\n", g_coop_p2_input_mode,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+            g_coop_p2_input_mode = -1;
+        } else if (!menu && !cutscene) {
+            closeup = true;
+            owner = 1;
+        }
+    }
     if (closeup && owner != 1 && coop_trace())
         fprintf(stderr, "[trace] close-up for player 2: assist %u busy %u player 1's look %d frame %llu\n", g_coop_assist_at, mem_read32(cpu, cpu->gpr[13] - 23344u), g_coop_p1_look,
                 (unsigned long long)(cpu->timebase / 675000ull));
@@ -32172,7 +32350,10 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         coop_follow(cpu, player);
         // Up through player 1's look at something and its scene, as theirs is through player 2's.
         // Not through their own script's hold (coop_p2_holds), asked in player 1's turn with it let go: made and let go each frame.
-        coop_prompt_show(cpu, (!coop_busy(cpu) || g_coop_p1_look) && !g_coop_p2_hold_open && !game_menu_open(cpu) && !cutscene_playing(cpu));
+        // (Not through an input mode of theirs: the mode's own prompt is the game's, in their half; their zone's prompt, the
+        // clock's EXAMINE (prompt 6), was drawn over it, two B buttons and two lines of words in one place.)
+        coop_prompt_show(cpu, (!coop_busy(cpu) || g_coop_p1_look) && !g_coop_p2_hold_open && !game_menu_open(cpu) && !cutscene_playing(cpu) &&
+                                  g_coop_p2_input_mode < 0);
         coop_p1_icon_show(cpu);
     }
     static int log = -1;
@@ -32585,6 +32766,20 @@ static void find_coop(CPUState* cpu) {
         if (change != NULL && start != NULL && buffer != NULL) {
             change->intercept = tw_mode_change;
             start->intercept = tw_tome_start;
+            HleDispatchEntry* mode_start = hle_dispatch_entry(INPUT_MODE_START);  // (coop_input_mode_start: player 2's clock dials)
+            if (mem_read32(cpu, INPUT_MODE_START) == 0x9421FE30u && mode_start != NULL && mode_start->intercept == NULL && mode_start->notify == NULL)
+                mode_start->intercept = coop_input_mode_start;
+            else
+                fprintf(stderr, "[coop] the input mode's start 0x%08X not taken: a mode player 2 begins answers player 1's pad\n", INPUT_MODE_START);
+            HleDispatchEntry* dial_step = hle_dispatch_entry(DIAL_STEP);
+            HleDispatchEntry* dial_end = hle_dispatch_entry(DIAL_END);
+            if (mem_read32(cpu, DIAL_STEP) == 0x9421FF40u && mem_read32(cpu, DIAL_END) == 0x9421FFF0u && dial_step != NULL && dial_end != NULL &&
+                dial_step->intercept == NULL && dial_step->notify == NULL && dial_end->intercept == NULL && dial_end->notify == NULL) {
+                dial_step->intercept = coop_dial_step;
+                dial_end->intercept = coop_dial_end;
+            } else {
+                fprintf(stderr, "[coop] the clock dials' steps not taken: player 2's dials apart turn nothing\n");
+            }
             // The game's state keep with the world behind the Tome (keep_request_hold, keep_filter): the request
             // dispatcher (split_requests takes it over with the stay and runs the same rule), the keep's walk, its filter.
             HleDispatchEntry* requests = hle_dispatch_entry(SPLIT_REQUESTS);
@@ -33053,7 +33248,7 @@ static void find_coop(CPUState* cpu) {
                 }
             }
             HleDispatchEntry* later = hle_dispatch_entry(0x80163C6Cu);
-            if (getenv("ED_ROOM_LOG") != NULL && later != NULL && later->notify == NULL && later->intercept == NULL)
+            if (later != NULL && later->notify == NULL && later->intercept == NULL)  // (the log only with ED_ROOM_LOG)
                 later->notify = notify_script_later;
             HleDispatchEntry* script_run = hle_dispatch_entry(COOP_RUN_SCRIPT);
             if (script_run != NULL && script_run->intercept == NULL && script_run->notify == NULL)
@@ -33738,6 +33933,31 @@ static void unstick_disc_streams(CPUState* cpu) {
 static void coop_state_loaded(CPUState* cpu) {
     g_coop_words_free = g_coop_find_free = g_coop_script_hold = false;
     g_coop_p1_look = false;
+    g_coop_p2_input_mode = -1;  // (a mode of the loaded machine is not one player 2 began)
+    // The rooms in the two slots are the loaded machine's (the user's slot 3, 2026-11-15: saved with player 2 in room 77,
+    // player 1 in 69; loaded over a session where slot 1 last held 78). The host learned them only at the next room draw
+    // (room_slots_frame), and coop_follow ran first: 77 in no slot it knew, "player 2 brought to player 1's room 0x45", and
+    // 77 stayed loaded with nobody in it, its things in the foyer's picture. Learned here, from the load's own memory.
+    if (room_slots() == 2 && sda_ready(cpu)) {
+        for (int i = 0; i < 2; i++) {
+            const u32 p = room_slot_record(cpu, i);
+            const u32 w = p != 0u ? mem_read32(cpu, p + 0x8140u) : 0u;
+            const s32 room = (s32)(s16)(w >> 16);
+            g_room_slot_room[i] = p != 0u && ((w >> 8) & 0xFFu) != 0u && room != -1 ? room : -1;
+        }
+        fprintf(stderr, "[rooms] the load's slots: %d and %d\n", g_room_slot_room[0], g_room_slot_room[1]);
+        // Any co-op state loaded brings player 2 back to player 1 (the user, 2026-11-15: "any load of that save state should
+        // bring player 2 back to player 1", as a memory card save does, coop_adopt): saved apart, they are brought at the next
+        // coop_follow by the story change's bring (beside player 1, event 61 to the room left; that room, nobody in it, drawn
+        // in neither half).
+        if (g_settings.mod_coop && g_coop_p2 != 0u && coop_stay_apart(cpu)) {
+            g_story_bring.on = true;
+            g_story_bring.tickets = g_coop_tickets;
+            g_story_bring.to = (s32)mem_read32(cpu, cpu->gpr[13] - 23276u);
+            fprintf(stderr, "[stay] a state saved apart: player 2 (room %d) goes to player 1 in room %d\n", coop_object_room(cpu, g_coop_p2),
+                    g_story_bring.to);
+        }
+    }
     if (!g_settings.mod_coop || !sda_ready(cpu) || !guest_ram_range_valid(cpu, PROMPT_LOOKS, 68u))
         return;
     const u32 entry = PROMPT_LOOKS + (mem_read32(cpu, PROMPT_LOOKS + 64u) & 1u) * 32u, kind = mem_read32(cpu, entry);
