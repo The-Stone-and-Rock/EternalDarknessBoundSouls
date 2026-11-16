@@ -286,6 +286,96 @@ def scan(code, addr, r13t, abst, callt):
     return hits, callees
 
 
+class Needs:
+    """`ed needs` as something to call: the one-player words a function or a script reaches, each with its helper.
+    One disassembly load and one scan per function for any number of questions (the catalogue asks thousands).
+
+    A found row is keyed (where, what, helper) and holds: how (read / write / compare / addr / call / is), depth (the
+    shallowest it was seen at), cmp (the shallowest compare, or None), offs (offsets inside a table), in (up to 3
+    functions it was seen in)."""
+
+    def __init__(self):
+        self.code = Code()
+        self.r13t, self.abst, self.callt = _player_table()
+        self._scans, self._natives, self._native_reach = {}, None, {}
+
+    def scan(self, f):
+        if f not in self._scans:
+            self._scans[f] = scan(self.code, f, self.r13t, self.abst, self.callt)
+        return self._scans[f]
+
+    def reach(self, roots, depth=3, cap=1500):
+        """Walk direct calls from the roots, breadth first, `depth` calls deep, at most `cap` functions."""
+        seen, queue, found = {}, [], {}
+        for a in roots:
+            if a not in seen:
+                seen[a] = 0
+                queue.append(a)
+        for a in roots:
+            if '%08X' % a in self.callt:
+                what, helper = self.callt['%08X' % a]
+                found[('0x%08X' % a, what, helper)] = {'how': {'is'}, 'in': [a], 'depth': 0, 'offs': set(), 'cmp': None}
+        while queue and len(seen) < cap:
+            f = queue.pop(0)
+            hits, callees = self.scan(f)
+            for how, where, what, helper, at in hits:
+                off = None
+                if how != 'call' and where.startswith('0x'):  # a table's word: one row per table, with the offsets seen
+                    at_word = int(where, 16)
+                    for start, size, w, h in self.abst:
+                        if w == what and start <= at_word < start + size:
+                            where, off = '0x%08X' % start, at_word - start
+                            break
+                key = (where, what, helper)
+                row = found.setdefault(key, {'how': set(), 'in': [], 'depth': seen[f], 'offs': set(), 'cmp': None})
+                row['how'].add(how)
+                if how == 'compare' and (row['cmp'] is None or seen[f] < row['cmp']):
+                    row['cmp'] = seen[f]  # the shallowest depth it's branched on, which may be deeper than where it's first seen
+                if off is not None:
+                    row['offs'].add(off)
+                if len(row['in']) < 3 and f not in row['in']:
+                    row['in'].append(f)
+            if seen[f] < depth:
+                for c in callees:
+                    if c not in seen:
+                        seen[c] = seen[f] + 1
+                        queue.append(c)
+        return seen, found
+
+    def natives(self):
+        """{script function name: address} from natives.tsv."""
+        if self._natives is None:
+            self._natives = {l.split('\t')[0]: int(l.split('\t')[1], 16) for l in open(os.path.join(DB, 'natives.tsv'))}
+        return self._natives
+
+    def native(self, name, depth=3):
+        """What one script function reaches (cached): (seen, found)."""
+        if name not in self._native_reach:
+            self._native_reach[name] = self.reach([self.natives()[name]], depth)
+        return self._native_reach[name]
+
+    def script(self, globals_, depth=3):
+        """What a script reaches through the script functions it calls (its `globals` in scripts.json, one level's
+        copy): the union of each function's own walk, so each walk is done once for the whole game.
+        Returns {key: row} with row['via'], the script functions that reach it."""
+        merged = {}
+        for name in sorted(set(globals_) & set(self.natives())):
+            for key, row in self.native(name, depth)[1].items():
+                m = merged.get(key)
+                if m is None:
+                    m = merged[key] = {'how': set(), 'in': [], 'depth': row['depth'], 'offs': set(), 'cmp': None, 'via': []}
+                m['how'] |= row['how']
+                m['offs'] |= row['offs']
+                m['depth'] = min(m['depth'], row['depth'])
+                if row['cmp'] is not None and (m['cmp'] is None or row['cmp'] < m['cmp']):
+                    m['cmp'] = row['cmp']
+                for f in row['in']:
+                    if len(m['in']) < 3 and f not in m['in']:
+                        m['in'].append(f)
+                m['via'].append(name)
+        return merged
+
+
 def cmd_needs(argv):
     if not argv:
         raise SystemExit('ed needs ADDR|fnN [--depth N], or ed needs --script ID|L00/ID [--level N]')
@@ -333,44 +423,8 @@ def cmd_needs(argv):
     addr, name = resolve(argv[0])
     q = name or argv[0]
     natives = {name: 1} if name else {}
-    code = Code()
-    r13t, abst, callt = _player_table()
     syms = disc.symbols()
-    seen = {addr: 0}
-    queue = [addr]
-    for a in extra_roots:
-        if a not in seen:
-            seen[a] = 0
-            queue.append(a)
-    found = {}
-    if '%08X' % addr in callt:
-        what, helper = callt['%08X' % addr]
-        found[('0x%08X' % addr, what, helper)] = {'how': {'is'}, 'in': [addr], 'depth': 0, 'offs': set(), 'cmp': None}
-    while queue and len(seen) < 1500:
-        f = queue.pop(0)
-        hits, callees = scan(code, f, r13t, abst, callt)
-        for how, where, what, helper, at in hits:
-            off = None
-            if how != 'call' and where.startswith('0x'):  # a table's word: one row per table, with the offsets seen
-                at_word = int(where, 16)
-                for start, size, w, h in abst:
-                    if w == what and start <= at_word < start + size:
-                        where, off = '0x%08X' % start, at_word - start
-                        break
-            key = (where, what, helper)
-            row = found.setdefault(key, {'how': set(), 'in': [], 'depth': seen[f], 'offs': set(), 'cmp': None})
-            row['how'].add(how)
-            if how == 'compare' and (row['cmp'] is None or seen[f] < row['cmp']):
-                row['cmp'] = seen[f]  # the shallowest depth it's branched on, which may be deeper than where it's first seen
-            if off is not None:
-                row['offs'].add(off)
-            if len(row['in']) < 3 and f not in row['in']:
-                row['in'].append(f)
-        if seen[f] < depth:
-            for c in callees:
-                if c not in seen:
-                    seen[c] = seen[f] + 1
-                    queue.append(c)
+    seen, found = Needs().reach([addr] + [a for a in extra_roots if a != addr], depth)
     if extra_roots and not given_addr:
         subject = 'script %s\'s %d functions' % (sid, len(extra_roots))
     elif extra_roots:
