@@ -174,7 +174,8 @@ def _compared(body, idx, reg, ahead=6):
         srcs = p[2:] if len(p) > 2 else []
         if name.startswith('cmp'):
             if any(x in held for x in p[1:]):
-                return True
+                # Against 0 (cmpwi/cmplwi rX, 0): a there-or-not or zero test, not a pick between values.
+                return 'zero' if name in ('cmpwi', 'cmplwi') and re.fullmatch(r'(0x)?0+', p[-1]) else True
         elif dot and name in DOT_TESTS and any(x in held for x in srcs):
             return True  # sets cr0 from the value: a test of it
         elif name in ('subfic', 'xori') and len(p) > 3 and p[2] in held and re.fullmatch(r'-?(0x)?[0-9A-Fa-f]+', p[3]):
@@ -250,8 +251,12 @@ def scan(code, addr, r13t, abst, callt):
             if m:
                 off, base = int(m.group(1)), m.group(2)
                 how = 'write' if name in STORES else 'read'
-                if how == 'read' and dst and _compared(body, idx, dst):
-                    how = 'compare'  # the function picks by the value: a branch on it, not just passing it on
+                if how == 'read' and dst:
+                    c = _compared(body, idx, dst)
+                    if c == 'zero':
+                        how = 'zero-test'  # a there-or-not test (cmp against 0): it branches, but doesn't pick a value
+                    elif c:
+                        how = 'compare'  # the function picks by the value: a branch on it, not just passing it on
                 if base == 'r13' and off in r13t:
                     hits.append((how, 'r13%+d' % off, *r13t[off], a))
                 else:
@@ -450,7 +455,8 @@ def cmd_needs(argv):
     print('It reaches this one-player data. To call it for player 2, the helper on the right must have their data in first.')
     print('This follows direct calls only: a script it runs (`ed needs --script ID`), a table, and work it leaves for later in the frame aren\'t followed.')
     print('"compare": a function branches on the word (it picks by it: the likely co-op bug when the players are apart);'
-          ' "read": it only loads it, maybe to pass it on. Depth 0 is the function itself.')
+          ' "zero-test": it only asks whether the word is 0 or there; "read": it only loads it, maybe to pass it on. Depth 0 '
+          'is the function itself.')
     picks = sorted({(row['cmp'], where, what) for (where, what, helper), row in found.items()
                     if row.get('cmp') is not None and row['cmp'] <= 1})
     if picks:
