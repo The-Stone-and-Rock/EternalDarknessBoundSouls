@@ -44,6 +44,11 @@ bool frontend_photo_active(void);
 void frontend_toast(const char* text);
 // The same in one co-op player's half (0 or 1), for longer.
 void frontend_toast_player(int player, const char* text);
+// The Tome's Options page's "Choose Character" (testing): the menu opens on player 1's character roster.
+void frontend_open_characters(void);
+// A button drawn as part of a Tome page, for this frame (asked each frame while the page is up): its text, the co-op half
+// it's in (-1 the whole screen) and its centre as parts of that half's width and height.
+void frontend_tome_button(const char* text, int half, float x, float y);
 
 #ifdef __cplusplus
 }

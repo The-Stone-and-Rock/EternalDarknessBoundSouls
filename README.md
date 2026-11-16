@@ -151,8 +151,17 @@ Ideas and bug reports are welcome in the Issues.
 
 ## Getting started
 
-Packaged downloads for Bound Souls aren't up yet. Until they are, build it from source (below). The original
-recomp's [releases](https://github.com/griches/eternaldarknessrecomp/releases) are single player only.
+**Download the latest release** from [Releases](https://github.com/The-Stone-and-Rock/EternalDarknessBoundSouls/releases)
+(Windows 64-bit: `EternalDarknessBoundSouls-vX.Y.Z-windows-x64.zip`). Nothing to build:
+
+1. Unzip it somewhere you can write to (Documents or a Games folder, not Program Files).
+2. Put your own image of the **European** disc (`GEDP01`, `.iso` or `.gcm`) in the `dump` folder. The game files are
+   not included: you need your own copy of the game. The USA disc (`GEDE01`) is not supported.
+3. Double-click `play.bat`. If Windows says it protected your PC: **More info**, then **Run anyway**.
+
+Updating: unzip a new release over your old folder; your saves, settings, disc and textures stay. To build it yourself
+instead (for developers), see [Building from source](#building-from-source) below. The original recomp's
+[releases](https://github.com/griches/eternaldarknessrecomp/releases) are single player only.
 
 ### HD textures (recommended)
 

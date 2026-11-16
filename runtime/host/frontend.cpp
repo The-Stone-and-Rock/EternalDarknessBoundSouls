@@ -45,6 +45,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <atomic>
 #include <mutex>
 #include <string>
 #include <sys/stat.h>
@@ -321,6 +322,7 @@ struct Row {
 
 Rml::ElementDocument* g_doc = nullptr;
 ImFont* g_fps_font = nullptr;  // the FPS counter's (frontend_imgui_init)
+ImFont* g_tome_font = nullptr;  // the Tome-looking buttons' (frontend_tome_button)
 bool g_ui_ready = false;
 Screen g_screen = Screen::Launcher;
 Screen g_options_return = Screen::Launcher;
@@ -3156,6 +3158,10 @@ extern "C" void frontend_imgui_init(void) {
         return;
     }
     g_fps_font = ImGui::GetIO().Fonts->AddFontFromFileTTF(path.c_str(), 64.f);
+    // The Tome's own-looking buttons (frontend_tome_button): IM Fell English, an old book's face.
+    const std::string tome = res_dir() + "/fonts/IMFellEnglish-Regular.ttf";
+    if (stat(tome.c_str(), &st) == 0)
+        g_tome_font = ImGui::GetIO().Fonts->AddFontFromFileTTF(tome.c_str(), 64.f);
 }
 
 extern "C" void frontend_init(int argc, char** argv) {
@@ -3309,7 +3315,71 @@ void draw_one_toast(const std::string& text, Uint64 at_ms, Uint64 lasts_ms, floa
                   IM_COL32(0xf0, 0xe6, 0xc8, static_cast<int>(0xff * fade)), text.c_str());
 }
 
+// A button drawn as part of a Tome page (frontend_tome_button): asked each frame by the game thread while that page is up,
+// drawn while the ask is fresh. The Options tab's "Characters", under its cross of four (Controller, Audio, Display,
+// Load/Save), in the Tome's own plaque look: dark wood, a gold rule, the old book's face, its button picture beside.
+std::string g_tome_button_text;
+int g_tome_button_half = -1;  // -1 the whole screen, 0 or 1 a co-op half
+float g_tome_button_x = 0.54f, g_tome_button_y = 0.415f;  // its centre, as parts of the half's width and the screen's height
+Uint64 g_tome_button_at = 0;
+void draw_tome_button() {
+    std::string text;
+    int half;
+    float fx, fy;
+    Uint64 at;
+    {
+        std::lock_guard<std::mutex> lock(g_toast_mutex);
+        text = g_tome_button_text;
+        half = g_tome_button_half;
+        fx = g_tome_button_x;
+        fy = g_tome_button_y;
+        at = g_tome_button_at;
+    }
+    const Uint64 now = SDL_GetTicks();  // (the game thread's ask may be a tick newer than this frame's clock)
+    static unsigned drawn, skipped;
+    static Uint64 said_at;
+    const bool fresh = !text.empty() && at != 0 && !(now > at && now - at > 400) && ImGui::GetCurrentContext() != nullptr;
+    if (!text.empty())
+        (fresh ? drawn : skipped)++;
+    if (!text.empty() && now - said_at > 2000) {
+        said_at = now;
+        std::fprintf(stderr, "[frontend] tome button: drawn %u, skipped %u (at %llu now %llu)\n", drawn, skipped, (unsigned long long)at,
+                     (unsigned long long)now);
+    }
+    if (!fresh)
+        return;
+    const float dp = overlay_dp();
+    const ImVec2 window = ImGui::GetMainViewport()->Size;
+    const bool above = g_settings.mod_split == 1;  // (the halves one above the other)
+    float left = 0.f, width = window.x, top = 0.f, height = window.y;
+    if (half >= 0) {
+        if (above) {
+            height = window.y * 0.5f;
+            top = half == 0 ? 0.f : height;
+        } else {
+            width = window.x * 0.5f;
+            left = half == 0 ? 0.f : width;
+        }
+    }
+    ImFont* font = g_tome_font != nullptr ? g_tome_font : (g_fps_font != nullptr ? g_fps_font : ImGui::GetFont());
+    const float size = height * 0.026f;
+    const ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.f, text.c_str());
+    const ImVec2 pad{size * 0.55f, size * 0.22f};
+    const ImVec2 centre{left + width * fx, top + height * fy};
+    const ImVec2 a{centre.x - extent.x * 0.5f - pad.x, centre.y - extent.y * 0.5f - pad.y};
+    const ImVec2 b{centre.x + extent.x * 0.5f + pad.x, centre.y + extent.y * 0.5f + pad.y};
+    ImDrawList* draw = ImGui::GetForegroundDrawList(ImGui::GetMainViewport());
+    // (As the Tome's own buttons: a parchment plaque, a dark outline doubled, dark lettering.)
+    draw->AddRectFilled(a, b, IM_COL32(0xc9, 0xb3, 0x86, 0xf0), size * 0.12f);
+    draw->AddRect(a, b, IM_COL32(0x2e, 0x22, 0x16, 0xff), size * 0.12f, 0, 1.6f * dp);
+    const float inset = 2.5f * dp;
+    draw->AddRect(ImVec2{a.x + inset, a.y + inset}, ImVec2{b.x - inset, b.y - inset}, IM_COL32(0x5a, 0x44, 0x2c, 0xc0), size * 0.1f, 0,
+                  1.0f * dp);
+    draw->AddText(font, size, ImVec2{a.x + pad.x, a.y + pad.y}, IM_COL32(0x26, 0x1a, 0x10, 0xff), text.c_str());
+}
+
 void draw_toast() {
+    draw_tome_button();
     std::string text, player[2];
     Uint64 at_ms, player_at[2];
     {
@@ -4183,6 +4253,19 @@ void frame(bool start) {
 
 extern "C" bool frontend_photo_active(void) { return photo::g_state != photo::State::Off; }
 
+// The Tome's Options page's "Choose Character" asked for (any thread): frontend_frame opens the roster.
+static std::atomic<bool> g_open_characters{false};
+extern "C" void frontend_open_characters(void) { g_open_characters = true; }
+// A Tome-looking button for this frame (any thread): text, the half it's in (-1 the whole screen) and its centre.
+extern "C" void frontend_tome_button(const char* text, int half, float x, float y) {
+    std::lock_guard<std::mutex> lock(g_toast_mutex);
+    g_tome_button_text = text != nullptr ? text : "";
+    g_tome_button_half = half;
+    g_tome_button_x = x;
+    g_tome_button_y = y;
+    g_tome_button_at = SDL_GetTicks();
+}
+
 extern "C" void frontend_toast_player(int player, const char* text) {
     if (player < 0 || player > 1)
         return;
@@ -4292,12 +4375,21 @@ extern "C" void frontend_frame(void) {
         g_test_close_at = SDL_GetTicks() + test_hold;
         std::fprintf(stderr, "[frontend] test menu open for %llu ms\n", (unsigned long long)test_hold);
     }
-    if ((!press && !test_press) || !ensure_ui())
+    // The Tome's Options page's "Choose Character" (hle.c tome_options_button, testing the native in-game menu): the menu
+    // opens straight on player 1's character roster.
+    const bool characters = g_open_characters.exchange(false);
+    if ((!press && !test_press && !characters) || !ensure_ui())
         return;
     g_in_game = true;
     g_screen = Screen::InGame;
     g_options_return = Screen::InGame;
     g_selected = 0;
+    if (characters) {
+        g_characters_player = 0;
+        g_characters_return_row = 0;
+        g_screen = Screen::Characters;
+        g_selected = roster_index(chosen_character(), form_on(0, chosen_character()));
+    }
     report_pause(true);
     hle_coop_ui_over(true);
     if (!run_menu())

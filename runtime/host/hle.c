@@ -4295,6 +4295,7 @@ static bool pad_read_by_monitor(CPUState* cpu) {
 }
 
 void sanity_door_run(CPUState* cpu);
+static void tome_options_button(CPUState* cpu, DolPadState* p1);  // (below: the Tome's Options page's Choose Character)
 static void hle_PADRead(CPUState* cpu) {
 #ifdef ED_AURORA
     const bool monitor = pad_read_by_monitor(cpu);
@@ -4468,8 +4469,14 @@ static void hle_PADRead(CPUState* cpu) {
         }
     }
     if (input_script_apply(cpu, &state[0].button, &state[0].stick_x,
-                           &state[0].stick_y, &state[0].analog_a))
+                           &state[0].stick_y, &state[0].analog_a)) {
         state[0].error = 0;
+        // (Testing: a scripted L or R pulls its trigger all the way, as a real one does: the Tome's tabs read the pull.)
+        if ((state[0].button & 0x0040u) != 0u)
+            state[0].trigger_left = 0xFFu;
+        if ((state[0].button & 0x0020u) != 0u)
+            state[0].trigger_right = 0xFFu;
+    }
     if (skip_intro_apply(cpu, &state[0].button, state[0].stick_x, state[0].stick_y,
                          &state[0].analog_a))
         state[0].error = 0;
@@ -4478,6 +4485,7 @@ static void hle_PADRead(CPUState* cpu) {
     if (coop_dream_no_tome(cpu, menu, cutscene))
         state[0].button &= (u16)~0x1000u;  // player 1's Start: no Tome in the dream
 #ifdef ED_AURORA
+    tome_options_button(cpu, &state[0]);  // (the Tome's Options page's Choose Character; after the test presses)
     if (g_coop_press_b) {
         state[0].button |= 0x0200u;  // PAD_BUTTON_B
         state[0].analog_b = 0xFFu;
@@ -16877,6 +16885,69 @@ static void tome_copy_tab(CPUState* cpu) {
     g_hle_passthrough = false;
     g_hle_tail_call = true;
     cpu->pc = to;
+}
+// The native in-game menu's first test (the user, 2026-11-16): player 1's Tome on its Options page (0x80101600, outside
+// player 2's copy turn) shows "Y: Choose Character", and Y there opens the in-game menu on their character roster
+// (frontend_open_characters; the change itself is the built characters_reload). A hint, not a row of the game's list.
+static unsigned long long g_tome_options_frame;
+static bool g_tome_on_options;  // player 1's Tome went to Options (0x80101600 runs once, as the tab is entered)
+static void tome_options_page(CPUState* cpu) {
+    if (!g_tome_copy_turn) {
+        g_tome_options_frame = cpu->timebase / 675000ull;
+        g_tome_on_options = true;
+    }
+    tome_copy_tab(cpu);
+}
+// Any other tab entered (Journal through tome_copy_tab's hook; Inventory, Map, Magick by their own entries): not Options.
+static void tome_journal_page(CPUState* cpu) {
+    if (!g_tome_copy_turn)
+        g_tome_on_options = false;
+    tome_copy_tab(cpu);
+}
+static void tome_other_page(CPUState* cpu) {
+    if (!g_tome_copy_turn)
+        g_tome_on_options = false;
+}
+static void tome_options_button(CPUState* cpu, DolPadState* p1) {
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    static unsigned long long said;
+    static bool y_was;
+    // ED_TOME_HINT_ANY=1 (testing, to picture it): any page of player 1's open Tome (the game's mode word 3) counts.
+    static int any = -1;
+    if (any < 0)
+        any = getenv("ED_TOME_HINT_ANY") != NULL;
+    const bool tome_up = sda_ready(cpu) && !g_tome_copy_turn && (hle_coop_player1_tome_up() || mem_read32(cpu, cpu->gpr[13] - 26240u) == 3u);
+    if (!tome_up && sda_ready(cpu) && !g_tome_copy_turn && !g_tw.sharing)
+        g_tome_on_options = false;  // (the Tome closed: it opens on its own page next time)
+    const bool on = tome_up && (g_tome_on_options || any);
+    // (In co-op the world's frames run between the Tome's: a press is noted on either kind and taken while the page is up.)
+    const bool y = (p1->button & 0x0800u) != 0u;
+    static unsigned long long y_at;
+    if (y && !y_was)
+        y_at = frame;
+    y_was = y;
+    if (!on)
+        return;
+    // Co-op (side by side): a button of the Options page itself, under its cross of four (Load/Save's at 0.54, 0.36 of
+    // player 1's half: logs/run-20261116-011045-jtg-tome-options-page). Solo and the halves above one another: the corner
+    // hint till those layouts are measured.
+    if (g_settings.mod_coop && g_coop_p2 != 0u && g_settings.mod_split != 1) {
+        static bool told;
+        if (!told) {
+            told = true;
+            fprintf(stderr, "[tome] the Options page's Choose Character button shown (frame %llu)\n", frame);
+        }
+        frontend_tome_button("Y   Choose Character", 0, 0.54f, 0.405f);
+    } else if (frame >= said + 45ull || said > frame) {
+        said = frame;
+        frontend_toast("Y: Choose Character");
+    }
+    if (y_at != 0ull && frame >= y_at && frame - y_at <= 4ull) {
+        y_at = 0ull;
+        fprintf(stderr, "[tome] Choose Character from the Tome's Options (frame %llu)\n", frame);
+        frontend_open_characters();
+    }
+    p1->button &= (u16)~0x0800u;  // (the Options page doesn't see this Y)
 }
 
 // The world's frame on the Tome's camera (8) with nothing pushed to go back to: the game never leaves it so (its every 8
@@ -32813,9 +32884,15 @@ static void find_coop(CPUState* cpu) {
                 HleDispatchEntry* to_options = hle_dispatch_entry(0x80101600u);
                 HleDispatchEntry* to_journal = hle_dispatch_entry(0x80106FD4u);
                 if (to_options != NULL && to_options->intercept == NULL)
-                    to_options->intercept = tome_copy_tab;
+                    to_options->intercept = tome_options_page;  // (tome_copy_tab, and player 1's Options noted)
                 if (to_journal != NULL && to_journal->intercept == NULL)
-                    to_journal->intercept = tome_copy_tab;
+                    to_journal->intercept = tome_journal_page;  // (tome_copy_tab, and player 1 off Options)
+                const u32 kOtherPages[3] = {TOME_PAGE_INVENTORY, TOME_PAGE_MAP, TOME_PAGE_MAGICK};
+                for (int i = 0; i < 3; i++) {
+                    HleDispatchEntry* other = hle_dispatch_entry(kOtherPages[i]);
+                    if (other != NULL && other->intercept == NULL && other->notify == NULL)
+                        other->notify = tome_other_page;
+                }
                 // R5: the copy's plain sounds live (its navigation ticks were started in the copied MusyX state and thrown away).
                 HleDispatchEntry* plain = hle_dispatch_entry(SOUND_PLAIN);
                 HleDispatchEntry* plain_stop = hle_dispatch_entry(SOUND_PLAIN_STOP);

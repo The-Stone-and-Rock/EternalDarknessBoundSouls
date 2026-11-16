@@ -233,7 +233,44 @@ The launcher plays res/music/launcher.wav, a loop of the game's Options song rec
   Not yet: the real mansion between chapters (level
   0, reached through the prologue), other pages (chapters 3 and 11 play their films in-level), a chapter's end back to the
   mansion (ed89 restores the keep).
-- Saving apart, in-game saves and save states: the user is still deciding how it should work (separate, together only,
-  or whether it matters). Ask before designing.
+- Saving: DECIDED (the user, 2026-11-15): only player 1 saves, and any co-op save of either kind loads both players
+  together where player 1 saved. As built: card saves only through player 1's Tome (player 2's copy skips Journal and
+  Options, tome_copy_tab); a co-op save state brings player 2 to player 1 (coop_state_loaded, g_story_bring); a co-op card
+  save puts player 2 beside player 1 (coop_adopt), parked far off with co-op off (coop_park). The pause menu with the
+  save-state slots opens from the first connected controller (frontend.cpp gamepad()), which is player 1's: the user
+  confirmed only player 1 can open it.
+- Later, the overall direction (the user, 2026-11-15): everything the launcher's in-game menu has, reached from the
+  Tome's Options so it looks native; the launcher menu itself hidden in game. Not new pages: the launcher's existing
+  RmlUi pages and functions, drawn with a Tome skin (one style sheet and frame: parchment, the Tome font sheets, its
+  rules, labels and button hints, a page-turn in and out) as overlays, paused as the pause menu is. Entries organised in
+  Options where they make sense (Characters, Graphics, Co-op, Mods and cheats, Save states beside the game's own Save).
+  The old in-game menu kept behind a hidden shortcut only as a fallback. Player 2 later: the same overlays in their half
+  from their copy Tome, only what's theirs (character, camera, controller), never shared settings. First page:
+- BUILT 2026-11-16 (uncommitted, script-checked with pictures, not yet played): "Y Choose Character" drawn on player 1's
+  Tome Options tab under its cross of four (hle.c tome_options_page/tome_options_button: Options entered at
+  0x80101600, left at the other tabs' entries; frontend.cpp frontend_tome_button, a parchment plaque in IM Fell English;
+  Y opens the in-game menu on player 1's roster, frontend_open_characters). Side-by-side co-op only; solo and stacked
+  halves show a corner hint. Testing switch ED_TOME_HINT_ANY=1; scripted L/R now pull the triggers (the Tome's tabs).
+  NEXT (the user, 2026-11-16): make it a real cursor stop, not Y: read the Options page's own cursor code first (where
+  the game keeps the cursor among Controller/Audio/Display/Load-Save and what Down on Load/Save does), then Down from
+  Load/Save selects it (the game's ring hidden meanwhile), A opens, Up returns; unselected = translucent with the dark
+  ring like the others, selected = the game's dashed ring; the label in the game's own Tome font sheets
+  (res/fonts/game/tome-*) at the others' size. Back from the roster straight to the Tome.
+- (the first page of it) "Characters" in the Tome's Options, player 1 first. A fake Tome page that is really an
+  overlay: while player 1's Tome is on its Options page, an entry drawn in the Tome's style (a line under the list or a
+  button hint) opens the existing in-game Choose Character page (frontend.cpp page 3, "Characters") re-skinned as a Tome
+  page (the Tome font sheets res/fonts/game/tome-*, the cards' Tome rules), paused as the pause menu is; a choice uses the
+  built in-game swap (hle.c characters_reload: the game saved and loaded again so the chapter's load makes each player
+  the chosen one; built and played many times); Back returns to the Tome. About 1-2 sessions. Player 2 later: the same in
+  their half on their controller with their copy Tome (which skips Options today: tome_copy_tab), their card only. (The
+  `mods` stash "WIP: mid-game character swap" is an older attempt, superseded.)
 - Later: the in-game mod menu as its own page in the Tome; the launcher's settings inside the game's title menu
   (beside Start Game, Load).
+- Later, when the user has learned more about it (2026-11-15): share this project's PAL (GEDP01) knowledge with
+  decompilation efforts. The `ed` tool, tools/ed/primitives.tsv, docs/game/systems/ and hle.c's comments name hundreds of
+  the game's own functions, script commands and records by PAL address; export them as a decomp-style symbol list
+  (`name = .text:0xADDR; // type:function`), and with a US (GEDE01) to PAL address map offer them to the matching
+  decompilation at https://github.com/psdwizzard/Eternal-Darkness---Decompile (US, 76.5% of functions matched, game
+  systems mostly unnamed). Read its LICENSE first.
+- Later (the user, 2026-11-15): online co-op. Recommended: host-run with player 2's view, sound and pad streamed (keeps
+  every co-op rule as it is); a host-run world drawn by a local copy (enemy/scene sync) only after that.

@@ -1,5 +1,37 @@
 # HANDOFF 2026-11-15 evening: START HERE (committed through 821e1ac on tools/game-kit; the evening's work UNCOMMITTED)
 
+## THE TO-DO LIST, in order (the user, 2026-11-16)
+The kit first, so later work finds each co-op rule before play instead of during it (the user will run a session
+dedicated to it; its prompt is docs/prompts/session-kit-mapping.md).
+1. **Kit: `ed needs` up to date with separate rooms.** The one-player words it knows predate the two room slots: add the
+   room in play (r13-23276), the slot table (0x8058AFC0), the input mode byte (0x80323AEB), the keep (0x80307184) and the
+   per-room words of lights, mist and effects, each with the host helper that puts player 2's in (coop_stay_room_in /
+   coop_room_in, coop_use_start, coop_cameras_lend, coop_states_swap, the prompt slots...). Test: `ed needs 0x8007F254`
+   (the clock dials' step) must name the room in play; tonight it didn't.
+2. **Kit: a per-room catalogue generated from the disc** (`build/ed-db`: 297 rooms, 2,832 regions, 2,172 scripts): every
+   level, room and region with what it runs (examine words, prompts, items given or taken, doors and where, flags, input
+   modes, cutscenes, spawns, cameras), names and IDs, plus a co-op column (the per-player words each interaction reaches
+   and which helper covers it). Written as docs per level, by one new `ed` command over the existing readers.
+3. **Kit: the known patterns as checks** flagged per interaction: asks the room in play; one global per game (busy word,
+   input mode, keep, subtitles); queued for a later frame; run inside player 2's change; drawn from one camera.
+4. **Code: one "run this as player N" helper** taking a game function and a player and swapping in what the kit says it
+   needs (room, cameras, prompts, input copy, identity, states), for new features to reuse instead of their own swaps.
+5. **Kit: a play-check runner** from fresh Jump-to-Game states: each player into each risky region (from the catalogue),
+   the press or script, both players' call paths compared; differences reported. Unattended, ED_RUN_AWAY.
+6. **Camera modes per player** (third and first person in co-op): a reading pass first; one camera brain per player in
+   camera.c (all its state per player, fed by that player's body, room and stick); the game's cameras win in scenes,
+   close-ups, doors and puzzles as now. Player 1's brief camera jitter around player 2's clock first (needs a 60 fps
+   picture run and the moment named).
+7. **The native in-game menu in the Tome** (coop-todo.md "the overall direction"): the Choose Character button as a real
+   cursor stop (read the Options page's cursor code first), the Tome's own lettering, Back to the Tome; then every launcher
+   page as a Tome-skinned overlay; then player 2's in their half.
+8. **Showcase**: clips recorded with the user, a README section (media via YouTube/GitHub uploads, never in the repo); the
+   README's Getting started already points to Releases (committed, not pushed yet).
+9. Open co-op items: chapter 13's Tome room, Chapter Pages in the real mansion, the ladder's Yes in the other's door
+   (M13), independent sanity effects per player.
+10. Later: reflections and the cheap visual upgrades (automatic surface detail, rounder models, a cinematic finish);
+    online co-op (stream player 2's view first); sharing the PAL names with the decompilation.
+
 ## The evening (uncommitted, unplayed): an audit of the afternoon, every check re-run, and the Chapter Page keep fix
 - **Audit** (a read-only workflow over b42fb68..821e1ac): solo safe by code, controls.cpp never committed, but several
   checks named in the commit messages had run on builds older than the committed code, player 1's page from a copy Tome had
@@ -137,8 +169,9 @@ by the user yet**: their next step is a play test (list at the end). Commits, ne
    player 2's: check it); a chapter's end back to the mansion (ed89 restores the keep at 0x80307184); the mansion Tome.
 4. Smaller separate-rooms gaps (docs/coop-todo.md): a ladder's Yes answered in the other's door is lost (M13); examine
    and pick up during the other player's cutscene; the Tome room's first-entry scene camera in player 2's half.
-5. Waiting on the user's decision: saving apart (separate, together only, or not at all). Later, theirs: "Bring X to Y"
-   in the co-op menu; the randomizer last.
+5. Saving is DECIDED (the user, 2026-11-15): only player 1 saves; any co-op save loads both together where player 1
+   saved (built, see coop-todo.md "Saving"); only player 1 can open the save-state pause menu. Later, theirs: an
+   Options page in each player's Tome with character selection (coop-todo.md); "Bring X to Y" in the co-op menu; the randomizer last.
 
 # HANDOFF 2026-11-14: effects per room and per camera, uncommitted on top of 96745f8
 
