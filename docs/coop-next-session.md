@@ -54,8 +54,13 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
    region's scripts grouped, call by call with the nearest tests guarding each; camera-only scripts summed; a shared
    script (L00/1816 in rooms 70, 81, 87) shows only the room's own branch, by following its fn25 tests over the jumps
    (catalogue.room_states); other calls summed per script. `ed catalogue --script L00/ID [--room N]` for one script.
-   `ed needs` is callable (know.Needs). **Left: the co-op column (the per-player words each row reaches and which
-   helper covers each, from Needs.script and the hook map), then a review workflow, then item 3's pattern counts.**
+   `ed needs` is callable (know.Needs). **The co-op column (2a4e839):** each row lists the per-player words its call
+   reaches, as hooked (a live host hook where the word is read), helper (player_data.tsv names one; whether it's in
+   force on that run isn't known here) or one per game, and is flagged when a word is branched on within one call with
+   no live hook there. 888 rows flagged over all levels: the room in play 539 (mostly spawns "in the room in play"),
+   equipment records 279, script words 172, the look being set up 93, the running script 81, the magick record 2. A
+   cmp against 0 is now a "zero-test", not a compare: that took all 722 flags off the player's object. A flag is a
+   place to look, not a bug found. **Left: the review's fixes (a workflow is checking it), then item 3's patterns.**
    **Groundwork done 2026-11-16 (committed in ec7f923; every field read from the code that uses it, by a reader
    and a refuter each: docs/game/research/kit-groundwork.md):**
    - `ed cinematic [N|TEXT]`, `ed film [N]`, `ed mode [N]` (tools/ed/facts/cinematics.py -> facts/cinematics.json): the
