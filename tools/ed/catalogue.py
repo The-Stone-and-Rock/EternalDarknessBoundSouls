@@ -14,7 +14,19 @@ import disc
 DB = disc.DB
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-CALL = re.compile(r'\b(fn\d+|ed\d+|ED\w+|StopAudioStream)\(')
+def _call_names():
+    """Every script function name in tools/ed/primitives.tsv (fnN, edN and the game's own names such as BKSpecialText),
+    longest first; one- and two-letter names (H, V) are script variables as often as functions and are left out."""
+    names = set()
+    for line in open(os.path.join(HERE, 'primitives.tsv'), encoding='utf8'):
+        if not line.startswith('#') and line.strip():
+            n = line.split('\t')[0]
+            if len(n) > 2:
+                names.add(n)
+    return sorted(names, key=len, reverse=True)
+
+
+CALL = re.compile(r'\b(fn\d+|ed\d+|%s)\(' % '|'.join(re.escape(n) for n in _call_names() if not re.fullmatch(r'(fn|ed)\d+', n)))
 IF_GOTO = re.compile(r'^\s*if (.+) then goto (L\d+) end\s*$')
 GOTO = re.compile(r'^\s*goto (L\d+)\s*$')
 LABEL = re.compile(r'^\s*::(L\d+)::\s*$')
@@ -92,8 +104,18 @@ def split_args(s):
     return out
 
 
+FOR_CALL = re.compile(r'^\s*(?:L\d+|\d+)\(-?\d+, -?\d+, (fn\d+|ed\d+|ED\w+|BK\w+)(?:, |\))')
+
+
 def calls_in(line):
-    """Each call on a line: (name, [args]), nested calls included, parentheses balanced."""
+    """Each call on a line: (name, [args]), nested calls included, parentheses balanced. A call right after a for loop
+    comes out of the decompiler as `L18(7, 1, fn91, 1)` (the loop's counter, limit and step left on its stack): it's
+    read as fn91(1)."""
+    m = FOR_CALL.match(line)
+    if m:
+        inner = line[line.index('(') + 1:line.rindex(')')]
+        parts = split_args(inner)
+        return [(m.group(1), parts[3:])] + calls_in(', '.join(parts[3:]))
     out = []
     for m in CALL.finditer(line):
         depth, j = 0, m.end() - 1
@@ -147,13 +169,50 @@ def guards(lines):
 RETURN = re.compile(r'^\s*return\b')
 
 
+def join_states(a, b):
+    """The rooms either of two room states allows."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    (ka, sa), (kb, sb) = a, b
+    if ka == kb == 'in':
+        return ('in', sa | sb)
+    if ka == kb == 'out':
+        return ('out', sa & sb)
+    i, o = (sa, sb) if ka == 'in' else (sb, sa)
+    return ('out', o - i)
+
+
+ROOM_TEST = re.compile(r'^\s*(fn25\(\)|\w+)\s*(==|~=)\s*(\d+)\s*$')
+
+
+def room_test(cond, holding):
+    """(op, room) when a test is `fn25() == N` / `~= N`, or the same of a variable that holds the room there."""
+    t = ROOM_TEST.match(cond)
+    if not t or (t.group(1) != 'fn25()' and t.group(1) not in holding):
+        return None
+    return t.group(2), int(t.group(3))
+
+
+def room_holders(lines):
+    """For each line, the variables that hold the room in play there: from `X = fn25()` to X's next assignment, in the
+    file's order (a jump back over another assignment isn't followed; such a test then isn't read as a room test,
+    which only widens the answer)."""
+    holds, current = [], set()
+    for l in lines:
+        m = re.match(r'^\s*(?:local\s+)?(\w+)\s*=(?!=)\s*(.+?)\s*$', l)
+        if m:
+            current = (current | {m.group(1)}) if m.group(2) == 'fn25()' else (current - {m.group(1)})
+        holds.append(set(current))
+    return holds
+
+
 def room_states(lines):
     """For each line, the rooms it can run in, from the script's own tests of the room in play (fn25, or a variable set
     from it), followed over its jumps: ('in', rooms) or ('out', rooms), or None for a line no path reaches. A test of
     anything else, or a compound test, leaves the rooms as they were, so the answer is never too narrow."""
-    alias = {m.group(1) for l in lines for m in [re.match(r'^\s*(?:local\s+)?(\w+)\s*=\s*fn25\(\)\s*$', l)] if m}
-    room_word = r'(?:fn25\(\)|%s)' % '|'.join(map(re.escape, sorted(alias))) if alias else r'fn25\(\)'
-    test = re.compile(r'^\s*%s\s*(==|~=)\s*(\d+)\s*$' % room_word)
+    holds = room_holders(lines)
     labels = {m.group(1): i for i, l in enumerate(lines) for m in [LABEL.match(l)] if m}
 
     def apply(state, op, n):
@@ -163,26 +222,15 @@ def room_states(lines):
             return ('in', s2)
         return ('in', s - {n}) if kind == 'in' else ('out', s | {n})
 
-    def join(a, b):
-        if a is None:
-            return b
-        if b is None:
-            return a
-        (ka, sa), (kb, sb) = a, b
-        if ka == kb == 'in':
-            return ('in', sa | sb)
-        if ka == kb == 'out':
-            return ('out', sa & sb)
-        i, o = (sa, sb) if ka == 'in' else (sb, sa)
-        return ('out', o - i)
+    join = join_states
 
     def edges(i):
         l = lines[i]
         m = IF_GOTO.match(l)
         if m:
-            t = test.match(m.group(1))
-            yes = (t.group(1), int(t.group(2))) if t else None
-            no = (NEGATE[t.group(1)], int(t.group(2))) if t else None
+            t = room_test(m.group(1), holds[i])
+            yes = (t[0], t[1]) if t else None
+            no = (NEGATE[t[0]], t[1]) if t else None
             out = [(labels.get(m.group(2)), yes), (i + 1, no)]
         elif GOTO.match(l):
             out = [(labels.get(GOTO.match(l).group(1)), None)]
@@ -227,30 +275,66 @@ class Reader:
 
     def coop(self, name):
         """The per-player words a script function reaches (`ed needs`), each with how it's covered for player 2:
-        hooked (a live host hook on the function that reads it, or on the script function itself), helper (the kit names
-        a host helper that puts player 2's in: whether it's in force for this run is not known here), or one per game
-        (there's no copy of player 2's: player_data.tsv says none / one per game). picks: the word is branched on within
-        one call of the script function. flagged: picks and not hooked."""
+        hooked (a live host hook on the script function itself, or, for a word it branches on, on the function holding
+        that compare; for one it only reads, on a function it's read in), keyed (a table looked up by an id the caller
+        passes, right for either player when the id is), per run (written for every script run, whoever's), helper (the
+        kit names a host helper that puts player 2's in: whether it's in force for this run is not known here), or one per
+        game (player_data.tsv says none / one per game / see a failed attempt). picks: branched on within one call of the
+        script function. flagged: picks, and hooked / keyed / per run don't apply."""
         if name in self._coop:
             return self._coop[name]
+        n = self.needs()
+        out = []
+        if name in n.natives():
+            out = self._coop_rows(n.native(name)[1], [n.natives()[name]])
+        self._coop[name] = out
+        return out
+
+    def needs(self):
         import know
         if self._needs is None:
             self._needs = know.Needs()
-        n = self._needs
+        return self._needs
+
+    def _coop_rows(self, found, roots):
+        import know
+        live = lambda a: any(know.live(h) for h in know.hooks().get(a, []))
+        hosts = lambda a: sorted({h['host'] for h in know.hooks().get(a, []) if know.live(h)})
         out = []
-        if name in n.natives():
-            root = n.natives()[name]
-            live = lambda a: any(know.live(h) for h in know.hooks().get(a, []))
-            hosts = lambda a: sorted({h['host'] for h in know.hooks().get(a, []) if know.live(h)})
-            for (where, what, helper), row in sorted(n.native(name)[1].items(), key=lambda kv: (kv[1]['depth'], kv[0][0])):
-                hooked = sorted({h for a in [root] + row['in'] if live(a) for h in hosts(a)})
-                h = helper.strip().lower()
-                status = 'hooked' if hooked else 'one per game' if h.startswith(('none', 'one per game', '(see')) else 'helper'
-                picks = row['cmp'] is not None and row['cmp'] <= 1
-                out.append(dict(word=short(what), where=where, helper=helper, how=sorted(row['how']), depth=row['depth'],
-                                picks=picks, status=status, hooked_by=hooked, flagged=picks and status != 'hooked'))
-        self._coop[name] = out
+        for (where, what, helper), row in sorted(found.items(), key=lambda kv: (kv[1]['depth'], kv[0][0])):
+            picks = row['cmp'] is not None and row['cmp'] <= 1
+            at = roots + (row.get('cmp_in') or [] if picks else row['in'])
+            hooked = sorted({h for a in at if live(a) for h in hosts(a)})
+            h = helper.strip().lower()
+            status = ('hooked' if hooked else 'keyed' if h.startswith('keyed') else 'per run' if h.startswith('per run')
+                      else 'one per game' if h.startswith(('none', 'one per game', '(see')) else 'helper')
+            out.append(dict(word=short(what), where=where, helper=helper, how=sorted(row['how']), depth=row['depth'],
+                            picks=picks, status=status, hooked_by=hooked,
+                            flagged=picks and status not in ('hooked', 'keyed', 'per run')))
         return out
+
+    def coop_row(self, x):
+        """A row's co-op words: its call's, and for ed56/ed68 with a literal mode, also those of that input mode's own
+        case, handlers and tick (facts/cinematics.json), which run later and aren't reached by direct calls."""
+        if not x.get('call'):
+            return []
+        base = self.coop(x['call'])
+        if x['call'] in ('ed56', 'ed68') and x['args'] and re.fullmatch(r'\d+', x['args'][0]) and int(x['args'][0]) < len(self.d.modes):
+            key = ('mode', int(x['args'][0]))
+            if key not in self._coop:
+                m = self.d.modes[key[1]]
+                addrs = [int(a, 16) for a in [m.get('case'), m.get('tick')] + m.get('handlers', []) + m.get('also', []) if a]
+                found = self.needs().reach(addrs)[1] if addrs else {}
+                rows = self._coop_rows(found, [])
+                for w in rows:
+                    # While a mode is player 2's, coop_input_mode_start keeps their close-up and pad with them (the pad
+                    # routing reads their copy): the pad words in the mode's own code are theirs then.
+                    if w['word'] in ('raw and processed pads, the input channels', 'the pad routine\'s state', 'control blocks'):
+                        w['status'], w['flagged'] = 'routed', False
+                    w['word'] = w['word'] + ' (in mode %d\'s own code)' % key[1]
+                self._coop[key] = rows
+            return base + self._coop[key]
+        return base
 
     def describe(self, name, args, level):
         """One call, in words. Literal numbers are named where the kit can name them."""
@@ -271,7 +355,7 @@ class Reader:
             w = d.words('room' + level, args[0], args[1]) if len(args) > 1 else None
             cam = d.name(args[2]) if name != 'ed220' and len(args) > 2 else None
             text = ('%s "%s"' % (w[0], w[1][:80])) if w else ('words by a variable (%s, %s)' % (args[0], args[1]) if len(args) > 1 else '')
-            extra = ', unless %s is carried' % self.item(args[4]) if name == 'ed221' and len(args) > 4 else ''
+            extra = ', unless %s is carried' % self.tagged(args[4]) if name == 'ed221' and len(args) > 4 else ''
             return 'EXAMINE: %s%s%s' % (text, (', close-up camera %s' % cam) if cam else '', extra)
         if name in ('fn8', 'fn10'):
             return 'camera %s%s' % (d.name(args[0]) if args else '?', ' (its path)' if name == 'fn10' else '')
@@ -310,7 +394,13 @@ class Reader:
         if name == 'ed55':
             n = num(0)
             c = d.cinematics[n] if n is not None and 0 <= n < len(d.cinematics) else None
-            return 'cinematic %s%s' % (args[0] if args else '?', (' (level %s room %s, then script %s)' % (c['level'], c['room'], c['end_script'])) if c else '')
+            if not c:
+                return 'cinematic %s' % (args[0] if args else '?')
+            bits = ['level %s' % c['level'] if c['level'] is not None else None,
+                    'room %s' % c['room'] if c['room'] is not None else None,
+                    'queues room %s' % c['queued_room'] if c['room'] is None and c['queued_room'] is not None else None,
+                    'then script %s' % c['end_script'] if c['end_script'] else None]
+            return 'cinematic %s (%s)' % (args[0], ', '.join(b for b in bits if b))
         if name == 'ed83':
             n = num(0)
             f = d.films[n] if n is not None and 0 <= n < len(d.films) else None
@@ -321,14 +411,24 @@ class Reader:
             return 'input mode %s: %s %s' % (args[0] if args else '?', m, 'starts' if name == 'ed56' else 'ends')
         if name == 'fn73':
             return 'runs script %s next' % (args[0] if args else '?')
+        other = ('script %s' % args[1]) if len(args) > 1 and name in ('fn1', 'fn35', 'fn36') else None
         if name == 'fn36':
-            return 'waits %s frames' % (args[0] if args else '?')
+            return '%s %s frames' % ((other + ' waits') if other else 'waits', args[0] if args else '?')
         if name == 'fn1':
-            return 'its state to %s' % (args[0] if args else '?')
+            return '%s state to %s' % ((other + '\'s') if other else 'its', args[0] if args else '?')
+        if name == 'fn35':
+            return '%s state kept %s' % ((other + '\'s') if other else 'its', 'on' if args and args[0] != '0' else 'off')
         if name == 'fn25':
             return 'asks the room in play'
         p = d.prims.get(name)
         return '%s(%s)' % (p['short'] if p else name, ', '.join(args))
+
+    def tagged(self, arg):
+        """A placed thing by its tag (ed221's 5th argument; fn78(5, tag)): the items that carry that tag."""
+        if not re.fullmatch(r'\d+', str(arg)):
+            return 'thing tagged %s' % arg
+        names = sorted({r['name'] or r['label'] for r in self.d.items.values() if int(arg) in (r.get('tags') or [])})
+        return 'the thing tagged %s%s' % (arg, (' (%s)' % ', '.join(names)) if names else '')
 
     def item(self, arg):
         if re.fullmatch(r'\d+', str(arg)) and int(arg) in self.d.items:
@@ -365,13 +465,19 @@ class Reader:
                                  line=i + 1, test=in_test, guard=g[i],
                                  rooms=None if st is None else (st[0], sorted(st[1]))))
         if follow:
-            _seen = (_seen or set()) | {str(sid)}
-            for r in list(rows):
-                if r['call'] == 'fn73' and r['args'] and re.fullmatch(r'\d+', r['args'][0]) and r['args'][0] not in _seen:
-                    sub = self.read(r['args'][0], level, follow=False, _seen=_seen) or []
-                    for s in sub:
-                        s['via'] = r['args'][0]
-                    rows += sub
+            # Each script run next once, whatever number of fn73 calls name it; its rows can run in the rooms where any
+            # of those calls can (joined), and nowhere else.
+            targets = collections.OrderedDict()
+            for r in rows:
+                if r['call'] == 'fn73' and r['args'] and re.fullmatch(r'\d+', r['args'][0]) and r['args'][0] != str(sid):
+                    st = None if r['rooms'] is None else (r['rooms'][0], frozenset(r['rooms'][1]))
+                    targets[r['args'][0]] = join_states(targets.get(r['args'][0]), st) if r['args'][0] in targets else st
+            for target, st in targets.items():
+                sub = self.read(target, level, follow=False) or []
+                for s in sub:
+                    s['via'] = target
+                    s['via_rooms'] = None if st is None else (st[0], sorted(st[1]))
+                rows += sub
         return rows
 
 
@@ -382,13 +488,24 @@ CANT_KNOW = ('What this can\'t know: story gates beyond the literal tests shown 
              'whose argument is a variable. The tests shown are the nearest ones in the script, not the whole path.')
 
 
+# Which level's scripts a level runs: chapter 16's scripts, words and U_Level are level 00's (0x8003F4F4 turns 16 into
+# 0; facts/levels.json, level 16's note), whatever build/ed-db/scripts/L16 holds.
+SCRIPT_PACK = {'16': '00'}
+
+
 def level_rooms(d, level):
-    """A level's rooms: its Npcs placements, the door walk from them, and its start room (facts/levels.json)."""
+    """A level's rooms: its Npcs placements, the door walk from them, and its start room (facts/levels.json). Level 12
+    is the mansion once flag 787 is on: it has no Npcs file of its own, so level 00's rooms are its rooms too."""
     v = d.levels.get(level, {})
     rooms = set(v.get('placed_rooms_Npcs') or []) | set(v.get('rooms_by_door_walk_from_those') or [])
     if v.get('start_room_0x8023D738') is not None:
         rooms.add(v['start_room_0x8023D738'])
+    if level == '12':
+        rooms |= set(level_rooms(d, '00'))
     return sorted(r for r in rooms if str(r) in d.rooms)
+
+
+CAMERA_LIKE = ('camera', 'zones')  # what a camera-only script may also call: camera moves and zone tests
 
 
 def room_sources(d, rid):
@@ -412,8 +529,10 @@ ROOM_NOT = re.compile(r'fn25\(\)\s*~=\s*(\d+)')
 def for_room(rows, rid):
     """A shared script's rows that can run in room rid, by the script's own tests of the room in play followed over
     its jumps (room_states). Rows with no line (the summed-up others) and rows from a script run next are kept."""
-    return [x for x in rows if x.get('via') or not x['line'] or x.get('rooms') is None and False or
-            (x.get('rooms') is not None and runs_in((x['rooms'][0], frozenset(x['rooms'][1])), rid))]
+    def ok(state):
+        return state is not None and runs_in((state[0], frozenset(state[1])), rid)
+    # A row of a script run next runs where the fn73 calling it can (via_rooms) and where its own tests allow.
+    return [x for x in rows if (not x.get('via') or ok(x.get('via_rooms'))) and (not x['line'] or ok(x.get('rooms')))]
 
 
 def shown_rows(rows):
@@ -434,7 +553,12 @@ def shown_rows(rows):
 
 
 def md(s):
-    return str(s).replace('|', '\\|').replace('\n', ' ')
+    """Text safe in a Markdown table cell: | escaped, < and > as entities (the game's <player> would vanish as a tag)."""
+    return str(s).replace('|', '\\|').replace('\n', ' ').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def tsv_cell(s):
+    return str(s).replace('\t', ' ').replace('\n', ' ')
 
 
 def generate(only_level=None, out=OUT):
@@ -459,12 +583,18 @@ def generate(only_level=None, out=OUT):
         n_rows = n_scripts = n_flag_rows = 0
         level_flags = collections.Counter()
         body = []
+        pack = SCRIPT_PACK.get(level, level)
+        not_here = []
         for rid in rooms:
             sources = room_sources(d, rid)
             room = d.rooms[str(rid)]
             doors, cam_only, sections = [], [], []
+            present = sum(1 for sid in sources if pack in d.scripts.get(sid, {}))
+            if sources and not present:
+                not_here.append(rid)  # named for this level on paper (a door walk), but none of its scripts is here
+                continue
             for sid, where in sources.items():
-                rows = r.read(sid, level) if level in d.scripts.get(sid, {}) else None
+                rows = r.read(sid, pack) if pack in d.scripts.get(sid, {}) else None
                 if rows is None:
                     elsewhere = sorted(d.scripts.get(sid, {}))
                     sections.append('### Script %s (%s)\n\nNot in this level\'s scripts, so it runs nothing here%s.\n' % (
@@ -475,14 +605,15 @@ def generate(only_level=None, out=OUT):
                 rows = for_room(rows, rid)
                 dropped = total - len(rows)
                 named = [x for x in rows if x['kind'] != 'other']
-                if named and all(x['kind'] == 'camera' for x in named) and all('arrival' not in w and 'leave' not in w for w in where):
-                    cam_only.append((sid, where, sorted({x['what'] for x in named})))
-                    continue
+                camera_only = bool(named) and all(x['kind'] == 'camera' for x in named) and all(
+                    d.prims.get(x['call'], {}).get('system') in CAMERA_LIKE for x in rows if x['kind'] == 'other') and all(
+                    not w.startswith('the room\'s ') for w in where)
                 script_words, script_flags = collections.OrderedDict(), collections.OrderedDict()
                 for x in rows:
                     if x['kind'] == 'door' and x['call'] == 'fn66':
-                        doors.append('%s (script %s%s)' % (x['args'][0] if x['args'] else '?', sid, (', if ' + ' and '.join(x['guard'])) if x['guard'] else ''))
-                    co = r.coop(x['call']) if x['call'] else []
+                        doors.append('%s (script %s%s)' % (x['args'][0] if x['args'] else '?', x.get('via') or sid,
+                                                            (', if ' + ' and '.join(x['guard'])) if x['guard'] else ''))
+                    co = r.coop_row(x)
                     x['coop_flagged'] = sorted({w['word'] for w in co if w['flagged']})
                     for w in co:
                         script_words.setdefault(w['word'], w['status'])
@@ -491,12 +622,15 @@ def generate(only_level=None, out=OUT):
                     if x['coop_flagged']:
                         n_flag_rows += 1
                         for w in x['coop_flagged']:
-                            level_flags[w] += 1
-                    tsv.append('\t'.join(md(v) for v in (level, rid, sid, '; '.join(where), x['line'], x['kind'], x['call'] or '',
-                                                          x['what'], ' and '.join(x['guard']), x.get('via', ''),
-                                                          '; '.join('%s [%s%s]' % (w['word'], w['status'], ', picks' if w['picks'] else '') for w in co),
-                                                          '; '.join(x['coop_flagged']))))
+                            level_flags[re.sub(r" \(in mode \d+'s own code\)", " (in an input mode's own code)", w)] += 1
+                    tsv.append('\t'.join(tsv_cell(v) for v in (level, rid, sid, '; '.join(where), x['line'], x['kind'], x['call'] or '',
+                                                                x['what'], ' and '.join(x['guard']), x.get('via', ''),
+                                                                '; '.join('%s [%s%s]' % (w['word'], w['status'], ', picks' if w['picks'] else '') for w in co),
+                                                                '; '.join(x['coop_flagged']))))
                 n_rows += len(rows)
+                if camera_only:  # its rows are in the TSV; the page sums it up in the room's head
+                    cam_only.append((sid, where, sorted({x['what'] for x in named})))
+                    continue
                 part = ['### Script %s (%s)' % (sid, '; '.join(where)), '']
                 tests = [x for x in rows if x['kind'] == 'room_test']
                 shown = shown_rows(rows)
@@ -516,7 +650,7 @@ def generate(only_level=None, out=OUT):
                     part += ['| line | kind | what | if | co-op flagged |', '|---|---|---|---|---|']
                     for x in shown:
                         flagged = x.get('coop_flagged') or sorted({w['word'] for o in rows if o['kind'] == 'other' and o.get('via') == x.get('via')
-                                                                   for w in r.coop(o['call']) if w['flagged']}) if x['kind'] == 'other' else x.get('coop_flagged', [])
+                                                                   for w in r.coop_row(o) if w['flagged']}) if x['kind'] == 'other' else x.get('coop_flagged', [])
                         part.append('| %s | %s | %s%s | %s | %s |' % (x['line'] or '', x['kind'], md(x['what']),
                                                                      (' (via %s)' % x['via']) if x.get('via') else '', md(' and '.join(x['guard'])),
                                                                      md(', '.join(flagged))))
@@ -527,12 +661,21 @@ def generate(only_level=None, out=OUT):
             if doors:
                 head.append('Doors out (fn66): %s.' % '; '.join(sorted(set(doors))))
             if cam_only:
-                head.append('Camera-only scripts (%d, not listed below): %s.' % (len(cam_only), '; '.join(
+                head.append('Camera-only scripts (%d: only camera moves and zone tests; their rows are in the TSV): %s.' % (len(cam_only), '; '.join(
                     '%s from %s: %s' % (sid, ', '.join(w.split(' ')[0] for w in where), ', '.join(c.replace('camera ', '') for c in cams))
                     for sid, where, cams in cam_only)))
             body.append('\n'.join(head) + '\n\n' + '\n'.join(sections))
         lines.append('Rooms %d, scripts read %d, rows %d. The TSV beside this file has every row.' % (len(rooms), n_scripts, n_rows))
         lines.append('')
+        if pack != level:
+            lines.append('This level runs level %s\'s scripts (facts/levels.json: 0x8003F4F4 turns %s into %s), so those are '
+                         'the copies read here.' % (pack, int(level), int(pack)))
+            lines.append('')
+        if not_here:
+            lines.append('Rooms this level reaches on paper (its door walk) but whose scripts are none of them in this level, so '
+                         'nothing of theirs runs here and they have no section: %s. A door to them may stand behind a test of '
+                         'another chapter (ed143).' % ', '.join(map(str, not_here)))
+            lines.append('')
         lines.append('Co-op: %d rows flagged (a call that branches on a per-player word within one call, with no live host '
                      'hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: %s.' % (
                          n_flag_rows, ', '.join('%s %d' % (w, c) for w, c in level_flags.most_common(8)) or 'none'))
@@ -540,7 +683,7 @@ def generate(only_level=None, out=OUT):
                      'whole script run, a swap around the caller), and a word that is one per game may be fine for both.')
         lines.append('')
         all_flags.update(level_flags)
-        lines.append('Rooms: ' + ', '.join('[%d](#room-%d)' % (x, x) for x in rooms))
+        lines.append('Rooms: ' + ', '.join('[%d](#room-%d)' % (x, x) for x in rooms if x not in not_here))
         lines.append('')
         open(os.path.join(out, 'level-%s.md' % level), 'w', encoding='utf8', newline='\n').write('\n'.join(lines) + '\n' + '\n'.join(body))
         open(os.path.join(out, 'level-%s.tsv' % level), 'w', encoding='utf8', newline='\n').write('\n'.join(tsv) + '\n')
@@ -550,9 +693,10 @@ def generate(only_level=None, out=OUT):
         return
     # Rooms no level reaches: their scripts, and the levels that hold each.
     unplaced = sorted(int(x) for x in d.rooms if int(x) not in placed)
-    up = ['# Rooms in no level', '', 'Rooms the catalogue can\'t give a level: no level\'s Npcs placements, door walk or '
-          'start room names them (facts/levels.json), so which level\'s copy of a script runs there is not known here. '
-          'Each is reached some other way (a cinematic, a film, a script\'s own room change) or not at all.', '']
+    up = ['# Rooms in no level', '', 'Rooms the catalogue can\'t give a level: no level with scripts names them in its Npcs '
+          'placements, door walk or start room (facts/levels.json; room 0 is only the start word of level 17, which has no '
+          'scripts), so which level\'s copy of a script runs there is not known here. Each is reached some other way (a '
+          'cinematic, a film, a script\'s own room change) or not at all.', '']
     for rid in unplaced:
         src = room_sources(d, rid)
         up.append('## Room %d' % rid)
@@ -576,8 +720,19 @@ def generate(only_level=None, out=OUT):
         ix.append('| %s | %s | %d | %d | %d | %d | [level-%s.md](level-%s.md), [tsv](level-%s.tsv) |' % (
             level, md(who), nr, ns, nrow, nflag, level, level, level))
     ix += ['', 'Co-op flagged rows by word, over every level: %s.' % ', '.join('%s %d' % (w, c) for w, c in all_flags.most_common()),
-           'A row is flagged when its call branches on a per-player word within one call and no live host hook sits where '
-           'the word is read. It\'s a place to look, not a bug found.']
+           'A row is flagged when its call branches on a per-player word within one call and no live host hook sits on the '
+           'function holding that compare. It\'s a place to look, not a bug found.', '',
+           'Statuses in the co-op columns: **hooked** (a live host hook on the script function or the function holding the '
+           'compare: logs, traces, hooks that lose their slot and hooks that act for one caller only don\'t count), '
+           '**keyed** (a table looked up by an id the caller passes), **per run** (written for every script run, '
+           'whoever\'s), **routed** (an input mode\'s pad while the mode is player 2\'s: coop_input_mode_start), **helper** '
+           '(tools/ed/player_data.tsv names a host helper that puts player 2\'s in), **one per game** (no copy of player '
+           '2\'s).', '',
+           'The two biggest, the room in play and the script words, are put in for player 2 by the brackets around their '
+           'own runs (coop_use_start, coop_run_script\'s first block, coop_stay_room_in with coop_states_swap). A flag there '
+           'matters where a run happens outside those brackets: a region\'s other_enter script, a script queued for a later '
+           'frame, a timer, or a room\'s arrival script run for player 2 with player 1 still the character. Whether a '
+           'bracket is in force on a given run is a run-time fact the catalogue can\'t see.']
     ix += ['', 'Rooms in no level (%d): [unplaced.md](unplaced.md).' % len(unplaced), '',
            'Levels with no rooms or scripts of their own here: %s (see `ed level`).' % ', '.join(
                l for l in sorted(d.levels, key=int) if l not in levels)]

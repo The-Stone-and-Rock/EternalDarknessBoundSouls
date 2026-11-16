@@ -29,7 +29,7 @@ r13	-23052	4	hold's input channel	coop_script_hold_go
 r13	-23056	4	hold's input channel	coop_play_hold
 r13	-25648	4	controller's channel	coop_player1_turn
 r13	-25960	4	the open words window	tome_copy_no_window
-r13	-23228	4	the running script	coop_run_script (its first block runs a room's own load script queued inside player 2's change with that room current: notify_script_later)
+r13	-23228	4	the running script	per run: the script runner 0x801642D4 writes it for every run, whoever's (a test of it, as ed70's "am I 2204", asks which script is running, not which player); coop_run_script (its first block runs a room's own load script queued inside player 2's change with that room current: notify_script_later)
 r13	-26188	4	the Tome's mode	coop_menu_input, tome_copy_step
 r13	-24244	4	the mode asked for (Start sets 2)	coop_menu_input, tome_copy_step
 r13	-23456	4	players shown	(see docs/coop-failed-attempts.md)
@@ -55,7 +55,7 @@ r13	-26324	4	the script left for the Tome's end (ed9)	tome_copy_left
 r13	-25592	4	reload byte: 1 loads until full, from event 208	none yet
 r13	-21784	4	the fade's ticks	none: both players share one fade
 abs	0x80334388	1320	the Inventory's slots, 44 bytes each	tome_copy
-abs	0x80588DF0	8160	equipment, 20 records by holder id	coop_rehold
+abs	0x80588DF0	8160	equipment, 20 records by holder id	keyed by holder: the holder id it's asked with picks the record (0x80151500's loop compares each record's id with that argument), so it's right for either player when the id is; coop_rehold
 abs	0x8058AFFC	44	the room change's ticket	coop_follow
 r13	-26276	4	show word (fn111): 0 leaves r13-26524's body undrawn (0x8002794C), which is player 1's whoever asked	coop_show_asked
 r13	-26272	4	show word for main (fn111, 0x80043C88): 0 stops main's controller (0x80007460) and with it both players' turns	coop_show_asked

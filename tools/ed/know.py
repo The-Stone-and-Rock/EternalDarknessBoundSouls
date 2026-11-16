@@ -85,7 +85,8 @@ def hooks():
 
 def live(r):
     """A hook that does co-op or game work on a normal run: not a log or trace, not one that loses its slot."""
-    return not r.get('debug') and not r.get('slot', '').startswith(('loses', 'installs only while')) and not r.get('when', '').startswith('only with')
+    # 'only with' a switch off by default, 'only for the call returning to X' (it passes the others through)
+    return not r.get('debug') and not r.get('slot', '').startswith(('loses', 'installs only while')) and not r.get('when', '').startswith('only')
 
 
 def hook_lines(addr):
@@ -174,8 +175,9 @@ def _compared(body, idx, reg, ahead=6):
         srcs = p[2:] if len(p) > 2 else []
         if name.startswith('cmp'):
             if any(x in held for x in p[1:]):
-                # Against 0 (cmpwi/cmplwi rX, 0): a there-or-not or zero test, not a pick between values.
-                return 'zero' if name in ('cmpwi', 'cmplwi') and re.fullmatch(r'(0x)?0+', p[-1]) else True
+                # Against 0 or -1 (cmpwi/cmplwi rX, 0 / -1, the game's "none" mark): a there-or-not test, not a pick
+                # between values.
+                return 'zero' if name in ('cmpwi', 'cmplwi') and re.fullmatch(r'(0x)?0+|-1|0x[Ff]{4}', p[-1]) else True
         elif dot and name in DOT_TESTS and any(x in held for x in srcs):
             return True  # sets cr0 from the value: a test of it
         elif name in ('subfic', 'xori') and len(p) > 3 and p[2] in held and re.fullmatch(r'-?(0x)?[0-9A-Fa-f]+', p[3]):
@@ -319,7 +321,7 @@ class Needs:
         for a in roots:
             if '%08X' % a in self.callt:
                 what, helper = self.callt['%08X' % a]
-                found[('0x%08X' % a, what, helper)] = {'how': {'is'}, 'in': [a], 'depth': 0, 'offs': set(), 'cmp': None}
+                found[('0x%08X' % a, what, helper)] = {'how': {'is'}, 'in': [a], 'depth': 0, 'offs': set(), 'cmp': None, 'cmp_in': []}
         while queue and len(seen) < cap:
             f = queue.pop(0)
             hits, callees = self.scan(f)
@@ -332,10 +334,12 @@ class Needs:
                             where, off = '0x%08X' % start, at_word - start
                             break
                 key = (where, what, helper)
-                row = found.setdefault(key, {'how': set(), 'in': [], 'depth': seen[f], 'offs': set(), 'cmp': None})
+                row = found.setdefault(key, {'how': set(), 'in': [], 'depth': seen[f], 'offs': set(), 'cmp': None, 'cmp_in': []})
                 row['how'].add(how)
                 if how == 'compare' and (row['cmp'] is None or seen[f] < row['cmp']):
                     row['cmp'] = seen[f]  # the shallowest depth it's branched on, which may be deeper than where it's first seen
+                if how == 'compare' and f not in row['cmp_in'] and len(row['cmp_in']) < 6:
+                    row['cmp_in'].append(f)  # the functions that branch on it: where a hook would have to sit
                 if off is not None:
                     row['offs'].add(off)
                 if len(row['in']) < 3 and f not in row['in']:
@@ -368,8 +372,11 @@ class Needs:
             for key, row in self.native(name, depth)[1].items():
                 m = merged.get(key)
                 if m is None:
-                    m = merged[key] = {'how': set(), 'in': [], 'depth': row['depth'], 'offs': set(), 'cmp': None, 'via': []}
+                    m = merged[key] = {'how': set(), 'in': [], 'depth': row['depth'], 'offs': set(), 'cmp': None, 'cmp_in': [], 'via': []}
                 m['how'] |= row['how']
+                for f in row.get('cmp_in', []):
+                    if f not in m['cmp_in'] and len(m['cmp_in']) < 6:
+                        m['cmp_in'].append(f)
                 m['offs'] |= row['offs']
                 m['depth'] = min(m['depth'], row['depth'])
                 if row['cmp'] is not None and (m['cmp'] is None or row['cmp'] < m['cmp']):
@@ -455,7 +462,7 @@ def cmd_needs(argv):
     print('It reaches this one-player data. To call it for player 2, the helper on the right must have their data in first.')
     print('This follows direct calls only: a script it runs (`ed needs --script ID`), a table, and work it leaves for later in the frame aren\'t followed.')
     print('"compare": a function branches on the word (it picks by it: the likely co-op bug when the players are apart);'
-          ' "zero-test": it only asks whether the word is 0 or there; "read": it only loads it, maybe to pass it on. Depth 0 '
+          ' "zero-test": it only asks whether the word is 0, -1 (none) or there; "read": it only loads it, maybe to pass it on. Depth 0 '
           'is the function itself.')
     picks = sorted({(row['cmp'], where, what) for (where, what, helper), row in found.items()
                     if row.get('cmp') is not None and row['cmp'] <= 1})

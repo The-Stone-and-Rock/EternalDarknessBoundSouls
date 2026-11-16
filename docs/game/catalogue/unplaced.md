@@ -1,6 +1,6 @@
 # Rooms in no level
 
-Rooms the catalogue can't give a level: no level's Npcs placements, door walk or start room names them (facts/levels.json), so which level's copy of a script runs there is not known here. Each is reached some other way (a cinematic, a film, a script's own room change) or not at all.
+Rooms the catalogue can't give a level: no level with scripts names them in its Npcs placements, door walk or start room (facts/levels.json; room 0 is only the start word of level 17, which has no scripts), so which level's copy of a script runs there is not known here. Each is reached some other way (a cinematic, a film, a script's own room change) or not at all.
 
 ## Room 0
 

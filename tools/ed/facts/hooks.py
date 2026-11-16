@@ -389,6 +389,24 @@ def main():
                 bad_lr.append(row)
             lr_rows['0x%08X' % caller if caller is not None else '?'].append(row)
 
+    # An intercept that passes every call through but one: `g_hle_passthrough = true;` then `if (cpu->lr != X ...) return`
+    # (or `if (cpu->lr != X) { g_hle_passthrough = true; return; }`) at its top. It covers only the call returning to X.
+    starts_at = {}
+    for i, f in enumerate(fn_at):
+        if f and f not in starts_at:
+            starts_at[f] = i
+    for r in rows:
+        i = starts_at.get(r['host'])
+        if i is None or r['kind'] != 'intercept':
+            continue
+        top = ' '.join(src[k].split('//')[0] for k in range(i, min(i + 7, len(src))))
+        m = re.search(r'if \((cpu->lr != [^)]*)\)\s*(?:\{\s*g_hle_passthrough = true;\s*)?return;', top)
+        if m and 'g_hle_passthrough = true' in top:
+            vals = [ev(x) for x in re.findall(r'cpu->lr != ([A-Za-z_]\w*|0x[0-9A-Fa-f]+u?)', m.group(1))]
+            if vals and all(v is not None for v in vals):
+                r['when'] = 'only for the call%s returning to %s (passes every other call through)' % (
+                    's' if len(vals) > 1 else '', ', '.join('0x%08X' % v for v in vals))
+
     by_addr = collections.defaultdict(list)
     for r in rows:
         by_addr[r['address']].append(r)
