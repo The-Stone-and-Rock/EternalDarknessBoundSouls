@@ -207,6 +207,13 @@ Worm room's sepia in Ehn'gha and Max's third rune sepia, from the wiki: scripts 
 - **Voice:** `ed64(62, 0, 0, 100)` at level 3, and the character line after an effect: mode 12 "This isn't happening!", asked for while `r13-24140` is set.
 - **Screens:** `UInsane.cmp` and its language copies, game modes 7, 8, 10 to 13 (`0x80112D98`).
 
+## The white flash at an effect's end (and the phone's)
+
+- **What it is:** `ed85`'s `0x80145760(a, 0, 0)` and its copy `0x8006B270` (a = 20). A flat lavender disc (230, 230, 255) over the screen, drawn by `0x80183E1C`, submitted by `0x8017C9DC`, with sound 536. a = 0 fades in about a second; a = 20 holds longer first. The phone call ends with it (`L00/1801`, frame 4882 in the slot 3 runs).
+- **The blocky wedge, fixed 2026-11-17:** the game fills 21 of the fan's 64 pairs and leaves the rest at z = +1 and x, y = 0, 0 (seen with `ED_FLASH_LOG=1`). The GameCube clips those; the host's near-plane snap kept them, so a hard triangle from the centre to the top-left stayed over the fade. `flash_submit_notify` in `hle.c` folds the unused pairs onto the last used one. No renderer change. Research: `docs/research/firstrun-hd-flash/flash.md`.
+- **Co-op:** the flash shows in the half of the player who set it off (player 2 answering the phone lights their half), placed as their subtitle line is (`coop_subtitle_away`); the game's own place with the split off. The owner is kept for the effect block's whole life (`FLASH_KEEP`, 240 frames), so a host stall mid-fade can't send it back to player 1's half; a moved disc's rim is pushed out by half again so its half's corners stay covered at 21:9.
+- **Testing:** `ED_FLASH_TEST=FRAME,A[,PLAYER]` calls the game's own flash once at that guest frame. `ED_FLASH_LOG=1` (or `ED_COOP_LOG`) logs each flash's start and the fan before and after the fold. `ED_FLASH_STALL=MS` makes the host wait once after a flash's first draw, as a first pipeline compile would.
+
 ## Enhanced, single player first
 
 Only while Enhanced is chosen, so Normal is untouched. Each is one place to change:

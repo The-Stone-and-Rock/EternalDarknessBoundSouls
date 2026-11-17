@@ -4272,6 +4272,7 @@ static void test_save_state(CPUState* cpu);
 static void test_load_state(CPUState* cpu);
 static void test_set_flag(CPUState* cpu);
 static void test_subtitles(CPUState* cpu);
+static void test_flash(CPUState* cpu);  // ED_FLASH_TEST (below, flash_install)
 static struct {
     u16 button;
     s8 x, y;
@@ -4413,6 +4414,7 @@ static void hle_PADRead(CPUState* cpu) {
         test_run_script(cpu);
         test_save_state(cpu);
     test_load_state(cpu);
+        test_flash(cpu);
         sanity_door_run(cpu);
     }
 #endif
@@ -27966,6 +27968,218 @@ static void sanity_tool_install(CPUState* cpu) {
     }
 }
 
+// The lavender screen flash (docs/research/firstrun-hd-flash/flash.md): ed85's 0x80145760 (the phone's end, a sanity
+// effect's end, the Tome) and its copy 0x8006B270 make a flat disc drawn by 0x80183E1C as a 64-pair fan of which only
+// the first count pairs (byte effect+1, 21) are filled. The rest get z = +1 and stale x,y: the GameCube clips them, but
+// the host's near-plane snap (wgsl.cpp) keeps them, so one hard-edged triangle from the centre to guest (0,0) was drawn
+// over the fade (logs/run-20261104-232036-sanity2-17 000068, logs/run-20261117-103854-sub-before-p2-follow 000063).
+// Fix: at the submit 0x8017C9DC (its one caller returns to 0x80183F68), pairs count..63 are folded onto pair count-1,
+// so that triangle has no area. The game draws everything else as before; no renderer change.
+// Co-op: the disc is a HUD draw (an ortho fan whose first vertices are narrow), so the split showed it in player 1's
+// half whoever set it off: player 2's phone flashed player 1's half. Now it goes to the half of the player who set it
+// off, as their subtitle line does (coop_subtitle_away: player 2's at +4096, player 1's at +8192 while player 2 has the
+// screen or the lent cameras, the game's own x with the split off). The player is read as the subtitle's is
+// (r13-21496 against player 2's id) at 0x80145760's or 0x8006B270's entry, and given to the next new disc submitted.
+// ED_FLASH_LOG=1 (or ED_COOP_LOG): a line at each flash's start, and the fan before and after the fold, once a disc.
+// ED_FLASH_TEST=FRAME,A[,PLAYER] (testing): the game's own 0x80145760(A,0,0) once at the pad read of guest frame FRAME,
+// taken as PLAYER's (1 or 2; default: whoever the game says).
+#define FLASH_ED85 0x80145760u
+#define FLASH_COPY 0x8006B270u
+#define FLASH_SUBMIT 0x8017C9DCu
+#define FLASH_SUBMIT_RET 0x80183F68u
+#define FLASH_PAIRS 64u
+static struct {
+    int pending;  // the player whose flash began and has no disc yet (0 none)
+    unsigned long long pending_frame;
+    int test_owner;  // ED_FLASH_TEST's PLAYER while its call runs
+    struct {
+        u32 effect;
+        int owner;
+        unsigned long long seen;
+        u32 alpha;  // the centre's alpha at its last draw: a rise is a new flash in the same effect block
+    } disc[8];
+    int next;
+} g_flash;
+// A disc keeps its owner while its effect block is drawn again within this many guest frames. The guest frame follows
+// the wall clock (interrupt.c), so a host stall (a first pipeline compile, a load) jumps it; 2 frames lost the owner
+// mid-fade. The flash's whole fade is about 40 frames.
+#define FLASH_KEEP 240ull
+
+static bool flash_log(void) {
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_FLASH_LOG") != NULL || getenv("ED_COOP_LOG") != NULL;
+    return on == 1;
+}
+
+static int flash_owner_now(CPUState* cpu) {
+    if (g_flash.test_owner != 0)
+        return g_flash.test_owner;
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || g_tome_copy_turn || !sda_ready(cpu))
+        return 0;
+    return mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u) ? 2 : 1;
+}
+
+static void flash_began(CPUState* cpu, const char* which) {
+    g_flash.pending = flash_owner_now(cpu);
+    g_flash.pending_frame = cpu->timebase / 675000ull;
+    if (flash_log())
+        fprintf(stderr, "[flash] %s(%d, %d, %d) from lr 0x%08X: player %d's (frame %llu)\n", which, (s32)cpu->gpr[3],
+                (s32)cpu->gpr[4], (s32)cpu->gpr[5], cpu->lr, g_flash.pending, g_flash.pending_frame);
+}
+static void flash_ed85_notify(CPUState* cpu) { flash_began(cpu, "0x80145760 (ed85's flash)"); }
+static void flash_copy_notify(CPUState* cpu) { flash_began(cpu, "0x8006B270 (the flash's copy)"); }
+
+// How far the disc moves to go to its player's half. coop_subtitle_away takes the renderer's widescreen HUD shift
+// (80 units at 16:9) off, as the renderer moves a draw wholly right of the middle out by it. The disc spans every HUD
+// band, so the renderer skips that shift whenever anything crosses the middle at any height, which this side can't
+// see. Half of it is put back: the disc's centre is then 40 units off either way (102 at 21:9). A moved disc's rim is
+// also pushed out by half again (FLASH_GROW: its 20 sides reach 758 units from the centre, not 505), so the half's
+// corners stay covered at 21:9 too (the far corner there is about 577 + 102 away). The split's view clips it to the half.
+static s16 flash_away(CPUState* cpu, int owner) {
+    s16 away = coop_subtitle_away(cpu, owner);
+    if (away != 0)
+        away = (s16)(away + coop_subtitle_wide(cpu) / 2);
+    return away;
+}
+
+static void flash_say_pairs(CPUState* cpu, const char* when, u32 pos, u32 clr, u32 count) {
+    for (u32 p = count - 1u; p <= count && p < FLASH_PAIRS; p++)
+        for (u32 v = 0u; v < 2u; v++) {
+            const u32 at = pos + p * 12u + v * 6u, c = clr + (p * 2u + v) * 4u;
+            fprintf(stderr, "[flash]   %s pair %u vertex %u: x %d y %d z %d rgba %08X\n", when, p, v, (s16)mem_read16(cpu, at),
+                    (s16)mem_read16(cpu, at + 2u), (s16)mem_read16(cpu, at + 4u),
+                    guest_ram_range_valid(cpu, c, 4u) ? mem_read32(cpu, c) : 0u);
+        }
+}
+
+// ED_FLASH_STALL=MS (testing): the host waits MS milliseconds once, after a flash's first disc is drawn, as a first
+// pipeline compile or a load would stall it. The guest frames jump on (they follow the wall clock); the flash must stay
+// in its player's half.
+static void flash_test_stall(void) {
+    static int ms = -1;
+    if (ms < 0)
+        ms = getenv("ED_FLASH_STALL") != NULL ? atoi(getenv("ED_FLASH_STALL")) : 0;
+    if (ms <= 0)
+        return;
+    fprintf(stderr, "[test] the flash's host stall: %d ms\n", ms);
+    const clock_t until = clock() + (clock_t)((long long)ms * CLOCKS_PER_SEC / 1000);
+    while (clock() < until) {
+    }
+    ms = 0;
+}
+
+static void flash_submit_notify(CPUState* cpu) {
+    if (cpu->lr != FLASH_SUBMIT_RET)
+        return;
+    const u32 pos = cpu->gpr[3], clr = cpu->gpr[5], effect = cpu->gpr[30];
+    if (!guest_ram_range_valid(cpu, effect, 2u) || !guest_ram_range_valid(cpu, pos, FLASH_PAIRS * 12u))
+        return;
+    const u32 count = mem_read8(cpu, effect + 1u);
+    if (count == 0u || count >= FLASH_PAIRS)
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    const u32 alpha = guest_ram_range_valid(cpu, clr, 4u) ? (mem_read32(cpu, clr) & 0xFFu) : 0u;
+    const bool pending = g_flash.pending != 0 && frame <= g_flash.pending_frame + 60ull;
+    int slot = -1;
+    for (int i = 0; i < 8 && slot < 0; i++)
+        if (g_flash.disc[i].effect == effect && frame <= g_flash.disc[i].seen + FLASH_KEEP && frame >= g_flash.disc[i].seen)
+            slot = i;
+    const bool fresh = slot < 0;
+    // The same block drawn again keeps its owner, through any stall. Only a flash begun since, whose centre is brighter
+    // than at the block's last draw (a fade only darkens), is a new flash in the old block, and takes the new owner.
+    const bool again = !fresh && pending && alpha > g_flash.disc[slot].alpha;
+    if (fresh) {  // a new disc: the flash that began last is its
+        slot = g_flash.next;
+        g_flash.next = (g_flash.next + 1) % 8;
+        g_flash.disc[slot].effect = effect;
+    }
+    if (fresh || again) {
+        g_flash.disc[slot].owner = pending ? g_flash.pending : 0;
+        g_flash.pending = 0;
+    } else if (frame > g_flash.disc[slot].seen + 2ull && flash_log())
+        fprintf(stderr, "[flash] disc 0x%08X drawn again after %llu frames: still player %d's (frame %llu)\n", effect,
+                frame - g_flash.disc[slot].seen, g_flash.disc[slot].owner, frame);
+    g_flash.disc[slot].seen = frame;
+    g_flash.disc[slot].alpha = alpha;
+    const int owner = g_flash.disc[slot].owner;
+    const s16 away = owner != 0 ? flash_away(cpu, owner) : 0;
+    if ((fresh || again) && flash_log()) {
+        fprintf(stderr, "[flash] disc 0x%08X%s: %u of %u pairs used, n %u, player %d's, moved %d (frame %llu)\n", effect,
+                again ? " (a new flash in the same block)" : "", count, FLASH_PAIRS, mem_read16(cpu, 0x805D7102u), owner, away,
+                frame);
+        flash_say_pairs(cpu, "before", pos, clr, count);
+    }
+    if (away != 0)  // the game fills the used pairs anew each draw: grown and moved once (the guard as the subtitle's)
+        for (u32 p = 0u; p < count; p++) {
+            const u32 at = pos + p * 12u;  // the centre, then the rim (+6)
+            const s16 cx = (s16)mem_read16(cpu, at), cy = (s16)mem_read16(cpu, at + 2u);
+            const s16 rx = (s16)mem_read16(cpu, at + 6u), ry = (s16)mem_read16(cpu, at + 8u);
+            if (cx >= 2048 || rx >= 2048)
+                continue;
+            mem_write16(cpu, at, (u16)(s16)(cx + away));
+            mem_write16(cpu, at + 6u, (u16)(s16)(cx + (rx - cx) * 3 / 2 + away));
+            mem_write16(cpu, at + 8u, (u16)(s16)(cy + (ry - cy) * 3 / 2));
+        }
+    if (fresh || again)
+        flash_test_stall();
+    const u32 last = pos + (count - 1u) * 12u;
+    for (u32 p = count; p < FLASH_PAIRS; p++)
+        for (u32 v = 0u; v < 2u; v++) {
+            mem_write16(cpu, pos + p * 12u + v * 6u, mem_read16(cpu, last + v * 6u));
+            mem_write16(cpu, pos + p * 12u + v * 6u + 2u, mem_read16(cpu, last + v * 6u + 2u));
+        }
+    if ((fresh || again) && flash_log())
+        flash_say_pairs(cpu, "after", pos, clr, count);
+}
+
+static void flash_install(CPUState* cpu) {
+    static bool done;
+    if (done)
+        return;
+    done = true;
+    HleDispatchEntry* s = hle_dispatch_entry(FLASH_SUBMIT);
+    if (strcmp(ED_GAME_ID, "GEDP01") == 0 && mem_read32(cpu, FLASH_SUBMIT) == 0x9421FFE0u && stayer_bl_is(cpu, 0x80183F64u, FLASH_SUBMIT) &&
+        s != NULL && s->notify == NULL) {
+        s->notify = flash_submit_notify;
+        fprintf(stderr, "[effects] the screen flash's disc 0x%08X: its unused points folded (no wedge), in its player's half\n", FLASH_SUBMIT);
+    } else {
+        fprintf(stderr, "[effects] the screen flash's disc 0x%08X not taken: the flash keeps its wedge\n", FLASH_SUBMIT);
+        return;
+    }
+    HleDispatchEntry* a = hle_dispatch_entry(FLASH_ED85);
+    HleDispatchEntry* b = hle_dispatch_entry(FLASH_COPY);
+    if (mem_read32(cpu, FLASH_ED85) == 0x9421FF10u && stayer_bl_is(cpu, 0x80014DB0u, FLASH_ED85) && a != NULL && a->notify == NULL)
+        a->notify = flash_ed85_notify;
+    else
+        fprintf(stderr, "[effects] the flash 0x%08X not taken: its flash is in player 1's half\n", FLASH_ED85);
+    if (mem_read32(cpu, FLASH_COPY) == 0x9421FFC0u && stayer_bl_is(cpu, 0x8006C970u, FLASH_COPY) && b != NULL && b->notify == NULL)
+        b->notify = flash_copy_notify;
+    else
+        fprintf(stderr, "[effects] the flash 0x%08X not taken: its flash is in player 1's half\n", FLASH_COPY);
+}
+
+static void test_flash(CPUState* cpu) {
+    static int on = -1;
+    static unsigned long long at;
+    static int a, player;
+    if (on < 0) {
+        const char* t = getenv("ED_FLASH_TEST");
+        unsigned long long f = 0ull;
+        on = t != NULL && sscanf(t, "%llu,%d,%d", &f, &a, &player) >= 2;
+        at = f;
+    }
+    if (on != 1 || !sda_ready(cpu) || cpu->timebase / 675000ull < at)
+        return;
+    on = 0;
+    u32 args[3] = {(u32)a, 0u, 0u}, ignore = 0u;
+    fprintf(stderr, "[test] frame %llu: the flash 0x%08X(%d, 0, 0)%s\n", cpu->timebase / 675000ull, FLASH_ED85, a,
+            player == 1 || player == 2 ? (player == 1 ? " as player 1's" : " as player 2's") : "");
+    g_flash.test_owner = player == 1 || player == 2 ? player : 0;
+    hle_guest_call(cpu, FLASH_ED85, args, 3, 0.0, &ignore);
+    g_flash.test_owner = 0;
+}
+
 static void cheat_apply(CPUState* cpu) {
     static int asked = -1;  // ED_CHEAT=n (testing): HleCheat n on from the start
     if (asked < 0) {
@@ -35429,6 +35643,7 @@ void hle_install(CPUState* cpu) {
     find_camera(cpu);
     find_coop(cpu);
     sanity_tool_install(cpu);
+    flash_install(cpu);
 #endif
     find_refresh_prompt(cpu);
     publish_codegen_options();

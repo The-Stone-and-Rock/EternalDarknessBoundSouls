@@ -196,3 +196,14 @@ Play with `play-rooms-log.bat subtitles`, co-op on, in Alex's mansion (chapter 0
   nothing left behind after it.
 - Say if a line is ever in the wrong half, cut off, left behind after it ends, or in both halves with the players in
   different rooms.
+
+## 9. The white flash after the phone call and a sanity effect (2026-11-17)
+The flash should be one smooth lavender fade, with no dark triangle from the middle to the top-left corner.
+- Player 2 answers the hall phone (room 69). At the end of the call the flash should light player 2's half only, and
+  fade evenly. The same with player 1 in another room.
+- Player 1 answers it instead: the flash in player 1's half only.
+- Turn "Split-screen co-op" off while a call is up: the flash on the whole screen.
+- Single player: play a sanity effect to its end (Mods, Sanity Effects). Its closing flash should be smooth too.
+- If you can, try the 21:9 aspect setting: the flash should still fill the whole half.
+- The first flash after clearing the shader cache may stutter. It should still stay in the right half all the way.
+- Say if a flash is ever in the wrong half, leaves a corner of its half uncovered, or still shows a hard edge.

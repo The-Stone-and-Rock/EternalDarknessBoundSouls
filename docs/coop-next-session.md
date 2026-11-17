@@ -3,6 +3,21 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: the sanity/phone white flash, step F1 (checkpoint commit)
+docs/research/firstrun-hd-flash/flash.md ("Built" and "Built: review fixes"), in hle.c (`flash_submit_notify`):
+- **The blocky flash:** the game fills 21 of the disc's 64 pairs; the rest sat at 0,0 with z +1 and the host kept
+  them, a hard triangle from the middle to the top-left. They are now folded onto the last used pair. No renderer change.
+- **Co-op:** the flash goes to the half of the player who set it off (the subtitle owner's test, moved as the
+  subtitle line). The owner now holds for the disc's whole life (240 frames), so a host stall can't send it back to
+  player 1's half. A moved disc is grown by half so its half's corners stay covered at 21:9.
+- Seen: player 2's phone (one room, apart), player 1's phone, solo a = 0 and a = 20, a forced player 2 flash
+  (runs 20261117-1216 to 1220); after the review: a 400 ms stall (run-20261117-122919-flash-p2-stall), aspect 4
+  (run-20261117-123004-flash-p2-219), solo again (run-20261117-123048-flash-solo-a0-recheck). Pictures:
+  `Screenshots for Claude/f1-sanity-flash/`.
+- Not seen: a real sanity effect's own end in solo (slot 2 is chapter 1 now), 0x8006B270's flash, the 0x801D68F4
+  user, the split off, a real 21:9 screen, player 2's copy Tome. Title, Options, Choose Character, Tome and subtitle
+  runs were not re-run (nothing on those paths changed). For the user: docs/coop-play-test.md section 9.
+
 ## 2026-11-17: co-op subtitles, step U3 review fix (committed with step U3)
 - The Tome's replay page behind player 1's real Tome: the world frame's updater call still ran and would make the
   replay's lines from play's pack (wrong words) or count twice a frame. Now `coop_subtitle_tick` passes over the

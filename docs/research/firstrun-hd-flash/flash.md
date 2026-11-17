@@ -338,3 +338,35 @@ The cause holds. It is one stray triangle from the unused points, kept by the ho
 its range and timing are safe. The doc gets some details wrong: the makers, the sound's source, the colour story, the
 list's N and the line numbers. None of these changes the fix. The co-op problem (the flash in player 1's half when
 player 2 answers) stands as its own co-op bug.
+
+## Built (step F1, 2026-11-17)
+
+- `flash_submit_notify`, `flash_install`, `flash_ed85_notify`, `flash_copy_notify`, `test_flash` in `runtime/host/hle.c`.
+- The log confirmed the plan: count 21, n 128, the unused pairs at x, y = 0, 0 and z = 1, colours 0. The disc's radius is
+  512 from its first draw (no growth seen in the log; the 5-tick growth above was not seen).
+- The phone's flash is at the call's end (state 5 of L00/1801, frame 4882 in the slot 3 runs), not at the B press.
+- Co-op: the flash goes to the half of the player who set it off (r13-21496 at 0x80145760's entry, as the subtitle's
+  owner), moved as the subtitle line is. Half the widescreen HUD shift is put back, because the disc spans every HUD
+  band and the renderer's choice to shift it can't be seen from here; its centre is then within 40 units either way.
+- Seen in pictures: solo a = 0 and a = 20 (ED_FLASH_TEST), player 2's phone (one room and apart), player 1's phone,
+  and a forced player 2 flash. Kept in `Screenshots for Claude/f1-sanity-flash/`.
+- Not run: the split off, 21:9, the 0x801D68F4 user, a natural sanity effect's end (slot 2 is now chapter 1, where
+  effect 17 needs a door), player 2's copy Tome.
+
+## Built: review fixes (step F1, 2026-11-17)
+
+- **The owner lasted only 2 frames.** A disc kept its player while its block was drawn again within 2 guest frames.
+  The guest frame follows the wall clock, so a host stall (a first pipeline compile on a fresh cache, a load) made the
+  next draw look like a new disc, with no owner: the rest of player 2's flash went to player 1's half. Now a block keeps
+  its owner while it is drawn again within `FLASH_KEEP` (240) frames. A flash begun since takes a matched block only if
+  the block's centre got brighter than at its last draw (a fade only darkens): a new flash in the same block.
+  A test switch, `ED_FLASH_STALL=MS`, makes the host wait once after a flash's first draw.
+  Seen: `logs/run-20261117-122919-flash-p2-stall` (400 ms): the next draw came 31 frames later, the log says
+  "drawn again after 31 frames: still player 2's", and the fade stayed in player 2's half.
+- **21:9 corners.** Half the HUD shift put back leaves the centre up to 102 units off at 21:9, more than the 20-gon's
+  505 could cover. A moved disc's rim is now pushed out by half again (758 units). The split's view clips it to the half.
+  Seen with a scratch settings file at aspect 4 (`logs/run-20261117-123004-flash-p2-219`, "moved 3993", so the 21:9 value
+  was read): the whole of player 2's half lit, corners covered. The window was the user's 16:9 screen, so a real 21:9
+  screen was not seen.
+- Solo is not moved or grown; seen unchanged (`logs/run-20261117-123048-flash-solo-a0-recheck`).
+- Pictures: `Screenshots for Claude/f1-sanity-flash/review-*`.
