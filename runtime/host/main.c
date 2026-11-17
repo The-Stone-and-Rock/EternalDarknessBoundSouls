@@ -692,6 +692,9 @@ int main(int argc, char** argv) {
             }
             iso_path = launcher_iso;
         }
+        // A boot state plays in its own mode (56 MB co-op, smaller solo), not settings.ini's: tools/ed/run.sh plays the
+        // user's settings, and the Solo / Co-op page writes mod_coop there (docs/research/solo-coop-picker/plan.md).
+        coop_follow_boot_state();
         // Separate rooms only with co-op on (frontend.cpp rooms_follow_coop): also for runs with no launcher (tests).
         rooms_follow_coop();
     }

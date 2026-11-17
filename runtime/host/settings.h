@@ -92,6 +92,11 @@ extern Settings g_settings;
 
 void settings_load(void);
 void settings_save(void);
+// This run plays co-op or solo as its boot state was made (main.c: ED_QUICKLOAD's memory size), whatever settings.ini
+// says; settings_save keeps the file's own mod_coop until the player picks a mode (settings_coop_chosen: the Solo /
+// Co-op page, Mods > Co-op), so a test run never changes the user's choice.
+void settings_run_coop(bool coop);
+void settings_coop_chosen(void);
 
 // Choose Character's "Random": a character rolled once when it is chosen and kept (in settings.ini, across chapters
 // and restarts) until the player chooses again; choosing Random again rolls another. Its cards only ever show

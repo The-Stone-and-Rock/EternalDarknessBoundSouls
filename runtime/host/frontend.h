@@ -29,6 +29,15 @@ void frontend_frame(void);
 // switches for this run from the ask and Mods > Co-op, before the game's memory, title machine and hooks read them.
 // True when that changed them.
 bool rooms_follow_coop(void);
+// True when playing co-op (or solo) would need this run's separate rooms changed, so the game started again; a pure
+// test, nothing set (the Solo / Co-op page, hle.c's ED_TITLE_PICK).
+bool rooms_would_change(bool coop);
+// main.c, before rooms_follow_coop: a run that boots from a state (ED_QUICKLOAD) plays that state's mode (56 MB co-op,
+// smaller solo), not settings.ini's, which keeps its own (settings_run_coop). Logged when it differs.
+void coop_follow_boot_state(void);
+// The title's Solo / Co-op answer (any thread; hle.c takes it once the page has closed): -1 none (Back), else
+// row * 2 + co-op, row 0 Start Game, 1 Load Game. Taking it clears it.
+int frontend_title_pick_take(void);
 
 // A problem page over the game (report.c): heading, the text, and Keep
 // waiting (when can_wait) or Quit. True when the player chose to wait.
@@ -65,7 +74,7 @@ enum {
     FRONTEND_PAGE_TITLE_MODS = 10,
     FRONTEND_PAGE_TITLE_QUIT = 11,       // "Quit the game?" (No first); Yes saves the settings and quits
     // Solo or Co-op: two cards (docs/research/solo-coop-picker/plan.md). `player` is the title row it asks for
-    // (0 Start Game, 1 Load Game: the page's heading). Nothing opens it from the game yet (plan step 3).
+    // (0 Start Game, 1 Load Game: the page's heading). hle.c's title_main_start_load opens it (plan step 3).
     FRONTEND_PAGE_TITLE_PICK = 12,
 };
 // How the page is drawn, chosen by whoever opens it: the launcher's parchment, the title's look (over the title

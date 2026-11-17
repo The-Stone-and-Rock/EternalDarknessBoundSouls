@@ -38,6 +38,10 @@ const char* quickstate_boot_path(void);
 // when there is no boot state.
 bool quickstate_request_reboot(CPUState* cpu, u32 start, u32 end, bool rebooted);
 
+// A state file's guest memory (MEM1) size in bytes, read from its section headers alone: 56 MB is a co-op state (the two
+// room slots), 32-48 MB a solo one. 0 when the file can't be read or is not a state of this game.
+u32 quickstate_file_mem1_size(const char* path);
+
 // Nonzero while a save or load waits for a safe point.
 extern int g_quickstate_pending;
 

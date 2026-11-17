@@ -329,6 +329,20 @@ int settings_roll_random(int player) {
     return pick;
 }
 
+// This run's co-op mode from its boot state (settings_run_coop): settings.ini keeps its own mod_coop (written back as it
+// was read) until the player picks a mode (settings_coop_chosen). -1: no such run mode.
+static int g_coop_file = -1;
+
+void settings_run_coop(bool coop) {
+    if (g_coop_file < 0)
+        g_coop_file = g_settings.mod_coop ? 1 : 0;
+    g_settings.mod_coop = coop;
+}
+
+void settings_coop_chosen(void) {
+    g_coop_file = -1;
+}
+
 void settings_save(void) {
     FILE* f = fopen(settings_path(), "w");
     if (f == NULL) {
@@ -382,7 +396,7 @@ void settings_save(void) {
         fprintf(f, "pad_slot_p%d = %d\n", i + 1, g_settings.pad_slot[i]);
         fprintf(f, "pad_type_p%d = %d\n", i + 1, g_settings.pad_type[i]);
     }
-    fprintf(f, "mod_coop = %d\n", g_settings.mod_coop ? 1 : 0);
+    fprintf(f, "mod_coop = %d\n", g_coop_file >= 0 ? g_coop_file : g_settings.mod_coop ? 1 : 0);
     fprintf(f, "mod_split = %d\n", g_settings.mod_split);
     fprintf(f, "mod_p2_input = %d\n", g_settings.mod_p2_input);
     fprintf(f, "mod_p2_camera = %d\n", g_settings.mod_p2_camera);

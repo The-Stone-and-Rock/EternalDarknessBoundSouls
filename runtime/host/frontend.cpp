@@ -58,6 +58,7 @@ extern "C" {
 void quickstate_request_save(const char* path);
 void quickstate_request_load(const char* path);
 const char* quickstate_boot_path(void);
+unsigned int quickstate_file_mem1_size(const char* path);
 void hle_set_skip_intro(bool on);
 bool hle_start_up_hidden(void);
 bool hle_player_place(float place[3], unsigned* frame);
@@ -548,6 +549,45 @@ extern "C" bool rooms_follow_coop(void) {
     return was != now;
 }
 
+// Whether co-op would have the separate rooms, as rooms_follow_coop decides it (asked, or the default ask when nothing
+// names either switch). Reads only.
+static bool rooms_asked_for_coop() {
+    const bool named = getenv("ED_ROOM_SLOTS") != nullptr || getenv("ED_COOP_STAY") != nullptr ||
+                       getenv("ED_ROOM_SLOTS_ASKED") != nullptr || getenv("ED_COOP_STAY_ASKED") != nullptr;
+    if (!named)
+        return true;
+    const char* asked = getenv("ED_ROOM_SLOTS_ASKED") != nullptr ? getenv("ED_ROOM_SLOTS_ASKED") : getenv("ED_ROOM_SLOTS");
+    return asked != nullptr && std::strcmp(asked, "0") != 0;
+}
+
+extern "C" bool rooms_would_change(bool coop) {
+    return (coop && rooms_asked_for_coop()) != (getenv("ED_ROOM_SLOTS") != nullptr);
+}
+
+extern "C" void coop_follow_boot_state(void) {
+    const char* state = getenv("ED_QUICKLOAD");
+    if (state == nullptr || state[0] == '\0')
+        return;
+    const unsigned mem1 = quickstate_file_mem1_size(state);
+    if (mem1 == 0u) {
+        std::fprintf(stderr, "[rooms] %s: no memory size read, co-op as settings.ini says (%s)\n", state,
+                     g_settings.mod_coop ? "on" : "off");
+        return;
+    }
+    const bool coop = mem1 == 56u * 1024u * 1024u;
+    // (A smaller state plays co-op too when co-op has no separate rooms: ED_ROOM_SLOTS=0.)
+    if (coop == g_settings.mod_coop || (!coop && !rooms_asked_for_coop()))
+        return;
+    settings_run_coop(coop);
+    settings_apply();  // (co-op's frame rate)
+    std::fprintf(stderr, "[rooms] %s is a %s state (%u MB): this run plays %s (settings.ini keeps mod_coop = %d)\n", state,
+                 coop ? "co-op" : "solo", mem1 >> 20, coop ? "co-op" : "solo", coop ? 0 : 1);
+}
+
+// The title's Solo / Co-op answer for hle.c (frontend_title_pick_take): -1, or row * 2 + co-op.
+static std::atomic<int> g_title_pick_result{-1};
+extern "C" int frontend_title_pick_take(void) { return g_title_pick_result.exchange(-1); }
+
 void start_game(int slot) {
     snprintf(g_settings.disc, sizeof g_settings.disc, "%s", g_discs[g_disc].path.c_str());
     settings_save();
@@ -610,6 +650,9 @@ int g_controls_return_row = 0;
 enum class PickKind { Mode, Controls };
 PickKind g_pick_kind = PickKind::Controls;
 int g_pick_title_row = 0;
+// The Solo / Co-op card whose A needs the game started again (the other mode than this run's rooms): its line says so.
+// -1 none. (Plan step 4 makes that pick restart the game.)
+int g_pick_note = -1;
 Screen g_pick_return = Screen::Options;
 int g_pick_return_row = 0;
 void open_pick(PickKind kind, Screen back, int back_row);
@@ -1540,9 +1583,13 @@ std::string pick_card_rml(int which, bool selected, size_t index) {
         static const char* const kInput[] = {"Plays with a controller", "Plays with the keyboard"};
         line = line.empty() ? kInput[g_settings.mod_p2_input & 1] : line;
     }
+    // (A mode that needs the game started again, once its A was pressed: plan step 4 builds the restart.)
+    const bool note = !controls && g_pick_note == which;
+    if (note)
+        press = which == 1 ? "Co-op needs the game started again: not ready yet" : "Solo needs the game started again: not ready yet";
     out += "<div class=\"pcard-name\">" + escape(name) + "</div><div class=\"pcard-form\">" +
            (line.empty() ? std::string("&nbsp;") : escape(line)) + "</div><div class=\"pcard-press\">" +
-           (selected ? press : "&nbsp;") + "</div></div>";
+           (selected || note ? press : "&nbsp;") + "</div></div>";
     return out;
 }
 
@@ -1552,6 +1599,7 @@ void open_pick(PickKind kind, Screen back, int back_row) {
     g_pick_kind = kind;
     g_pick_return = back;
     g_pick_return_row = back_row;
+    g_pick_note = -1;
     g_screen = Screen::Pick;
     g_selected = kind == PickKind::Mode ? (g_settings.mod_coop ? 1 : 0) : (g_menu_player == 1 ? 1 : 0);
 }
@@ -1577,8 +1625,32 @@ void build_pick() {
                 g_selected = 0;
             };
         } else {
-            // (Nothing starts from here yet: plan step 3 gives the title's Start Game and Load Game this page.)
-            r.activate = [which] { std::fprintf(stderr, "[frontend] pick: %s\n", which == 1 ? "co-op" : "solo"); };
+            // Over the title (its Start Game or Load Game, hle.c title_main_start_load): a mode this run's rooms fit is
+            // set and saved, and the page closes with the answer; hle.c then presses A on the same row, so the game's
+            // own Start or Load goes on. The other mode needs the game started again (plan step 4): said on the card,
+            // the page stays. (The launcher's test door only logs.)
+            r.activate = [which] {
+                const bool coop = which == 1;
+                const char* const name = coop ? "co-op" : "solo";
+                if (!g_on_title || g_root != Screen::Pick) {
+                    std::fprintf(stderr, "[frontend] pick: %s\n", name);
+                    return;
+                }
+                if (rooms_would_change(coop)) {
+                    g_pick_note = which;
+                    std::fprintf(stderr, "[frontend] pick: %s needs the game started again (not built yet: plan step 4)\n",
+                                 name);
+                    return;
+                }
+                g_settings.mod_coop = coop;
+                settings_coop_chosen();
+                changed();  // (co-op's frame rate)
+                settings_save();
+                g_title_pick_result = g_pick_title_row * 2 + (coop ? 1 : 0);
+                std::fprintf(stderr, "[frontend] pick: %s for %s, saved\n", name,
+                             g_pick_title_row == 1 ? "Load Game" : "Start Game");
+                g_close = true;
+            };
         }
         g_rows.push_back(r);
     }
@@ -1662,6 +1734,7 @@ void build_mods_rows() {
     coop.toggle = true;
     coop.change = [](int) {
         g_settings.mod_coop = !g_settings.mod_coop;
+        settings_coop_chosen();  // (the player's choice: saved, also in a run that plays its boot state's mode)
         changed();  // co-op has its own frame rate
     };
     g_rows.push_back(coop);
@@ -5907,6 +5980,9 @@ extern "C" void frontend_frame(void) {
     if (!(press && debug) && !test_press && page < 0)
         return;
     if (!ensure_ui()) {
+        // (No Solo / Co-op page can show: the title's Start Game or Load Game goes on in this run's mode.)
+        if (page == FRONTEND_PAGE_TITLE_PICK)
+            g_title_pick_result = (g_open_page_player.load() == 1 ? 2 : 0) + (g_settings.mod_coop ? 1 : 0);
         if (page >= 0)
             g_menu_closed++;  // the asked-for page is used up and can't open: a caller waiting on the count goes on
         return;

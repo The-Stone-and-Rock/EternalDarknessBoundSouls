@@ -736,6 +736,32 @@ static bool parse_file(const u8* file, size_t size, QsSection* sections,
     return true;
 }
 
+u32 quickstate_file_mem1_size(const char* path) {
+    FILE* f = path != NULL ? fopen(path, "rb") : NULL;
+    if (f == NULL)
+        return 0u;
+    QsFileHeader header;
+    u32 size = 0u;
+    if (fread(&header, sizeof header, 1, f) == 1 && memcmp(header.magic, QS_MAGIC, sizeof header.magic) == 0 &&
+        header.version == QS_VERSION && header.section_count <= QS_MAX_SECTIONS &&
+        strncmp(header.game_id, ED_GAME_ID, sizeof header.game_id) == 0) {
+        for (u32 i = 0; i < header.section_count; i++) {
+            QsSectionHeader h;
+            if (fread(&h, sizeof h, 1, f) != 1)
+                break;
+            if (memcmp(h.tag, "MEM1", 4) == 0) {
+                if (h.size < 4u || fread(&size, 4, 1, f) != 1)
+                    size = 0u;
+                break;
+            }
+            if (h.size > 0x7FFFFFFFu || fseek(f, (long)h.size, SEEK_CUR) != 0)
+                break;
+        }
+    }
+    fclose(f);
+    return size;
+}
+
 static bool load_state(CPUState* cpu, const char* path) {
     const double start = now_ms();
     size_t size = 0;

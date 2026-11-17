@@ -29,6 +29,8 @@
 #         1300 (the others). JTG_ETERNAL=0 leaves that press out, for a card where it is not asked.
 #   then hle.c skip_card_inserted presses A through the memory card screen itself, and the chapter loads.
 #   JTG_TITLE_AT=N moves the whole schedule (default 700; everything above is relative to it).
+#   Start Game and Load Game ask Solo or Co-op (since 2026-11-17, plan step P3): this script answers with ED_TITLE_PICK
+#   from the run's mod_coop, so no page opens (JTG_NEWGAME, the intro's taps). ED_TITLE_PICK= (empty) shows the page.
 #   A title-look page (Choose Character, a title Options row) is live since 2026-11-17: the title runs under it, about 60
 #   guest frames a second, and the guest's pad is held from its open to its close (hle.c title_page_held). Script presses
 #   that fall inside a page are lost; space the presses after one by its open time and raise ED_RUN_FRAMES to match
@@ -167,6 +169,11 @@ while :; do
             if grep -q "^$k *=" "$R/settings.ini"; then sed -i "s/^$k *=.*/$k = $v/" "$R/settings.ini"; else echo "$k = $v" >> "$R/settings.ini"; fi
         done
     fi
+    # The title's Start Game and Load Game ask Solo or Co-op (hle.c title_main_start_load): answered from this run's
+    # mod_coop with no page (JTG_NEWGAME, or the intro's A taps landing on Start Game), unless ED_TITLE_PICK is given
+    # (ED_TITLE_PICK= empty: the page asks, as it does the player).
+    if grep -q '^mod_coop *= *1' "$R/settings.ini"; then TITLE_PICK_MODE=coop; else TITLE_PICK_MODE=solo; fi
+    export ED_TITLE_PICK="${ED_TITLE_PICK-$TITLE_PICK_MODE}"
     {
         grep -E '^mod_(coop|p1_character|p2_character|p1_costume|p2_costume) ' "$R/settings.ini" | tr '\n' ' '; echo
         echo "chapter $CH, base frame $BASE, closes at frame $STOP, attempt $TRY"

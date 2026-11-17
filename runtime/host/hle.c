@@ -4321,6 +4321,7 @@ static bool title_page_held(CPUState* cpu) {
 bool hle_title_page_hold(void) {
     return g_title_page_hold && frontend_menu_closed_count() == g_title_page_hold_count;
 }
+static void title_pick_replay(CPUState* cpu, DolPadState* pad, bool held);
 static void title_page_hold_pads(DolPadState* state, u32 n) {
     for (u32 i = 0u; i < n; i++) {
         const s32 error = state[i].error;
@@ -4565,8 +4566,10 @@ static void hle_PADRead(CPUState* cpu) {
     skip_card_select(cpu, &state[0]);
     if (g_mash_to_gameplay)
         state[0].error = 0;
-    if (title_page_held(cpu))
+    const bool title_held = title_page_held(cpu);
+    if (title_held)
         title_page_hold_pads(state, 4u);
+    title_pick_replay(cpu, &state[0], title_held);  // (after the hold: the A for a Solo / Co-op pick)
     for (u32 i = 0; i < 4; i++) {
         u32 p = out + i * 12u;
         mem_write16(cpu, p, state[i].button);
@@ -15239,7 +15242,24 @@ static void tome_copy_sound_live(CPUState* cpu, u32 fn, int count) {
     g_hle_passthrough = false;
     g_hle_tail_call = false;
 }
-static void tome_copy_sound(CPUState* cpu) { tome_copy_sound_live(cpu, SOUND_PLAIN, 2); }
+// The title's A pressed by the host after a Solo / Co-op pick (title_main_start_load): its choose sound (633) already
+// played as the page opened, so the A's own is left out, on that frame only. 0: none.
+static u64 g_title_replay_quiet_frame;
+#define TITLE_A_SOUND_RETURN 0x8001A688u  // the 633 every main-menu A ends with (0x8001A684)
+static void tome_copy_sound(CPUState* cpu) {
+    const u64 frame = cpu->timebase / 675000ull;
+    if (g_title_replay_quiet_frame != 0u && cpu->lr == TITLE_A_SOUND_RETURN && cpu->gpr[3] == 633u &&
+        frame - g_title_replay_quiet_frame <= 1u) {
+        g_title_replay_quiet_frame = 0u;
+        fprintf(stderr, "[title] the picked A's choose sound left out: it played as the page opened (frame %llu)\n",
+                (unsigned long long)frame);
+        hle_set_u32(cpu, ~0u);
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
+    tome_copy_sound_live(cpu, SOUND_PLAIN, 2);
+}
 static void tome_copy_sound_stop(CPUState* cpu) { tome_copy_sound_live(cpu, SOUND_PLAIN_STOP, 1); }
 // At the copy's close (cpu->ram is the real memory): the handles its turn left running, stopped; the close sound.
 static void tome_copy_sound_close(CPUState* cpu, const u32 copy_handles[3]) {
@@ -17329,6 +17349,128 @@ static void title_main_choose(CPUState* cpu) {
     g_title_idle_reset = true;
     title_page_hold_start(cpu);
     frontend_open_page_skin(FRONTEND_PAGE_TITLE_CHARACTERS, 0, FRONTEND_SKIN_TITLE, -1);
+}
+// Start Game and Load Game ask Solo or Co-op first (docs/research/solo-coop-picker/plan.md, step 3). An intercept on the
+// title's A, which is also its Start (the handler is bound to mask 0x1100), at the main menu's rows 0 and 1. It does the
+// A's first steps as the game does (0x8013E154: input taken this frame, so no Up/Down in the same frame; the two
+// whispers stopped; the choose sound 633) and opens the page over the live title, the pad the page's. A pick that this
+// run's rooms fit sets mod_coop (frontend.cpp) and the host then presses A once on the same row (title_pick_replay):
+// that A goes through to the game's own Start or Load as before, its 633 left out (tome_copy_sound). Back closes the page
+// with nothing started, the row still lit. Any language: Start and Load are the game's own rows.
+// ED_TITLE_PICK=solo|coop (scripts: tools/ed/jtg.sh sets it from its mod_coop): no page, the A goes straight on.
+#define TITLE_INPUT_TAKEN 0x8013E154u
+#define TITLE_WHISPERS (TITLE_RECORD + 52u)  // two words, +52 and +56: the row names' whispers' handles (-1 none)
+static bool g_title_pick_open;        // the page is up for g_title_pick_row
+static u32 g_title_pick_row;
+static unsigned g_title_pick_closed;  // the close count as it opened
+static s32 g_title_replay_row = -1;   // the row the host presses A on, -1 none
+static u64 g_title_replay_from;
+static unsigned g_title_replay_reads;
+static const char* title_row_name(u32 row) { return row == 1u ? "Load Game" : "Start Game"; }
+static int title_pick_auto(void) {
+    static int pick = -2;  // -1 ask
+    if (pick == -2) {
+        const char* t = getenv("ED_TITLE_PICK");
+        pick = t == NULL ? -1 : strcmp(t, "solo") == 0 ? 0 : strcmp(t, "coop") == 0 || strcmp(t, "co-op") == 0 ? 1 : -1;
+        if (t != NULL && t[0] != '\0' && pick < 0)
+            fprintf(stderr, "[title] ED_TITLE_PICK=%s: not solo or coop, the page asks\n", t);
+    }
+    return pick;
+}
+static void title_main_start_load(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!sda_ready(cpu) || mem_read8(cpu, TITLE_STATE) != TITLE_MAIN)
+        return;
+    const u32 row = mem_read32(cpu, TITLE_CURSOR);
+    if (row > 1u)
+        return;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (g_title_replay_row == (s32)row) {
+        g_title_replay_row = -1;
+        g_title_replay_quiet_frame = frame != 0u ? frame : 1u;
+        fprintf(stderr, "[title] %s goes on: the A pressed for the pick (frame %llu)\n", title_row_name(row), frame);
+        return;
+    }
+    if (g_title_pick_open) {
+        g_hle_passthrough = false;  // (the page is up: no press of the title's reaches the game under it)
+        return;
+    }
+    u32 notice = 0u;
+    hle_guest_call(cpu, TITLE_CARD_NOTICE, NULL, 0, 0.0, &notice);
+    if (notice != 0u)
+        return;
+    const int pick = title_pick_auto();
+    if (pick >= 0) {
+        if (rooms_would_change(pick == 1)) {
+            fprintf(stderr, "[title] %s: ED_TITLE_PICK=%s needs the game started again: this run's %s kept (frame %llu)\n",
+                    title_row_name(row), pick ? "coop" : "solo", g_settings.mod_coop ? "co-op" : "solo", frame);
+        } else {
+            if (g_settings.mod_coop != (pick == 1))
+                g_settings.mod_coop = pick == 1;  // (this run's only: not saved)
+            fprintf(stderr, "[title] %s: %s (ED_TITLE_PICK, no page, frame %llu)\n", title_row_name(row),
+                    pick ? "co-op" : "solo", frame);
+        }
+        return;
+    }
+    hle_guest_call(cpu, TITLE_INPUT_TAKEN, NULL, 0, 0.0, NULL);
+    for (u32 i = 0u; i < 2u; i++) {
+        const u32 at = TITLE_WHISPERS + 4u * (1u - i);  // +56 first, as the game
+        const u32 handle = mem_read32(cpu, at);
+        if (handle == 0xFFFFFFFFu)
+            continue;
+        hle_guest_call(cpu, SOUND_PLAIN_STOP, &handle, 1, 0.0, NULL);
+        mem_write32(cpu, at, 0xFFFFFFFFu);
+    }
+    const u32 sound[2] = {633u, 100u};
+    hle_guest_call(cpu, SOUND_PLAIN, sound, 2, 0.0, NULL);
+    fprintf(stderr, "[title] %s: Solo or Co-op? (frame %llu)\n", title_row_name(row), frame);
+    g_title_idle_closed = frontend_menu_closed_count();
+    g_title_idle_reset = true;
+    title_page_hold_start(cpu);
+    g_title_pick_open = true;
+    g_title_pick_row = row;
+    g_title_pick_closed = frontend_menu_closed_count();
+    frontend_open_page_skin(FRONTEND_PAGE_TITLE_PICK, (int)row, FRONTEND_SKIN_TITLE, -1);
+    g_hle_passthrough = false;
+}
+// Each pad read, after the page's hold: once the page has closed (every button let go), its answer; for a pick, A on the
+// same row, three reads in six, until the intercept above sees it. Dropped if the menu has left the row or the state, or
+// after a second.
+static void title_pick_replay(CPUState* cpu, DolPadState* pad, bool held) {
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (g_title_pick_open && !held && frontend_menu_closed_count() != g_title_pick_closed) {
+        g_title_pick_open = false;
+        const int answer = frontend_title_pick_take();
+        if (answer < 0) {
+            fprintf(stderr, "[title] the Solo / Co-op page closed with no pick: the main menu, %s lit (frame %llu)\n",
+                    title_row_name(g_title_pick_row), frame);
+        } else if ((u32)(answer / 2) != g_title_pick_row) {
+            fprintf(stderr, "[title] the Solo / Co-op answer was for another row (%d): nothing pressed (frame %llu)\n", answer / 2,
+                    frame);
+        } else {
+            g_title_replay_row = (s32)g_title_pick_row;
+            g_title_replay_from = frame;
+            g_title_replay_reads = 0u;
+            fprintf(stderr, "[title] %s, %s: A pressed for it (frame %llu)\n", title_row_name(g_title_pick_row),
+                    (answer & 1) ? "co-op" : "solo", frame);
+        }
+    }
+    if (g_title_replay_row < 0)
+        return;
+    const char* why = frame - g_title_replay_from > 60u                       ? "a second went by"
+                      : mem_read8(cpu, TITLE_STATE) != TITLE_MAIN              ? "the title left its main menu"
+                      : mem_read32(cpu, TITLE_CURSOR) != (u32)g_title_replay_row ? "the cursor moved"
+                                                                                 : NULL;
+    if (why != NULL) {
+        fprintf(stderr, "[title] the A for %s dropped: %s (frame %llu)\n", title_row_name((u32)g_title_replay_row), why, frame);
+        g_title_replay_row = -1;
+        return;
+    }
+    if (g_title_replay_reads++ % 6u >= 3u)
+        return;  // released between presses
+    pad->button |= 0x0100u;
+    pad->analog_a = 0xFFu;
+    pad->error = 0;
 }
 // The first-run step (docs/research/firstrun-hd-flash/firstrun.md, step 2): the title Options picture taken from the
 // game's own title bank on the title's first frame, so the title look (Choose Character, More Options, Load's skull)
@@ -34473,10 +34615,18 @@ static void find_coop(CPUState* cpu) {
                     more = more && e != NULL && e->notify == NULL && e->intercept == NULL &&
                            mem_read32(cpu, kMore[i].at) == kMore[i].first;
                 }
-                if (more)
+                if (more) {
                     for (u32 i = 0u; i < sizeof kMore / sizeof kMore[0]; i++)
                         hle_dispatch_entry(kMore[i].at)->notify = kMore[i].fn;
-                else
+                    // Start Game and Load Game ask Solo or Co-op first (title_main_start_load): an intercept on the same A,
+                    // run before its notify. The game's row code is checked as the skeptic's check read it.
+                    HleDispatchEntry* a = hle_dispatch_entry(TITLE_A);
+                    if (a->intercept == NULL && mem_read32(cpu, TITLE_A + 0x2Cu) == 0x48000001u + ((TITLE_INPUT_TAKEN - (TITLE_A + 0x2Cu)) & 0x03FFFFFCu) &&
+                        mem_read32(cpu, 0x8001A67Cu) == 0x38600279u)
+                        a->intercept = title_main_start_load;
+                    else
+                        fprintf(stderr, "[title] Start Game and Load Game's Solo / Co-op NOT installed (the title's A not as expected)\n");
+                } else
                     fprintf(stderr, "[title] the Options' scrolling list NOT installed (its functions taken or not as expected)\n");
                 // The main menu's Choose Character (title_main_*): its Up/Down and A ride on the notifies above.
                 HleDispatchEntry* screen = hle_dispatch_entry(TITLE_SCREEN_DRAW);

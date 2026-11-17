@@ -263,8 +263,18 @@ Play with the sound on. Start from the launcher as usual.
   example the Options song).
 
 ## 13. Solo / Co-op picker (2026-11-17)
-**Steps P1 and P2: the Solo/Co-op page is built but Start Game and Load Game do not ask yet** (step P3; you saw this
-on 2026-11-17, and it is expected until P3). To try now:
+**Step P3: Start Game and Load Game now ask Solo or Co-op.** You saw no page before: that build was older than this
+step. Start play.bat again (the new build) and try:
+- On the title, press A (or Start) on Start Game. The Solo / Co-op page should open, the mode you played last lit.
+  Pick that same mode: the game should go on exactly as before (the carry-over question if your card has a finished
+  game, then the opening). Do the same with Load Game: the save list should come up.
+- B on the page: back on the title, the same row lit, nothing started.
+- Pick the OTHER mode: for now the card only says it needs the game started again (that restart is the next step).
+  Press B, or pick the mode you are in.
+- Listen as the page opens and closes: the title music should go on, and you should hear one choose sound as the page
+  opens, and for Start Game the start sound as you pick (Load Game has only the one, as before). Say if a sound is
+  missing or doubled.
+Steps P1 and P2 (still to try):
 - With HD textures on, open the title's Options > Controls or Choose Character the first time after a start. The title
   music should not skip as the page opens. (If the "Preparing the game" page was skipped, the cards may show the
   smaller disc pictures there until you open a page in the Tome or start again: say if you see that.)

@@ -542,3 +542,65 @@ mode belong in step 3). Then the six card tests (missed 1) and player 2's Defaul
   the line "Spirit", and in front on Co-op with "Karim and Lindsey" (pictures 17 and 18 in P2-pick-page/).
 - Review finding rejected in part: the Mode runs did have a form (player 2's Ellia, form 2, from the costume bits), and
   Ellia-2's picture is behind on Co-op in pictures 07 and 08. Only player 1's form had not been seen there.
+
+## Built: step P3, Start Game and Load Game ask first (plan step 3 with the skeptic's 1, 2, 8, 9; 2026-11-17, checkpoint commit)
+
+- **The intercept** (hle.c `title_main_start_load`, on `TITLE_A` 0x80019F30, installed after the `kMore` notifies when
+  the entry has no intercept, its `bl 0x8013E154` is at +0x2C and 0x8001A67C is `li r3, 633`). It passes through unless
+  the title is in state 7 on row 0 or 1 with no card notice. Then it does the A's first steps as the game: guest-calls
+  0x8013E154 (input taken this frame, wrong 1), stops the whispers at TM+56 and TM+52 (0x8019DC00, then -1), plays 633
+  once, sets the idle reset and the live page's pad hold, logs `[title] Start Game: Solo or Co-op?` and opens page 12
+  (`player` = the row). While the page is up a title A is swallowed. Start is the same handler (mask 0x1100): seen.
+- **The pick** (frontend.cpp, the Mode card's A over the title): `rooms_would_change(coop)` false (the same rooms as this
+  run) sets `mod_coop`, `settings_coop_chosen()`, `changed()`, `settings_save()`, stores the answer in an atomic
+  (`g_title_pick_result` = row * 2 + co-op, `frontend_title_pick_take`) and closes. True: the card's line says "Co-op
+  needs the game started again: not ready yet" (`g_pick_note`), the page stays (step 4 builds the restart). If no page
+  can show (`ensure_ui` fails), the answer is this run's mode, so Start never goes dead.
+- **The replay** (hle.c `title_pick_replay`, in `hle_PADRead` after the live hold): once the close count has moved (every
+  button let go), it takes the answer; for a pick it presses A three reads in six on the same row until the intercept
+  sees it (`g_title_replay_row`), which then passes it through to the game's own Start (634, state 8, the card screen,
+  the carry-over question) or Load (card manager, state 13). Dropped with a log line after 60 frames, or if the state
+  or the cursor moved (not seen). **Sound 633 once** (wrong 2): the replayed A's own 633 (the call at 0x8001A684,
+  return 0x8001A688) is left out in `tome_copy_sound`, the SOUND_PLAIN intercept, on that frame only. Load Game plays
+  no 634 of its own (read in the disassembly), so its pick is silent, as the game's Load is after its one 633.
+- **ED_TITLE_PICK=solo|coop** (wrong 9): no page; the A passes through, and `mod_coop` is set for this run (not saved)
+  when the rooms fit; else it is kept and logged. `tools/ed/jtg.sh` exports it from the run's `mod_coop` unless it is
+  already in the environment (`ED_TITLE_PICK=` empty asks).
+- **A boot state's mode** (wrong 8): main.c calls `coop_follow_boot_state()` before `rooms_follow_coop()`. With
+  `ED_QUICKLOAD`, `quickstate_file_mem1_size()` reads the state's MEM1 size from the section headers: 56 MB co-op,
+  smaller solo (unless co-op has no separate rooms, `ED_ROOM_SLOTS=0`). `settings_run_coop()` sets this run's mode and
+  `settings_save` writes the file's own `mod_coop` until a pick or Mods > Co-op (`settings_coop_chosen`).
+- **Seen** (Screenshots for Claude/solo-coop-picker/P3-start-load/, scratch card copy `ED_CARD`, jtg settings copies):
+  - -175205-jtg-p3-start-solo (solo): Start Game -> the page, Solo lit first; Right lit Co-op, Left Solo, A: "solo for
+    Start Game, saved", the replay seen by the intercept on the next frame, 633 left out, the title fades, the
+    carry-over question (pictures 01, 06, 07).
+  - -175333-jtg-p3-start-solo-dream: the same, then Right and A on No: room 96, the opening (Silicon Knights, "before
+    humanity") (02).
+  - -175447-jtg-p3-load-coop (co-op, separate rooms on): Load Game -> the page, Co-op lit first; Solo, A: "needs the game
+    started again", the card's line says so, the page stays (08); Co-op, A: the save list (03).
+  - -175605-jtg-p3-back-start (solo): B: "closed with no pick", the main menu with Start Game lit; Down lit Load Game, Up
+    Start Game; the Start button on Start Game opened the page again; A: the carry-over question (04). One state change,
+    no second page.
+  - -175805-jtg-p3-newgame-auto: `JTG_NEWGAME=1` with jtg's `ED_TITLE_PICK=coop`: "Start Game: co-op (ED_TITLE_PICK, no
+    page)", the new game went on (05). -175719-jtg-p3-jtg-timing: `jtg.sh 1`, control at frame 1795 (1768-1836 in the
+    P1 and P2 runs).
+  - run.sh -175904-p3-bootmode-slot3 (scratch settings `mod_coop = 0`): "slot3.state is a co-op state (56 MB): this run
+    plays co-op", the rooms on, the state loaded, player 2 there; the scratch file's hash unchanged. -175948-p3-bootmode-slot1
+    (a copy of the user's settings, co-op): "a solo state (48 MB): this run plays solo", loaded, player 2 parked; the copy
+    still equals settings.ini.
+  - The page's opens: set up in 13-14 ms and no "ran dry" in four of five; the first open of the first run after the
+    build: 34.4 ms and "ran dry after a 53 ms pause". Not listened to (muted runs).
+- **Not seen:** another language (the intercept needs no English; the page shows on black there, missed 4), the page left
+  up 200 s (the idle reset is Choose Character's code: its "starts again" line was seen), a replay dropped, the
+  `ensure_ui` fallback, `ED_TITLE_PAGE_PAUSE=1`, the user's play. The frontend's "page 12 opened ... for player 2" line
+  means the row (Load Game), not a player.
+- **Finished 2026-11-17 (checkpoint).** The user said the page did not appear on Start Game or Load Game. Their last
+  play (logs/play.log, 16:16) was before this step was built (17:51), so it is expected. The reviewers found nothing.
+  The finisher also ran the user's own path: the launcher's Play (`ED_LAUNCHER_TEST_KEYS=a`), play.bat's
+  `ED_ROOM_SLOTS=2 ED_COOP_STAY=1`, a copy of the user's settings (co-op, Skip intro) and card, so
+  saves/title-rooms.state is loaded through the launcher (`ED_QUICKLOAD` set by `start_game`), and no `ED_TITLE_PICK`.
+  - -181610-p3f-playbat-start: Start Game opened the page at frame 701, Co-op lit; Solo, A: the "needs the game
+    started again" line, the page stayed; Co-op, A: saved, the A replayed at 1034, the carry-over question.
+  - -181655-p3f-playbat-load: Down, A on Load Game: the page at 741, Co-op lit; A: the save list.
+  - Pictures 09 and 10 in P3-start-load/. settings.ini, the card, title-rooms.state, title.state and slot3.state kept
+    their hashes.

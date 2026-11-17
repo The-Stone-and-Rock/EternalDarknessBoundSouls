@@ -3,6 +3,28 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: the Solo/Co-op picker, step P3: Start Game and Load Game ask Solo or Co-op (checkpoint commit)
+docs/research/solo-coop-picker/plan.md, "Built: step P3".
+- **Start Game and Load Game (A or Start) now open the Solo / Co-op page** over the live title. The card first lit is
+  the mode played last. Picking the mode this run is in saves it (settings.ini `mod_coop`) and the game goes on into its
+  own Start (the carry-over question, the opening) or Load (the save list), as before. B goes back to the main menu with
+  the same row lit. hle.c `title_main_start_load` (an intercept on the title's A 0x80019F30, rows 0 and 1) and
+  `title_pick_replay` (the host presses A once on that row after the page closed).
+- **Picking the other mode does not restart yet** (plan step 4, P4): the card says "Co-op needs the game started again:
+  not ready yet" (or Solo), and the page stays; B or the other card still work. To change mode today: Mods > Co-op and
+  start the game again.
+- **Test kit:** `ED_TITLE_PICK=solo|coop` answers the page with no page; `tools/ed/jtg.sh` sets it from its run's
+  `mod_coop` (give `ED_TITLE_PICK=` empty to get the page). A run that boots a state (`ED_QUICKLOAD`, so `run.sh`) plays
+  that state's mode: 56 MB co-op, smaller solo (`coop_follow_boot_state`), and settings.ini keeps its own `mod_coop`
+  (`settings_run_coop`). So `run.sh saves/slot1.state` (48 MB) now loads solo even with your co-op setting (it was refused
+  under the separate rooms before), and slot3 (56 MB) co-op even with solo picked.
+- Seen in pictures: Screenshots for Claude/solo-coop-picker/P3-start-load/. Not seen: another language, the idle 200 s
+  under the page, a replay that fails to land (the one-second drop), the user's play; the music was not listened to.
+- **The user's report ("solo and co-op screen does not appear"):** their last play (logs/play.log, 16:16) ran a build
+  from before P3 (built 17:51). With P3, play.bat's own path was run: the launcher's Play, title-rooms.state, a copy of
+  the user's co-op settings and card. Start Game and Load Game both opened the page (runs -181610-p3f-playbat-start and
+  -181655-p3f-playbat-load, pictures 09 and 10). Ask the user to try it again with this build.
+
 ## 2026-11-17: the Solo/Co-op picker, step P2: the two-card page, and Controls through Player I / Player II (checkpoint commit)
 docs/research/solo-coop-picker/plan.md, "Built: step P2".
 - **Controls now asks whose first**, everywhere: the title's Options > Controls, the Tome's Settings > Controls and the
