@@ -196,6 +196,10 @@ Play with `play-rooms-log.bat subtitles`, co-op on, in Alex's mansion (chapter 0
   nothing left behind after it.
 - Say if a line is ever in the wrong half, cut off, left behind after it ends, or in both halves with the players in
   different rooms.
+- Since step F2 (2026-11-17): with a line in both halves, player 2's copy should be in the middle of their half, the
+  same as player 1's in theirs (it sat a little left before). Check both phone answers. Also say if any of player 2's
+  HUD (prompts, the health/sanity/magick bars, the words box) has moved since the last build, mainly while a line or
+  a prompt is up in player 1's half at the same height.
 
 ## 9. The white flash after the phone call and a sanity effect (2026-11-17)
 The flash should be one smooth lavender fade, with no dark triangle from the middle to the top-left corner.
@@ -207,3 +211,5 @@ The flash should be one smooth lavender fade, with no dark triangle from the mid
 - If you can, try the 21:9 aspect setting: the flash should still fill the whole half.
 - The first flash after clearing the shader cache may stutter. It should still stay in the right half all the way.
 - Say if a flash is ever in the wrong half, leaves a corner of its half uncovered, or still shows a hard edge.
+- Since step F2 (2026-11-17) the flash is centred in its half (before, it sat a bit off to one side). It should
+  still cover the whole half, with no strip at either edge.

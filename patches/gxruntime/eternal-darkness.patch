@@ -7892,7 +7892,7 @@ index 0000000..64bd328
 +
 +} // namespace aurora::gfx::glow
 diff --git a/graphics/aurora/lib/gfx/gxcore_draw.cpp b/graphics/aurora/lib/gfx/gxcore_draw.cpp
-index 71136b9..1e8dc99 100644
+index 71136b9..2777911 100644
 --- a/graphics/aurora/lib/gfx/gxcore_draw.cpp
 +++ b/graphics/aurora/lib/gfx/gxcore_draw.cpp
 @@ -1,4 +1,14 @@
@@ -9303,7 +9303,7 @@ index 71136b9..1e8dc99 100644
    gfx::resolve_pass(it->second, srcRect, do_clear && cmd.color_update,
                      do_clear && cmd.alpha_update,
                      do_clear && cmd.depth_update,
-@@ -723,73 +1893,734 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
+@@ -723,73 +1893,740 @@ void copy_efb_to_texture(const gxc::EfbCopyCommand& cmd) {
                                  static_cast<float>(cmd.clear_a) / 255.f},
                      clearDepthValue, fmt, &filter);
  
@@ -9638,6 +9638,12 @@ index 71136b9..1e8dc99 100644
 +  }
 +  if (x0 > x1)
 +    return 0.f;
++  // Wholly past the screen's right edge: another half's HUD (Eternal Darkness's co-op: player 2's at +4096, player 1's
++  // at +8192 in player 2's close-up; only a split view brings it back). This screen's bands are not its own: a line
++  // centred in player 1's half at the same height left player 2's copy of it unshifted, 80 units left of their half's
++  // middle, while the host takes the shift off (hle.c coop_subtitle_wide). Always out by the spare width.
++  if (x0 > 1.f)
++    return spare;
 +  const int b0 = std::clamp(static_cast<int>(y0 / 8.f), 0, kHudBands - 1);
 +  const int b1 = std::clamp(static_cast<int>(y1 / 8.f), 0, kHudBands - 1);
 +  // What spans a split's whole frame, as a scene's bars, isn't a thing in the middle of the HUD: with it,
@@ -10095,7 +10101,7 @@ index 71136b9..1e8dc99 100644
      const float sx = plan.viewport[0];
      const float sy = plan.viewport[1];
      const float sz = plan.viewport[2];
-@@ -799,13 +2630,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -799,13 +2636,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const float width = sx * 2.0f;
      const float height = -sy * 2.0f;
      gx::set_logical_viewport({
@@ -10113,7 +10119,7 @@ index 71136b9..1e8dc99 100644
    }
  
    // U4: apply DrawPlan scissor as a logical render-pass scissor. Multi-rect
-@@ -827,7 +2660,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -827,7 +2666,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
        [&](uint32_t address, uint32_t tsize, uint32_t format, uint32_t width,
            uint32_t height, const void* data, uint32_t available, bool has_tlut,
            uint32_t tlut_address, uint32_t tlut_format, uint32_t tlut_entries,
@@ -10122,7 +10128,7 @@ index 71136b9..1e8dc99 100644
      auto efbIt = g_efbCopyTextures.find(address);
      if (efbIt != g_efbCopyTextures.end() && efbIt->second) {
        ++g_textureCacheStats.hits;
-@@ -839,23 +2672,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -839,23 +2678,275 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      const uint32_t size = std::min(tsize, available);
      // Hash the actual source texels (+ TLUT for CI) so a content change under an
      // unchanged guest identity is a distinct cache entry — see TextureKey.
@@ -10405,7 +10411,7 @@ index 71136b9..1e8dc99 100644
      // gxcore owns the decode for every format: produce tightly-packed RGBA8 and
      // upload it as a pre-decoded PC texture (no substrate re-conversion).
      std::vector<uint8_t> decoded;
-@@ -868,8 +2953,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -868,8 +2959,50 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      } else {
        decoded = gxc::decode_texture(format, width, height, bytes, size);
      }
@@ -10457,7 +10463,7 @@ index 71136b9..1e8dc99 100644
        handle = new_static_texture_2d(
            width, height, 1, GX_TF_RGBA8_PC,
            ArrayRef<uint8_t>{decoded.data(), decoded.size()}, false,
-@@ -892,7 +3019,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -892,7 +3025,98 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    };
  
    BindGroupRef textureBindGroup = 0;
@@ -10556,7 +10562,7 @@ index 71136b9..1e8dc99 100644
      if (plan.texmap_mask == 0u) {
        // Single-texmap fast path: primary texture + plan.sampler at binding 0/1.
        if (plan.has_texture) {
-@@ -903,7 +3121,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -903,7 +3127,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
              plan.tlut_data, plan.tlut_available);
          if (bound) {
            const auto sampler =
@@ -10565,7 +10571,7 @@ index 71136b9..1e8dc99 100644
            const std::array entries{
                WGPUBindGroupEntry{.binding = 0,
                                   .textureView =
-@@ -919,6 +3137,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -919,6 +3143,7 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            textureBindGroup = bind_group_ref(descriptor);
          }
        }
@@ -10573,7 +10579,7 @@ index 71136b9..1e8dc99 100644
      } else {
        // Multi-texmap: bind each used texmap at 2t (texture) / 2t+1 (sampler),
        // matching the WGSL declarations. Per-texmap PlanSampler from
-@@ -932,12 +3151,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -932,12 +3157,15 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          if ((plan.texmap_mask & (1u << t)) == 0u)
            continue;
          const gxc::PlanTexture& pt = plan.textures[t];
@@ -10590,7 +10596,7 @@ index 71136b9..1e8dc99 100644
          if (!bound) {
            complete = false;
            break;
-@@ -945,14 +3167,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -945,14 +3173,16 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
          held.push_back(bound);
          const gxc::PlanSampler& ps =
              pt.sampler.valid ? pt.sampler : plan.samplers[t];
@@ -10609,7 +10615,7 @@ index 71136b9..1e8dc99 100644
        const WGPUBindGroupDescriptor descriptor{
            .label = {"GXCore Texture Bind Group", WGPU_STRLEN},
            .layout = texture_bind_group_layout(plan.texmap_mask).Get(),
-@@ -960,6 +3184,374 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -960,6 +3190,374 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
            .entries = entries.data(),
        };
        textureBindGroup = bind_group_ref(descriptor);
@@ -10984,7 +10990,7 @@ index 71136b9..1e8dc99 100644
      }
    }
  
-@@ -969,31 +3561,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -969,31 +3567,20 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
    const auto idxRange = push_indices(
        reinterpret_cast<const uint8_t*>(plan.indices.data()),
        plan.indices.size() * sizeof(uint16_t), 4);
@@ -11021,7 +11027,7 @@ index 71136b9..1e8dc99 100644
      });
    };
  
-@@ -1006,6 +3587,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
+@@ -1006,6 +3593,8 @@ bool submit_draw_plan(const gxc::DrawPlan& plan) {
      }
    } else {
      issue_draw();

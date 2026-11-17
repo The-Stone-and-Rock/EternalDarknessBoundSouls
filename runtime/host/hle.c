@@ -21885,8 +21885,10 @@ static void coop_subtitle_line_freed(CPUState* cpu) {
 // screen's middle out by the spare width, so a corner prompt sits at the corner. The game's 16:9 HUD is 800 units over
 // -0.8..0.8, so that is 80 units (205 at 21:9, where the renderer narrows it by 16/21). A line past the edge is all right
 // of the middle: player 2's "Hello?" sat 80 units right of their half's middle (logs/run-20261117-104322-sub-after-p2-follow;
-// at 4032 it was 16 right, run-20261117-105109-sub-exp4032). Taken off here. Not taken by the renderer when something
-// crossed the screen's middle at the line's height (its bands), and then the line sits that much left of the middle.
+// at 4032 it was 16 right, run-20261117-105109-sub-exp4032). Taken off here. A draw wholly past the screen's right
+// edge is always shifted (step F2): before, the renderer skipped it when something crossed the screen's middle at the
+// line's height, so with the line in both halves player 2's copy sat 80 units left of their half's middle
+// (logs/run-20261117-111931-u2-p2-follow, shot 46).
 static s16 coop_subtitle_wide(CPUState* cpu) {
     if (!sda_ready(cpu) || mem_read32(cpu, cpu->gpr[13] - TITLE_WIDESCREEN) == 0u)
         return 0;
@@ -28030,17 +28032,14 @@ static void flash_began(CPUState* cpu, const char* which) {
 static void flash_ed85_notify(CPUState* cpu) { flash_began(cpu, "0x80145760 (ed85's flash)"); }
 static void flash_copy_notify(CPUState* cpu) { flash_began(cpu, "0x8006B270 (the flash's copy)"); }
 
-// How far the disc moves to go to its player's half. coop_subtitle_away takes the renderer's widescreen HUD shift
-// (80 units at 16:9) off, as the renderer moves a draw wholly right of the middle out by it. The disc spans every HUD
-// band, so the renderer skips that shift whenever anything crosses the middle at any height, which this side can't
-// see. Half of it is put back: the disc's centre is then 40 units off either way (102 at 21:9). A moved disc's rim is
-// also pushed out by half again (FLASH_GROW: its 20 sides reach 758 units from the centre, not 505), so the half's
-// corners stay covered at 21:9 too (the far corner there is about 577 + 102 away). The split's view clips it to the half.
+// How far the disc moves to go to its player's half: as the subtitle line (coop_subtitle_away takes the renderer's
+// widescreen HUD shift off). A moved disc is wholly past the screen's right edge, and since step F2 the renderer always
+// shifts such a draw, whatever crosses the middle on this screen, so its centre is its half's. (Step F1 put half the
+// shift back here, as the renderer then skipped it whenever anything crossed the middle at the disc's height.) A moved
+// disc's rim is also pushed out by half again (its 20 sides reach 758 units from the centre, not 505): the half's corners
+// stay covered with room to spare. The split's view clips it to the half.
 static s16 flash_away(CPUState* cpu, int owner) {
-    s16 away = coop_subtitle_away(cpu, owner);
-    if (away != 0)
-        away = (s16)(away + coop_subtitle_wide(cpu) / 2);
-    return away;
+    return coop_subtitle_away(cpu, owner);
 }
 
 static void flash_say_pairs(CPUState* cpu, const char* when, u32 pos, u32 clr, u32 count) {

@@ -964,3 +964,6 @@ right of the middle. At +4032 it was 16 units right (run-20261117-105109-sub-exp
 What worked: take that width off in the host, 80 units with the game's widescreen on (205 at 21:9), nothing at 4:3
 (`coop_subtitle_wide`). Centred in run-20261117-105400-sub-after2-p2-follow. The renderer was left alone: player 2's
 bars, count and prompts were placed by eye with the shift in.
+Later (step F2): with the line in both halves the renderer still skipped the shift for the copy past the edge, as
+player 1's centred line was on the same height band, so the copy sat 80 units left. Fixed in the renderer: a draw
+wholly past the right edge is always shifted (subtitles.md "Built: step F2").

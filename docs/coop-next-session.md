@@ -3,6 +3,25 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: subtitle leftovers, step F2 (checkpoint commit; review found nothing)
+docs/research/coop-gaps/subtitles.md ("Built: step F2").
+- **Player 2's copy of a line sat 48 px left of their half's middle** when the line was in both halves. The cause was
+  the renderer, not `coop_subtitle_wide`: `widescreen_hud_shift` (gxcore_draw.cpp) skipped its shift for any draw on
+  a height band where something crossed the screen's middle. Player 1's centred line is on the same band, so the copy
+  at +4016 was not shifted, while the host still took 80 off. Now a draw wholly past the right edge (another half's
+  HUD) is always shifted. The flash no longer puts half the shift back (`flash_away`), so its disc is centred too.
+- Seen: both halves centred for player 2's phone (left 239, right 719 px; was 671) and player 1's phone; at aspect 4
+  too. Apart, the EXAMINE prompt, the clock's words and the ANSWER PHONE prompt: the same places as before.
+- **Older, not from the subtitle work (not fixed):** a state saved in player 2's own scene loads as player 1's.
+  Both halves show the scene's close-up camera and player 2's camera is "-" (U2b's picture 02; its line naming player
+  1's character is U1's rule for a loaded line). Seen again with a state saved before any subtitle started and no subtitle in the run
+  (logs/run-20261117-124145-f2-p2scene-load). From the code: `hle_save_held` does not wait in player 2's own scene,
+  and `hle_coop_state_load` (step E, 1bc19f3) clears `g_coop_screen`, `g_play_script_p2`, the lent cameras and their
+  camera zones, so the loaded scene is the game's. In that run the scene also stayed held: busy 0x22 and no line for
+  the 370 frames after the load (it was saved before the scene's script ran, frame 4575 of 4592). A fix would hold the
+  save through player 2's own scene, as for their close-up. Not done here.
+- Pictures: `Screenshots for Claude/F2-subtitle-leftovers/`.
+
 ## 2026-11-17: the sanity/phone white flash, step F1 (checkpoint commit)
 docs/research/firstrun-hd-flash/flash.md ("Built" and "Built: review fixes"), in hle.c (`flash_submit_notify`):
 - **The blocky flash:** the game fills 21 of the disc's 64 pairs; the rest sat at 0,0 with z +1 and the host kept

@@ -652,3 +652,45 @@ Pictures 06 to 09 in `Screenshots for Claude/U3-subtitles-tome/`:
 | run-20261117-120120-u3r-p2copy | Left out of player 2's copy as in U3's run; line 2 at 4670, over at 4795 (one frame later than U3's run) | Nothing on player 2's Tome page, "Remember me, Pius?" in player 1's half (08) |
 
 Not seen: the replay page itself. The fix is from the code only. No run here opens the replay page.
+
+## Built: step F2, player 2's copy centred (2026-11-17, checkpoint commit, not yet played by the user)
+
+Review (2026-11-17): the reviewers found nothing. The build used for the runs is newer than the renderer edit, and
+pictures 02 and 08 were looked at again: both copies centred, the flash in player 2's half only.
+
+- **The cause.** With the line in both halves, player 2's copy sat 48 px left of their half's middle
+  (logs/run-20261117-111931-u2-p2-follow, shot 46: left 239, right 671, the half's middle 720). `coop_subtitle_wide`
+  was right: the renderer moves a draw past the edge out by 80 units and the host takes 80 off. But the renderer
+  (`widescreen_hud_shift`, gxcore_draw.cpp) leaves alone any draw on a height band where something crossed the
+  screen's middle this frame or the last. The line in player 1's half is centred on the same band, so the copy at
+  +4016 was not moved, and the host's 80 put it 80 units (48 px in a half) left. Its own bands were player 1's.
+- **The fix (renderer).** A draw wholly past the screen's right edge (x0 > 1) is always moved out by the spare width.
+  Only a split view brings such a draw back (player 2's HUD at +4096, player 1's at +8192 in player 2's close-up), so
+  this screen's bands are not its own. Before, it was moved anyway unless such a band blocked it, so nothing that was
+  placed by eye with the shift in moves.
+- **The flash** (`flash_away`, step F1) put half the shift back for the same reason. It now uses the subtitle's place
+  as it is, so the disc is centred in its half. The grown rim stays.
+- **4:3 and 21:9, from the code.** At 4:3 the game's widescreen is off (aspect 1), the HUD spans the whole screen, the
+  renderer moves nothing and `coop_subtitle_wide` gives 0. At 21:9 the renderer's spare is 1 - 0.8 x 16/21 = 0.39 NDC,
+  205 HUD units at the narrowed scale, which is what `coop_subtitle_wide` gives; it is now always applied too.
+
+Runs (saves/slot3.state, ED_RUN_AWAY=1, ED_SUBTITLES=1, the U2 scripts). Pictures in
+`Screenshots for Claude/F2-subtitle-leftovers/`. Text centres measured from the pictures (960 px wide, halves of 480):
+
+| Run | Seen |
+|---|---|
+| run-20261117-123652-f2-p2-follow | Player 2's phone, one room: "Hello?" and "Remember me, Ellia?" at 239 and 719 in both halves (02). The flash fills player 2's half, "moved 4016" (08). ANSWER PHONE after it in the same place as before |
+| run-20261117-123836-f2-p2-apart | Player 1 in room 77: the lines at 719 in player 2's half only, as before (03) |
+| run-20261117-123928-f2-mix-p1phone-p2clock | Player 1's "Remember me, Pius?" at 239 and 719 (was 671 in U2's run, 04 and 05). Player 2's EXAMINE prompt and the clock's words in the same places as U2's run (05, 06) |
+| run-20261117-124032-f2-p2-follow-219 | A scratch settings file at aspect 4: "laid at x 320 + 3891" (205 off), both copies at 239.5 and 719.5 (07); the flash, "moved 3891", fills player 2's half (09). The window was the user's 16:9 screen |
+
+Not seen: a real 21:9 or 4:3 screen (4:3 is from the code), the +8192 path (player 1's line while player 2 has the
+screen), solo (a scratch solo settings file reached only the title, picture 11; the change only touches draws wholly
+off the screen, which solo does not make).
+
+**U2b picture 02 (a state saved in player 2's scene) is older than the subtitle work.** Seen again with a state saved
+at frame 4575, before the call's first line (4592), with no subtitle in the run (logs/run-20261117-124127-f2-p2scene-save
+and -124145-f2-p2scene-load, picture 10): both halves show the close-up camera, player 2's camera "-", for the whole
+run. The scene also stayed held (busy 0x22, no line) for 370 frames. From the code: the save does not wait in player 2's
+own scene, and `hle_coop_state_load` (step E, 1bc19f3) clears `g_coop_screen`, `g_play_script_p2`, the lent cameras and
+player 2's camera zones. Left as it is; written up in docs/coop-next-session.md.

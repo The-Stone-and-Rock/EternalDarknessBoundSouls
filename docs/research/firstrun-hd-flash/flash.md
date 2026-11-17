@@ -370,3 +370,10 @@ player 2 answers) stands as its own co-op bug.
   screen was not seen.
 - Solo is not moved or grown; seen unchanged (`logs/run-20261117-123048-flash-solo-a0-recheck`).
 - Pictures: `Screenshots for Claude/f1-sanity-flash/review-*`.
+
+## Changed by step F2 (2026-11-17): the disc is centred
+- The renderer now always moves a draw wholly past the screen's right edge out by the widescreen spare width
+  (`widescreen_hud_shift`, gxcore_draw.cpp; docs/research/coop-gaps/subtitles.md "Built: step F2"). So `flash_away`
+  no longer puts half the shift back: a moved disc's centre is its half's middle at 16:9 and 21:9. The grown rim stays.
+- Seen: player 2's phone, "moved 4016" (was 4056), and at aspect 4 "moved 3891": player 2's half lit whole both times
+  (`Screenshots for Claude/F2-subtitle-leftovers/` 08, 09).
