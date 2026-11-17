@@ -7,7 +7,7 @@ Rooms 4, scripts read 36, rows 939. The TSV beside this file has every row.
 Co-op: 24 rows flagged (a call that branches on a per-player word within one call, with no live host hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: the room in play 14, the room in play (in an input mode's own code) 6, the script words 4.
 A flag is a place to look, not a bug found: the host can still cover it another way (a helper around the whole script run, a swap around the caller), and a word that is one per game may be fine for both.
 
-Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 16 (0), who "the player" is 51 (0), one global per game 11 (1), one script state for both 17 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 5 (0), queued for a later frame 21 (0), run inside player 2's change 7 (0), only for the chapter's character (a hero gate) 1 (1), drawn from one camera 17 (0).
+Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 16 (0), who "the player" is 51 (0), one global per game 11 (0), one script state for both 17 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 5 (0), queued for a later frame 21 (0), run inside player 2's change 7 (0), only for the chapter's character (a hero gate) 1 (1), drawn from one camera 17 (0).
 
 Rooms: [5](#room-5), [64](#room-64), [83](#room-83), [267](#room-267)
 
@@ -598,9 +598,9 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 2403 (BodyExamine01 enter; ObeliskExamine01 enter)
 
-Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (covered).
 
-Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], the six prompts [hooked].
+Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], the six prompts [hooked].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|

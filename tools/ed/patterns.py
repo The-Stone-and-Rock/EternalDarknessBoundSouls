@@ -64,8 +64,11 @@ PATTERNS = [
               ('coop_show_asked', None, 'the show words'), ('coop_hold_open', None, 'the holds'),
               ('g_coop_prompt_slots', None, 'player 2\'s six prompts'), ('coop_prompt_look', 'c3619bf', 'the six prompts'),
               ('coop_prompt_player1s', None, 'player 1\'s prompts in player 2\'s close-up'),
-              ('coop_scan_player1', None, 'the zones-on word, the prompts')],
-         example='subtitles have no fix yet (0x80308DE8 is one record; the keep fix only stops it being overwritten)',
+              ('coop_scan_player1', None, 'the zones-on word, the prompts'),
+              ('g_coop_p2_looks', None, 'the looks on offer: player 2\'s own copy')],
+         example='subtitles have no fix yet (0x80308DE8 is one record; the keep fix only stops it being overwritten): '
+                 'player 2 answering the mansion phone (L00/1801) gets its lines in player 1\'s half '
+                 '(docs/research/coop-gaps/subtitles.md)',
          trust='High that the call uses it; uncovered when a word it reaches is one per game (no copy of player 2\'s) or '
                'it\'s a subtitle; whether two players really collide on it is a run-time fact.'),
     dict(key='state', name='one script state for both', unit='script',
@@ -215,8 +218,10 @@ def for_row(x, words, where, prims):
             out.append(('room', 'covered' if arrival_row else bracketed(False), ('script',)))
     if name in ONE_GLOBAL_CALLS or any(w['picks'] and _base(w['word']) in LOOK_WORDS for w in words):
         # Each global has its fix (the busy word, the input mode, the show words, the holds, the prompts, the zones-on
-        # word: see the fix list) but two: the looks on offer (one copy, never swapped) and the subtitles (no fix).
-        look = name in ('ed219', 'ed220', 'ed221') or any(_base(w['word']) in LOOK_WORDS and w['status'] == 'one per game' for w in near)
+        # word, the looks on offer: see the fix list) but the subtitles (no fix). The looks are player 2's own copy
+        # (g_coop_p2_looks, since 2026-11-05: docs/research/coop-gaps/looks-on-offer.md); what's left there is one thing
+        # offered to both and taken by one, a run-time case these rows don't decide.
+        look = any(_base(w['word']) in LOOK_WORDS and w['status'] == 'one per game' for w in near)
         unit = ('call', name, args[:1]) if name in ('ed56', 'ed68') else ('call', name, ())
         out.append(('global', 'uncovered' if look or name in SUBTITLES else 'covered', unit))
     if name in ('fn1', 'fn35') and region_script and (name == 'fn35' or (args and args[0] not in ('0',))):

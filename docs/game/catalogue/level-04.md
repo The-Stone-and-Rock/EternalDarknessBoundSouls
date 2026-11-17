@@ -9,7 +9,7 @@ Rooms this level reaches on paper (its door walk) but whose scripts are none of 
 Co-op: 41 rows flagged (a call that branches on a per-player word within one call, with no live host hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: the room in play 21, the script words 12, the look being set up 8.
 A flag is a place to look, not a bug found: the host can still cover it another way (a helper around the whole script run, a swap around the caller), and a word that is one per game may be fine for both.
 
-Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 15 (0), who "the player" is 137 (0), one global per game 10 (3), one script state for both 54 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 14 (0), queued for a later frame 33 (0), run inside player 2's change 15 (0), drawn from one camera 31 (0).
+Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 15 (0), who "the player" is 137 (0), one global per game 10 (0), one script state for both 54 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 14 (0), queued for a later frame 33 (0), run inside player 2's change 15 (0), drawn from one camera 31 (0).
 
 Rooms: [5](#room-5), [13](#room-13), [83](#room-83), [185](#room-185), [186](#room-186), [187](#room-187), [188](#room-188), [189](#room-189), [190](#room-190), [191](#room-191), [192](#room-192), [193](#room-193), [194](#room-194), [195](#room-195), [338](#room-338), [339](#room-339), [340](#room-340)
 
@@ -617,9 +617,9 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 2403 (BodyExamine01 enter; ObeliskExamine01 enter)
 
-Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (covered).
 
-Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], the six prompts [hooked].
+Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], the six prompts [hooked].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -877,9 +877,9 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 
 ### Script 690 (Region04 enter)
 
-Co-op patterns (`ed patterns`): one global per game (uncovered).
+Co-op patterns (`ed patterns`): one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], the six prompts [hooked], the room slot table [helper].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], the six prompts [hooked], the room slot table [helper].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -887,11 +887,11 @@ Co-op, reaches: the two looks on offer, copied from it [one per game], the look 
 
 ### Script 834 (BoxRegion01 enter)
 
-Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (one per game, by EXAMINE).
+Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (helper, by EXAMINE).
 
-Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -972,9 +972,9 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 
 ### Script 1887 (ExamineRgn01 enter)
 
-Co-op patterns (`ed patterns`): who "the player" is (covered), one global per game (uncovered), drawn from one camera (n/a), one script state for both (n/a), queued for a later frame (covered).
+Co-op patterns (`ed patterns`): who "the player" is (covered), one global per game (covered), drawn from one camera (n/a), one script state for both (n/a), queued for a later frame (covered).
 
-Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], hold word, 0x80006D0C asks it [hooked], the player's object [hooked], hold word [helper], hold's input channel [hooked], find's bit 2, script timers wait on it [helper], busy [hooked], main [hooked], show word for main [helper], show word [helper], equipment, 20 records by holder id [keyed], the cameras' records [hooked], the spell being cast [hooked], control blocks [helper], asks if anyone is busy [helper], the room slot table [helper], the running script [per run], the script words [hooked], the two looks on offer, copied from it [one per game], the look being set up [one per game], the six prompts [hooked].
+Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], hold word, 0x80006D0C asks it [hooked], the player's object [hooked], hold word [helper], hold's input channel [hooked], find's bit 2, script timers wait on it [helper], busy [hooked], main [hooked], show word for main [helper], show word [helper], equipment, 20 records by holder id [keyed], the cameras' records [hooked], the spell being cast [hooked], control blocks [helper], asks if anyone is busy [helper], the room slot table [helper], the running script [per run], the script words [hooked], the two looks on offer, copied from it [helper], the look being set up [helper], the six prompts [hooked].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1147,9 +1147,9 @@ Co-op, reaches: the room in play [helper], reads the zones' inside words [helper
 
 ### Script 2354 (CameraRgn04 enter)
 
-Co-op patterns (`ed patterns`): one global per game (uncovered).
+Co-op patterns (`ed patterns`): one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], the six prompts [hooked], the room slot table [helper].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], the six prompts [hooked], the room slot table [helper].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1157,9 +1157,9 @@ Co-op, reaches: the two looks on offer, copied from it [one per game], the look 
 
 ### Script 2353 (CameraRgn05 enter)
 
-Co-op patterns (`ed patterns`): one global per game (uncovered).
+Co-op patterns (`ed patterns`): one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], the six prompts [hooked], the room slot table [helper].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], the six prompts [hooked], the room slot table [helper].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1495,9 +1495,9 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 2360 (Region01 enter)
 
-Co-op patterns (`ed patterns`): one global per game (uncovered).
+Co-op patterns (`ed patterns`): one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], the six prompts [hooked], the room slot table [helper].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], the six prompts [hooked], the room slot table [helper].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1506,9 +1506,9 @@ Co-op, reaches: the two looks on offer, copied from it [one per game], the look 
 
 ### Script 1153 (SphereRegion05 enter)
 
-Co-op patterns (`ed patterns`): one global per game (uncovered).
+Co-op patterns (`ed patterns`): one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], the six prompts [hooked], the room slot table [helper].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], the six prompts [hooked], the room slot table [helper].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1606,11 +1606,11 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 
 ### Script 2099 (EffigyRgn01 enter)
 
-Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (one per game, by EXAMINE).
+Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (helper, by EXAMINE).
 
-Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1659,9 +1659,9 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 
 ### Script 2380 (Region01 enter)
 
-Co-op patterns (`ed patterns`): one global per game (uncovered).
+Co-op patterns (`ed patterns`): one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], the six prompts [hooked], the room slot table [helper].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], the six prompts [hooked], the room slot table [helper].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1670,9 +1670,9 @@ Co-op, reaches: the two looks on offer, copied from it [one per game], the look 
 
 ### Script 774 (ExamineRgn enter)
 
-Co-op patterns (`ed patterns`): one global per game (uncovered).
+Co-op patterns (`ed patterns`): one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], the six prompts [hooked], the room slot table [helper].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], the six prompts [hooked], the room slot table [helper].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1718,11 +1718,11 @@ Co-op, reaches: hold word, 0x80006D0C asks it [hooked], the player's object [hoo
 
 ### Script 345 (CodexRegion01 enter)
 
-Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (one per game, by EXAMINE).
+Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (helper, by EXAMINE).
 
-Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1761,9 +1761,9 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 
 ### Script 154 (Region02 enter)
 
-Co-op patterns (`ed patterns`): who "the player" is (covered), one global per game (uncovered), a table player 2's things fill (n/a), one script state for both (n/a).
+Co-op patterns (`ed patterns`): who "the player" is (covered), one global per game (covered), a table player 2's things fill (n/a), one script state for both (n/a).
 
-Co-op, reaches: the running script [hooked], the six prompts [hooked], current [hooked], the room slot table [hooked], the room in play [helper], the room change's ticket [helper], the script words [hooked], the open words window [hooked], raw and processed pads, the input channels [helper], the pad routine's state [helper], hold word, 0x80006D0C asks it [hooked], the player's object [hooked], finds a node by id [hooked], the cameras' records [hooked], hold word [helper], hold's input channel [hooked], busy [hooked], find's bit 2, script timers wait on it [helper], the fade's ticks [hooked], equipment, 20 records by holder id [hooked], the spell being cast [hooked], main [hooked], the two looks on offer, copied from it [one per game], the look being set up [one per game].
+Co-op, reaches: the running script [hooked], the six prompts [hooked], current [hooked], the room slot table [hooked], the room in play [helper], the room change's ticket [helper], the script words [hooked], the open words window [hooked], raw and processed pads, the input channels [helper], the pad routine's state [helper], hold word, 0x80006D0C asks it [hooked], the player's object [hooked], finds a node by id [hooked], the cameras' records [hooked], hold word [helper], hold's input channel [hooked], busy [hooked], find's bit 2, script timers wait on it [helper], the fade's ticks [hooked], equipment, 20 records by holder id [hooked], the spell being cast [hooked], main [hooked], the two looks on offer, copied from it [helper], the look being set up [helper].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1809,11 +1809,11 @@ Co-op, reaches: the running script [hooked], the six prompts [hooked], current [
 
 ### Script 841 (BoxRegion01 enter)
 
-Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (one per game, by EXAMINE).
+Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (helper, by EXAMINE).
 
-Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1879,9 +1879,9 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 842 (SphereRegion01 enter)
 
-Co-op patterns (`ed patterns`): one global per game (uncovered).
+Co-op patterns (`ed patterns`): one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], the six prompts [hooked], the room slot table [helper].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], the six prompts [hooked], the room slot table [helper].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1930,11 +1930,11 @@ No other call the catalogue names.
 
 ### Script 2089 (StatueRgn01 enter)
 
-Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (one per game, by EXAMINE).
+Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (helper, by EXAMINE).
 
-Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -1992,11 +1992,11 @@ Co-op, reaches: the running script [per run], the script words [hooked], the pla
 
 ### Script 1960 (TorchRgn01 enter)
 
-Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (one per game, by EXAMINE).
+Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (helper, by EXAMINE).
 
-Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -2004,11 +2004,11 @@ Co-op, reaches: the two looks on offer, copied from it [one per game], the look 
 
 ### Script 1958 (StatueRgn01 enter)
 
-Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (one per game, by EXAMINE).
+Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (helper, by EXAMINE).
 
-Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|
@@ -2016,11 +2016,11 @@ Co-op, reaches: the two looks on offer, copied from it [one per game], the look 
 
 ### Script 346 (CodexRgn01 enter)
 
-Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (one per game, by EXAMINE).
+Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the look being set up** (helper, by EXAMINE).
 
-Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (bracket), one global per game (covered).
 
-Co-op, reaches: the two looks on offer, copied from it [one per game], the look being set up [one per game], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
+Co-op, reaches: the two looks on offer, copied from it [helper], the look being set up [helper], the running script [hooked], finds a node by id [helper], the six prompts [hooked], main [helper], the room in play [helper], the room slot table [helper], current [hooked].
 
 | line | kind | what | if | co-op flagged |
 |---|---|---|---|---|

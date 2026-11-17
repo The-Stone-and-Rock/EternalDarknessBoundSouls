@@ -17,14 +17,11 @@
  },
  "global": {
   "units": 30,
-  "covered": 23,
+  "covered": 26,
   "bracket": 0,
-  "uncovered": 7,
+  "uncovered": 4,
   "n/a": 0,
   "top_uncovered": [
-   "ed219(): uncovered at 315 of its 315 places, e.g. L00/2322 room 67 line 1; L00/2271 room 67 line 2",
-   "ed221(): uncovered at 93 of its 93 places, e.g. L00/698 room 69 line 6; L00/2332 room 70 line 1",
-   "ed220(): uncovered at 85 of its 85 places, e.g. L00/792 room 69 line 2; L00/2334 room 71 line 1",
    "EDStartSubtitlesForAlexClockPuzzle: uncovered at 2 of its 2 places, e.g. L00/1551 room 78 line 51; L12/1551 room 78 line 51",
    "EDCleanUpSubtitles: uncovered at 1 of its 1 place, e.g. L00/1801 room 69 line 48",
    "EDStartSubtitlesForGhostMaid: uncovered at 1 of its 1 place, e.g. L00/583 room 77 line 26",

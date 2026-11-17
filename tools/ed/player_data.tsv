@@ -46,8 +46,8 @@ call	0x80123F70	0	asks for the character info (zones' inside words at +180)	coop
 call	0x8016A7DC	0	reads the zones' inside words	coop_zones_swap
 call	0x80155738	0	asks if anyone is busy	coop_busy_ask
 call	0x801F5F88	0	finds a node by id (their list answers for player 2)	hle_find_by_id
-abs	0x803090C4	32	the look being set up: words, camera (ed219, ed220, ed221)	none: one copy, never swapped. coop_player_turn leaves it to who's in it
-abs	0x80307108	64	the two looks on offer, copied from it	none: one copy, never swapped. coop_player_turn leaves it to who's in it
+abs	0x803090C4	32	the look being set up: words, camera (ed219, ed220, ed221)	per call: only ed219-221 write it (0x800170D8-0x80017770) and copy it into look 0 or 1 in the same call, so it carries nothing between players (docs/research/coop-gaps/looks-on-offer.md)
+abs	0x80307108	68	the two looks on offer, copied from it	g_coop_p2_looks: player 2's own copy since 2026-11-05, swapped in by coop_prompt_look, coop_cameras_lend, coop_script_cameras, coop_words_tick; reset by coop_zones_new (ED_COOP_SHARED_LOOKS=1 shares the game's). Left: one thing offered to both, taken by one (looks-on-offer.md)
 r13	-24492	4	the Inventory page's state: list, actions, mix, check	tome_copy_step (check: page state only)
 r13	-24536	4	the mix script, the first pick's +42	tome_copy: separate because it lives in the copy
 r13	-24504	4	the Inventory's name window	tome_copy: separate because it lives in the copy
