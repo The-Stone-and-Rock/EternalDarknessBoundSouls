@@ -490,3 +490,91 @@ Seen after the fix (pictures 10-12 in `Screenshots for Claude/U1-subtitles/`):
   EXAMINE prompt and carriage clock words in theirs.
 Not seen: a state load mid-line, and a start over the other player's line. Neither was run; both fixes are read from
 the code.
+
+## Built: step U2, both halves in one room (2026-11-17, checkpoint commit, not yet played by the user)
+
+The user's call: the line in both halves while both players are in the same room; apart, only in the owner's half
+(U1). Only if it doesn't break the other co-op fixes. Solo is untouched: the same gate as U1.
+
+How (hle.c, `coop_subtitle_copy`, called each frame after `coop_subtitle_place`):
+- **The copy is the game's own make.** The line's make arguments are read at its layout: 0x801DB374 keeps them in
+  r24..r27 and r29 until it calls the layout (r28 is the text by then; the updater passes 1). The copy is a second
+  guest call of 0x801DB374 with them. Its layout adds the other half's away (`coop_subtitle_away` of the other owner),
+  and it takes the same name as the line (an owner-2 line names player 2's character in both halves).
+- **Made only when:** the record's +20 is still the line, the split is on, the players are not in two rooms
+  (`coop_rooms_apart`, by their own nodes), no Tome is up (`g_tw.sharing`, `g_tome_copy_open`, `g_coop_tome_p2`), and
+  at least two of the ten elements are free (one stays free after it).
+- **Freed with the game's free (0x801DA4D8):**
+  - at 0x80008D7C (new notify: the line's own free, the next row or its frames out);
+  - at 0x80008DD4 and 0x80008E40 (`coop_subtitle_ended`);
+  - each frame when the line is gone, the split goes off, the players are in two rooms, a Tome comes up, or the pool
+    has no free element.
+  - A state load forgets it without a free: `g_sub` is cleared there. (Safe only because a save now waits while a
+    copy is up: see "Review fixes for U2" below. A state with a copy in it would keep the copy for ever.)
+  - An element the game cleared (0x801DA074 at a mode's start) is only forgotten. One laid out again as something else
+    is forgotten at its layout, never freed by the host.
+- **Placed again** when the screen changes, as the line is.
+- The log (`ED_COOP_LOG`) gives the free count of the ten at each lay, copy made, copy freed, line over and line gone.
+
+Runs, all from saves/slot3.state (the fallback), ED_RUN_AWAY=1, ED_SUBTITLES=1. Pictures in
+`Screenshots for Claude/U2-subtitles-both-halves/`:
+
+| Run | Seen in pictures | Pool (free of 10) |
+|---|---|---|
+| run-20261117-111931-u2-p2-follow | Player 2's "Hello?" and "Remember me, Ellia?" centred in both halves; both gone at the end (01) | 9 line, 8 with copy, 10 after |
+| run-20261117-112010-u2-p2-apart | Player 1 in room 77: the lines only in player 2's half (02) | 9, 10 after |
+| run-20261117-112102-u2-p1-follow | Player 1's lines, "Remember me, Pius?", in both halves (03) | 9, 8, 10 after |
+| run-20261117-112136-u2-p1-leaves | Player 1 takes door 1000 during "Remember me": the copy in their half until the door, then none in room 77; player 2's stays (04) | 8 with copy and a prompt, 9 after (player 2's prompt) |
+| run-20261117-112237-u2-mix-p1phone-p2clock | Player 1's lines in both halves, player 2's EXAMINE prompt in its place beside the copy; then the clock's words in player 2's half only (05) | 7 with copy and prompt, 9 after (the prompt) |
+| run-20261117-112315-u2-mix-p2phone-p1clock | Player 2's lines in both halves; then player 1's clock words in their half only (06) | 8, 10 after |
+| run-20261117-112425-u2-load-mid-line | A state load at 4700 with the copy up: no crash, no line left in either half after it | not logged after the load |
+
+In the leave run, player 2's ANSWER PHONE prompt came back at player 1's door, during their call. The log has the
+prompt made at frame 4734, in the same pad read as "subtitle copy freed: the players are in two rooms" (frame 4734),
+just before it. Picture 04 agrees: no prompt at F4690 or F4720, the prompt at F4745. So the two come at the same
+moment, the room change. That U2 did not cause it is only inferred: `coop_prompt_show` runs before
+`coop_subtitle_copy` in `coop_pad_read`, and it does not read `g_sub`. It was not checked with the copy turned off.
+U1 noted the same prompt coming back after the call. (The first report of U2 said "frame 4668, before any copy was
+freed": that was wrong; 4668 is when the second line's copy was made.)
+
+Not seen:
+- Player 1's Start during player 2's call: the Tome did not open (the scene holds it), so the "a Tome is up" free
+  never ran (run-20261117-112355-u2-p2-phone-p1-tome).
+- The copy moved when the screen changes (player 2 taking the screen during player 1's line): never reached.
+- A full pool (no copy made): never reached; the most in use was 3 of 10.
+- Players coming together into one room partway through a line (the copy made then): not run.
+- The clock, the ghost maid, the creature and event-91 lines: not run.
+
+### Review fixes for U2 (2026-11-17, checkpoint commit)
+
+Four review findings. Three were real code problems, one was a wrong frame in the report.
+- **A save with the copy up (two findings, one cause).** Only the host frees the copy. A state saved while it was
+  up kept it as a used element of the ten. After loading, `g_sub` is cleared, so nothing frees it: the line would
+  stay drawn in the other half and the pool would have one element fewer until a mode start. Fixed by holding the
+  save: `hle_save_held()` now also waits while `g_sub.copy != 0`, as for the other host-only windows. Every save
+  (F1-F10, the quick key, the save-now file, ED_SAVE_STATE, the recording's start) goes through that wait in
+  quickstate.c. No load-time sweep was added: with the hold, no state can hold a copy. (`characters_reload` also
+  checks `hle_save_held()`, so a character change waits for the copy too: at most one line.)
+- **Co-op turned off, or player 2 gone, with a line up.** Every free was behind the co-op gate, so the copy stayed.
+  New `coop_subtitle_stop`, called in `coop_pad_read` while playing whenever `mod_coop` is off or `g_coop_p2` is 0:
+  it frees the copy with the game's free, puts an owner-2 line back at the game's own x (it was out at +4016, where
+  the full screen does not show it), and forgets the line. Not in player 2's copy Tome's turn. Solo never has a
+  line or copy in `g_sub`, so it returns at once there.
+- New test switch: `ED_TEST_COOP_OFF=FRAME` turns co-op off at that frame, as the mods menu's toggle does.
+- **The ANSWER PHONE frame** is corrected above (4734, not 4668).
+
+Runs (saves/slot3.state, ED_RUN_AWAY=1, ED_SUBTITLES=1, the p2-follow phone script). Pictures in
+`Screenshots for Claude/U2b-subtitles-review-fixes/`:
+
+| Run | Log | Seen in pictures |
+|---|---|---|
+| run-20261117-113619-u2b-save-hold | ED_SAVE_STATE at 4625, copy up: "the save ... waits", then saved just after the copy freed at 4645. Pool 9, 8, 10 at the end | Both lines in both halves, as before (01) |
+| run-20261117-113646-u2b-load-held-save | Loaded that state. Next line laid with 9 free, copy 8, back to 9 when the line freed: no orphan | Both halves had the line; nothing left in either half at F4850 and F4890 (02) |
+| run-20261117-113718-u2b-coop-off | ED_TEST_COOP_OFF=4630: "copy freed: co-op is off", "put back at the game's x", "[split] off" | Both halves at F4625; one centred "Hello?" on the full screen at F4640; "Remember me" centred at F4700; none at F4800 (03) |
+
+The line after the load named player 1's character ("Pius"): a loaded state's line is player 1's (U1's rule), as
+before. The pictures run up to about ten frames behind the log's frame numbers around a save (the save stalls the
+shots), so both halves' "Hello?" still shows in the picture labelled F4656, after the 4645 free.
+
+Not checked: player 2 gone mid-line (an area change); the leave and mix runs again after these fixes (the changed
+code only runs with co-op off, player 2 gone, or a save waiting).

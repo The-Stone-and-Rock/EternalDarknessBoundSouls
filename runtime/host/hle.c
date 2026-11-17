@@ -21799,9 +21799,42 @@ static struct {
     u32 element;    // the line put in its owner's half, as the record's +20
     s16 x;          // its +8 as last written
     s16 away;       // what was added to the game's x
+    // U2: the line's copy in the other half, while both players are in one room (coop_subtitle_copy).
+    u32 make[6];         // the line's own make, read at its layout: pack, group, line, flags, 1, style
+    unsigned serial;     // one up for each line laid
+    u32 copy;            // the copy's element (0: none)
+    unsigned copy_of;    // the line it copies (serial)
+    s16 copy_x, copy_away;
+    bool copy_making;    // inside the copy's 0x801DB374
+    unsigned no_copy_of; // the line whose "no copy" was logged
+    bool after_log;      // log the pool once the line and its copy are gone
 } g_sub;
 
 static bool coop_subtitles_on(void) { return g_settings.mod_coop && g_coop_p2 != 0u && !g_tome_copy_turn; }
+
+// The ten shared elements (0x805F87D0): how many are free (0x801DB374 takes the first with +122 and +123 both 0).
+static int coop_subtitle_pool_free(CPUState* cpu) {
+    int n = 0;
+    for (u32 k = 0u; k < TW_ELEMENT_COUNT; k++)
+        n += !tw_element_used(cpu, TW_ELEMENTS + k * TW_ELEMENT_SIZE);
+    return n;
+}
+
+// The copy freed with the game's own free (0x801DA4D8), as the game frees the line. One the pool was cleared of
+// (0x801DA074 at a mode's start) is only forgotten; one made again as something else was forgotten at its layout.
+static void coop_subtitle_copy_free(CPUState* cpu, const char* why) {
+    u32 copy = g_sub.copy;
+    if (copy == 0u)
+        return;
+    g_sub.copy = 0u;
+    if (tw_element_used(cpu, copy)) {
+        u32 ignore = 0u;
+        hle_guest_call(cpu, PROMPT_FREE, &copy, 1, 0.0, &ignore);
+    }
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] subtitle copy freed: %s (element 0x%08X, %d of 10 free, frame %llu)\n", why, copy,
+                coop_subtitle_pool_free(cpu), (unsigned long long)(cpu->timebase / 675000ull));
+}
 
 static void coop_subtitle_started(CPUState* cpu, const char* mode) {
     if (!coop_subtitles_on() || !sda_ready(cpu))
@@ -21822,10 +21855,17 @@ static void coop_subtitle_ended(CPUState* cpu) {
     if (!coop_subtitles_on())
         return;
     if (g_sub.owner != 0 && getenv("ED_COOP_LOG") != NULL)
-        fprintf(stderr, "[coop] subtitle of player %d over (lr 0x%08X, frame %llu)\n", g_sub.owner, cpu->lr,
-                (unsigned long long)(cpu->timebase / 675000ull));
+        fprintf(stderr, "[coop] subtitle of player %d over (lr 0x%08X, %d of 10 free, frame %llu)\n", g_sub.owner, cpu->lr,
+                coop_subtitle_pool_free(cpu), (unsigned long long)(cpu->timebase / 675000ull));
+    coop_subtitle_copy_free(cpu, "the subtitle is over");  // with the line, as the game frees +20 here
+    g_sub.after_log = g_sub.owner != 0 || g_sub.element != 0u;
     g_sub.owner = 0;
     g_sub.element = 0u;
+}
+// 0x80008D7C: the record's line freed (the next row's line, or its frames run out): the copy goes with it.
+static void coop_subtitle_line_freed(CPUState* cpu) {
+    if (coop_subtitles_on())
+        coop_subtitle_copy_free(cpu, "the line freed");
 }
 
 // The renderer's widescreen HUD (gxcore_draw.cpp widescreen_hud_shift) moves a HUD draw that is wholly right of the
@@ -21868,11 +21908,28 @@ static void coop_subtitle_laid(CPUState* cpu) {
     const u32 element = cpu->gpr[3];
     if (!coop_subtitles_on() || !guest_ram_range_valid(cpu, element + 8u, 2u))
         return;
+    if (g_sub.copy_making) {  // the copy (coop_subtitle_copy): into the other half, as the line into its own
+        const s16 x = (s16)mem_read16(cpu, element + 8u);
+        if (cpu->lr == 0x801DB53Cu && g_sub.copy_away != 0 && x < 2048)
+            mem_write16(cpu, element + 8u, (u16)(s16)(x + g_sub.copy_away));
+        return;
+    }
+    if (element == g_sub.copy)
+        g_sub.copy = 0u;  // the copy's element made anew as something else (freed by the game, or a full pool's last)
     if (!coop_subtitle_laying(cpu)) {
         if (element == g_sub.element)
             g_sub.element = 0u;  // the pool's element made anew as something else
         return;
     }
+    // The make's own arguments, still in 0x801DB374's registers at its layout (0x801DB390..0x801DB3A4; r28 is the
+    // text by now, and the updater passes 1): the copy is made with them.
+    g_sub.make[0] = cpu->gpr[24];
+    g_sub.make[1] = cpu->gpr[25];
+    g_sub.make[2] = cpu->gpr[26];
+    g_sub.make[3] = cpu->gpr[27];
+    g_sub.make[4] = 1u;
+    g_sub.make[5] = cpu->gpr[29];
+    g_sub.serial++;
     g_sub.line_owner = g_sub.owner == 2 ? 2 : 1;
     const s16 away = coop_subtitle_away(cpu, g_sub.line_owner);
     const s16 x = (s16)mem_read16(cpu, element + 8u);
@@ -21882,8 +21939,8 @@ static void coop_subtitle_laid(CPUState* cpu) {
     g_sub.away = x < 2048 ? away : 0;
     g_sub.x = -32768;  // read back after the layout (coop_subtitle_place)
     if (getenv("ED_COOP_LOG") != NULL)
-        fprintf(stderr, "[coop] subtitle line of player %d laid at x %d + %d (element 0x%08X, frame %llu)\n", g_sub.line_owner,
-                x, g_sub.away, element, (unsigned long long)(cpu->timebase / 675000ull));
+        fprintf(stderr, "[coop] subtitle line of player %d laid at x %d + %d (element 0x%08X, %d of 10 free, frame %llu)\n",
+                g_sub.line_owner, x, g_sub.away, element, coop_subtitle_pool_free(cpu), (unsigned long long)(cpu->timebase / 675000ull));
 }
 
 // Each frame: the line in its owner's half as the screen and the split change. Only the element the record still
@@ -21912,6 +21969,107 @@ static void coop_subtitle_place(CPUState* cpu) {
         fprintf(stderr, "[coop] subtitle line of player %d moved: away %d -> %d (frame %llu)\n", g_sub.line_owner,
                 g_sub.away, away, (unsigned long long)(cpu->timebase / 675000ull));
     g_sub.away = away;
+}
+
+// U2 (the user, 2026-11-17): with both players in one room the line shows in both halves, as both hear it; apart, only
+// in its owner's (U1). The copy is a second element made with the line's own make (0x801DB374, its arguments read at
+// the line's layout) at the other half's x, and freed with 0x801DA4D8 whenever the line goes: at 0x80008D7C (the next
+// row, or its frames out) and 0x80008DD4 / 0x80008E40 (coop_subtitle_ended), and here each frame when the record no
+// longer holds the line, the players are in two rooms, the split is off (one frame: one line), or a Tome is up. The ten
+// elements are shared with the words, the prompts and the finds: the copy is made only with one more left free after
+// it, and let go when none is free, so the owner's half alone is shown rather than another's words go without.
+#define SUBTITLE_COPY_SPARE 1
+static void coop_subtitle_copy(CPUState* cpu) {
+    if (!coop_subtitles_on() || !sda_ready(cpu))
+        return;
+    if (g_sub.element == 0u && g_sub.copy == 0u) {
+        if (g_sub.after_log && getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] subtitle gone: %d of 10 free (frame %llu)\n", coop_subtitle_pool_free(cpu),
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        g_sub.after_log = false;
+        return;
+    }
+    const char* why = NULL;
+    if (g_sub.element == 0u || mem_read32(cpu, SUBTITLE_RECORD + 20u) != g_sub.element || !tw_element_used(cpu, g_sub.element))
+        why = "the line is gone";
+    else if (!camera_split_on())
+        why = "the split is off";
+    else if (coop_rooms_apart(cpu))
+        why = "the players are in two rooms";
+    else if (g_tw.sharing || g_tome_copy_open || g_coop_tome_p2)
+        why = "a Tome is up";
+    else if (g_sub.copy != 0u && g_sub.copy_of != g_sub.serial)
+        why = "a new line";
+    else if (g_sub.copy != 0u && coop_subtitle_pool_free(cpu) == 0)
+        why = "the pool is full";
+    if (why != NULL) {
+        const bool remake = strcmp(why, "a new line") == 0;  // the next row's line: copied again below
+        if (g_sub.copy == 0u && g_sub.element != 0u && g_sub.no_copy_of != g_sub.serial && getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] subtitle copy not made: %s (frame %llu)\n", why, (unsigned long long)(cpu->timebase / 675000ull));
+        if (!remake)
+            g_sub.no_copy_of = g_sub.serial;  // logged once a line
+        coop_subtitle_copy_free(cpu, why);
+        if (!remake)
+            return;
+    }
+    const s16 away = coop_subtitle_away(cpu, g_sub.line_owner == 2 ? 1 : 2);
+    if (g_sub.copy != 0u) {  // placed again as the screen changes, as the line is (coop_subtitle_place)
+        if (away == g_sub.copy_away)
+            return;
+        const s16 x = (s16)mem_read16(cpu, g_sub.copy + 8u);
+        if (x != g_sub.copy_x)
+            return;  // not where it was left (the Tome's swap has it off the screen this frame)
+        g_sub.copy_x = (s16)(x - g_sub.copy_away + away);
+        mem_write16(cpu, g_sub.copy + 8u, (u16)g_sub.copy_x);
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] subtitle copy moved: away %d -> %d (frame %llu)\n", g_sub.copy_away, away,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        g_sub.copy_away = away;
+        return;
+    }
+    const int free_now = coop_subtitle_pool_free(cpu);
+    if (free_now < SUBTITLE_COPY_SPARE + 1) {
+        if (g_sub.no_copy_of != g_sub.serial && getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] subtitle copy not made: %d of 10 free (frame %llu)\n", free_now,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        g_sub.no_copy_of = g_sub.serial;
+        return;
+    }
+    u32 element = 0u;
+    g_sub.copy_away = away;
+    g_sub.copy_making = true;
+    const bool made = hle_guest_call(cpu, PROMPT_MAKE, g_sub.make, 6, 0.0, &element);
+    g_sub.copy_making = false;
+    if (!made || element < TW_ELEMENTS || element >= TW_ELEMENTS + TW_ELEMENT_COUNT * TW_ELEMENT_SIZE ||
+        (element - TW_ELEMENTS) % TW_ELEMENT_SIZE != 0u || element == g_sub.element)
+        return;
+    g_sub.copy = element;
+    g_sub.copy_of = g_sub.serial;
+    g_sub.copy_x = (s16)mem_read16(cpu, element + 8u);
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] subtitle copy of player %d's line made for player %d's half at x %d (away %d, element 0x%08X, %d of 10 free, frame %llu)\n",
+                g_sub.line_owner, g_sub.line_owner == 2 ? 1 : 2, g_sub.copy_x, away, element, coop_subtitle_pool_free(cpu),
+                (unsigned long long)(cpu->timebase / 675000ull));
+}
+
+// Co-op stopped with a line up (the mods menu turned it off, or player 2 is gone): the copy freed, as no hook of
+// U1/U2 runs again, and the line put back at the game's own x, where it would be solo. Not in player 2's copy Tome's
+// turn (its own memory). Each pad read in play while co-op is off; does nothing once g_sub holds no line or copy.
+static void coop_subtitle_stop(CPUState* cpu) {
+    if (g_tome_copy_turn || (g_sub.copy == 0u && g_sub.element == 0u))
+        return;
+    coop_subtitle_copy_free(cpu, "co-op is off");
+    const u32 element = g_sub.element;
+    if (element != 0u && g_sub.away != 0 && g_sub.x != -32768 && mem_read32(cpu, SUBTITLE_RECORD + 20u) == element &&
+        tw_element_used(cpu, element) && (s16)mem_read16(cpu, element + 8u) == g_sub.x) {
+        mem_write16(cpu, element + 8u, (u16)(s16)(g_sub.x - g_sub.away));
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] subtitle line of player %d put back at the game's x: co-op is off (frame %llu)\n",
+                    g_sub.line_owner, (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    g_sub.element = 0u;
+    g_sub.owner = 0;
+    g_sub.after_log = false;
 }
 
 static void hle_words_layout(CPUState* cpu) {
@@ -21970,7 +22128,7 @@ static void hle_words_layout(CPUState* cpu) {
     // before their close-up and named player 1's character, logs/run-20261109-001519-items-l7), as hle_coop_found tells.
     const bool p2 = g_settings.mod_coop && g_coop_p2 != 0u &&
                     (g_coop_tome_p2 || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 || coop_close_up_p2s() ||
-                     (g_coop_use.active && g_coop_use.p2) || (g_sub.line_owner == 2 && g_sub.element == cpu->gpr[3]));
+                     (g_coop_use.active && g_coop_use.p2) || (g_sub.line_owner == 2 && (g_sub.element == cpu->gpr[3] || g_sub.copy_making)));
     const int choice = coop_name_choice(p2);
     if (chapter < 0 || choice < 0 || choice >= 12 || choice == chapter)
         return;
@@ -33293,6 +33451,19 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
     const u32 player = coop_player(cpu);
     if (player == 0u)
         return;
+    // ED_TEST_COOP_OFF=FRAME (testing): co-op turned off at that frame, as the mods menu's toggle does (frontend.cpp).
+    static long long coop_off_at = -2;
+    if (coop_off_at == -2) {
+        const char* t = getenv("ED_TEST_COOP_OFF");
+        coop_off_at = t != NULL ? atoll(t) : -1;
+    }
+    if (coop_off_at >= 0 && cpu->timebase / 675000ull >= (u64)coop_off_at) {
+        coop_off_at = -1;
+        g_settings.mod_coop = false;
+        fprintf(stderr, "[test] frame %llu: co-op turned off\n", (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    if (!g_settings.mod_coop || g_coop_p2 == 0u)
+        coop_subtitle_stop(cpu);  // a subtitle's copy and away left from co-op (U2)
     characters_reload(cpu, player);
     costume_moves(cpu, player);
     wpn_test_equip(cpu, player);
@@ -33334,6 +33505,7 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
                                   g_coop_p2_input_mode < 0);
         coop_p1_icon_show(cpu);
         coop_subtitle_place(cpu);
+        coop_subtitle_copy(cpu);  // and in the other half while both are in one room
     }
     static int log = -1;
     if (log < 0)
@@ -33664,14 +33836,15 @@ static void find_coop(CPUState* cpu) {
         static const struct {
             u32 at, first;
             void (*fn)(CPUState*);
-        } kSubtitle[5] = {
+        } kSubtitle[6] = {
             {0x80008D48u, 0x3D008031u, coop_subtitle_start_wait},    // lis r8,-32719
             {0x80008C6Cu, 0x3CE08031u, coop_subtitle_start_now},     // lis r7,-32719
             {0x80008D0Cu, 0x3CE08031u, coop_subtitle_start_stream},  // lis r7,-32719
             {0x80008DD4u, 0x9421FFF0u, coop_subtitle_ended},         // stwu r1,-16(r1)
             {0x80008E40u, 0x3880FFFFu, coop_subtitle_ended},         // li r4,-1
+            {0x80008D7Cu, 0x9421FFF0u, coop_subtitle_line_freed},    // stwu r1,-16(r1): the line's free
         };
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 6; i++) {
             HleDispatchEntry* entry = hle_dispatch_entry(kSubtitle[i].at);
             if (mem_read32(cpu, kSubtitle[i].at) == kSubtitle[i].first && entry != NULL && entry->intercept == NULL &&
                 entry->notify == NULL)
@@ -34787,8 +34960,9 @@ bool hle_save_held(void) {
     // G4 (design-split-hold.md §3.11): and while a route job runs whole in a door's countdown (its thread's MSR[EE] is off).
     // The stayer's presses: and while a Tome item of player 2's kept from a door's window waits (host memory; a load drops it,
     // and its count may already be off their list).
+    // U2: and while a subtitle's copy is up (an element only the host frees: a state with it would keep it for ever).
     return g_coop_tome_p2 || coop_p2_own_up() || g_coop_use.active || g_coop_p2_look.held || g_coop_p2_words.close_count > 0 ||
-           g_coop_words_theirs || g_r6b.open || g_split_job.open || g_stayer_p2_left.n > 0u;
+           g_coop_words_theirs || g_r6b.open || g_split_job.open || g_stayer_p2_left.n > 0u || g_sub.copy != 0u;
 }
 
 // NULL: a state saved before co-op was kept; player 2 is found again as

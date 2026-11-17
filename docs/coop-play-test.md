@@ -172,13 +172,21 @@ Play it with `play-rooms-log.bat karim-pedestal`, co-op on:
 - Then on into the Artifact's room (the enemies appear there). Close the game when done.
 
 ## 8. Subtitles in co-op (2026-11-17)
-A subtitle line now shows only in the half of the player who started it. Turn **Subtitles on** in the game's options
-first, or nothing shows. Play with `play-rooms-log.bat subtitles`, co-op on, in Alex's mansion (chapter 0):
-- Player 2 answers the hall phone (room 69). "Hello?" and "Remember me, ..." should be in player 2's half, in its
-  middle, naming player 2's character. Player 1's half should have none.
-- Player 1 answers it instead (load a save from before). The lines should be in player 1's half.
+A subtitle line shows in both halves while both players are in the same room, and only in the half of the player
+who started it when they are in different rooms. Turn **Subtitles on** in the game's options first, or nothing shows.
+Play with `play-rooms-log.bat subtitles`, co-op on, in Alex's mansion (chapter 0):
+- Player 2 answers the hall phone (room 69) with player 1 in the hall too. "Hello?" and "Remember me, ..." should be
+  in both halves, in each one's middle, naming player 2's character.
+- The same with player 1 in another room: the lines only in player 2's half.
+- Leave the hall with the other player while a line is up: the line should go from the leaver's half.
+- Player 1 answers it instead (load a save from before). Both halves in one room; only player 1's half apart.
 - One player at the phone, the other at the carriage clock in the next room (or in another room). Each one's words
   and EXAMINE prompts should stay in their own half.
 - Try the clock three times with player 2 (Alex's clock lines), and the ghost maid if you reach her.
 - If you can: open player 1's Tome or a close-up while player 2's line is up, and say where the line goes.
-- Say if a line is ever in the wrong half, cut off, or shows in both.
+- Save a state (F1) while a line is in both halves. The save should wait until the line goes. Load it later: no
+  line should be left on either half once the talking stops.
+- Turn "Split-screen co-op" off in the mods menu while a line is up: one line, in the middle of the full screen, and
+  nothing left behind after it.
+- Say if a line is ever in the wrong half, cut off, left behind after it ends, or in both halves with the players in
+  different rooms.

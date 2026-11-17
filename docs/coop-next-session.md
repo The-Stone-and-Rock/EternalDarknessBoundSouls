@@ -3,6 +3,32 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: co-op subtitles, step U2 review fixes (committed with step U2)
+- A save now waits while a subtitle's copy is up (`hle_save_held`). Before, a state saved then kept the copy, and
+  after loading it nothing freed it: the line stayed drawn in the other half. Seen: the save waited and landed just
+  after the copy went (run-20261117-113619-u2b-save-hold); loading that state left no stray line and the pool back
+  to its count (run-20261117-113646-u2b-load-held-save).
+- Co-op turned off, or player 2 gone, mid-line: the copy is freed and player 2's line put back at the game's x
+  (`coop_subtitle_stop`). New test switch `ED_TEST_COOP_OFF=FRAME`. Seen: one centred line on the full screen after
+  co-op went off, nothing left after (run-20261117-113718-u2b-coop-off).
+- Pictures: `Screenshots for Claude/U2b-subtitles-review-fixes/` (01 to 03).
+- The returning ANSWER PHONE prompt in the leave run: made at frame 4734, the same pad read as the copy's free at the
+  room change, not 4668 as first said. Not caused by U2 is only inferred from the call order; not checked.
+- Not checked: player 2 gone mid-line by an area change; the leave and mix runs again.
+
+## 2026-11-17: co-op subtitles, step U2 (checkpoint commit)
+The user's second wish: with both players in one room the line shows in both halves; apart, only in the owner's (U1).
+Built in hle.c (`coop_subtitle_copy`; detail in docs/research/coop-gaps/subtitles.md, "Built: step U2"):
+- A second element made with the line's own make (0x801DB374, its arguments read at the line's layout), at the other
+  half's x. Freed with the game's free 0x801DA4D8 whenever the line goes (0x80008D7C, 0x80008DD4, 0x80008E40), and
+  when the players are in two rooms, the split goes off or a Tome is up. Only made with two of the ten elements free.
+- Seen in pictures (`Screenshots for Claude/U2-subtitles-both-halves/`): player 2's call and player 1's call in both
+  halves in follow (01, 03); apart, owner only (02); player 1 leaving by door mid-line, the copy goes (04); the
+  EXAMINE prompts and the clock's words still in their owner's half (05, 06). The pool went back to its count each time.
+- Not seen: the copy moved for a screen change; a full pool; the Tome-up free (Start does nothing in the other's
+  scene); players meeting mid-line; the clock, maid, creature and event-91 lines. All runs used saves/slot3.state.
+- Next: the user's play (docs/coop-play-test.md section 8).
+
 ## 2026-11-17: co-op subtitles, step U1 (checkpoint commit)
 The user's call: a subtitle may show only for the player who started it. Built that way (plan A and B of
 docs/research/coop-gaps/subtitles.md, its "Built" section has the detail).
