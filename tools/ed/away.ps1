@@ -19,13 +19,16 @@ $before = [Away]::GetForegroundWindow()
 $right = [Away]::GetSystemMetrics(76) + [Away]::GetSystemMetrics(78)  # SM_XVIRTUALSCREEN + SM_CXVIRTUALSCREEN
 $deadline = (Get-Date).AddSeconds(60)
 $moved = $false
+$gone = $null  # when the moved window went (a game that starts itself again opens a new one: looked for 5 s)
 while ($true) {
     $p = Get-Process -Name $proc -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
     if (-not $p) {
-        if ($moved -or (Get-Date) -gt $deadline) { break }
+        if ($moved -and -not $gone) { $gone = Get-Date }
+        if (($gone -and ((Get-Date) - $gone).TotalSeconds -gt 5) -or (-not $moved -and (Get-Date) -gt $deadline)) { break }
         Start-Sleep -Milliseconds 100
         continue
     }
+    $gone = $null
     $h = $p.MainWindowHandle
     $r = New-Object Away+RECT
     if ([Away]::GetWindowRect($h, [ref]$r) -and $r.L -lt $right) {

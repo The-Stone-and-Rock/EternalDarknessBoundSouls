@@ -231,6 +231,19 @@ bool hle_start_up_hidden(void) {
            ((g_skip_intro && !g_skip_intro_done) || g_title_save_at != 0u);
 }
 
+// A program started again by a Solo / Co-op pick whose title is made fresh (frontend.cpp frontend_title_resume_boot,
+// ED_TITLE_RESUME with ED_TITLE_STATE): while the start-up is passed over behind black and until the title is saved, the
+// players' pads are kept from the game (hle_PADRead) and a press does not end the skip (skip_intro_apply). A press on
+// the black screen lifted the cover before: the intro showed with its sound and the title was never saved.
+static bool title_resume_cover(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char* t = getenv("ED_TITLE_RESUME");
+        on = t != NULL && t[0] != '\0';
+    }
+    return on && hle_start_up_hidden();
+}
+
 static void skip_intro_note_open(const CPUState* cpu, const char* path) {
     if (!g_skip_intro || g_skip_intro_done)
         return;
@@ -271,7 +284,7 @@ static bool skip_intro_apply(CPUState* cpu, u16* buttons, s8 stick_x, s8 stick_y
     const u64 elapsed = frame - g_skip_intro_start_frame;
     const char* why = NULL;
     // Ignore the first frames: the launcher's A may still be held.
-    if (elapsed > 20u && (*buttons != 0u || abs(stick_x) > 48 || abs(stick_y) > 48))
+    if (elapsed > 20u && !title_resume_cover() && (*buttons != 0u || abs(stick_x) > 48 || abs(stick_y) > 48))
         why = "the player took over";
     else if (elapsed > 90u * 60u)
         why = "90 s";
@@ -4331,7 +4344,12 @@ static void title_page_hold_pads(DolPadState* state, u32 n) {
 }
 
 void sanity_door_run(CPUState* cpu);
+// The game's pad reads so far (any thread reads it): the Solo / Co-op page's restart (frontend.cpp pick_restart_now) waits
+// for it to stand still, the game then held at its next present.
+static volatile unsigned g_pad_reads;
+unsigned hle_pad_reads(void) { return g_pad_reads; }
 static void hle_PADRead(CPUState* cpu) {
+    g_pad_reads++;
 #ifdef ED_AURORA
     const bool monitor = pad_read_by_monitor(cpu);
     if (g_tome_copy_turn && !monitor) {
@@ -4381,6 +4399,8 @@ static void hle_PADRead(CPUState* cpu) {
         state[0].button &= (u16)~0x1000u;  // their Start opens their own Tome (coop_menu_input)
         if (g_coop_screen)
             memset(&state[0], 0, sizeof state[0]);  // their pad runs the close-up instead
+        if (title_resume_cover())
+            memset(&state[0], 0, sizeof state[0]);  // (the start-up behind black: title_resume_cover)
         for (u32 i = 1; i < 4; i++)
             state[i].error = -1;  // PAD_ERR_NO_CONTROLLER
         if (title_page_held(cpu))
@@ -4515,6 +4535,13 @@ static void hle_PADRead(CPUState* cpu) {
             state[0].trigger_left = 0xFFu;
         if ((state[0].button & 0x0020u) != 0u)
             state[0].trigger_right = 0xFFu;
+    }
+    if (title_resume_cover()) {
+        for (u32 i = 0; i < 4; i++) {  // (the players' presses and test scripts: the skip's own taps come after)
+            const s32 error = state[i].error;
+            memset(&state[i], 0, sizeof state[i]);
+            state[i].error = error;
+        }
     }
     if (skip_intro_apply(cpu, &state[0].button, state[0].stick_x, state[0].stick_y,
                          &state[0].analog_a))
@@ -17367,6 +17394,18 @@ static s32 g_title_replay_row = -1;   // the row the host presses A on, -1 none
 static u64 g_title_replay_from;
 static unsigned g_title_replay_reads;
 static const char* title_row_name(u32 row) { return row == 1u ? "Load Game" : "Start Game"; }
+// A program started again by a Solo / Co-op pick (title_resume_step below): -2 ED_TITLE_RESUME not read yet, -1 none or
+// done, else the row it goes on into.
+static int g_title_resume = -2;
+static void title_resume_read(unsigned long long frame) {
+    if (g_title_resume != -2)
+        return;
+    const char* t = getenv("ED_TITLE_RESUME");
+    g_title_resume = t == NULL ? -1 : strcmp(t, "start") == 0 ? 0 : strcmp(t, "load") == 0 ? 1 : -1;
+    if (g_title_resume >= 0)
+        fprintf(stderr, "[title] started again by the Solo / Co-op page: %s once the title is up (frame %llu)\n",
+                title_row_name((u32)g_title_resume), frame);
+}
 static int title_pick_auto(void) {
     static int pick = -2;  // -1 ask
     if (pick == -2) {
@@ -17399,6 +17438,18 @@ static void title_main_start_load(CPUState* cpu) {
     hle_guest_call(cpu, TITLE_CARD_NOTICE, NULL, 0, 0.0, &notice);
     if (notice != 0u)
         return;
+    title_resume_read(frame);
+    if (g_title_resume >= 0) {
+        // The player's own A before the host's (title_resume_step): on the row the game was started again for, it goes
+        // on as that row's (the mode was picked before the restart: no page again); on the other row the page asks as
+        // usual. Either way the resume is done, so it never presses by itself later (Return to title screen, game over).
+        const bool same = (u32)g_title_resume == row;
+        g_title_resume = -1;
+        fprintf(stderr, "[title] %s: the player's own A, started again for %s: %s (frame %llu)\n", title_row_name(row),
+                same ? "it" : "the other row", same ? "it goes on, no page" : "the page asks", frame);
+        if (same)
+            return;
+    }
     const int pick = title_pick_auto();
     if (pick >= 0) {
         if (rooms_would_change(pick == 1)) {
@@ -17433,11 +17484,49 @@ static void title_main_start_load(CPUState* cpu) {
     frontend_open_page_skin(FRONTEND_PAGE_TITLE_PICK, (int)row, FRONTEND_SKIN_TITLE, -1);
     g_hle_passthrough = false;
 }
+// A program started again by a Solo / Co-op pick of the other mode (frontend.cpp restart_process, ED_TITLE_RESUME=start
+// or load; read once, so Return to title screen in this run does not go on again): once the title's main menu has been
+// up for a third of a second, with nothing over it and, when it was made fresh, saved (g_title_save_at, plan's skeptic
+// wrong 6), the cursor goes to that row and the same A as a pick's is pressed for it (below). No page this time: the
+// intercept passes that A through to the game's own Start Game or Load Game. Any language (no title word is read).
+static unsigned g_title_resume_frames;
+static bool g_title_resume_seen;  // the title was ready for it once (a later leave of the main menu drops it)
+static void title_resume_step(CPUState* cpu, unsigned long long frame) {
+    title_resume_read(frame);
+    if (g_title_resume < 0)
+        return;
+    if (g_title_resume_seen && sda_ready(cpu) && mem_read8(cpu, TITLE_STATE) != TITLE_MAIN) {
+        // (The player went on from the main menu first, to Options or another row: the resume is done, never later.)
+        fprintf(stderr, "[title] the title left its main menu before the A for %s: not pressed (frame %llu)\n",
+                title_row_name((u32)g_title_resume), frame);
+        g_title_resume = -1;
+        return;
+    }
+    const bool ready = sda_ready(cpu) && mem_read8(cpu, TITLE_STATE) == TITLE_MAIN && g_title_save_at == 0u &&
+                       (!g_skip_intro || g_skip_intro_done) && !hle_start_up_hidden() && !g_title_pick_open &&
+                       !g_title_page_hold && g_title_replay_row < 0;
+    if (!ready) {
+        g_title_resume_frames = 0u;
+        return;
+    }
+    g_title_resume_seen = true;
+    if (++g_title_resume_frames < 20u)
+        return;
+    const u32 row = (u32)g_title_resume;
+    g_title_resume = -1;
+    mem_write32(cpu, TITLE_CURSOR, row);
+    g_title_replay_row = (s32)row;
+    g_title_replay_from = frame;
+    g_title_replay_reads = 0u;
+    fprintf(stderr, "[title] %s, %s (started again for it): A pressed for it (frame %llu)\n", title_row_name(row),
+            g_settings.mod_coop ? "co-op" : "solo", frame);
+}
 // Each pad read, after the page's hold: once the page has closed (every button let go), its answer; for a pick, A on the
 // same row, three reads in six, until the intercept above sees it. Dropped if the menu has left the row or the state, or
 // after a second.
 static void title_pick_replay(CPUState* cpu, DolPadState* pad, bool held) {
     const unsigned long long frame = cpu->timebase / 675000ull;
+    title_resume_step(cpu, frame);
     if (g_title_pick_open && !held && frontend_menu_closed_count() != g_title_pick_closed) {
         g_title_pick_open = false;
         const int answer = frontend_title_pick_take();
@@ -35885,7 +35974,9 @@ void hle_install(CPUState* cpu) {
     const char* once_frame = getenv("ED_AUTO_INPUT_ONCE");
     if (once_frame != NULL && once_frame[0] != '\0')
         g_auto_input_once_frame = strtoull(once_frame, NULL, 0);
-    parse_input_script(getenv("ED_INPUT_SCRIPT"));
+    // (Testing: a program started again by a Solo / Co-op pick, ED_TITLE_RESUME, plays ED_INPUT_SCRIPT_RESUMED instead,
+    // so the first run's presses, at the same guest frames, do not come again.)
+    parse_input_script(getenv(getenv("ED_TITLE_RESUME") != NULL ? "ED_INPUT_SCRIPT_RESUMED" : "ED_INPUT_SCRIPT"));
 #ifdef ED_AURORA
     memset(g_textures, 0, sizeof g_textures);
     memset(g_tluts, 0, sizeof g_tluts);

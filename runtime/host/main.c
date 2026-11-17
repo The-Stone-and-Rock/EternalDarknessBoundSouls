@@ -680,8 +680,20 @@ int main(int argc, char** argv) {
         frontend_init(argc, argv);
         texpack_init();
         titlevideo_preload();
+        // Started again by a Solo / Co-op pick of the other mode (frontend.cpp restart_process, ED_TITLE_RESUME): past
+        // the launcher, on the disc the last run played (ED_ISO, over argv's --iso: the launcher may have chosen another).
+        const char* resume = getenv("ED_TITLE_RESUME");
+        if (resume != NULL && resume[0] != '\0') {
+            const char* disc = getenv("ED_ISO");
+            if (disc != NULL && disc[0] != '\0') {
+                if (iso_path != NULL && strcmp(iso_path, disc) != 0)
+                    fprintf(stderr, "[title] started again on the disc played last, %s (argv's --iso is %s)\n", disc, iso_path);
+                iso_path = disc;
+            }
+            frontend_resume_discs(iso_path != NULL ? iso_path : "dump/" ED_GAME_ID ".iso");  // (as the launcher fills them)
+        }
         if (!no_launcher && getenv("ED_QUICKLOAD") == NULL &&
-            getenv("ED_NO_LAUNCHER") == NULL) {
+            getenv("ED_NO_LAUNCHER") == NULL && (resume == NULL || resume[0] == '\0')) {
             const char* default_iso = iso_path != NULL ? iso_path : getenv("ED_ISO");
             if (default_iso == NULL || default_iso[0] == '\0')
                 default_iso = "dump/" ED_GAME_ID ".iso";
@@ -697,6 +709,8 @@ int main(int argc, char** argv) {
         coop_follow_boot_state();
         // Separate rooms only with co-op on (frontend.cpp rooms_follow_coop): also for runs with no launcher (tests).
         rooms_follow_coop();
+        // Started again by a Solo / Co-op pick: the title machine of this run's rooms, or one made fresh.
+        frontend_title_resume_boot();
     }
 #endif
 

@@ -269,8 +269,19 @@ step. Start play.bat again (the new build) and try:
   Pick that same mode: the game should go on exactly as before (the carry-over question if your card has a finished
   game, then the opening). Do the same with Load Game: the save list should come up.
 - B on the page: back on the title, the same row lit, nothing started.
-- Pick the OTHER mode: for now the card only says it needs the game started again (that restart is the next step).
-  Press B, or pick the mode you are in.
+- Pick the OTHER mode (step P4): the card says "Starting the game again in ...", the window closes and opens again,
+  and the game goes straight on into Start Game or Load Game in that mode. The first time you switch to Solo it shows
+  black for about 10 seconds (it makes a new solo title once); after that a few seconds. Say if the window opens in a
+  different place, if anything flashes, or if it does not go on by itself.
+- While that screen is black, press buttons: nothing should show (no company logos, no movie), and it should still go
+  on by itself. The next switch to Solo should then take only a few seconds.
+- After the restart, press A on Start Game yourself as soon as the title shows: the game should start in the new mode
+  with no Solo / Co-op page again. Later, go back to the title (Return to title screen, or a game over): the title
+  should wait for you, never start a game by itself.
+- After a restart, open the in-game menu and pick Return to launcher: the launcher should show your disc, and Continue,
+  Main menu and Load game should work.
+- If you start EternalDarkness.exe by double-clicking it (not play.bat), switching modes should still bring the game
+  back. Before this fix it closed for good there.
 - Listen as the page opens and closes: the title music should go on, and you should hear one choose sound as the page
   opens, and for Start Game the start sound as you pick (Load Game has only the one, as before). Say if a sound is
   missing or doubled.

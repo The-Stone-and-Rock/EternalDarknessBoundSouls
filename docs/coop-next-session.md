@@ -3,6 +3,44 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: the Solo/Co-op picker, step P4 review fixes (checkpoint commit with P4)
+docs/research/solo-coop-picker/plan.md, "Built: step P4 review fixes". Four review findings, all real, all fixed:
+- **Disc list after a restart:** main.c `frontend_resume_discs` fills it as the launcher does, so Return to launcher
+  works. Checked in the log only ("3 disc(s), dump\GEDP01.iso chosen"). The launcher picture was not taken.
+- **Paths with spaces:** `restart_process` quotes argv for `_execv`. Seen: full paths with spaces, solo -> co-op restart
+  -> co-op dream (-185154, pictures 03-05).
+- **The resume's A never stays set:** the player's own A ends it (on its row it goes on with no page). Leaving the main
+  menu after it was ready ends it too. Seen: A mashed as the title came up -> "goes on, no page" -> co-op dream
+  (-185154). Not run: the leave path, Return to title afterwards.
+- **Presses on the black start-up:** `title_resume_cover` clears the pads, and the skip is not ended by a press. Seen:
+  presses every 20 frames on black, the cover held, the title was saved, then the solo save list (-185008, pictures
+  01-02).
+- Regression on the play.bat path: co-op -> Start -> Solo -> the solo dream (-185308, pictures 06-07).
+- Not verified: the user's own play, a double-click start on the user's desktop, Mac `execv`, other languages, sound.
+
+## 2026-11-17: the Solo/Co-op picker, step P4: picking the other mode starts the game again in it (committed with the review fixes)
+docs/research/solo-coop-picker/plan.md, "Built: step P4".
+- **Picking the other mode now restarts into it.** The mode is saved, the card says "Starting the game again in
+  co-op" (or solo) for about a third of a second, the window closes and opens again past the launcher, and the game goes
+  straight on into the same Start Game or Load Game (no second page). About 3 seconds with a fitting title machine.
+- **The first solo restart takes longer (about 10 s on black):** the old saves/title.state is 32 MB, not this build's
+  48 MB, so the new process makes a fresh one (the intro passed over behind black, as Skip intro does the first time)
+  and saves it over saves/title.state. Later solo restarts load it. Co-op uses saves/title-rooms.state (56 MB).
+- Code: frontend.cpp `restart_process(resume)` (drops ED_QUICKLOAD, ED_SKIP_INTRO, ED_TITLE_STATE, ED_TITLE_RESUME, then
+  sets ED_TITLE_RESUME=start|load and ED_ISO to this run's disc), `pick_restart_now` (from the page's step: presents the
+  page by itself until the game's pad reads stand still 100 ms, so the game is held at its present before `_execv`),
+  `frontend_title_resume_boot` (main.c, after `rooms_follow_coop`: the title machine of the new mode if its memory size
+  fits, else made fresh); main.c skips the launcher for ED_TITLE_RESUME and takes ED_ISO over argv's --iso; hle.c
+  `title_resume_step` (state 7 for 20 frames, nothing over it, the title saved: cursor to the row, the pick's A replayed).
+- **Test kit:** a restarted run plays `ED_INPUT_SCRIPT_RESUMED` instead of `ED_INPUT_SCRIPT` (the guest frames start
+  again near the same numbers). tools/ed/shots.ps1 and away.ps1 now follow the game into its new process (5 s look).
+  both.tsv starts again with the new process (its first frames are the new one's).
+- Seen (Screenshots for Claude/solo-coop-picker/P4-restart/): solo -> Start -> Co-op -> restart -> co-op split screen
+  in the dream (-182818); co-op -> Load -> Solo -> fresh title -> the save list in solo (-183004); co-op -> Start -> Solo
+  from the fresh 48 MB title.state -> one player in the dream (-183125); play.bat's path (launcher Play, ED_ROOM_SLOTS=2,
+  a copy of the user's settings) co-op -> Start -> Solo, no launcher on the restart (-183252); the same mode still goes
+  on with no restart (-183425). User files put back byte-identical (title.state, boot.state rewritten by the runs).
+
 ## 2026-11-17: the Solo/Co-op picker, step P3: Start Game and Load Game ask Solo or Co-op (checkpoint commit)
 docs/research/solo-coop-picker/plan.md, "Built: step P3".
 - **Start Game and Load Game (A or Start) now open the Solo / Co-op page** over the live title. The card first lit is

@@ -90,6 +90,8 @@ bool hle_save_held(void);
 // moves on (game thread): the guest's pad is the page's. Covers the frame or two before the frame hook takes the page,
 // which frontend_page_live does not (quickstate.c).
 bool hle_title_page_hold(void);
+// The game's pad reads so far (game thread counts, any thread reads): standing still, the game is held.
+unsigned hle_pad_reads(void);
 
 // Mods' Cheats, on or off from the in-game menu: kept at the player's frames in
 // play.

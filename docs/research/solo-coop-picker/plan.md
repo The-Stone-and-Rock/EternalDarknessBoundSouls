@@ -604,3 +604,73 @@ mode belong in step 3). Then the six card tests (missed 1) and player 2's Defaul
   - -181655-p3f-playbat-load: Down, A on Load Game: the page at 741, Co-op lit; A: the save list.
   - Pictures 09 and 10 in P3-start-load/. settings.ini, the card, title-rooms.state, title.state and slot3.state kept
     their hashes.
+
+## Built: step P4, a pick of the other mode starts the game again in it (plan step 4 with the skeptic's 3-7; 2026-11-17)
+
+- **The card's A** (frontend.cpp `build_pick`, Mode): when `rooms_would_change(coop)`, `mod_coop` is set,
+  `settings_coop_chosen()`, `settings_save()`, the card's line says "Starting the game again in co-op" (or solo), and
+  `g_pick_restart_row` is the title row. Nothing in the environment is changed here (wrong 4).
+- **The restart point** (wrong 7): `menu_step` returns at once while a restart is pending (no B can close the page); 300 ms
+  after the A, `pick_restart_now` presents the page by itself with `dol_aurora_ui_frame` (as a blocking page does, from the
+  frame hook inside the Present item), until the game's pad reads (`hle_pad_reads`, hle.c) stand still for 100 ms (at most
+  2 s), then `restart_process("start"|"load")`. Seen: "the game is held (no pad read for 100 ms) after 100-122 ms" in
+  every run. A failed `_execv` puts this run's mode back and the card says "The game could not start again" (not run).
+- **restart_process(resume)** drops ED_QUICKLOAD, ED_SKIP_INTRO, ED_TITLE_STATE and ED_TITLE_RESUME for every caller
+  (wrong 5's list); with a resume it sets ED_TITLE_RESUME and ED_ISO = `g_run_disc` (the disc this run plays).
+- **main.c:** ED_TITLE_RESUME skips the launcher (as ED_QUICKLOAD does), takes ED_ISO over argv's `--iso` and logs a
+  difference (missed 8; seen only as slashes, "dump\GEDP01.iso" vs argv's "dump/GEDP01.iso"). After `rooms_follow_coop`,
+  `frontend_title_resume_boot()` picks the title machine of the new run's rooms if its MEM1 is this run's (56 MB rooms,
+  48 MB without), else ED_SKIP_INTRO + ED_TITLE_STATE (made fresh, the start-up behind black) (wrong 3). Nothing is unset
+  at boot (wrong 5). The user's saves/title.state is 32 MB, so the first solo restart makes a 48 MB one over it (~10 s).
+- **hle.c `title_resume_step`** (in `title_pick_replay`, each pad read): ED_TITLE_RESUME read once; when the title is in
+  state 7 with no page, no hold, no replay, the intro skip over, `hle_start_up_hidden()` false and `g_title_save_at == 0`
+  (wrong 6) for 20 frames in a row: TM+28 = the row and the pick's replay armed. The intercept passes that A through. Seen
+  after the fresh title: "title menu saved" then the A two frames later (frame 592-595).
+- **Test kit:** `ED_INPUT_SCRIPT_RESUMED` is the restarted run's script (else none). tools/ed/shots.ps1 and away.ps1
+  follow the game into its new process (looked for 5 s; pictures go on in the same folder and shots.csv).
+- **Seen** (Screenshots for Claude/solo-coop-picker/P4-restart/, scratch card, jtg settings copies or a copy of the
+  user's settings):
+  - -182818-jtg-p4-solo-start-coop: solo, Start Game, the page (01), Co-op: the note (02), restart in 1.3 s,
+    "separate rooms on", title-rooms.state, Start Game lit (03), A at 604, the dream with both players and the screen
+    split (04; control at 1715).
+  - -183004-jtg-p4-coop-load-solo: co-op, Load Game, the page (05), Solo: the note (06), "title.state is from a smaller
+    memory": black while it is made (07), saved, A at 595, the save list in solo (08).
+  - -183125-jtg-p4-coop-start-solo: co-op, Start, Solo, now from the fresh 48 MB title.state: the dream with one player
+    (09; timeline P2 none).
+  - -183252-p4-playbat-coop-start-solo: run.sh launcher with play.bat's ED_ROOM_SLOTS=2 ED_COOP_STAY=1 and a copy of the
+    user's settings (co-op, Skip intro): the launcher's Play, title-rooms.state, Start, Solo: the restart skipped the
+    launcher, the title made fresh, Start Game, the dream in solo.
+  - -183425-jtg-p4-same-mode-solo: the same mode still goes on with no restart.
+  - saves/title.state and saves/boot.state (both rewritten by the runs) put back byte-identical; settings.ini, the card,
+    title-rooms.state and slot3.state never changed.
+- **Not seen:** a failed restart, B pressed during the note, ED_TITLE_PAGE_PAUSE=1 (blocking page), another language,
+  the Mac build (`execv`), the sound by ear, where the new window opens on the user's desktop (the runs moved it away),
+  a slow machine where the game thread holds longer than 2 s.
+
+## Built: step P4 review fixes (2026-11-17, checkpoint commit)
+
+Four reviewer findings were checked against the code. All four were real, and all four are fixed:
+- **No disc list after a restart.** A restarted program skips the launcher, and only the launcher filled `g_discs`.
+  Return to launcher then showed "None found" with Play turned off. Now main.c calls `frontend_resume_discs(iso)`. It
+  fills the list as `frontend_run_launcher` does: the disc being played is chosen, with `g_disc_on_main` and
+  `g_running_disc` set the same way. Seen in the log only: "started again past the launcher: 3 disc(s), dump\GEDP01.iso
+  chosen".
+- **`_execv` split arguments with spaces.** The Windows CRT joins argv with spaces and adds no quotes. An exe started from
+  Explorer or a shortcut as "E:\Eternal Darkness Recomp Fork\..." came back split, and the restart failed. Now
+  `restart_process` quotes each argument the way CommandLineToArgvW reads it back. Seen working: the exe, the dol and
+  the disc given as full paths with spaces, then solo, Start, Co-op, and the co-op dream after the restart. The old,
+  unquoted build was not run that way.
+- **`g_title_resume` stayed set when the player acted first.** Two fixes in hle.c. In `title_main_start_load`, the
+  player's own A ends the resume. On the resume's row it goes on with no page; on the other row the page asks. In
+  `title_resume_step`, once the title has been ready, leaving the main menu ends it. Seen: A pressed again and again as
+  the title came up: "the player's own A, started again for it: it goes on, no page", then the co-op dream. The
+  "left the main menu" path and Return to title were not run.
+- **A press on the black start-up showed the intro.** `title_resume_cover()` (ED_TITLE_RESUME with the start-up hidden)
+  clears the players' pads, and test scripts too, before the skip's own taps. While it holds, a press cannot end the
+  skip. Seen: A, Start, B and Down pressed every 20 frames from frame 100 to 560 on the black. The intro ended at 452 as
+  usual, the screen stayed black, "title menu saved", the A at 595, then the solo save list. The Mods Skip intro by
+  itself, with no restart, is unchanged.
+- Runs: logs/run-20261117-185008-jtg-p4f-fresh-presses, -185154-p4f-spaces-mash, -185308-p4f-playbat-coop-start-solo
+  (the play.bat way, regression). Pictures: Screenshots for Claude/solo-coop-picker/P4-review/01-07. saves/title.state
+  and boot.state were rewritten by the runs and put back byte-identical, with their file times. settings.ini, the card,
+  title-rooms.state and slot3.state were never changed.

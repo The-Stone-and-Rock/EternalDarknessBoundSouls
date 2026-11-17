@@ -20,6 +20,9 @@ bool frontend_run_launcher(const char* default_iso, char* iso_out,
 // The disc this run plays (main.c, once it is known): the portraits are made from it when they are first shown, also in
 // a run with no launcher (whose disc list is empty).
 void frontend_set_disc(const char* path);
+// A program started again by a Solo / Co-op pick (ED_TITLE_RESUME) skips the launcher: main.c calls this with the disc
+// it plays, so the disc list is filled as the launcher fills it (Return to launcher and Options' disc row need it).
+void frontend_resume_discs(const char* iso_path);
 
 // Once a game frame: open the in-game menu when asked for, and run it with
 // the game paused until the player resumes.
@@ -35,6 +38,9 @@ bool rooms_would_change(bool coop);
 // main.c, before rooms_follow_coop: a run that boots from a state (ED_QUICKLOAD) plays that state's mode (56 MB co-op,
 // smaller solo), not settings.ini's, which keeps its own (settings_run_coop). Logged when it differs.
 void coop_follow_boot_state(void);
+// main.c, after rooms_follow_coop: a program started again by a Solo / Co-op pick of the other mode (ED_TITLE_RESUME)
+// boots on the title, from this mode's title machine or a fresh one (ED_QUICKLOAD, or ED_SKIP_INTRO + ED_TITLE_STATE).
+void frontend_title_resume_boot(void);
 // The title's Solo / Co-op answer (any thread; hle.c takes it once the page has closed): -1 none (Back), else
 // row * 2 + co-op, row 0 Start Game, 1 Load Game. Taking it clears it.
 int frontend_title_pick_take(void);

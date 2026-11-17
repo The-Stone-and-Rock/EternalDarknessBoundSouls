@@ -61,6 +61,7 @@ const char* quickstate_boot_path(void);
 unsigned int quickstate_file_mem1_size(const char* path);
 void hle_set_skip_intro(bool on);
 bool hle_start_up_hidden(void);
+unsigned hle_pad_reads(void);
 bool hle_player_place(float place[3], unsigned* frame);
 bool camera_last_view(float eye[3], float target[3]);
 void audio_set_muted(bool muted);
@@ -490,18 +491,63 @@ int launcher_main_row() {
 }
 
 // Start this program again from the launcher (another disc, or no boot state
-// to go back to): the window closes and reopens.
-void restart_process() {
+// to go back to): the window closes and reopens. With `resume` ("start" or "load", the Solo / Co-op page's pick of the
+// other mode: docs/research/solo-coop-picker/plan.md, step 4) it starts again on the title instead, past the launcher, and
+// goes on into Start Game or Load Game by itself (main.c, hle.c title_resume_step), on the disc this run plays. Every
+// boot choice of this run is dropped first, so the new one makes its own (frontend_title_resume_boot: its title machine
+// follows its own rooms). Returns only when the restart failed.
+void restart_process(const char* resume = nullptr) {
     settings_save();
     unsetenv("ED_QUICKLOAD");
     unsetenv("ED_SKIP_INTRO");
-    std::fprintf(stderr, "[frontend] starting again (the same log goes on)\n");
+    unsetenv("ED_TITLE_STATE");
+    unsetenv("ED_TITLE_RESUME");
+    if (resume != nullptr) {
+        setenv("ED_TITLE_RESUME", resume, 1);
+        if (!g_run_disc.empty())
+            setenv("ED_ISO", g_run_disc.c_str(), 1);  // (main.c takes it over argv's --iso for a resume)
+        std::fprintf(stderr, "[frontend] starting again for %s (the same log goes on; disc %s)\n",
+                     std::strcmp(resume, "load") == 0 ? "Load Game" : "Start Game",
+                     g_run_disc.empty() ? "as given" : g_run_disc.c_str());
+    } else {
+        std::fprintf(stderr, "[frontend] starting again (the same log goes on)\n");
+    }
     report_before_restart();  // the new process's output to the log, not to this one's tee pipe
 #ifdef _WIN32
-    _execv(g_argv[0], g_argv);
+    // The CRT joins _execv's strings with spaces and quotes none of them, so a path with a space ("E:\Eternal Darkness
+    // Recomp Fork\...", an exe started from Explorer or a shortcut, a disc path with a space) came back split in two.
+    // Each one is quoted as the new process's CRT reads it back (CommandLineToArgvW's rules).
+    std::vector<std::string> quoted;
+    for (int i = 0; g_argv[i] != nullptr; i++) {
+        const std::string a = g_argv[i];
+        if (!a.empty() && a.find_first_of(" \t\n\v\"") == std::string::npos) {
+            quoted.push_back(a);
+            continue;
+        }
+        std::string q = "\"";
+        size_t slashes = 0;
+        for (char c : a) {
+            if (c == '\\') {
+                slashes++;
+                continue;
+            }
+            q.append(c == '"' ? slashes * 2 + 1 : slashes, '\\');
+            q += c;
+            slashes = 0;
+        }
+        q.append(slashes * 2, '\\');
+        q += '"';
+        quoted.push_back(q);
+    }
+    std::vector<char*> args;
+    for (std::string& q : quoted)
+        args.push_back(q.data());
+    args.push_back(nullptr);
+    _execv(g_argv[0], args.data());
 #else
     execv(g_argv[0], g_argv);
 #endif
+    unsetenv("ED_TITLE_RESUME");
     std::fprintf(stderr, "[frontend] restart failed\n");
 }
 
@@ -584,6 +630,35 @@ extern "C" void coop_follow_boot_state(void) {
                  coop ? "co-op" : "solo", mem1 >> 20, coop ? "co-op" : "solo", coop ? 0 : 1);
 }
 
+// main.c, after rooms_follow_coop, in a program started again by a Solo / Co-op pick (ED_TITLE_RESUME, restart_process):
+// straight to the title's main menu from this mode's title machine (title_state_path: it follows this run's rooms), when
+// it is this run's memory size (56 MB with the separate rooms, 48 without). Else it is made fresh, as Mods' Skip intro
+// does the first time: the start-up passed over behind black and the menu saved as it comes up (an older or smaller
+// machine is not loaded: docs/research/solo-coop-picker/plan.md, skeptic's wrong 3). hle.c then presses Start Game or
+// Load Game. The switches stay set: hle.c and quickstate read them later (skeptic's wrong 5); restart_process drops them.
+extern "C" void frontend_title_resume_boot(void) {
+    const char* resume = getenv("ED_TITLE_RESUME");
+    if (resume == nullptr || resume[0] == '\0')
+        return;
+    if (getenv("ED_QUICKLOAD") != nullptr) {
+        std::fprintf(stderr, "[title] started again for %s, from the given state %s\n", resume, getenv("ED_QUICKLOAD"));
+        return;
+    }
+    const char* path = title_state_path();
+    const unsigned want = (getenv("ED_ROOM_SLOTS") != nullptr ? 56u : 48u) * 1024u * 1024u;  // (cpu.c's memory)
+    struct stat st;
+    const unsigned mem1 = stat(path, &st) == 0 ? quickstate_file_mem1_size(path) : 0u;
+    if (mem1 == want) {
+        setenv("ED_QUICKLOAD", path, 1);
+        std::fprintf(stderr, "[title] started again for %s: the title from %s\n", resume, path);
+    } else {
+        setenv("ED_SKIP_INTRO", "1", 1);
+        setenv("ED_TITLE_STATE", path, 1);
+        std::fprintf(stderr, "[title] started again for %s: %s %s, so the title is made fresh (the start-up passed over)\n",
+                     resume, path, mem1 == 0u ? "is not there" : mem1 < want ? "is from a smaller memory" : "is from a larger memory");
+    }
+}
+
 // The title's Solo / Co-op answer for hle.c (frontend_title_pick_take): -1, or row * 2 + co-op.
 static std::atomic<int> g_title_pick_result{-1};
 extern "C" int frontend_title_pick_take(void) { return g_title_pick_result.exchange(-1); }
@@ -650,9 +725,13 @@ int g_controls_return_row = 0;
 enum class PickKind { Mode, Controls };
 PickKind g_pick_kind = PickKind::Controls;
 int g_pick_title_row = 0;
-// The Solo / Co-op card whose A needs the game started again (the other mode than this run's rooms): its line says so.
-// -1 none. (Plan step 4 makes that pick restart the game.)
+// The Solo / Co-op card whose A needs the game started again (the other mode than this run's rooms): its line says so
+// while the program starts again in it (g_pick_restart_row: the title row it goes on into, -1 none; live_page_frame).
+// -1 none. g_pick_note_failed: the restart did not happen (the line says so, the mode as it was).
 int g_pick_note = -1;
+bool g_pick_note_failed = false;
+int g_pick_restart_row = -1;
+Uint64 g_pick_restart_at = 0;
 Screen g_pick_return = Screen::Options;
 int g_pick_return_row = 0;
 void open_pick(PickKind kind, Screen back, int back_row);
@@ -1583,10 +1662,10 @@ std::string pick_card_rml(int which, bool selected, size_t index) {
         static const char* const kInput[] = {"Plays with a controller", "Plays with the keyboard"};
         line = line.empty() ? kInput[g_settings.mod_p2_input & 1] : line;
     }
-    // (A mode that needs the game started again, once its A was pressed: plan step 4 builds the restart.)
+    // (A mode that needs the game started again, once its A was pressed: the program starts again in it.)
     const bool note = !controls && g_pick_note == which;
     if (note)
-        press = which == 1 ? "Co-op needs the game started again: not ready yet" : "Solo needs the game started again: not ready yet";
+        press = g_pick_note_failed ? "The game could not start again" : which == 1 ? "Starting the game again in co-op" : "Starting the game again in solo";
     out += "<div class=\"pcard-name\">" + escape(name) + "</div><div class=\"pcard-form\">" +
            (line.empty() ? std::string("&nbsp;") : escape(line)) + "</div><div class=\"pcard-press\">" +
            (selected || note ? press : "&nbsp;") + "</div></div>";
@@ -1600,6 +1679,8 @@ void open_pick(PickKind kind, Screen back, int back_row) {
     g_pick_return = back;
     g_pick_return_row = back_row;
     g_pick_note = -1;
+    g_pick_note_failed = false;
+    g_pick_restart_row = -1;
     g_screen = Screen::Pick;
     g_selected = kind == PickKind::Mode ? (g_settings.mod_coop ? 1 : 0) : (g_menu_player == 1 ? 1 : 0);
 }
@@ -1627,8 +1708,9 @@ void build_pick() {
         } else {
             // Over the title (its Start Game or Load Game, hle.c title_main_start_load): a mode this run's rooms fit is
             // set and saved, and the page closes with the answer; hle.c then presses A on the same row, so the game's
-            // own Start or Load goes on. The other mode needs the game started again (plan step 4): said on the card,
-            // the page stays. (The launcher's test door only logs.)
+            // own Start or Load goes on. The other mode needs the game started again (plan step 4): it is saved, the
+            // card says so, and the program starts again in it from the live page's frame (live_page_frame, once the
+            // game is held), into the same row. (The launcher's test door only logs.)
             r.activate = [which] {
                 const bool coop = which == 1;
                 const char* const name = coop ? "co-op" : "solo";
@@ -1636,10 +1718,18 @@ void build_pick() {
                     std::fprintf(stderr, "[frontend] pick: %s\n", name);
                     return;
                 }
+                if (g_pick_restart_row >= 0)
+                    return;  // (already starting again)
                 if (rooms_would_change(coop)) {
+                    g_settings.mod_coop = coop;
+                    settings_coop_chosen();
+                    settings_save();
                     g_pick_note = which;
-                    std::fprintf(stderr, "[frontend] pick: %s needs the game started again (not built yet: plan step 4)\n",
-                                 name);
+                    g_pick_note_failed = false;
+                    g_pick_restart_row = g_pick_title_row;
+                    g_pick_restart_at = SDL_GetTicks();
+                    std::fprintf(stderr, "[frontend] pick: %s for %s, saved: the game starts again in it\n", name,
+                                 g_pick_title_row == 1 ? "Load Game" : "Start Game");
                     return;
                 }
                 g_settings.mod_coop = coop;
@@ -4150,10 +4240,55 @@ void menu_begin() {
     g_input.poll(g_menu_pressed);
 }
 
+// The Solo / Co-op page's pick of the other mode (build_pick): the program starts again in it, into the same title row.
+// A live title page steps inside the game's Present item (the frame hook) while the game thread can be a frame ahead
+// and running; so here the page is presented by itself, as a blocking page is, until the game is held at its next
+// present (its pad reads stand still for 100 ms; at most 2 s), and only then is the process replaced (plan, skeptic's
+// wrong 7). The environment is changed only then too (wrong 4). Failed: the mode as it was, and the card says so.
+void pick_restart_now() {
+    const int row = g_pick_restart_row;
+    report_pause(true);
+    const Uint64 start = SDL_GetTicks();
+    unsigned reads = hle_pad_reads();
+    Uint64 still_since = start;
+    bool held = false;
+    while (SDL_GetTicks() - start < 2000) {
+        if (!dol_aurora_ui_frame()) {
+            report_pause(false);
+            g_pick_restart_row = -1;
+            dol_aurora_request_quit();  // (the window was closed)
+            return;
+        }
+        const unsigned now = hle_pad_reads();
+        if (now != reads) {
+            reads = now;
+            still_since = SDL_GetTicks();
+        } else if (SDL_GetTicks() - still_since >= 100) {
+            held = true;
+            break;
+        }
+    }
+    std::fprintf(stderr, "[frontend] the Solo / Co-op pick: the game %s after %llu ms\n",
+                 held ? "is held (no pad read for 100 ms)" : "still reads its pad", static_cast<unsigned long long>(SDL_GetTicks() - start));
+    restart_process(row == 1 ? "load" : "start");
+    g_settings.mod_coop = !g_settings.mod_coop;  // (this run's mode again)
+    settings_save();
+    g_pick_note_failed = true;
+    g_pick_restart_row = -1;
+    report_pause(false);
+    build_rows();
+}
+
 MenuStep menu_step() {
     bool* const pressed = g_menu_pressed;
     if (g_close)
         return MenuStep::Closed;
+    if (g_pick_restart_row >= 0) {
+        // (The card's line up for a moment first, drawn by the game's own presents under a live page.)
+        if (SDL_GetTicks() - g_pick_restart_at >= 300)
+            pick_restart_now();
+        return MenuStep::Open;
+    }
     {
         g_launcher_music.tick();
         update_cursor();
@@ -4668,6 +4803,24 @@ extern "C" void frontend_set_disc(const char* path) {
     Disc d;
     if (path != nullptr && read_disc(path, &d) && d.id == ed_game_id())
         g_run_disc = path;
+}
+
+extern "C" void frontend_resume_discs(const char* iso_path) {
+    // As frontend_run_launcher: the list from the chosen disc and the folders, then the disc this run plays chosen in it
+    // (else the launcher's own choice), and the disc row on the launcher's main page only while none was chosen yet.
+    g_discs = scan_discs(g_settings.disc[0] != '\0' ? g_settings.disc : iso_path);
+    g_disc = 0;
+    bool found = false;
+    for (int pass = 0; pass < 3 && !found; pass++)
+        for (size_t i = 0; i < g_discs.size() && !found; i++)
+            if (g_discs[i].id == ed_game_id() && (pass == 2 || g_discs[i].path == (pass == 0 ? iso_path : g_settings.disc))) {
+                g_disc = static_cast<int>(i);
+                found = true;
+            }
+    g_disc_on_main = !(g_settings.disc[0] != '\0' && disc_playable() && g_discs[g_disc].path == g_settings.disc);
+    g_running_disc = found ? g_discs[g_disc].path : std::string(iso_path);
+    std::fprintf(stderr, "[frontend] started again past the launcher: %zu disc(s), %s chosen%s\n", g_discs.size(),
+                 found ? g_discs[g_disc].path.c_str() : "none", g_disc_on_main ? " (the disc row on the launcher's page)" : "");
 }
 
 extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,

@@ -27,13 +27,16 @@ public static class Shots {
     s.UnlockBits(d);
     return o;
   }
-  public static void Run(Process p, string dir, int every, int width) {
+  // first: the next picture's number (a game that starts itself again goes on in the same folder, its list added to).
+  public static int Run(Process p, string dir, int every, int width, int first) {
     SetProcessDPIAware();
-    var log = new StreamWriter(Path.Combine(dir, "shots.csv")) { AutoFlush = true };
-    log.WriteLine("ms,file,left,right");
+    var path = Path.Combine(dir, "shots.csv");
+    var fresh = !File.Exists(path);
+    var log = new StreamWriter(path, true) { AutoFlush = true };
+    if (fresh) log.WriteLine("ms,file,left,right");
     var clock = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     byte[] was = null;
-    int n = 0;
+    int n = first;
     var jpg = Array.Find(ImageCodecInfo.GetImageEncoders(), e => e.MimeType == "image/jpeg");
     var q = new EncoderParameters(1); q.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 70L);
     while (!p.HasExited) {
@@ -68,6 +71,7 @@ public static class Shots {
       Thread.Sleep(every);
     }
     log.Close();
+    return n;
   }
 }
 '@
@@ -76,4 +80,15 @@ for ($i = 0; $i -lt 200; $i++) {
     if ($p) { break }
     Start-Sleep -Milliseconds 200
 }
-if ($p) { [Shots]::Run($p, $dir, $everyMs, $width) }
+# A game that starts itself again (the Solo / Co-op page's other mode: frontend.cpp restart_process) is followed into
+# its new process (looked for 5 s), the pictures going on in the same folder.
+$n = 0
+while ($p) {
+    $n = [Shots]::Run($p, $dir, $everyMs, $width, $n)
+    $p = $null
+    for ($i = 0; $i -lt 25; $i++) {
+        $p = Get-Process $proc -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($p) { break }
+        Start-Sleep -Milliseconds 200
+    }
+}
