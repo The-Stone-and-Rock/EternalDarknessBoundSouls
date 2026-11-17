@@ -66,3 +66,17 @@ The launcher's menu no longer opens over the game on Esc / Back (it's a debug me
 Check: that everything you used to reach from Esc is reachable this way; how the plaques look (they're the game's own
 painted plaque with the word in the Tome's hand); player 2's page on player 2's controller; B always returning to the
 Tome or the title; nothing pressed by accident in the game when a page closes. Tell Claude what to move or rename.
+
+## 7. Karim's skeletal pedestal (chapter 4), for Claude to trace
+The gate you meant is **room 193** in Karim's chapter (the room numbers are the game's; "room 93" is a different room,
+the mansion's teleporter hub in Alex's last chapter, where the game's ending starts). In room 193 the portcullis
+(Region01, flag 150) opens only when Karim uses the Tome on the skeletal pedestal (ExamineRgn): the Tome's Use there
+(script L04/1381) puts the Tome down as thing 831, opens the gate and hands the Tome back. The next room is the Artifact's,
+with the enemies. Karim's elevators also wait on that Tome (thing 831), so this one play unblocks that test too.
+Play it with `play-rooms-log.bat karim-pedestal`, co-op on:
+- Before the pedestal: player 1's Tome > Options > **Save States**, save a slot (so it can be replayed by script).
+- Player 1 uses the Tome at the pedestal (Tome > Inventory > the Tome > USE, standing at the pedestal). Watch: the
+  close-up, the gate opening, both players able to go through, player 2's half meanwhile.
+- After the gate is open and the Tome is back: save another slot.
+- If you have time: load the first slot and let **player 2** use their Tome at the pedestal instead.
+- Then on into the Artifact's room (the enemies appear there). Close the game when done.

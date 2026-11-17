@@ -23,7 +23,14 @@ runtime/host/hle.c, **uncommitted, for the user to review**. Plans: plans.md.
 4. **The L04 elevators**: not reached; the test's route was wrong, not the game. Door 132 sends the chapter's character
    (model 150, what hle_object_model tells scripts) to room 5 unless thing 733 or 831 is carried (fn78(5, id), the carry
    test, hle.c:25332), and the Tome trip took both there (logs/run-20261117-011659-elev-apart). The test needs 733 or 831
-   carried first. The traps show the same
+   carried first. **What 733 and 831 are (2026-11-17):** both are the Tome. 831 is the Tome Karim puts on the skeletal
+   pedestal in room 193 (L04/1381, item 120's USE: in ExamineRgn, it takes the Tome (fn93), puts item 120 back as
+   thing 831 at PedistalCam (ed3(42, 6, -1, 120, ..., 831, ...)), opens the portcullis (thing 150 moved, flag 150
+   off: Region01's GATE examine (L04/2380) asks it) and gives it back to him (ed52, state 5)). 733 is the Tome made
+   by room 5's arrival script 2675. So the elevators come after the pedestal in the story. A test can't do it yet:
+   ED_RUN_SCRIPT calls 0x801642D4(script, 0, 0) and 1381 reads the Tome's handle with ed20(0) (the Tome page's
+   record 0x80335748 word 0), so it needs the handle there first. The user offered to play it so it is traced
+   (docs/coop-play-test.md section 7). The traps show the same
    mechanism (the game's zone look running other_* fields for player 2's body), and the fix is one for both.
 5. **ed177's play-start scripts**: shown. Player 2 in MuffledVoicesRgn01 (L03/933, room 150), then the Tome: the stored
    script ran from play mode's start (lr 0x80008280) twice, as the game's, though player 2 left it
