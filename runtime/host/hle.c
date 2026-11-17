@@ -15042,7 +15042,8 @@ static void coop_sound_fade_rooms(CPUState* cpu, s32 keep_room, u32 ticks, int m
 // Inside tw_keep (the intercept on 0x801A05EC and 0x8019E068): fn66's departure fade (lr 0x801668FC the cut, 0x80166970 the
 // fade; r3 = the ticks; the ticket is already written, so g_coop_room_p2 names the mover), the change's fade 0x801A05EC(10,
 // 1, 0) (lr 0x80152354), the arrival's group reset 0x8019E068(0|1, 100, 0) (lr 0x8015206C / 0x8015207C) and fn151's duck
-// (lr 0x80164DD4: r4 25 ducks, 100 lifts; the groups scale the music too). Answers true when it took the call.
+// (lr 0x80164DD8, the return from its bl at 0x80164DD4: r4 25 ducks, 100 lifts; the groups scale the music too). Answers
+// true when it took the call.
 static bool coop_sound_change_act(CPUState* cpu) {
     static bool running;
     if (running || !coop_stay() || g_coop_p2 == 0u || !sda_ready(cpu))
@@ -15081,7 +15082,7 @@ static bool coop_sound_change_act(CPUState* cpu) {
         g_hle_tail_call = false;
         return true;
     }
-    if (cpu->lr == 0x80164DD4u && cpu->gpr[4] == 25u && coop_music_theirs(cpu) && coop_rooms_apart(cpu)) {
+    if (cpu->lr == 0x80164DD8u && cpu->gpr[4] == 25u && coop_music_theirs(cpu) && coop_rooms_apart(cpu)) {
         if (coop_sound_log())
             fprintf(stderr, "[sound] a duck (fn151) by player 2 apart: passed over, player 1's music stays (frame %llu)\n",
                     (unsigned long long)(cpu->timebase / 675000ull));
@@ -20219,6 +20220,74 @@ static bool coop_interface_ran(u32 lr);  // an interface's script runs (below, b
 #define COOP_SCRIPT_WAIT_RAN 0x80168388u
 
 #define TOME_SCRIPT_RAN 0x800082ACu  // the world's call, as a Tome closes, of the script an item left
+// A script left for play mode's next start (ed177, 0x8000F9C4: it stores the id at r13-24248; mode 2's enter 0x80008234 runs
+// it once, its call at 0x8000827C): run as whoever is the player then, so player 2's (L03/933 in their zone, then the Tome
+// closed) ran as player 1's (docs/research/kit-bugs/plans.md 5). Who stored it is kept here; the run is made theirs in
+// coop_run_script. One word, as the game's: the last store wins.
+#define PLAY_START_RAN 0x80008280u
+static bool g_play_script_p2;
+static void coop_play_script_left(CPUState* cpu) {
+    if (!g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu)) {
+        g_play_script_p2 = false;
+        return;
+    }
+    g_play_script_p2 = mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u);  // the id is read later, at 0x8000FA2C
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] on_play_script left by player %d (frame %llu)\n", g_play_script_p2 ? 2 : 1,
+                (unsigned long long)(cpu->timebase / 675000ull));
+}
+
+// The hero gates (ED_COOP_HERO_ID=1, testing, off by default; docs/research/kit-bugs/results.md). A gate keeps the player's
+// handle (fn78(1, 0): r13-21496, the current player's id) and turns away anyone but 1, the chapter's character: run as
+// player 2's (their id is the handle there, coop_be_player2), Edward's lever L09/1951 never offered them the lever. Each
+// run loads its chunk from the level pack (0x801642D4 -> 0x80164388 -> lua_dobuffer 0x80159D38(L, chunk, size, name)):
+// before it runs, the gate's own PUSHINT 1 is written to player 2's id when player 2 is the one running it, and back to 1
+// otherwise, so only that compare changes; fn78, every native, the queues and the r13-21496 / -21488 compares still see
+// player 2's real id, as they do today. The 31 gates that turn the player away (the jump on a mismatch goes to the end),
+// from tools/ed/herogates.py (`ed herogates --c`); the 21 compares with two paths are left as they are.
+#define LUA_DOBUFFER 0x80159D38u
+static const struct { s8 level; s16 script; u16 offset; u8 slot; u8 jmpeq; } kHeroGates[] = {
+    {0, 583, 0x1AB, 0, 0},   {0, 1438, 0x1E2, 0, 0},  {2, 1422, 0x10E, 0, 0},  {2, 2361, 0x10E, 0, 0},  {4, 1438, 0x1E2, 0, 0},
+    {5, 2055, 0x191, 0, 0},  {6, 1422, 0x10E, 0, 0},  {6, 2055, 0x191, 0, 0},  {6, 2549, 0x10E, 0, 0},  {6, 2550, 0x10E, 0, 0},
+    {6, 2551, 0x10E, 0, 0},  {6, 2552, 0x10E, 0, 0},  {6, 2553, 0x87, 0, 0},   {7, 2055, 0x191, 0, 0},  {9, 1821, 0x166, 0, 0},
+    {9, 1949, 0x1A8, 0, 0},  {9, 1951, 0x29F, 0, 0},  {9, 1952, 0x187, 0, 0},  {9, 1954, 0x172, 0, 0},  {9, 1956, 0x1B7, 0, 0},
+    {9, 1959, 0x167, 0, 0},  {9, 1961, 0x198, 0, 0},  {9, 1963, 0x14D, 0, 0},  {9, 2320, 0xF5, 0, 0},   {9, 2474, 0x10F, 0, 0},
+    {10, 2055, 0x191, 0, 0}, {10, 2474, 0x10F, 0, 0}, {11, 1438, 0x1E2, 0, 0}, {11, 2474, 0x10F, 0, 0}, {12, 1963, 0x14D, 0, 0},
+    {16, 2474, 0x10F, 0, 0},
+};
+static u32 hero_word_at(CPUState* cpu, u32 at) {  // a chunk's instruction: little-endian, maybe unaligned
+    return (u32)mem_read8(cpu, at) | (u32)mem_read8(cpu, at + 1u) << 8 | (u32)mem_read8(cpu, at + 2u) << 16 | (u32)mem_read8(cpu, at + 3u) << 24;
+}
+static bool g_hero_open;  // ED_COOP_HERO_ID > 0: gates open for player 2's runs; else only put back to 1 (find_coop)
+static void coop_hero_chunk(CPUState* cpu) {
+    const u32 chunk = cpu->gpr[4], size = cpu->gpr[5];
+    if (!sda_ready(cpu) || !guest_ram_range_valid(cpu, chunk, size > 0u ? size : 1u))
+        return;
+    const s32 script = (s32)(s16)mem_read32(cpu, cpu->gpr[13] - 23228u);
+    u32 p2id = 0u;
+    if (g_settings.mod_coop && g_coop_p2 != 0u && guest_ram_range_valid(cpu, g_coop_p2 + 16u, 4u))
+        p2id = mem_read32(cpu, g_coop_p2 + 16u);
+    const bool theirs = g_hero_open && p2id != 0u && p2id != 1u && mem_read32(cpu, cpu->gpr[13] - 21496u) == p2id;
+    const u32 value = theirs ? p2id : 1u;
+    for (size_t i = 0; i < sizeof kHeroGates / sizeof kHeroGates[0]; i++) {
+        if (kHeroGates[i].script != script || kHeroGates[i].offset + 8u > size)
+            continue;
+        const u32 at = chunk + kHeroGates[i].offset;
+        const u32 w0 = hero_word_at(cpu, at - 4u), w1 = hero_word_at(cpu, at), w2 = hero_word_at(cpu, at + 4u);
+        // GETLOCAL slot; PUSHINT n; JMPNE / JMPEQ (op 6 bits: 11, 6, 32 / 33): else this level's copy has no gate here
+        if ((w0 & 63u) != 11u || (w0 >> 6) != kHeroGates[i].slot || (w1 & 63u) != 6u || (w2 & 63u) != (kHeroGates[i].jmpeq ? 33u : 32u))
+            continue;
+        const u32 want = ((value + ((1u << 25) - 1u)) << 6) | 6u;  // PUSHINT's signed argument: value + MAXARG_S
+        if (w1 == want)
+            continue;
+        for (u32 b = 0u; b < 4u; b++)
+            mem_write8(cpu, at + b, (u8)(want >> (8u * b)));
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[hero] script %d: gate +0x%X %s (id %u; frame %llu)\n", script, kHeroGates[i].offset,
+                    theirs ? "opens for player 2" : "back to the chapter's character", value,
+                    (unsigned long long)(cpu->timebase / 675000ull));
+    }
+}
 #define ARRIVAL_ZONE_RAN 0x80134B38u
 #define ARRIVAL_TIMER_RAN 0x80163E5Cu
 #define ARRIVAL_END_RAN 0x801EC1C8u
@@ -20558,16 +20627,29 @@ static void coop_run_script(CPUState* cpu) {
             g_settings.mod_coop && g_coop_p2 != 0u && sda_ready(cpu)) {
             g_stay_room_script.script = 0;
             if (want != (s32)mem_read32(cpu, cpu->gpr[13] - 23276u) && room_slot_of(cpu, want) >= 0) {
-                u32 keep[3], args[3] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5]}, ret = 0u;
+                u32 keep[3], was[5], args[3] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5]}, ret = 0u;
                 const u32 lr = cpu->lr;
+                // Player 2 the player and main character for their own room's arrival: its calls ask who the player is
+                // (ed113 reads r13-21484's spell, ed248 whether the controlled character is in the room in play), and with
+                // only the room swapped they answered for player 1 in player 2's room (docs/research/kit-bugs/plans.md 2).
+                // Only when player 2 stands in that room and isn't the player already (be_player2 swaps the casting words).
+                const bool as_p2 = coop_listed(cpu, g_coop_p2) && mem_read32(cpu, cpu->gpr[13] - 21492u) != g_coop_p2 &&
+                                   guest_ram_range_valid(cpu, mem_read32(cpu, g_coop_p2 + 52u), 640u) &&
+                                   coop_object_room(cpu, g_coop_p2) == want;
                 running = true;
+                if (as_p2)
+                    coop_be_player2(cpu, true, was);
                 coop_room_in(cpu, want, keep);
+                const u32 main_node = mem_read32(cpu, cpu->gpr[13] - 21484u);
                 hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ret);
                 coop_stay_room_out(cpu, keep);
+                if (as_p2)
+                    coop_be_player2(cpu, false, was);
                 running = false;
                 cpu->lr = lr;
-                fprintf(stderr, "[stay] room %d's own script %d (queued by player 2's arrival) ran with room %d current (frame %llu)\n", want,
-                        (s32)args[0], want, (unsigned long long)(cpu->timebase / 675000ull));
+                fprintf(stderr, "[stay] room %d's own script %d (queued by player 2's arrival) ran with room %d current, as player %d's "
+                        "(main node 0x%08X; frame %llu)\n", want, (s32)args[0], want, as_p2 ? 2 : 1, main_node,
+                        (unsigned long long)(cpu->timebase / 675000ull));
                 hle_set_u32(cpu, ret);
                 g_hle_passthrough = false;
                 g_hle_tail_call = false;
@@ -20672,6 +20754,35 @@ static void coop_run_script(CPUState* cpu) {
     // 2's, a Granite Block's own check asked whether player 2 stood at a hole, and "Pious cannot use that now" went to
     // player 1, named for player 2 (the user, 2026-11-10, logs/run-20261110-134806-statue-user1 8279).
     // (g_coop_tome_owner is 1 through any close-up of player 2's, not only their Tome: the copy's owner decides.)
+    // Play mode's start runs the script left by ed177 (PLAY_START_RAN): as player 2's when they left it (coop_play_script_left),
+    // with their player, zones' words and room in, as the Tome's item scripts below run.
+    if (cpu->lr == PLAY_START_RAN && (s32)cpu->gpr[3] > 0 && g_play_script_p2 && g_coop_p2 != 0u && !g_coop_use.active &&
+        sda_ready(cpu) && coop_listed(cpu, g_coop_p2)) {
+        g_play_script_p2 = false;  // a store inside the run sets it again (player 2 is the player there)
+        const u32 args[3] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5]};
+        const u32 ran = cpu->lr;
+        u32 was[5], ignore = 0u, info = 0u, room_keep[3];
+        const u32 object = mem_read32(cpu, g_coop_p2 + 52u);
+        const bool zones = hle_guest_call(cpu, COOP_CHARACTER_INFO, &object, 1, 0.0, &info) && guest_ram_range_valid(cpu, info, 184u);
+        coop_be_player2(cpu, true, was);
+        if (zones)
+            coop_zones_swap(cpu, info, true);
+        const bool room_in = coop_stay_room_in(cpu, room_keep);
+        hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ignore);
+        if (room_in)
+            coop_stay_room_out(cpu, room_keep);
+        if (zones)
+            coop_zones_swap(cpu, info, false);
+        coop_be_player2(cpu, false, was);
+        if (getenv("ED_COOP_LOG") != NULL)
+            fprintf(stderr, "[coop] play start's script %d (left by player 2) ran as player 2's (frame %llu)\n", (s32)args[0],
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        cpu->lr = ran;
+        hle_set_u32(cpu, ignore);
+        g_hle_passthrough = false;
+        g_hle_tail_call = false;
+        return;
+    }
     const bool tome_item = (cpu->lr == TOME_SCRIPT_RAN || (cpu->lr >= TOME_ITEM_CODE && cpu->lr < TOME_ITEM_CODE_END)) &&
                            !(g_tome_copy_open && g_tome_copy_p1) && (g_coop_tome_owner == 1 || g_tome_copy_turn);
     // The first zone's script in a room player 2 asked for (the first time in a Tome's room,
@@ -22306,6 +22417,31 @@ static void coop_scan_player1(CPUState* cpu) {
     g_hle_passthrough = true;
     if (g_coop_p1_own_look)
         return;  // the game's own, run from below
+    // The game's own step looks at player 2's object as at "another" one (0x80133434's scan at 0x801335C4, r27 = 1): it runs
+    // the regions' other_* scripts for them, outside their bracket, as player 1 with player 1's room in play: a trap of
+    // L06 ran twice and wrote player 1's room's record (ed156), L04's lift scripts ran for them (docs/research/kit-bugs/
+    // plans.md 3 and 4). Player 2's own look (coop_prompt_look, in their turn, a guest call: its lr is the sentinel) runs
+    // their regions' own fields as theirs, as solo's player gets, so the step's look is passed over for player 2's object
+    // only; monsters keep theirs. The answer isn't used (0x801335C8: or r3,r31,r31). ED_COOP_P2_OTHER_ZONES=1: the old route.
+    {
+#define COOP_STEP_SCAN_RAN 0x801335C8u
+        static int other_zones = -1;
+        if (other_zones < 0)
+            other_zones = getenv("ED_COOP_P2_OTHER_ZONES") != NULL;
+        if (!other_zones && g_settings.mod_coop && g_coop_p2 != 0u && g_coop_p2_is_player && cpu->lr == COOP_STEP_SCAN_RAN &&
+            sda_ready(cpu) && cpu->gpr[3] == mem_read32(cpu, g_coop_p2 + 52u) && cpu->gpr[3] != mem_read32(cpu, cpu->gpr[13] - 26524u)) {
+            static u32 said_zones = 0xFFFFFFFFu;  // once per zones list (per room)
+            if (getenv("ED_COOP_LOG") != NULL && said_zones != cpu->gpr[4]) {
+                said_zones = cpu->gpr[4];
+                fprintf(stderr, "[coop] player 2's object passed over by the game's zone look for others (zones 0x%08X): their own look runs "
+                        "their zones (frame %llu)\n", cpu->gpr[4], (unsigned long long)(cpu->timebase / 675000ull));
+            }
+            cpu->gpr[3] = 0u;
+            g_hle_passthrough = false;
+            g_hle_tail_call = false;
+            return;
+        }
+    }
     if (coop_p1_unplaced(cpu, cpu->gpr[3]) && !g_coop_prompt_look && !g_coop_p1_scan && !g_coop_turn) {
         cpu->gpr[3] = 0u;
         g_hle_passthrough = false;
@@ -33333,6 +33469,19 @@ static void find_coop(CPUState* cpu) {
             HleDispatchEntry* run = hle_dispatch_entry(0x801642D4u);
             if (getenv("ED_ROOM_LOG") != NULL && run != NULL && run->notify == NULL && run->intercept == NULL)
                 run->notify = notify_script_run;
+            HleDispatchEntry* play_left = hle_dispatch_entry(0x8000F9C4u);  // ed177: who left play start's script
+            if (play_left != NULL && play_left->notify == NULL && play_left->intercept == NULL)
+                play_left->notify = coop_play_script_left;
+            else
+                fprintf(stderr, "[coop] on_play_script (0x8000F9C4) not hooked: player 2's play-start scripts run as player 1's\n");
+            // The hero gates: installed always, opened only with ED_COOP_HERO_ID (testing). Off, it only puts back a gate a
+            // loaded state (or the frontend's slots) kept patched to player 2's id: the game keeps loaded chunks in RAM.
+            g_hero_open = getenv("ED_COOP_HERO_ID") != NULL && atoi(getenv("ED_COOP_HERO_ID")) > 0;
+            HleDispatchEntry* dobuffer = hle_dispatch_entry(LUA_DOBUFFER);
+            if (dobuffer != NULL && dobuffer->notify == NULL && dobuffer->intercept == NULL && (mem_read32(cpu, LUA_DOBUFFER) >> 16) == 0x9421u)
+                dobuffer->notify = coop_hero_chunk;
+            else
+                fprintf(stderr, "[hero] lua_dobuffer (0x%08X) not hooked: the hero gates stay closed to player 2\n", LUA_DOBUFFER);
             HleDispatchEntry* call = hle_dispatch_entry(0x8015974Cu);
             if ((getenv("ED_ROOM_LOG") != NULL || coop_trace()) && call != NULL && call->notify == NULL && call->intercept == NULL)
                 call->notify = notify_script_call;
@@ -33846,6 +33995,7 @@ void hle_coop_state_load(const void* in) {
     g_reload_tried = ~0u;
     g_coop_tome_p2 = false;
     g_coop_next_cast_p2 = false;
+    g_play_script_p2 = false;  // the loaded r13-24248 had no ed177 store this session: its script runs as the game's
     g_coop_attempts = 0u;
     g_coop_restore.id = g_coop_restore.node = 0u;
     if (in == NULL) {

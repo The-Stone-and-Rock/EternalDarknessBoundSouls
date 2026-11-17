@@ -328,7 +328,7 @@ by the user yet**: their next step is a play test (list at the end). Commits, ne
   build.bat (VS2022 tools, `cmake --build build-win --target EternalDarkness`), called from PowerShell.
 
 ## Open, in order
-1. **The user's play test** (nothing above has been played): (a) the Tome trip apart and together, either player taking
+1. **The user's play test** (nothing above has been played) (the overnight fixes: docs/coop-play-test.md): (a) the Tome trip apart and together, either player taking
    the way in, including player 2 being the one who picks the Tome up (scripted runs can't press through the Tome's
    EXAMINE words; they start the after-find script 1599 as player 1's); (b) Max's Tome apart; (c) spells while apart,
    quick and from player 2's Tome (the Tome cast apart is built but unrun: chapter 3's list had nothing to enchant);

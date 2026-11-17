@@ -13,5 +13,7 @@ set ED_SHOW_TRACE=1
 set ED_FIN_LOG=1
 rem The door timings (each room change's parts in ms, [change-time]) and the floor probe ([floor], always on).
 set ED_CHANGE_TIME=1
+rem The hero gates open for player 2 (testing; docs/coop-play-test.md): scripts that only let the chapter's character in.
+set ED_COOP_HERO_ID=1
 "C:\Program Files\Git\bin\sh.exe" tools/ed/run.sh launcher %name%
 pause
