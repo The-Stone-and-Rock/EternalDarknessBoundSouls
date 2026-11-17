@@ -424,3 +424,69 @@ was run.
 - Steps C and D need the Tome's replay start and stops added.
 - The "player 1's scene shows the whole frame" premise is unproven and probably wrong. That widens open question 1
   from follow-with-player-2's-start to every start: in follow, does the other player see the line?
+
+## Built: step U1, plan A and B (2026-11-17, checkpoint commit, not yet played by the user)
+
+What it does: a subtitle line shows in the half of the player who started it. Solo is untouched: every step is
+gated on `g_settings.mod_coop && g_coop_p2 != 0`, and player 2's copy Tome (`g_tome_copy_turn`) is passed over.
+
+- **A, the owner** (`coop_subtitle_started`, hle.c): notify hooks on the three starts 0x80008D48, 0x80008C6C and
+  0x80008D0C. Owner 2 when r13-21496 is player 2's id at the call, else 1. The Tome's replay start (lr 0x80108048)
+  is player 1's. The owner goes back to none at 0x80008DD4 and 0x80008E40 (`coop_subtitle_ended`).
+- **B, the place** (`coop_subtitle_laid`, in `hle_words_layout`): only the world updater's own makes, found by the
+  stack: 0x801DB374's saved lr is 0x80008A64 or 0x80008C00, and the updater's is 0x80008534.
+  - Owner 2: x + 4096 - 80.
+  - Owner 1 while player 2 has the screen or the lent cameras: x + 8192 - 80.
+  - Owner 1 otherwise, or the split off: the game's x.
+  - The 80 is the renderer's widescreen HUD shift (`coop_subtitle_wide`: 80 with the game's 16:9 on, 205 at 21:9,
+    0 at 4:3). See docs/coop-failed-attempts.md.
+- **Each frame** (`coop_subtitle_place`, beside `coop_p1_icon_show`): the line is placed again when the screen or
+  the split changes. Only while the record's +20 is still that element at the x last written, so a pool element made
+  again as something else is let go.
+- **The name in the line**: an owner-2 line now names player 2's character ("Remember me, Ellia?", not "Pius").
+  hle_words_layout's rename takes it as theirs.
+- **ED_SUBTITLES=1** (test only, `test_subtitles`): holds bit 0 of 0x80307180 on. The user's slot3 save already has
+  Subtitles on.
+
+Runs, all from saves/slot3.state (the fallback; the new-game states were not made), with ED_RUN_AWAY=1:
+
+| Run | What it showed in pictures |
+|---|---|
+| run-20261117-103854-sub-before-p2-follow | Before: player 2's "Hello?" and "Remember me, Pius?" in player 1's half, none in player 2's |
+| run-20261117-105400-sub-after2-p2-follow | After: both lines in player 2's half, centred; none in player 1's |
+| run-20261117-110024-sub-after2-p2-apart | Player 1 in room 77, player 2 at the phone in 69: lines only in player 2's half |
+| run-20261117-104355-sub-after-p1 | Player 1's phone: lines in player 1's half, as before (owner 1, game x; no "[split] off") |
+| run-20261117-105448-sub-mix-p1phone-p2clock | Player 1's phone lines in their half, player 2's EXAMINE prompt and carriage clock words in theirs |
+| run-20261117-105525-sub-mix-p2phone-p1clock | Player 2's phone lines in their half, player 1's EXAMINE prompt and words in theirs |
+
+Pictures: `Screenshots for Claude/U1-subtitles/`.
+
+Seen in these runs:
+- The skeptic's correction holds: player 1's phone scene did not turn the split off.
+- Each player's press is held while the other's scene is up ("kept: ... it goes in as that's over"). So in these
+  runs a subtitle never overlapped the other player's close-up, and the +8192 path (owner 1 while player 2 has the
+  screen) was never reached. It is not seen in a picture.
+- Already there before this change (in the before run too): after player 2's call ends, their ANSWER PHONE prompt
+  shows again; and the phone's flash lights player 1's half, not player 2's.
+
+Not done:
+- **clock-p2-third**: not scripted. Room 77's clock spot (405,-1613, from the user's play) had no floor for a put in
+  follow: player 2 fell through it with both ED_PUT and ED_COOP_P2_PUT (run-20261117-105924-sub-clock-p2-third3).
+  The research's room 78 for Region04 is ed's numbering; the user's play reached it in the game's room 77.
+- Both halves while both players are in one room (the user's second wish): a later step.
+- C, D and E of the plan.
+
+### Review fixes (2026-11-17)
+Three review findings, two of them the same. Both real, both fixed in hle.c:
+- **A loaded state kept the old owner.** `g_sub` was not cleared when a state loads. Player 2's call up, then a load
+  of a state saved in one of player 1's lines: the loaded line would go to player 2's half, with player 2's name.
+  Now `hle_coop_state_load` clears `g_sub`, so a line the loaded state has up is player 1's, as the comment said.
+- **A new start moved the old line.** A start never frees the line on screen (the record's +20 keeps it until the new
+  record's first row). The per-frame re-place read the new start's owner, so it could move the old line into the
+  other half. Now `g_sub.line_owner` is the owner the line was laid for. The re-place and the name use it.
+Seen after the fix (pictures 10-12 in `Screenshots for Claude/U1-subtitles/`):
+- run-20261117-111103-sub-review-p2-follow: player 2's call, "Hello?" and "Remember me, Ellia?" centred in their half.
+- run-20261117-111154-sub-review-mix-p1phone-p2clock: player 1's "Remember me, Pius?" in their half, player 2's
+  EXAMINE prompt and carriage clock words in theirs.
+Not seen: a state load mid-line, and a start over the other player's line. Neither was run; both fixes are read from
+the code.

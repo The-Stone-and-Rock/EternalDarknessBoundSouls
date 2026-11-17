@@ -4271,6 +4271,7 @@ static void test_run_script(CPUState* cpu);
 static void test_save_state(CPUState* cpu);
 static void test_load_state(CPUState* cpu);
 static void test_set_flag(CPUState* cpu);
+static void test_subtitles(CPUState* cpu);
 static struct {
     u16 button;
     s8 x, y;
@@ -4408,6 +4409,7 @@ static void hle_PADRead(CPUState* cpu) {
         change_time_pad(cpu, pad_began);  // ([change-time] t6, ED_CHANGE_TIME only)
         change_hold_frame(cpu);  // ([change-hold]'s rows, ED_COOP_ENEMY_LOG only)
         test_set_flag(cpu);
+        test_subtitles(cpu);
         test_run_script(cpu);
         test_save_state(cpu);
     test_load_state(cpu);
@@ -20500,6 +20502,25 @@ static void test_set_flag(CPUState* cpu) {
     memmove(list, *rest == ',' ? rest + 1 : rest, strlen(rest) + 1);
 }
 
+// ED_SUBTITLES=1 (or 0): for tests. Holds the game's Subtitles option on (or off) every frame: bit 0 of 0x80307180, the
+// word the Options page sets (TITLE_SUBTITLES). With it off the updater 0x800088A0 makes no line, so a subtitle check
+// would show nothing in either half. Nothing happens without the variable.
+static void test_subtitles(CPUState* cpu) {
+    static int want = -2;
+    if (want == -2) {
+        const char* text = getenv("ED_SUBTITLES");
+        want = text == NULL ? -1 : atoi(text) != 0;
+    }
+    if (want < 0 || !sda_ready(cpu))
+        return;
+    const u32 was = mem_read32(cpu, 0x80307180u);
+    const u32 now = want ? was | 1u : was & ~1u;
+    if (now != was) {
+        mem_write32(cpu, 0x80307180u, now);
+        fprintf(stderr, "[test] frame %llu: Subtitles %s\n", (unsigned long long)(cpu->timebase / 675000ull), want ? "on" : "off");
+    }
+}
+
 // ED_RUN_SCRIPT=DELAY:SCRIPT[,DELAY:SCRIPT...]: for tests. Runs a level's script as a zone would, DELAY frames after the run starts
 // (the same script twice is walking into its zone, then pressing on its prompt). Nothing happens without the variable.
 // ED_SAVE_STATE=FRAME:PATH[,FRAME:PATH...]: for tests. Saves a state (as the frontend's F1-F10 do) at an absolute frame
@@ -21755,6 +21776,144 @@ static void coop_found_notice(CPUState* cpu, bool p2) {
     fprintf(stderr, "[coop] notice for player %d: %s\n", p2 ? 1 : 2, notice);
 }
 
+// Subtitles in co-op (docs/research/coop-gaps/subtitles.md, steps A and B). The game has one subtitle record
+// (0x80308DE8, 32 bytes): a start writes it (0x80008D48 mode 1, 0x80008C6C mode 0, 0x80008D0C mode 2), and the world
+// frame's updater 0x800088A0 makes each line with 0x801DB374 (from 0x80008A60 or 0x80008BFC) into the record's +20.
+// The line goes where the game's HUD is, player 1's half: player 2's phone call (L00/1801) read "Hello?" in player 1's
+// half, none in theirs (logs/run-20261117-103854-sub-before-p2-follow). Now the line is in the half of the player who
+// started it, as their words and prompts are: player 2's at +4096 (COOP_BAR_AWAY, which only their view brings back),
+// player 1's at +8192 while player 2 has the screen or the lent cameras (COOP_PROMPT_P1_AWAY, as coop_p1_icon_show), and
+// the game's own x with the split off (a scene on the whole frame). Placed again each frame: the screen can change while
+// a line is up. Solo, and player 2's copy Tome (its own record in its own memory), never come here.
+#define SUBTITLE_RECORD 0x80308DE8u
+#define SUBTITLE_MAKE_A 0x80008A64u     // the updater's two makes' returns
+#define SUBTITLE_MAKE_B 0x80008C00u
+#define SUBTITLE_WORLD 0x80008534u      // the updater's call in the world frame (li r3,2)
+#define SUBTITLE_TOME_REPLAY 0x80108048u  // the Tome's replay page's start: player 1's real Tome
+#define SUBTITLE_P2_AWAY 4096           // COOP_BAR_AWAY
+#define SUBTITLE_P1_AWAY 8192           // COOP_PROMPT_P1_AWAY
+static struct {
+    int owner;      // who started the record's subtitle: 0 none (a state loaded mid-line: player 1's), 1, 2
+    int line_owner; // whose half the line on screen was laid in (1, 2). A start leaves the old line up until the new
+                    // record's first row (0x80008A14 frees it then), so the re-place goes by this, not by owner.
+    u32 element;    // the line put in its owner's half, as the record's +20
+    s16 x;          // its +8 as last written
+    s16 away;       // what was added to the game's x
+} g_sub;
+
+static bool coop_subtitles_on(void) { return g_settings.mod_coop && g_coop_p2 != 0u && !g_tome_copy_turn; }
+
+static void coop_subtitle_started(CPUState* cpu, const char* mode) {
+    if (!coop_subtitles_on() || !sda_ready(cpu))
+        return;
+    // The player at the call: r13-21496 is player 2's id inside a turn, use or script run of theirs (coop_be_player2),
+    // the phone's state 2 included (a timer re-run in their bracket). The Tome's replay is player 1's real Tome.
+    const bool p2 = cpu->lr != SUBTITLE_TOME_REPLAY && mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u);
+    g_sub.owner = p2 ? 2 : 1;
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] subtitle (%s, text group %d) started by player %d (lr 0x%08X, frame %llu)\n", mode, (s32)cpu->gpr[4],
+                g_sub.owner, cpu->lr, (unsigned long long)(cpu->timebase / 675000ull));
+}
+static void coop_subtitle_start_wait(CPUState* cpu) { coop_subtitle_started(cpu, "mode 1"); }
+static void coop_subtitle_start_now(CPUState* cpu) { coop_subtitle_started(cpu, "mode 0"); }
+static void coop_subtitle_start_stream(CPUState* cpu) { coop_subtitle_started(cpu, "mode 2"); }
+// 0x80008DD4 (the end: the updater's own, EDCleanUpSubtitles, the Tome's replay stops) and 0x80008E40 (a mode's start).
+static void coop_subtitle_ended(CPUState* cpu) {
+    if (!coop_subtitles_on())
+        return;
+    if (g_sub.owner != 0 && getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] subtitle of player %d over (lr 0x%08X, frame %llu)\n", g_sub.owner, cpu->lr,
+                (unsigned long long)(cpu->timebase / 675000ull));
+    g_sub.owner = 0;
+    g_sub.element = 0u;
+}
+
+// The renderer's widescreen HUD (gxcore_draw.cpp widescreen_hud_shift) moves a HUD draw that is wholly right of the
+// screen's middle out by the spare width, so a corner prompt sits at the corner. The game's 16:9 HUD is 800 units over
+// -0.8..0.8, so that is 80 units (205 at 21:9, where the renderer narrows it by 16/21). A line past the edge is all right
+// of the middle: player 2's "Hello?" sat 80 units right of their half's middle (logs/run-20261117-104322-sub-after-p2-follow;
+// at 4032 it was 16 right, run-20261117-105109-sub-exp4032). Taken off here. Not taken by the renderer when something
+// crossed the screen's middle at the line's height (its bands), and then the line sits that much left of the middle.
+static s16 coop_subtitle_wide(CPUState* cpu) {
+    if (!sda_ready(cpu) || mem_read32(cpu, cpu->gpr[13] - TITLE_WIDESCREEN) == 0u)
+        return 0;
+    return g_settings.aspect == 4 ? 205 : 80;
+}
+
+static s16 coop_subtitle_away(CPUState* cpu, int owner) {
+    if (!camera_split_on())
+        return 0;
+    if (owner == 2)
+        return (s16)(SUBTITLE_P2_AWAY - coop_subtitle_wide(cpu));
+    return g_coop_screen || g_coop_cameras.lent ? (s16)(SUBTITLE_P1_AWAY - coop_subtitle_wide(cpu)) : 0;
+}
+
+// In the layout (hle_words_layout, lr 0x801DB53C): is this the world updater's line? 0x801DB374's saved lr is in its
+// caller's frame (r1 here is 0x801DB374's), and the updater's own one frame further up.
+static bool coop_subtitle_laying(CPUState* cpu) {
+    if (cpu->lr != 0x801DB53Cu || !guest_ram_range_valid(cpu, cpu->gpr[1], 4u))
+        return false;
+    const u32 updater_sp = mem_read32(cpu, cpu->gpr[1]);
+    if (!guest_ram_range_valid(cpu, updater_sp, 8u))
+        return false;
+    const u32 made_at = mem_read32(cpu, updater_sp + 4u);
+    if (made_at != SUBTITLE_MAKE_A && made_at != SUBTITLE_MAKE_B)
+        return false;
+    const u32 world_sp = mem_read32(cpu, updater_sp);
+    return guest_ram_range_valid(cpu, world_sp, 8u) && mem_read32(cpu, world_sp + 4u) == SUBTITLE_WORLD;
+}
+
+// The line as it is laid out: into its owner's half. The layout then takes half its width off +8, so the away is kept.
+static void coop_subtitle_laid(CPUState* cpu) {
+    const u32 element = cpu->gpr[3];
+    if (!coop_subtitles_on() || !guest_ram_range_valid(cpu, element + 8u, 2u))
+        return;
+    if (!coop_subtitle_laying(cpu)) {
+        if (element == g_sub.element)
+            g_sub.element = 0u;  // the pool's element made anew as something else
+        return;
+    }
+    g_sub.line_owner = g_sub.owner == 2 ? 2 : 1;
+    const s16 away = coop_subtitle_away(cpu, g_sub.line_owner);
+    const s16 x = (s16)mem_read16(cpu, element + 8u);
+    if (away != 0 && x < 2048)
+        mem_write16(cpu, element + 8u, (u16)(s16)(x + away));
+    g_sub.element = element;
+    g_sub.away = x < 2048 ? away : 0;
+    g_sub.x = -32768;  // read back after the layout (coop_subtitle_place)
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] subtitle line of player %d laid at x %d + %d (element 0x%08X, frame %llu)\n", g_sub.line_owner,
+                x, g_sub.away, element, (unsigned long long)(cpu->timebase / 675000ull));
+}
+
+// Each frame: the line in its owner's half as the screen and the split change. Only the element the record still
+// holds, at the place last written: one freed and made again as something else is let go.
+static void coop_subtitle_place(CPUState* cpu) {
+    if (g_sub.element == 0u || !coop_subtitles_on())
+        return;
+    const u32 element = g_sub.element;
+    if (mem_read32(cpu, SUBTITLE_RECORD + 20u) != element || !guest_ram_range_valid(cpu, element + 8u, 2u)) {
+        g_sub.element = 0u;
+        return;
+    }
+    const s16 x = (s16)mem_read16(cpu, element + 8u);
+    if (g_sub.x == -32768)
+        g_sub.x = x;  // where the layout left it
+    else if (x != g_sub.x) {
+        g_sub.element = 0u;
+        return;
+    }
+    const s16 away = coop_subtitle_away(cpu, g_sub.line_owner);  // the line's own half, even after a new start
+    if (away == g_sub.away)
+        return;
+    g_sub.x = (s16)(x - g_sub.away + away);
+    mem_write16(cpu, element + 8u, (u16)g_sub.x);
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] subtitle line of player %d moved: away %d -> %d (frame %llu)\n", g_sub.line_owner,
+                g_sub.away, away, (unsigned long long)(cpu->timebase / 675000ull));
+    g_sub.away = away;
+}
+
 static void hle_words_layout(CPUState* cpu) {
     if (coop_trace() && guest_ram_range_valid(cpu, cpu->gpr[3] + WORDS_AT, 120u)) {
         static char seen[8][100];
@@ -21780,6 +21939,7 @@ static void hle_words_layout(CPUState* cpu) {
     g_hle_passthrough = true;
     if (!g_tome_copy_turn && tw_on(cpu))
         tw_element_laid(cpu, cpu->gpr[3]);
+    coop_subtitle_laid(cpu);  // a subtitle's line, in the half of the player who started it
     // Player 2's own words (coop_p2_words_call): the element in their half, by x as every prompt of theirs is. The
     // layout subtracts half the width from +8 after this, so the box lands at 4096 + x - w/2 as COOP_PROMPT_AT does.
     if (coop_p2_words_open_call() && cpu->lr == 0x801DB53Cu && guest_ram_range_valid(cpu, cpu->gpr[3] + 8u, 2u)) {
@@ -21810,7 +21970,7 @@ static void hle_words_layout(CPUState* cpu) {
     // before their close-up and named player 1's character, logs/run-20261109-001519-items-l7), as hle_coop_found tells.
     const bool p2 = g_settings.mod_coop && g_coop_p2 != 0u &&
                     (g_coop_tome_p2 || mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2 || coop_close_up_p2s() ||
-                     (g_coop_use.active && g_coop_use.p2));
+                     (g_coop_use.active && g_coop_use.p2) || (g_sub.line_owner == 2 && g_sub.element == cpu->gpr[3]));
     const int choice = coop_name_choice(p2);
     if (chapter < 0 || choice < 0 || choice >= 12 || choice == chapter)
         return;
@@ -33173,6 +33333,7 @@ static void coop_pad_read(CPUState* cpu, bool playing) {
         coop_prompt_show(cpu, (!coop_busy(cpu) || g_coop_p1_look) && !g_coop_p2_hold_open && !game_menu_open(cpu) && !cutscene_playing(cpu) &&
                                   g_coop_p2_input_mode < 0);
         coop_p1_icon_show(cpu);
+        coop_subtitle_place(cpu);
     }
     static int log = -1;
     if (log < 0)
@@ -33497,6 +33658,27 @@ static void find_coop(CPUState* cpu) {
         words_layout->intercept = hle_words_layout;
     } else {
         fprintf(stderr, "[coop] the layout of the game's words not found: they name the chapter's character\n");
+    }
+    // Subtitles: whose the record's subtitle is (its three starts, its end and a mode's start), for coop_subtitle_laid.
+    {
+        static const struct {
+            u32 at, first;
+            void (*fn)(CPUState*);
+        } kSubtitle[5] = {
+            {0x80008D48u, 0x3D008031u, coop_subtitle_start_wait},    // lis r8,-32719
+            {0x80008C6Cu, 0x3CE08031u, coop_subtitle_start_now},     // lis r7,-32719
+            {0x80008D0Cu, 0x3CE08031u, coop_subtitle_start_stream},  // lis r7,-32719
+            {0x80008DD4u, 0x9421FFF0u, coop_subtitle_ended},         // stwu r1,-16(r1)
+            {0x80008E40u, 0x3880FFFFu, coop_subtitle_ended},         // li r4,-1
+        };
+        for (int i = 0; i < 5; i++) {
+            HleDispatchEntry* entry = hle_dispatch_entry(kSubtitle[i].at);
+            if (mem_read32(cpu, kSubtitle[i].at) == kSubtitle[i].first && entry != NULL && entry->intercept == NULL &&
+                entry->notify == NULL)
+                entry->notify = kSubtitle[i].fn;
+            else
+                fprintf(stderr, "[coop] subtitle hook 0x%08X not found: subtitles stay in player 1's half\n", kSubtitle[i].at);
+        }
     }
     // The look for things lying about (stwu r1,-32(r1); ... bl 0x800DA688 at +0x14),
     // player 2's in their own look.
@@ -34626,6 +34808,8 @@ void hle_coop_state_load(const void* in) {
     memset(g_wpn, 0, sizeof g_wpn);
     g_coop_p1_icon.element = 0u;
     g_coop_p1_icon.id = -1;
+    // A subtitle's owner and line are the old world's: a line the loaded state has up is player 1's (coop_subtitle_laid).
+    memset(&g_sub, 0, sizeof g_sub);
     g_coop_show_kept[0] = g_coop_show_kept[1] = false;
     g_coop_unseen_out_of[0] = g_coop_unseen_out_of[1] = -1;
     memset(g_coop_unseen_look, 0, sizeof g_coop_unseen_look);

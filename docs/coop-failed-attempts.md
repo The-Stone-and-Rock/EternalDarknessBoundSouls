@@ -947,3 +947,20 @@ body.skin-tome .tile { width: 5.9em; margin: 0.08em 0.17em; padding: 0.18em 0.15
 What worked: `box-sizing: border-box` on the tile, width 6.1em in a 19.2em grid, the roster's letters 0.87em and no
 rule under its heading; a `slots` body class with rows 1.3em tall on the slot lists. Seen in -094050-jtg-s5-tome-chars4
 and -093608-jtg-s5-tome-states2.
+
+## A subtitle at +4096 in player 2's half: 80 units right of the middle (2026-11-17, subtitles step U1)
+Player 2's phone lines ("Hello?", "Remember me, Alex?", L00/1801) were moved into their half at layout time by the
+same +4096 their own words use:
+```c
+const s16 away = g_sub.owner == 2 ? 4096 : 0;   // hle_words_layout, the updater's make (lr 0x801DB53C)
+if (away != 0 && x < 2048)
+    mem_write16(cpu, element + 8u, (u16)(s16)(x + away));
+```
+The line was in player 2's half, but 48 pixels (80 HUD units) right of its middle
+(logs/run-20261117-104322-sub-after-p2-follow, run-20261117-104434-sub-after-p2-apart). The cause is the renderer's
+widescreen HUD (gxcore_draw.cpp widescreen_hud_shift): a HUD draw wholly right of the screen's middle is moved out by
+the spare width (the game's 16:9 HUD is 800 units over -0.8..0.8, so 80 units). Everything past the edge counts as
+right of the middle. At +4032 it was 16 units right (run-20261117-105109-sub-exp4032).
+What worked: take that width off in the host, 80 units with the game's widescreen on (205 at 21:9), nothing at 4:3
+(`coop_subtitle_wide`). Centred in run-20261117-105400-sub-after2-p2-follow. The renderer was left alone: player 2's
+bars, count and prompts were placed by eye with the shift in.

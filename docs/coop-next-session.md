@@ -3,6 +3,31 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: co-op subtitles, step U1 (checkpoint commit)
+The user's call: a subtitle may show only for the player who started it. Built that way (plan A and B of
+docs/research/coop-gaps/subtitles.md, its "Built" section has the detail).
+- What changed (hle.c only, all gated on co-op with player 2 in; solo never reaches it):
+  - The three subtitle starts note who started the line (player 2 when it runs as theirs). The Tome replay is player 1's.
+  - The world updater's line is moved into its owner's half as it is laid out: player 2's at x + 4096 - 80, player 1's
+    at x + 8192 - 80 while player 2 has the screen, else the game's x. The 80 undoes the renderer's widescreen HUD shift.
+  - Each frame the line is placed again if the screen or split changes.
+  - Player 2's line names player 2's character.
+  - Review fixes: a state load clears the owner; a new start no longer moves the old line (`line_owner`).
+  - Test switch `ED_SUBTITLES=1` (bit 0 of 0x80307180 held on), in the ed skill.
+- Seen in pictures (`Screenshots for Claude/U1-subtitles/`):
+  - Before (1): player 2's phone lines in player 1's half.
+  - After: player 2's lines centred in their half, follow and apart (2-4, 10); player 1's phone lines in theirs (5, 11);
+    words windows and EXAMINE prompts still in their owner's half with a subtitle up (6, 7, 12).
+  - Runs: logs/run-20261117-105400-sub-after2-p2-follow, -110024-sub-after2-p2-apart, -105448/-105525 (mixed), and
+    after the review fixes -111103-sub-review-p2-follow and -111154-sub-review-mix-p1phone-p2clock.
+- Not seen: player 1's line moved to +8192 (no subtitle ever overlapped the other's close-up, as presses wait); the
+  per-frame move; a state load mid-line; a start over the other's line; the creature, event-91 and Tome replay starts;
+  the ghost maid; the clock's third try by player 2 (player 2 fell through room 77's floor at the put spot). All runs
+  used saves/slot3.state. Not played by the user.
+- Already broken before (not from this): player 2's ANSWER PHONE prompt shows again after their call; the phone's
+  flash lights player 1's half.
+- Next: the user's play (docs/coop-play-test.md section 8). Both halves when both are in one room is a later step.
+
 ## 2026-11-17 (morning): native menus, step 6 review fix (committed with step 6)
 A review found one real problem (two reviewers, the same one). It is fixed and seen in pictures
 (`Screenshots for Claude/s6-tome-coop/` 16-22).

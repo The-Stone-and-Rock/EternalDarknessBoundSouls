@@ -170,3 +170,15 @@ Play it with `play-rooms-log.bat karim-pedestal`, co-op on:
 - After the gate is open and the Tome is back: save another slot.
 - If you have time: load the first slot and let **player 2** use their Tome at the pedestal instead.
 - Then on into the Artifact's room (the enemies appear there). Close the game when done.
+
+## 8. Subtitles in co-op (2026-11-17)
+A subtitle line now shows only in the half of the player who started it. Turn **Subtitles on** in the game's options
+first, or nothing shows. Play with `play-rooms-log.bat subtitles`, co-op on, in Alex's mansion (chapter 0):
+- Player 2 answers the hall phone (room 69). "Hello?" and "Remember me, ..." should be in player 2's half, in its
+  middle, naming player 2's character. Player 1's half should have none.
+- Player 1 answers it instead (load a save from before). The lines should be in player 1's half.
+- One player at the phone, the other at the carriage clock in the next room (or in another room). Each one's words
+  and EXAMINE prompts should stay in their own half.
+- Try the clock three times with player 2 (Alex's clock lines), and the ghost maid if you reach her.
+- If you can: open player 1's Tome or a close-up while player 2's line is up, and say where the line goes.
+- Say if a line is ever in the wrong half, cut off, or shows in both.
