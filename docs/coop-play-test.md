@@ -74,6 +74,15 @@ should look different yet. Try:
   menu." The two character cards say a change also applies to a save state you load.
 - Tell Claude if anything changed that shouldn't have.
 
+**Native menus, step 2 (2026-11-17 morning):** the title's main menu has **Choose Character** between Load Game and
+Options (English). Try:
+- Up and Down through every row: each lights as before, at its place. Options, Jump to Game and Credits sit one row lower.
+- A on Choose Character: the two players' cards (the launcher's look for now). B, Esc or the Back row: back to the
+  title with the row still lit. Also: A on a card, then back to the cards.
+- Leave the cards open a few minutes, close them: the title should not jump straight into its attract movie.
+- With Mods > Title video off and the HD pack on: the title's picture is now the disc's, not the HD pack's. Say if
+  that matters.
+
 ## 7. Karim's skeletal pedestal (chapter 4), for Claude to trace
 The gate you meant is **room 193** in Karim's chapter (the room numbers are the game's; "room 93" is a different room,
 the mansion's teleporter hub in Alex's last chapter, where the game's ending starts). In room 193 the portcullis

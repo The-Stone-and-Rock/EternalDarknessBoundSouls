@@ -17173,14 +17173,124 @@ static bool title_on_options(CPUState* cpu) {
     hle_guest_call(cpu, TITLE_CARD_NOTICE, NULL, 0, 0.0, &notice);
     return notice == 0u;
 }
+// The title's main menu (state 7) gets "Choose Character" between Load Game and Options
+// (docs/research/in-game-menu/10-title-choose-character.md). It is the game's own spare row 5 (one past Credits): the
+// cursor can sit there, A on it plays the choose sound and does nothing else, and Up/Down plays no whisper there. The
+// host only reorders the moves (TITLE_ROWS 6, and the cursor set one step short of where it should land, so the game's
+// own step lands there): Start, Load, Choose Character, Options, Jump to Game, Credits. The game's rows 2-4 keep their
+// actions. titlevideo.cpp repaints the main menu's picture (Options 34 lower, the new words where it was, lit or not);
+// the Options, Jump and Credits glows and words go 34 lower by their quads (in RAM, English only). English only: the
+// picture of another language is not painted, and its quads are its own.
+#define TITLE_MAIN 7u
+#define TITLE_CHOOSE_ROW 5u          // the game's spare row: Choose Character
+#define TITLE_SHOWN 0x80308A88u      // byte: its bits counted, 1+ Credits shown, 2+ Jump to Game
+#define TITLE_FLAGS (TITLE_RECORD + 48u)  // word: 0x2 = the idle clock (to the attract movie) started
+#define TITLE_SCREEN_DRAW 0x8001DF90u     // (state, cursor, alpha): every title screen's draw
+#define TITLE_QUAD_DRAW 0x8019D3B4u       // (texture, quad * 4, 5): one quad of the bound table
+#define TITLE_GLOW_RETURN 0x8001E430u     // the main menu's glow, drawn at quad `cursor`
+#define TITLE_QUADS 0x8023C780u           // 4 corners x (x, y, z) s16 a quad
+void titlevideo_menu_row(int row);
+int titlevideo_menu_painted(void);
+static bool title_on_main(CPUState* cpu) {
+    return mem_read8(cpu, TITLE_STATE) == TITLE_MAIN && sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - TITLE_LANGUAGE) == 0u &&
+           titlevideo_menu_painted();
+}
+static u32 title_bits(u32 v) {
+    u32 n = 0u;
+    for (; v != 0u; v &= v - 1u)
+        n++;
+    return n;
+}
+// Quads 2-4 (Options, Jump to Game, Credits): the disc's, and 34 lower (Jump 10 right too, clear of "Nintendo").
+static const s16 kTitleQuadsDisc[3][4] = {{452, 556, 323, 378}, {367, 614, 348, 428}, {442, 564, 382, 441}};
+static const s16 kTitleQuadsMoved[3][4] = {{452, 556, 357, 412}, {377, 624, 382, 462}, {442, 564, 416, 475}};
+static bool title_quad_is(CPUState* cpu, u32 at, const s16 q[4]) {
+    const s16 want[12] = {q[0], q[2], -1, q[1], q[2], -1, q[1], q[3], -1, q[0], q[3], -1};
+    for (u32 i = 0u; i < 12u; i++)
+        if ((s16)mem_read16(cpu, at + 2u * i) != want[i])
+            return false;
+    return true;
+}
+static void title_quads_put(CPUState* cpu, bool moved) {
+    static bool warned;
+    for (u32 n = 0u; n < 3u; n++) {
+        const u32 at = TITLE_QUADS + (2u + n) * 24u;
+        const s16* to = moved ? kTitleQuadsMoved[n] : kTitleQuadsDisc[n];
+        if (title_quad_is(cpu, at, to))
+            continue;
+        if (!title_quad_is(cpu, at, kTitleQuadsDisc[n]) && !title_quad_is(cpu, at, kTitleQuadsMoved[n])) {
+            if (!warned)
+                fprintf(stderr, "[title] the main menu's quad %u is not as expected: left alone\n", 2u + n);
+            warned = true;
+            continue;
+        }
+        const s16 c[12] = {to[0], to[2], -1, to[1], to[2], -1, to[1], to[3], -1, to[0], to[3], -1};
+        for (u32 i = 0u; i < 12u; i++)
+            mem_write16(cpu, at + 2u * i, (u16)c[i]);
+    }
+}
+// The idle clock: the page can stay open for minutes of guest time, so the clock restarts once the page has closed.
+static bool g_title_idle_reset;
+static unsigned g_title_idle_closed;
+static void title_main_updown(CPUState* cpu) {
+    if (!title_on_main(cpu))
+        return;
+    const s32 dir = (s32)cpu->gpr[3] < 0 ? -1 : 1;
+    const u32 shown = title_bits(mem_read8(cpu, TITLE_SHOWN));
+    u32 order[6] = {0u, 1u, TITLE_CHOOSE_ROW, 2u}, n = 4u;
+    if (shown >= 2u)
+        order[n++] = 3u;
+    if (shown >= 1u)
+        order[n++] = 4u;
+    const u32 at = mem_read32(cpu, TITLE_CURSOR);
+    u32 i = 0u;
+    while (i < n && order[i] != at)
+        i++;
+    if (i == n)
+        return;  // (a row the order doesn't have: the game's own step)
+    const u32 dest = order[(i + n + (u32)dir) % n];
+    mem_write32(cpu, TITLE_ROWS, TITLE_CHOOSE_ROW + 1u);
+    mem_write32(cpu, TITLE_CURSOR, (u32)((s32)dest - dir));
+}
+static void title_main_choose(CPUState* cpu) {
+    if (!title_on_main(cpu) || mem_read32(cpu, TITLE_CURSOR) != TITLE_CHOOSE_ROW)
+        return;
+    fprintf(stderr, "[title] Choose Character (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+    g_title_idle_closed = frontend_menu_closed_count();
+    g_title_idle_reset = true;
+    frontend_open_page_skin(FRONTEND_PAGE_TITLE_CHARACTERS, 0, FRONTEND_SKIN_TITLE, -1);
+}
+// Every title screen's draw: r3 the state, r4 its cursor (during a cross-fade the old screen is drawn with its own).
+static void title_main_draw(CPUState* cpu) {
+    if (cpu->gpr[3] != TITLE_MAIN || !sda_ready(cpu))
+        return;
+    const bool english = mem_read32(cpu, cpu->gpr[13] - TITLE_LANGUAGE) == 0u;
+    titlevideo_menu_row(english ? (int)cpu->gpr[4] : -1);
+    title_quads_put(cpu, english && titlevideo_menu_painted());
+    if (g_title_idle_reset && frontend_menu_closed_count() != g_title_idle_closed) {
+        g_title_idle_reset = false;
+        mem_write32(cpu, TITLE_FLAGS, mem_read32(cpu, TITLE_FLAGS) & ~0x2u);
+        fprintf(stderr, "[title] the page closed: the idle clock starts again (frame %llu)\n",
+                (unsigned long long)(cpu->timebase / 675000ull));
+    }
+}
+// The game's glow for row 5 is texture 11 (a near-black 2x2) at quad 5, a dark box on the left: that one draw is passed over.
+static void title_quad_draw(CPUState* cpu) {
+    g_hle_passthrough = !(cpu->lr == TITLE_GLOW_RETURN && cpu->gpr[28] == TITLE_CHOOSE_ROW);
+}
+
 static void title_more_updown(CPUState* cpu) {
     if (title_on_options(cpu))
         mem_write32(cpu, TITLE_ROWS, TITLE_MORE_ROW + 1u);
+    else
+        title_main_updown(cpu);
 }
 static void title_more_choose(CPUState* cpu) {
     if (title_on_options(cpu) && mem_read32(cpu, TITLE_CURSOR) == TITLE_MORE_ROW) {
         fprintf(stderr, "[title] More Options (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
         frontend_open_page_skin(FRONTEND_PAGE_TITLE_SETTINGS, 0, FRONTEND_SKIN_TITLE, -1);
+    } else {
+        title_main_choose(cpu);
     }
 }
 // The draw's own cursor (r3, the one 0x8001D934 tests): during the fade out to the main menu it is the old screen's.
@@ -33465,6 +33575,18 @@ static void find_coop(CPUState* cpu) {
                         hle_dispatch_entry(kMore[i].at)->notify = kMore[i].fn;
                 else
                     fprintf(stderr, "[title] the Options' More Options row NOT installed (its functions taken or not as expected)\n");
+                // The main menu's Choose Character (title_main_*): its Up/Down and A ride on the notifies above.
+                HleDispatchEntry* screen = hle_dispatch_entry(TITLE_SCREEN_DRAW);
+                HleDispatchEntry* quad = hle_dispatch_entry(TITLE_QUAD_DRAW);
+                if (more && screen != NULL && screen->intercept == NULL && screen->notify == NULL && quad != NULL &&
+                    quad->intercept == NULL && quad->notify == NULL && mem_read32(cpu, TITLE_SCREEN_DRAW) == 0x9421FEA0u &&
+                    mem_read32(cpu, TITLE_QUAD_DRAW) == 0x9421FFE0u && mem_read32(cpu, TITLE_GLOW_RETURN - 4u) ==
+                    0x48000001u + ((TITLE_QUAD_DRAW - (TITLE_GLOW_RETURN - 4u)) & 0x03FFFFFCu)) {
+                    screen->notify = title_main_draw;
+                    quad->intercept = title_quad_draw;
+                } else {
+                    fprintf(stderr, "[title] the main menu's Choose Character NOT installed (its functions taken or not as expected)\n");
+                }
             }
             buffer->intercept = tw_room_buffer;
             for (int i = 0; i < 11; i++) {

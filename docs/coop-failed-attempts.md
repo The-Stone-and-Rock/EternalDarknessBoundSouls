@@ -885,3 +885,17 @@ logs/run-20261115-170750-jtg-page-p2).
 What worked: keep_request_hold (both world-frame calls, player 1's real Tome up), keep_walk/keep_filter (player 2's body and
 current copies out of the keep's own walk), tome_copy_film in the close's own order (mode, 0x80025FF0, keep). Every route
 then writes solo's keep: 159 entries ending 0x80308D40 (logs/run-20261115-1713*..1726*-jtg-page-*).
+
+## The title's main menu repaint: Options' hole box took Load Game's foot (2026-11-17, native menus step 2)
+Symptom: a short stray stroke under "Choose Character", between "Choose" and "Character", and "Load Game" thinner with
+the title video on (logs/run-20261117-073249-jtg-s2-cc-off2, -073410-jtg-s2-cc-video). The box for lifting Options
+(titlevideo.cpp paint_menu) began at upright y 322, but Load Game's ink ends at 324. Its low "faint ink" test took the
+bottom of Load Game's letters, erased them, and the move put them 34 lower, under the new words. The new words' dark
+shadow also darkened Load Game's foot, so the video's lift (by brightness) lost part of the "L".
+```cpp
+constexpr int bx0 = 554, bx1 = 668, by0 = 322, by1 = 374;
+...
+put(left + x - kR, top + y - kR, dark, clamp01(m * 2.2f) * 0.45f);
+```
+What worked: the box starts at y 325 (under Load Game), and the shadow is scaled by `1 - menu_ink(pixel)` so it never
+darkens another word's ink (logs/run-20261117-073702-jtg-s2-cc-video2, Screenshots for Claude/s2-choose-character/zoom4-*.png).

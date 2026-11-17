@@ -19,7 +19,9 @@
 # the guest clock follows the wall clock, so loads shift things by a few frames from run to run):
 #   ~455  the intro is over (ED_SKIP_INTRO stops tapping A: "[input] opening movie over (/UMemcardText.bin) at frame 452-462"
 #         in 6 of 7 runs); the title menu fades in by ~530 with Start Game lit, and stays (no attract loop by 1500)
-#   700, 740, 780  Down x3 (the menu WRAPS: 5 rows; 6 Downs land on Load Game, logs/run-20261105-194551-jtg-probe2)
+#   700, 740  Up x2: Start Game -> Credits -> Jump to Game (the menu WRAPS). The same landing with or without the
+#         title's Choose Character row (hle.c title_main_*, between Load Game and Options: Down x3 would land on
+#         Options now). Before 2026-11-17 this was Down x3 at 700, 740, 780.
 #   840   A: the 12-chapter grid fades in by ~910 with Pius lit
 #   940.. D-pad Down per grid row, then Right per column, 30 frames apart (none for chapter 1; chapter 7 checked: Paul lit)
 #   1100  A on the chapter. Chapters 2-12 then ask "CHOOSE YOUR FATE" (A at 1200 takes the lit Chattur'gha), and all ask
@@ -101,7 +103,7 @@ fi
 
 # The menu presses.
 T=${JTG_TITLE_AT:-700}
-MENU="$T,$((T+6)),0x0004;$((T+40)),$((T+46)),0x0004;$((T+80)),$((T+86)),0x0004;$((T+140)),$((T+146)),0x0100"
+MENU="$T,$((T+6)),0x0008;$((T+40)),$((T+46)),0x0008;$((T+140)),$((T+146)),0x0100"
 # JTG_SLOW=1: a slower grid for a loaded machine (several games at once, 6-40 fps). The stock 30-frame, 6-frame-long
 # grid presses were lost there and the run landed in the wrong chapter (room 166/150/338/103) or a menu
 # (2026-11-06, round 3); a first grid press at T+330, 60 frames apart, 14 frames long worked 6 of 6. It moves control

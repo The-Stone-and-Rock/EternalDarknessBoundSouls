@@ -3,6 +3,38 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17 (morning): native menus, step 2: "Choose Character" on the title's main menu (committed)
+The title's main menu now reads Start Game, Load Game, **Choose Character**, Options, Jump to Game, Credits. A on the
+new row opens the launcher's two-player cards (in the launcher look for now). Back closes them to the title, the row
+still lit. English only; other languages keep the game's five rows. No sound of its own on reaching it.
+- hle.c `title_main_*`: the row is the game's spare row 5. Up/Down: the host sets the row count to 6 and the cursor one
+  step short of where it should land; the game's own step does the rest (and plays its own whispers). A on row 5 opens
+  `FRONTEND_PAGE_TITLE_CHARACTERS`. A new notify on the screen draw `0x8001DF90` (state 7) tells titlevideo the lit
+  row, writes quads 2-4 (Options, Jump, Credits) 34 lower in RAM (Jump 10 right too), and restarts the idle clock once
+  the page has closed (the menu-closed count). A pass-through intercept on the quad draw `0x8019D3B4` skips only the
+  game's row-5 glow (`lr 0x8001E430`, r28 5), a near-black box. The row only turns on after titlevideo has repainted
+  the picture.
+- titlevideo.cpp `paint_menu`: the main menu's picture (texture 1) is now always claimed in English. Options is lifted,
+  its place filled from the hair round it, put back 34 lower, and "Choose Character" painted in the Tome's hand where it
+  was (lit pale cyan with a glow on row 5, a soft dark shadow so it reads over her chin). One generation word for all
+  850x480 pictures. With the video on, the words are lifted from the repainted picture (the box widened).
+- tools/ed/jtg.sh: Up x2 (Start -> Credits -> Jump) instead of Down x3. Same landing with or without the row. No other
+  script walks the title (check.py, coopcheck.py and the rest only call jtg.sh).
+- Testing switch: `ED_PAGE_TEST_BACK=1` with ED_PAGE_TEST_MS: the timed close presses Back once instead of closing.
+  `ED_TITLE_PAINT_DUMP=PATH` writes the repainted picture as PATH-lit.png / PATH-unlit.png.
+- Seen in pictures (Screenshots for Claude/s2-choose-character/): every row lit in turn, Down and Up, video off
+  (logs/run-20261117-073028-jtg-s2-cc-off, -073249-jtg-s2-cc-off2) and on (-073410-jtg-s2-cc-video,
+  -073702-jtg-s2-cc-video2, the last paint): Options, Jump and Credits lit at their new places; no dark box on row 5; A
+  opens the cards; Back (ED_PAGE_TEST_BACK) closes them, "Choose Character" still lit, Down then reaches Options. Jump
+  to Game by jtg.sh reached chapter 1, room 341, both in control at 1810 (-073459-jtg-s2-jtg-ch1) and, on the last
+  build, at 1801 (-073823-jtg-s2-jtg-final).
+- Fixed on the way: the first hole box took Load Game's foot and moved it under the new words (a stray mark). The box
+  now starts under Load Game, and the shadow leaves other words' ink alone.
+- Not seen: a real B, Start or Esc press closing the cards (only the test Back); a card's roster and back to the cards;
+  the idle clock after a long stay (only the log line); another language; the HD pack's title picture with the video
+  OFF is now replaced by the disc's 850x480 one (the claim skips the pack). Tell the user.
+- Next: step 3 of the plan (the title Options scroll, 09).
+
 ## 2026-11-17 (morning): native menus, step 1 (groundwork) of the plan in docs/research/in-game-menu/12-critic-and-plan.md
 The user's ask: the title's Options lists all our options and scrolls ("More Options" goes); "Choose Character" above
 Options on the title; the Tome's pages in a Tome look. Step 1 is only the groundwork. Nothing new shows yet.

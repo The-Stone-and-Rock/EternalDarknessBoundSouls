@@ -3283,7 +3283,15 @@ bool run_menu() {
         }
         if (g_test_close_at != 0 && SDL_GetTicks() >= g_test_close_at) {
             g_test_close_at = 0;
-            g_close = true;
+            // ED_PAGE_TEST_BACK=1 (testing): Back pressed once instead, so the page's own way out is what closes it.
+            static const bool by_back = std::getenv("ED_PAGE_TEST_BACK") != nullptr;
+            if (by_back && g_root_closes) {
+                std::fprintf(stderr, "[frontend] test: Back on screen %d\n", static_cast<int>(g_screen));
+                go_back();
+                dirty = true;
+            } else {
+                g_close = true;
+            }
         }
         static const bool log = std::getenv("ED_FRONTEND_LOG") != nullptr;
         if (log && dirty)

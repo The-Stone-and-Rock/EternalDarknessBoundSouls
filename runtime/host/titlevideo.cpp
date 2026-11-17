@@ -11,6 +11,8 @@
 #include "host/settings.h"
 #include "host/tome.h"
 
+#include <png.h>
+
 #define PL_MPEG_IMPLEMENTATION
 #include "third_party/pl_mpeg.h"
 
@@ -39,7 +41,8 @@ struct Box {
     uint32_t x0, y0, x1, y1;
     bool words;
 };
-constexpr Box kText[] = {{505, 85, 745, 220, true}, {340, 40, 500, 70, false}};
+// The words' box reaches down to moved Options and left to "Choose Character" (title_main_*: upright y 254..410).
+constexpr Box kText[] = {{490, 69, 745, 225, true}, {340, 40, 500, 70, false}};
 
 struct Video {
     std::mutex mutex;
@@ -354,6 +357,183 @@ std::vector<uint8_t> paint_more(const uint8_t* rgba, uint32_t w, uint32_t h, boo
     return out;
 }
 
+// The title's main menu (hle.c title_main_*): "Choose Character" between Load Game and Options, the game's spare row 5.
+// The disc's picture (texture 1) has Start Game, Load Game and Options painted in; Options is lifted, its place filled
+// from the hair round it, and put back 34 lower (its glow quad moved the same in RAM, as Jump's and Credits'), and the
+// new words painted where it was, in the Tome's hand and the painted rows' teal, lit pale cyan with a soft glow while
+// the game's cursor is on row 5 (as "More Options"). Measured on the disc's picture (upright 850x480,
+// docs/research/in-game-menu/10-title-choose-character.md section 2): Options' ink x 562..652, y 326..367; the rows
+// centred about x 618; Load Game's ink ends at y 324.
+std::atomic<int> g_menu_row{-1};  // the main menu's cursor as its frame last drew; -1 not English (hle.c)
+std::atomic<bool> g_menu_painted{false};
+constexpr int kMenuShift = 34;
+Painted g_menu[2];
+std::mutex g_menu_mutex;
+
+// The words' ink as the disc's picture paints them (the same test as the video's lift, below).
+float menu_ink(const uint8_t* p) {
+    const float lum = 0.3f * p[0] + 0.59f * p[1] + 0.11f * p[2];
+    return smooth(45.0f, 80.0f, lum) * smooth(12.0f, 24.0f, static_cast<float>(p[2]) - p[0]);
+}
+
+std::vector<uint8_t> paint_menu(const uint8_t* rgba, uint32_t w, uint32_t h, bool lit, bool* ok) {
+    std::vector<uint8_t> out(rgba, rgba + static_cast<size_t>(w) * h * 4);
+    *ok = false;
+    auto at = [&](std::vector<uint8_t>& v, int x, int y) { return &v[(static_cast<size_t>(h - 1 - y) * w + x) * 4]; };
+    auto src = [&](int x, int y) { return &rgba[(static_cast<size_t>(h - 1 - y) * w + x) * 4]; };
+    // 1. Options' ink, in a box round it (soft, smoothed once). Its faint edges (darker than the ink test takes, but
+    // still teal over the near-black hair) are found by a lower test, spread, for the hole.
+    constexpr int bx0 = 554, bx1 = 668, by0 = 325, by1 = 374;  // (Load Game's ink ends at 324: left alone)
+    constexpr int bw = bx1 - bx0, bh = by1 - by0;
+    std::vector<float> mask(static_cast<size_t>(bw) * bh), wide(mask.size());
+    for (int y = 0; y < bh; y++)
+        for (int x = 0; x < bw; x++) {
+            const uint8_t* p = src(bx0 + x, by0 + y);
+            const float lum = 0.3f * p[0] + 0.59f * p[1] + 0.11f * p[2];
+            mask[static_cast<size_t>(y) * bw + x] = menu_ink(p);
+            wide[static_cast<size_t>(y) * bw + x] = smooth(16.0f, 36.0f, lum) * smooth(3.0f, 10.0f, static_cast<float>(p[2]) - p[0]);
+        }
+    std::vector<float> lift = mask;
+    blur(lift, bw, bh, 1);
+    for (size_t i = 0; i < lift.size(); i++)
+        lift[i] = clamp01(std::max(lift[i] * 1.4f, wide[i]));
+    blur(wide, bw, bh, 2);
+    float ink = 0.f;
+    for (float m : mask)
+        ink += m;
+    if (ink < 200.f)
+        return out;  // not the picture measured: left as it is
+    // 2. The hole filled: each point under the words takes the hair round it (a blur of the points not under them).
+    std::vector<float> keep(static_cast<size_t>(bw) * bh), sum[3];
+    for (int c = 0; c < 3; c++)
+        sum[c].assign(keep.size(), 0.f);
+    for (size_t i = 0; i < keep.size(); i++) {
+        keep[i] = 1.f - clamp01(wide[i] * 3.f);
+        const int x = static_cast<int>(i % bw), y = static_cast<int>(i / bw);
+        for (int c = 0; c < 3; c++)
+            sum[c][i] = src(bx0 + x, by0 + y)[c] * keep[i];
+    }
+    for (int c = 0; c < 3; c++)
+        blur(sum[c], bw, bh, 7);
+    blur(keep, bw, bh, 7);
+    for (int y = 0; y < bh; y++)
+        for (int x = 0; x < bw; x++) {
+            const size_t i = static_cast<size_t>(y) * bw + x;
+            const float a = clamp01(std::max(lift[i], clamp01(wide[i] * 3.f)));
+            if (a <= 0.f || keep[i] <= 0.001f)
+                continue;
+            uint8_t* d = at(out, bx0 + x, by0 + y);
+            for (int c = 0; c < 3; c++)
+                d[c] = static_cast<uint8_t>(std::clamp(d[c] + (sum[c][i] / keep[i] - d[c]) * a, 0.f, 255.f));
+        }
+    // 3. Options put back 34 lower, its colour mixed in by its own mask (the ground there is nearly black).
+    for (int y = 0; y < bh; y++)
+        for (int x = 0; x < bw; x++) {
+            const float a = lift[static_cast<size_t>(y) * bw + x];
+            const int ty = by0 + y + kMenuShift;
+            if (a <= 0.f || ty >= static_cast<int>(h))
+                continue;
+            const uint8_t* s = src(bx0 + x, by0 + y);
+            uint8_t* d = at(out, bx0 + x, ty);
+            for (int c = 0; c < 3; c++)
+                d[c] = static_cast<uint8_t>(std::clamp(d[c] + (s[c] - d[c]) * a, 0.f, 255.f));
+        }
+    // 4. "Choose Character" where Options was: at most 232 wide, centred on the rows, its baseline at 356.
+    std::vector<uint8_t> cover;
+    int cw = 0, ch = 0, base = 0, ix0 = 0, ix1 = 0;
+    // As large as the game's own words (Load Game's ink is 33 tall), but no wider than 232 and its top under Load Game.
+    for (float px = 64.f; px >= 30.f; px -= 1.f) {
+        if (!tome_hand_cover("Choose Character", px, 0.8f, &cover, &cw, &ch, &base))
+            return out;
+        ix0 = cw;
+        ix1 = -1;
+        int iy0 = ch;
+        for (int y = 0; y < ch; y++)
+            for (int x = 0; x < cw; x++)
+                if (cover[static_cast<size_t>(y) * cw + x] > 24) {
+                    ix0 = std::min(ix0, x);
+                    ix1 = std::max(ix1, x);
+                    iy0 = std::min(iy0, y);
+                }
+        if (ix1 - ix0 <= 232 && base - iy0 <= 30)
+            break;
+    }
+    if (ix1 < ix0)
+        return out;
+    const int left = 618 - (ix0 + ix1) / 2, top = 356 - base;
+    const float paint[3] = {72.f, 97.f, 104.f}, light[3] = {0xA0, 0xE3, 0xF1}, dark[3] = {0.f, 0.f, 0.f};
+    auto put = [&](int x, int y, const float rgb[3], float a) {
+        if (x < 0 || y < 0 || x >= static_cast<int>(w) || y >= static_cast<int>(h) || a <= 0.f)
+            return;
+        uint8_t* p = at(out, x, y);
+        for (int c = 0; c < 3; c++)
+            p[c] = static_cast<uint8_t>(std::clamp(p[c] + (rgb[c] - p[c]) * std::min(a, 1.f), 0.f, 255.f));
+    };
+    // A soft shadow round the letters, so they read where they cross her chin (as the video's lift does). Not over
+    // the other words' ink (Load Game's foot, moved Options' top): darkened, the video's lift would lose them.
+    constexpr int kR = 6;
+    std::vector<float> halo(static_cast<size_t>(cw + 2 * kR) * (ch + 2 * kR), 0.f);
+    const int hw = cw + 2 * kR, hh = ch + 2 * kR;
+    for (int y = 0; y < ch; y++)
+        for (int x = 0; x < cw; x++)
+            halo[static_cast<size_t>(y + kR) * hw + x + kR] = cover[static_cast<size_t>(y) * cw + x] / 255.f;
+    blur(halo, hw, hh, 4);
+    for (int y = 0; y < hh; y++)
+        for (int x = 0; x < hw; x++) {
+            const float m = halo[static_cast<size_t>(y) * hw + x];
+            const int px = left + x - kR, py = top + y - kR;
+            if (px < 0 || py < 0 || px >= static_cast<int>(w) || py >= static_cast<int>(h) || m <= 0.f)
+                continue;
+            put(px, py, dark, clamp01(m * 2.2f) * 0.45f * (1.f - menu_ink(at(out, px, py))));
+            if (lit)  // the glow: faint pale cyan spread round the letters
+                put(px, py, light, clamp01(m * 1.6f) * 0.4f);
+        }
+    for (int y = 0; y < ch; y++)
+        for (int x = 0; x < cw; x++)
+            if (const uint8_t v = cover[static_cast<size_t>(y) * cw + x])
+                put(left + x, top + y, lit ? light : paint, v / 255.f * (lit ? 1.f : 0.9f));
+    *ok = true;
+    return out;
+}
+
+// The disc's main menu picture, repainted for the cursor (lit or not), kept; false when it isn't repainted.
+bool menu_picture(const uint8_t* rgba, uint32_t w, uint32_t h, std::vector<uint8_t>* out) {
+    if (g_menu_row.load() < 0 || !is_picture(w, h))
+        return false;
+    const bool lit = g_menu_row.load() == 5;
+    std::lock_guard<std::mutex> lock(g_menu_mutex);
+    Painted& p = g_menu[lit ? 1 : 0];
+    if (!p.ready || p.rgba.size() != static_cast<size_t>(w) * h * 4) {
+        bool ok = false;
+        p.rgba = paint_menu(rgba, w, h, lit, &ok);
+        p.lit = lit;
+        p.ready = ok;
+        if (!ok) {
+            static bool told = false;
+            if (!told)
+                std::fprintf(stderr, "[titlevideo] the main menu's picture NOT repainted (not as measured, or no hand font)\n");
+            told = true;
+            return false;
+        }
+        g_menu_painted = true;
+        if (const char* dump = std::getenv("ED_TITLE_PAINT_DUMP"); dump != nullptr && *dump != 0) {
+            // (testing) the repainted picture, upright, as dump-lit.png / dump-unlit.png
+            std::vector<uint8_t> up(p.rgba.size());
+            for (uint32_t y = 0; y < h; y++)
+                std::memcpy(&up[static_cast<size_t>(y) * w * 4], &p.rgba[static_cast<size_t>(h - 1 - y) * w * 4], w * 4);
+            png_image png{};
+            png.version = PNG_IMAGE_VERSION;
+            png.width = w;
+            png.height = h;
+            png.format = PNG_FORMAT_RGBA;
+            const std::string path = std::string(dump) + (lit ? "-lit.png" : "-unlit.png");
+            png_image_write_to_file(&png, path.c_str(), 0, up.data(), 0, nullptr);
+        }
+    }
+    *out = p.rgba;
+    return true;
+}
+
 int options_picture(const uint8_t* rgba, uint32_t w, uint32_t h, uint8_t** out_rgba, uint32_t* out_width,
                     uint32_t* out_height) {
     const bool lit = g_options_row.load() == 8;
@@ -517,7 +697,8 @@ bool titlevideo_claims(uint32_t format, uint32_t width, uint32_t height) {
 
 bool titlevideo_claims_hash(uint32_t width, uint32_t height, uint64_t hash) {
     if (is_picture(width, height))
-        return hash == kTitleHash ? video_on() : hash == kLoadScreenHash || hash == kOptionsHash;
+        // The main menu's picture: always while its Choose Character row is in use (English), else with the video.
+        return hash == kTitleHash ? video_on() || g_menu_row.load() >= 0 : hash == kLoadScreenHash || hash == kOptionsHash;
     if (width == kWordW && height == kWordH)
         return hash == kLoadWordHash;
     return hidden(width, height, hash) != nullptr;
@@ -526,9 +707,12 @@ bool titlevideo_claims_hash(uint32_t width, uint32_t height, uint64_t hash) {
 uint64_t titlevideo_generation(uint32_t width, uint32_t height) {
     if (!is_picture(width, height))
         return 1u;
-    // The Options picture is redrawn when its ninth row is lit or not (the video's frames change the title's).
-    const uint64_t more = kOptionsMoreSerial | (g_options_row.load() == 8 ? 1u : 0u);
-    return video_on() ? g.serial.load() * 2u + (more & 1u) : more;
+    // One word for every 850x480 picture: the Options picture is redrawn when its ninth row is lit or not, the main
+    // menu's when its Choose Character row comes into use and when it is lit or not (and the video's frames change the
+    // title's).
+    const int row = g_menu_row.load();
+    const uint64_t key = (g_options_row.load() == 8 ? 2u : 0u) + (row >= 0 ? 4u : 0u) + (row == 5 ? 1u : 0u);
+    return video_on() ? g.serial.load() * 256u + key : kOptionsMoreSerial | key;
 }
 
 int titlevideo_apply(const uint8_t* rgba, uint32_t width, uint32_t height, uint64_t hash, uint8_t** out_rgba,
@@ -557,12 +741,18 @@ namespace {
 
 int title_picture(const uint8_t* rgba, uint32_t width, uint32_t height, uint8_t** out_rgba, uint32_t* out_width,
                   uint32_t* out_height) {
+    // The main menu's own rows first (Choose Character): the video lifts its words from that.
+    std::vector<uint8_t> menu;
+    if (menu_picture(rgba, width, height, &menu))
+        rgba = menu.data();
+    if (!video_on())
+        return menu.empty() ? 0 : give(menu, width, height, out_rgba, out_width, out_height);
     g.asked_ms = now_ms();
     std::vector<uint8_t> out;
     uint32_t ow, oh;
     out = video_frame(&ow, &oh);
-    if (out.empty())
-        return 2;  // the first frame on its way: the picture meanwhile
+    if (out.empty())  // the first frame on its way: the picture meanwhile
+        return menu.empty() ? 2 : give(menu, width, height, out_rgba, out_width, out_height);
     // The painted text over the video: the menu's words by their pale teal
     // (brightness 60-110, blue over red by 20-40; the grey face beside them
     // 40-60 and 10-17), the copyright line by its brightness. The video's
@@ -608,3 +798,7 @@ int title_picture(const uint8_t* rgba, uint32_t width, uint32_t height, uint8_t*
 
 // The title Options' cursor row as its frame draws (hle.c, the game thread): row 8 lights "More Options".
 extern "C" void titlevideo_options_row(int row) { g_options_row = row; }
+// The main menu's cursor as its frame draws (hle.c, the game thread), -1 not English: row 5 lights "Choose Character".
+extern "C" void titlevideo_menu_row(int row) { g_menu_row = row; }
+// The main menu's picture has been repainted with Choose Character (hle.c adds the row only then).
+extern "C" int titlevideo_menu_painted(void) { return g_menu_painted.load() ? 1 : 0; }
