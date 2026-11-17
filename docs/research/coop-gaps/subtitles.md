@@ -301,6 +301,9 @@ ED_INPUT_SCRIPT goes round controls.cpp, so player 1's real button handling need
 
 1. With both players in one room (follow), should a subtitle show in both halves (both hear the voice) or only in the
    half of the player who started it? That is the user's call. Today's words and finds go to the owner's half only.
+   **Answered by the user, 2026-11-17:** the speaker's half first (A + B); then both halves only while both players
+   are in the same room (apart: the speaker's half only), if it can be done without breaking the other co-op fixes.
+   Only with the game's Subtitles option on, as today.
 2. Does player 2's clock close-up really hold through the third try's 220-frame wait (case 1)? Not seen.
 3. Where exactly does a subtitle end up behind player 1's real Tome (case 7): which mode's frame lays it out, and which
    half shows that frame?
