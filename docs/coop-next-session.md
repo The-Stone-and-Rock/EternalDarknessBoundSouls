@@ -3,6 +3,27 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: the HD title picture with the title video off, step F3 (checkpoint commit, with the review's fixes)
+docs/research/firstrun-hd-flash/hdtitle.md ("Built: step F3" and "Built: step F3 review fixes").
+- **Review fixes:** the HD backdrop now has a stamp beside it (`options-clean-hd.png.stamp`: code version, scale, the
+  pack file's path, size and time), so a swapped pack or a newer build makes it again (log "not stamped: made again"
+  in run -132942, "up to date" in run -134014). The ghost of "Opt" under Choose Character is gone at 2x in the paint
+  dump (run -133138, `Screenshots for Claude/f3-review-fixes/compare-ghost-before-after-lit-2x.png`). HD textures
+  turned on after boot now bring the HD backdrop at once, without a key (run -133835, fresh scratch res, pictures
+  01-03). The HD state is never destroyed and the exit waits for the HD workers (`titlevideo_shutdown`; from the code
+  only). New pictures: video-on Options list on HD (04, 05), the final build's title with Choose Character lit (02).
+- Not seen after the fixes: a 4K screen (a faint lighter smudge, no letters, stays at 2x where Options was); closing
+  the launcher during the boot read.
+- **With the video off and the HD pack there, the title is the pack's 3400x1920 picture** with Choose Character
+  painted on it (measured on the disc's 850x480, painted at 4x). The HD Options list (2x) and the title look's HD
+  backdrop (`res/video/options-clean-hd.png`, made at boot from the pack) also show, with the video on or off. A fresh
+  install with the pack no longer has black behind the Choose Character cards.
+- The pack is read at boot on workers (`titlevideo_preload`, main.c). The 1x paint shows until the HD one is ready.
+- Without the pack or with HD textures off, nothing changed (runs -131223-jtg-f3-hdoff-list, -131541-jtg-f3-nopack).
+- Seen: runs 20261117-1305 to 1315 (jtg f3-*). Pictures: `Screenshots for Claude/f3-hd-title/`.
+- Not seen: a 4K screen, the HD toggle while on the title, the first 1x frames. Older, not changed: the dark box past
+  "Stereo Surround" at scroll 3 (`options_shade` ends at y 240). For the user: docs/coop-play-test.md section 10.
+
 ## 2026-11-17: subtitle leftovers, step F2 (checkpoint commit; review found nothing)
 docs/research/coop-gaps/subtitles.md ("Built: step F2").
 - **Player 2's copy of a line sat 48 px left of their half's middle** when the line was in both halves. The cause was

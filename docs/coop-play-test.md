@@ -213,3 +213,22 @@ The flash should be one smooth lavender fade, with no dark triangle from the mid
 - Say if a flash is ever in the wrong half, leaves a corner of its half uncovered, or still shows a hard edge.
 - Since step F2 (2026-11-17) the flash is centred in its half (before, it sat a bit off to one side). It should
   still cover the whole half, with no strip at either edge.
+
+## 10. The HD title picture with the title video off (2026-11-17)
+Turn the title video off (Mods) with HD textures on (Graphics), and restart.
+- The title should be sharp (her face, the hair, the moons), with Start Game, Load Game, Choose Character and Options
+  in the same places as before. Choose Character should look like the game's own words (same thickness and colour).
+- Move the cursor up and down a few times. Say if the picture ever turns soft, or if a move feels slower than before.
+- The Options list should be sharp too (the skull), with the video on or off. Scroll it to the bottom and back.
+- Open Choose Character from the title: the skull behind the cards should be sharp. On a fresh install (with the HD
+  pack) it should be there at once, not black.
+- Turn HD textures off on the title's Graphics page and back: the title and Options should go soft, then sharp again.
+- Say if anything looks patched: a square, a smudge or a ghost of the old Options words behind Choose Character.
+- Since the review fixes (2026-11-17):
+  - With HD textures OFF, restart, then turn them ON from the title's Graphics page (Image). The skull behind the page
+    should turn sharp within a moment, without pressing anything. Then open Choose Character from the title: the
+    cards should be on the sharp skull.
+  - On a large screen (1440p or 4K, full screen), look closely between "Choose" and "Character": there should be no
+    outline of the old "Options" letters. A soft, slightly lighter patch of hair there is expected; say if it shows.
+  - If you install a different HD pack, the skull behind Choose Character should match the new pack on the next start.
+  - Close the launcher right after it opens: the game should close at once, with no error.

@@ -478,3 +478,8 @@ bool texpack_read_rgba(uint32_t format, uint32_t width, uint32_t height, uint64_
     *out_height = img.height;
     return true;
 }
+
+std::string texpack_file(uint32_t format, uint32_t width, uint32_t height, uint64_t hash) {
+    const auto it = g.files.find(Key{format, width, height, hash});
+    return it == g.files.end() ? std::string() : it->second;
+}

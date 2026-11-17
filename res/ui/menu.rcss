@@ -1001,6 +1001,12 @@ body.skin-title.title-art #backdrop-picture {
 	decorator: image(../video/options-clean.png fill);
 }
 
+/* The HD pack's Options picture, its words' box blacked (res/video/options-clean-hd.png, 1700x960, written at boot by
+   titlevideo.cpp when the pack has it and HD textures are on): in place of the disc's (frontend.cpp title-art-hd). */
+body.skin-title.title-art-hd #backdrop-picture {
+	decorator: image(../video/options-clean-hd.png fill);
+}
+
 body.skin-title #book {
 	decorator: none;
 	background-color: #03090bd8;

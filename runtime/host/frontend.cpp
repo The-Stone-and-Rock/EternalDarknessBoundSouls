@@ -2879,6 +2879,9 @@ bool title_wide_page() {
 }
 // Whether res/video/options-clean.png is there to show. The page asks RmlUi for it (body class title-art) only then:
 // RmlUi never tries a picture again once it failed to load, so asking before it is written would leave it black all run.
+// Whether the page as last built shows the HD backdrop (render): the menu loop builds it again once the backdrop is
+// written after it was built (HD textures turned on on the page itself: titlevideo_title_art_hd starts the read).
+bool g_art_hd_shown = false;
 bool title_art_ready() {
     static bool ready = false;
     if (!ready) {
@@ -3123,6 +3126,20 @@ void render() {
     if (title)
         ensure_title_art();  // (tried again at each render until the Options picture has been kept)
     g_doc->SetClass("title-art", title && title_art_ready());
+    // With HD textures on and the pack's Options picture, its clean copy (titlevideo_preload writes it at boot, from the
+    // pack alone: there before Options is ever seen); its own path, so a failed try at one never blocks the other.
+    const bool art_hd = title && g_settings.hd_textures && titlevideo_title_art_hd();
+    g_doc->SetClass("title-art-hd", art_hd);
+    g_art_hd_shown = art_hd;
+    if (title) {
+        static int told = -1;
+        const int now = art_hd ? 2 : title_art_ready() ? 1 : 0;
+        if (now != told)
+            std::fprintf(stderr, "[frontend] the title look's backdrop: %s\n",
+                         now == 2 ? "HD (res/video/options-clean-hd.png)" : now == 1 ? "the disc's (res/video/options-clean.png)"
+                                                                         : "none yet (black)");
+        told = now;
+    }
     // (Button Mapping always: a controller-only player's has no right-hand rows, and keeps the same panel.)
     const bool wide_page = title_wide_page();
     g_doc->SetClass("title-list", title && !wide_page);
@@ -3664,6 +3681,8 @@ bool run_menu() {
             refresh = SDL_GetTicks() + 500;  // controller plugged in / out
             dirty = true;
         }
+        if (g_skin == Skin::Title && g_settings.hd_textures && !g_art_hd_shown && titlevideo_title_art_hd())
+            dirty = true;  // (the HD backdrop just written: shown without waiting for a key)
         if (dirty)
             build_rows();
         if (!dol_aurora_ui_frame()) {

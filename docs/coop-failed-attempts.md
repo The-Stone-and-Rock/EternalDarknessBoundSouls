@@ -967,3 +967,35 @@ bars, count and prompts were placed by eye with the shift in.
 Later (step F2): with the line in both halves the renderer still skipped the shift for the copy past the edge, as
 player 1's centred line was on the same height band, so the copy sat 80 units left. Fixed in the renderer: a draw
 wholly past the right edge is always shifted (subtitles.md "Built: step F2").
+
+## The HD title's hole fill with the disc's masks, and its bold at 0.8 x k (2026-11-17, step F3)
+1. The first HD paint of the title (`paint_menu_hd`) filled Options' old place and moved it down with the disc's own
+   masks, upsampled:
+```cpp
+keep[i] = 1.f - clamp01(up_wide[i] * 3.f);                               // the fill's average keeps off these
+const float a = clamp01(std::max(up_lift[i], clamp01(up_wide[i] * 3.f)));  // replaced by the fill
+```
+   The disc's `wide` mask follows its compression's 4x4 blocks (the words' teal bleeds into them). On the sharp HD
+   hair those blocks showed as dark squares between Choose and Character and round the moved Options
+   (logs/run-20261117-130147-jtg-f3-hd-off, `Screenshots for Claude/f3-hd-title/zoom-hd-dump-box.png`).
+   A fixed brightness test (`smooth(20, 45, lum)` inside the disc's masks) took a lighter strand of hair as ink and
+   left a soft square (run -130512, zoom-hd-dump-box-2.png).
+2. The hand at `px * k` with bold `0.8f * k` (hdtitle.md, skeptic's correction 3): Choose Character's strokes were
+   about 10 HD px where the HD picture's pen words are about 6 (run -130147, picture 02).
+What worked: on HD the ink is a point brighter than the hair round it (`l - blur(l, 3k)`), inside the disc's grown
+masks, and the HD hand at bold `0.25f * k` (run -130706, zoom-hd-dump-box-3.png and zoom-hd-words-screen-3.png).
+
+## The HD title's ghost of "Opt": an erase mask over all of the disc's area (2026-11-17, step F3 review)
+The review found a faint outline of the old Options letters left under Choose Character at 1:1 (zoom-hd-ghost.png):
+the brightness test (`l - blur(l, 3k)`) misses the HD letters' soft edge and dark-teal outline. First try: an erase
+mask for the fill taking any point a little brighter or more teal than the hair round it, over the whole of the disc's
+upsampled masks (`near`), grown by k:
+```cpp
+const float soft = std::max(smooth(1.5f, 7.f, dl), smooth(1.5f, 6.f, dt));
+erase[i] = std::max(up_lift[i], soft * near[i]);   // then a max filter of radius k
+```
+The hair's own grain passes a 1.5-7 level test, so most of the disc's blocky masks were taken. The fill's average then
+had almost nothing to keep in the middle (`keep` near 0): hard-edged dark squares and a cut through the "e" of Choose
+(run logs/run-20261117-132942-jtg-f3fix-ghost, `Screenshots for Claude/f3-review-fixes/paint-hd-unlit.png`).
+What worked: the same test only within 2k of the letters (`prox`, the letters' mask grown by 2k), then grown by k/2
+(run -133138, compare-ghost-before-after-lit-2x.png).

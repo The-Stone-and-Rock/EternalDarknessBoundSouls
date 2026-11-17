@@ -11,6 +11,7 @@
 #include "gxruntime/aurora_backend.h"
 #include "host/buttons.h"
 #include "host/texpack.h"
+#include "host/titlevideo.h"
 #include "host/controls.h"
 #include "host/frontend.h"
 #include "host/guestprof.h"
@@ -678,12 +679,14 @@ int main(int argc, char** argv) {
         buttons_init();
         frontend_init(argc, argv);
         texpack_init();
+        titlevideo_preload();
         if (!no_launcher && getenv("ED_QUICKLOAD") == NULL &&
             getenv("ED_NO_LAUNCHER") == NULL) {
             const char* default_iso = iso_path != NULL ? iso_path : getenv("ED_ISO");
             if (default_iso == NULL || default_iso[0] == '\0')
                 default_iso = "dump/" ED_GAME_ID ".iso";
             if (!frontend_run_launcher(default_iso, launcher_iso, sizeof launcher_iso)) {
+                titlevideo_shutdown();  // (the HD boot workers may still be reading the pack)
                 dol_aurora_shutdown();
                 return 0;
             }

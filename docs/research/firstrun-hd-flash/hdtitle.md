@@ -385,3 +385,97 @@ The diagnosis holds. Every address, line and history claim checked is right, bar
 disc's 850x480, paint on the pack's HD" is sound, and the pack files are as described. The plan works with the
 corrections. The ones that matter most: the bold width at 4x, when the worker can start (not before the disc picture
 is in hand), and the 26 MB moves on each lit swap. The HD ink numbers in 1.7 were not re-measured here.
+
+## Built: step F3 (2026-11-17)
+
+What was built, with the skeptic's corrections. All in `runtime/host/titlevideo.cpp` unless named.
+
+- **Read at boot.** `titlevideo_preload` (main.c, after `texpack_init`) reads the pack's pictures on workers when HD
+  textures are on: Options always, the title when `mod_title_video` is 0 (later, at the first ask, if the video's file
+  is missing). Each BC7 read took 70-100 ms. Log: `[titlevideo] HD title: the pack's 3400x1920 read in N ms`.
+- **The title** (`paint_menu_hd`, on a worker started at the renderer's first ask, when the disc's picture is in
+  hand): measured on the disc's 850x480 as `paint_menu`, painted on the pack's 3400x1920 (x4). The 1x paint is the
+  stand-in until it is ready. Kept: the pack picture once, plus a small lit and unlit patch (about 900x332 each).
+  Each ask copies once (4-12 ms in the log). Painted in about 200 ms (1.3 s with the test dump on).
+- **The generation word.** Video off: +2 when the HD title is ready and HD is on; +0x8000 for HD Options. Video on:
+  bit 60 for HD Options. Turning HD textures off drops the bits, so the renderer asks again and gets the 1x pictures.
+- **Options** (`paint_options_hd`): at 2x (1700x960), on the renderer's thread as before. The logo shade and the lit
+  row's glow are made at 1x and upsampled; the game's rows are copied from the HD picture by the 1x row map; our rows
+  in the hand at 2x. Painted in 4-10 ms per press, copied in 1-2 ms. Three paints kept.
+- **The title look's backdrop.** `res/video/options-clean-hd.png` (1700x960), made from the pack alone at boot (the
+  words' box blacked; about 120 ms). Written again when its stamp differs (see the review fixes below). frontend.cpp sets
+  `title-art-hd` with HD textures on, and menu.rcss lays that file over `options-clean.png`. A fresh install with the
+  pack now shows the skull behind Choose Character at once.
+- **Colour.** The disc-tuned ink is moved by the HD words' colour over the disc words' (measured each run). Title:
+  disc (82,105,115), HD (92,104,108), so Choose Character is (81,96,98). Options rows: (75,113,128).
+- Without the pack, or with HD textures off: every path is the old one (log `[titlevideo] HD pictures: no pack` or
+  `HD textures off`).
+
+Changes from the plan, found in pictures:
+
+1. The disc's masks follow its CMPR 4x4 blocks. Used as they are for the HD hole fill and the move, they left dark
+   squares on the sharp HD hair (run -130147). On HD the ink is now taken where a point is brighter than the hair
+   round it (a 3k blur), inside the disc's grown masks. The squares are gone (run -130706, zoom-hd-dump-box-3.png).
+2. Bold `0.8f * k` (the skeptic's correction 3) made Choose Character twice as heavy as the HD pen words (about 10 HD
+   px against 6). The HD strokes use `kHdBold = 0.25f * k`. They now match on screen.
+3. Options at x4 was not tried: x2 is about native for a 1920 window and paints in under 10 ms.
+
+Seen in pictures (`Screenshots for Claude/f3-hd-title/`):
+- Video off, HD on: Start Game and Options lit (01, 03, 04; 02, Choose Character lit, is from before the fill fix,
+  and the final build's lit Choose Character was only in the paint dump until the review run below); the Options list at the top and
+  scrolled (05, 06); the Graphics page on the HD backdrop (07); a fresh res folder with the cards on the HD skull at
+  once (08). Zooms: compare-title-1x-vs-hd.png, compare-backdrop-skull-1x-vs-hd.png,
+  compare-options-scrolled-1x-vs-hd.png.
+- Video off, HD textures off (09) and an empty pack folder (10): the disc's picture with Choose Character, as before.
+- Video on: the title video as before (11). Picture 12 is byte-for-byte picture 07 (the Graphics page over the
+  backdrop, the same with the video on or off); the video-on Options list rested on the log ("HD Options given")
+  until the review run below. The frame rate held 60 through the fade into Options, where Options is asked again on
+  each video frame.
+
+Not seen or not done:
+- At 3x zoom a faint outline of the old Options letters is left between Choose and Character (zoom-hd-ghost.png). On
+  a 1920 screen it does not show (zoom-hd-words-screen-3.png). A 4K screen was not tried.
+- The first few title frames show the 1x paint before the HD one is ready. No shot caught it.
+- Turning HD textures on or off on the title's Graphics page while on the title. From the code only.
+- Older, not changed: past "Stereo Surround" at scroll 3 a dark box ends at y 240 on the skull. It is
+  `options_shade`'s box (y 30..240), the same at 1x.
+- Steps 6 (the Load screen) and the lit Load Game word from the pack were not done.
+- Other languages: the title is not claimed, so the pack shows on its own. When the video is off the title picture is
+  still read at boot (26 MB kept).
+
+## Built: step F3 review fixes (2026-11-17)
+
+Six review findings, checked against the code. Five were fixed; the sixth (claims resting on too few pictures) is
+fixed by new pictures and by the corrections above. All in `runtime/host/titlevideo.cpp` unless named.
+
+1. **The HD backdrop's freshness was only "not older than the pack's file"** (two findings, the same fault). A pack
+   unzipped with older file times, another `ED_TEXTURE_PACK`, or a build that changes `options_clean_of` kept the old
+   picture. Now `options-clean-hd.png.stamp` sits beside it: the code's version (`kArtHdVersion`), the scale and size,
+   and the pack file's path, size and time. The picture is reused only when the stamp matches exactly; else it is made
+   again (about 125 ms on a worker), and the stamp is written after the picture. Seen in the log: run -132942 "is not
+   stamped: made again" (the file from before this fix), run -134014 "up to date".
+2. **A ghost of "Opt" under Choose Character at 1:1.** The brightness test misses the HD letters' soft edge and
+   dark-teal outline. The fill now erases a wider mask: the letters, plus any point a little brighter or more teal
+   than the hair round it (the hair's average with the letters taken out), only within 2k of the letters, grown by k/2.
+   The move of Options still uses the letters' own mask. The first try (the test over all of the disc's masks) made
+   hard squares: coop-failed-attempts.md. Seen in the paint dump at 2x, unlit and lit (run -133138,
+   `f3-review-fixes/compare-ghost-before-after-lit-2x.png`), and on screen (picture 02, zoom-02-title-words.png).
+3. **HD textures turned on after boot left the title look without its HD backdrop** until the game's Options screen
+   was asked for. `titlevideo_title_art_hd()` now starts the pack's Options read itself when HD is on and the backdrop
+   isn't ready (log "HD textures on after boot: the pack's Options picture read for the title look"), and frontend.cpp's
+   menu loop builds the page again once it is written (`g_art_hd_shown`), so it shows without a key press. Seen: run
+   -133835 with a fresh scratch res folder and `hd_textures = 0` at boot: HD turned on in the Image page (test keys),
+   the log's backdrop line went from the disc's to HD with no key, then the title with Choose Character lit and the
+   cards on the HD skull (pictures 01-03).
+4. **Detached workers used statics the exit destroys.** `g_hd` and its mutex are now made with `new` and never
+   destroyed (as texpack.cpp's Shared). Every HD worker is counted (`hd_thread`), and `titlevideo_shutdown()` waits for
+   them (at most 3 s): main.c calls it when the launcher is closed, and `titlevideo_preload` registers it with
+   `atexit`. From the code and the build only: closing the launcher within 250 ms of boot was not tried.
+5. **Claims with too few pictures.** Picture 12 is the same file as 07. New: the Options list with the video on, lit
+   rows moving, on the HD skull (pictures 04, 05, run -134014), and the final build's title with Choose Character lit
+   (picture 02, run -133835).
+
+Not seen or not done:
+- At 2x, a faint lighter smudge stays where Options was (the fill's average of the hair), with no letter shapes in it.
+  At 1920 it does not show (zoom-02-title-words.png). A 4K screen was not tried.
+- Closing the launcher during the boot read; a stuck worker would delay the exit by up to 3 s.

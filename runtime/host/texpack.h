@@ -11,6 +11,7 @@ void texpack_init(void);
 #ifdef __cplusplus
 }
 #include <cstdint>
+#include <string>
 #include <vector>
 // Textures the pack offers (0: no pack).
 size_t texpack_count();
@@ -23,4 +24,6 @@ bool texpack_busy();
 // thread.
 bool texpack_read_rgba(uint32_t format, uint32_t width, uint32_t height, uint64_t hash,
                        std::vector<uint8_t>* rgba, uint32_t* out_width, uint32_t* out_height);
+// The pack's file for a texture (whatever the HD setting), else empty.
+std::string texpack_file(uint32_t format, uint32_t width, uint32_t height, uint64_t hash);
 #endif
