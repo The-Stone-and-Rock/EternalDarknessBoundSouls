@@ -22,6 +22,9 @@ runtime/host/hle.c, **uncommitted, for the user to review and play** (`git diff 
    them; the 21 two-path compares (a branch for each character) are left for the user to decide.
 Kit added overnight: `ed stops RUN [SCRIPT] [--p2] [--level N]` (each script run: who ran it, its calls, where it
 stopped, hero gates flagged), `ed herogates [--all|--c]`. No hang report in any run.
+A review (a reviewer per fix, two skeptics per finding) passed the duck, arrival and zone fixes; its two low findings
+(ed177's owner not reset on a state load; a gate left patched in a saved state with the switch off) are fixed, and every
+run was repeated on that build with the same results (results.md, "The review").
 **Next:** the user plays the five fixes (with ED_COOP_HERO_ID=1 for the gates) and decides the two-path gates; then
 commit hle.c. Then the to-do list below from item 4.
 

@@ -87,3 +87,24 @@ the user: opening them picks Edward's path for player 2, which may or may not be
   player 2 out, 555 units lower.)
 - `ed stops` named player 1 from the most common main id; player 2's chain made most of the runs in the duck runs, so
   it called player 2 "player 1". It now takes id 1 (the chapter's character in all 10 saves).
+
+## The review of the five fixes (a workflow: a reviewer per fix, two skeptics per finding; 2026-11-17)
+Three fixes came back with nothing (the duck, the arrival scripts, the zone scan). Two findings, both low, survived both
+skeptics and are fixed in hle.c (uncommitted, like the rest):
+- **ed177 across a state load**: g_play_script_p2 wasn't reset by hle_coop_state_load, so a play-start script in the
+  loaded RAM (stored by player 1 in the saved session) could run as player 2's if player 2 had stored one before the
+  load. Only ed177 (0x8000FA2C) writes a nonzero r13-24248. Now reset in Step E beside the other in-flight owners: a
+  loaded pending script runs as the game's, as before the fix.
+- **A gate left patched in RAM**: the game keeps loaded chunks, so a state saved after player 2's run holds the gate
+  patched to their id, and with ED_COOP_HERO_ID unset nothing put it back. coop_hero_chunk is now installed always
+  (find_coop runs at every start, solo too); g_hero_open (ED_COOP_HERO_ID > 0) alone decides whether it opens a gate.
+  Off, it only writes a gate back to 1, which never happens unless a state brought one patched.
+Re-run on the build with both (2026-11-17 02:0x; a fresh probe and state, F 1487, S 2387):
+- Switch on, apart (logs/run-20261117-021005-duck-apart): the duck passed over once (frame 3805); player 1 in 279.
+- Solo, switch on (logs/run-20261117-021050-jtg-hero-solo): no [hero] line; player 1's 1951 through state 9 (fn151 at
+  2908).
+- Player 2 then player 1 (logs/run-20261117-021209-hero-p1after): opens for player 2 (2788), back to 1 at player 1's entry
+  (2987), the scene player 1's (3047), states 3 to 8 for player 1.
+- **Switch off**, apart (logs/run-20261117-021248-duck-apart): no [hero] line, player 2's 1951 stops at the gate (line 12,
+  `if L0 ~= 1`), as before the patch: the always-installed hook writes nothing.
+No new hang report in any (176 before and after).
