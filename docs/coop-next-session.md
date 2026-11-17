@@ -101,8 +101,19 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
    ...InsanityPhoneCall and EDCleanUpSubtitles L00/1801): one record, no fix. (d) 29 scripts leave a script for play
    mode's next start with ed177 (L*/1188 in room 83 in every level, L03/1011, 933, 2465, L04/2346, L05/929, L06/1981,
    L11/2407, L12/2196): hle.c has no handling of r13-24248, so it runs as whoever is the player then.
-   **Next, when the user asks: a play check of bugs (1) to (3) and fix list (a) (runs from fresh Jump-to-Game states,
-   ED_RUN_AWAY=1), then to-do item 4 (one "run this as player N" helper) or item 5 (the play-check runner).**
+   **Ready for testing (2026-11-16, read only, nothing run): docs/research/kit-bugs/.** plans.md has the five likely
+   bugs, each traced in the code by a reader and checked by a skeptic, with the smallest fix and a test plan; all five
+   came out likely real: (1) the duck (one character, 0x80164DD8u), (2) arrival scripts run for player 2 with player 1
+   still the character (coop_be_player2 around coop_run_script's first block, guarded on player 2 standing in that
+   room), (3) the L06 traps and (4) the L04 elevators (the game's own zone look runs a region's other_* script for
+   player 2's body beside the host's run as theirs, with player 1's room in play: one rule for both), (5) ed177's
+   play-start scripts (record who stored it, run it as theirs at mode 2's enter). build-run-duck.sh, -arrival.sh,
+   -traps.sh, -elevator.sh and -onplay.sh run each test: their header says the steps and their order (a probe, a
+   fresh state on the build, the runs before the fix; then the fix from plans.md, a rebuild, a new state and the same
+   runs after it), what each step's output means and what only a run can show. Each was written by one agent, checked
+   by a second and corrected by a third; `sh -n` only. Every run ED_RUN_AWAY=1, from fresh Jump-to-Game states.
+   **Next, when the user asks: run those before-fix steps, then the fixes one at a time, then to-do item 4 (one "run
+   this as player N" helper) or item 5 (the play-check runner).**
    **Groundwork done 2026-11-16 (committed in ec7f923; every field read from the code that uses it, by a reader
    and a refuter each: docs/game/research/kit-groundwork.md):**
    - `ed cinematic [N|TEXT]`, `ed film [N]`, `ed mode [N]` (tools/ed/facts/cinematics.py -> facts/cinematics.json): the
