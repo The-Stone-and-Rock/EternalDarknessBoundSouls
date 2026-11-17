@@ -625,7 +625,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 03	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	138	other	ed280	spell_node_acts_in_hold	fn0() ~= 3 and fn0() == 4		finds a node by id [hooked]; main [hooked]; equipment, 20 records by holder id [keyed]		
 03	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	139	other	fn26	zones_on	fn0() ~= 3 and fn0() == 4		hold word [helper]		global (covered)
 03	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	140	state	fn1	its state to 0	fn0() ~= 3 and fn0() == 4		the running script [per run]; the script words [hooked, picks]		
-03	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	1	chain	ed177	on_play_script(1188)					later (uncovered)
+03	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	1	chain	ed177	on_play_script(1188)					later (covered)
 03	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	2	other	fn23	in_zone			reads the zones' inside words [helper]; the room slot table [helper]		identity (bracket)
 03	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	3	other	fn52	track_volume	fn23(MagicRgn)		the room in play [helper]		
 03	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	6	other	fn23	in_zone	not fn23(MagicRgn)		reads the zones' inside words [helper]; the room slot table [helper]		identity (bracket)
@@ -1049,7 +1049,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 03	147	2449	Region05 enter	2	examine	ed219	EXAMINE: words by a variable (96, -1), close-up camera PuzzleCam02	fn30(373) == 0		the two looks on offer, copied from it [one per game]; the look being set up [one per game]; the running script [hooked]; the six prompts [hooked]; the room slot table [helper]		global (uncovered)
 03	147	1293	CameraRgn03 enter	1	examine	ed221	EXAMINE: BLUE_URN_SHELF "A Blue Urn rests upon the shelf.", close-up camera Camera04, unless the thing tagged 633 (Blue Urn) is carried			the two looks on offer, copied from it [one per game]; the look being set up [one per game, picks]; the running script [hooked]; finds a node by id [helper]; the six prompts [hooked]; main [helper]; the room in play [helper]; the room slot table [helper]; current [hooked]; current [hooked]	the look being set up	identity (bracket); global (uncovered)
 03	150	1011	the room's arrival	1	other	fn23	in_zone			reads the zones' inside words [helper]; the room slot table [helper]		identity (covered); change (covered)
-03	150	1011	the room's arrival	2	chain	ed177	on_play_script(933)	fn23(MuffledVoicesRgn01)				later (uncovered); change (covered)
+03	150	1011	the room's arrival	2	chain	ed177	on_play_script(933)	fn23(MuffledVoicesRgn01)				later (covered); change (covered)
 03	150	1011	the room's arrival	3	other	fn63	marker_pos	fn23(MuffledVoicesRgn01)		the room slot table [helper]		change (covered)
 03	150	1011	the room's arrival	4	other	fn126	stream_play	fn23(MuffledVoicesRgn01)		the player's object [hooked]; the camera's view [helper]		fills (n/a); change (covered)
 03	150	1011	the room's arrival	7	flag	fn30	asks flag 634	fn0() == 0				change (covered)
@@ -1185,7 +1185,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 03	150	1063	CameraRgn10 enter; CameraRgn03 enter	2	other	fn3	camera_ease_eye					
 03	150	1063	CameraRgn10 enter; CameraRgn03 enter	3	other	fn2	camera_ease_target			the cameras' records [helper]		
 03	150	933	MuffledVoicesRgn01 enter	1	other	fn23	in_zone			reads the zones' inside words [helper]; the room slot table [helper]		identity (bracket)
-03	150	933	MuffledVoicesRgn01 enter	2	chain	ed177	on_play_script(933)	fn23(MuffledVoicesRgn01)				later (uncovered)
+03	150	933	MuffledVoicesRgn01 enter	2	chain	ed177	on_play_script(933)	fn23(MuffledVoicesRgn01)				later (covered)
 03	150	933	MuffledVoicesRgn01 enter	3	other	fn63	marker_pos	fn23(MuffledVoicesRgn01)		the room slot table [helper]		
 03	150	933	MuffledVoicesRgn01 enter	4	other	fn126	stream_play	fn23(MuffledVoicesRgn01)		the player's object [hooked]; the camera's view [helper]		fills (n/a)
 03	150	933	MuffledVoicesRgn01 enter	5	chain	fn36	waits 500 frames	fn23(MuffledVoicesRgn01)		the running script [per run]; the script words [hooked, picks]		later (covered)
@@ -1596,7 +1596,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 03	152	2097	WormTrigger00 cross_a; WormTrigger01 cross_a; WormTrigger02 cross_a	6	flag	fn29	flag 784 on	ed61() == 0 and fn30(778) == 1 and fn30(882) == 0				
 03	152	2097	WormTrigger00 cross_a; WormTrigger01 cross_a; WormTrigger02 cross_a	7	flag	fn29	flag 882 on	ed61() == 0 and fn30(778) == 1 and fn30(882) == 0				
 03	152	2097	WormTrigger00 cross_a; WormTrigger01 cross_a; WormTrigger02 cross_a	8	other	fn78	handle	ed61() == 0 and fn30(778) == 1 and fn30(882) == 0		finds a node by id [hooked]; the room in play [helper]; current [hooked]; current [hooked]		identity (covered)
-03	152	2465	Region04 enter	1	chain	ed177	on_play_script(2211)					later (uncovered)
+03	152	2465	Region04 enter	1	chain	ed177	on_play_script(2211)					later (covered)
 03	152	2465	Region04 enter	2	other	fn213	has_equipped			finds a node by id [helper]; equipment, 20 records by holder id [keyed]; current [hooked]; current [hooked]		
 03	152	2465	Region04 enter	5	examine	ed220	EXAMINE: DARK_AREA "This area is dark, and it is difficult to make out any detail. Perhaps if Anthon"	fn213(105) ~= 1		the two looks on offer, copied from it [one per game]; the look being set up [one per game]; the running script [hooked]; the six prompts [hooked]; the room slot table [helper]		global (uncovered)
 03	153	2206	the room's arrival	1	other	fn78	handle			finds a node by id [hooked]; the room in play [helper]; current [hooked]; current [hooked]		identity (covered); change (covered)

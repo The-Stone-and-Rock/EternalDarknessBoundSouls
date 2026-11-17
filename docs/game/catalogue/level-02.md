@@ -7,7 +7,7 @@ Rooms 15, scripts read 163, rows 1995. The TSV beside this file has every row.
 Co-op: 49 rows flagged (a call that branches on a per-player word within one call, with no live host hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: the room in play 38, the script words 6, the look being set up 3, the room in play (in an input mode's own code) 2.
 A flag is a place to look, not a bug found: the host can still cover it another way (a helper around the whole script run, a swap around the caller), and a word that is one per game may be fine for both.
 
-Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 47 (0), who "the player" is 101 (0), one global per game 10 (3), one script state for both 59 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 4 (0), queued for a later frame 57 (1), run inside player 2's change 19 (0), only for the chapter's character (a hero gate) 2 (0), drawn from one camera 18 (0).
+Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 47 (0), who "the player" is 101 (0), one global per game 10 (3), one script state for both 59 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 4 (0), queued for a later frame 57 (0), run inside player 2's change 19 (0), only for the chapter's character (a hero gate) 2 (0), drawn from one camera 18 (0).
 
 Rooms: [25](#room-25), [83](#room-83), [138](#room-138), [145](#room-145), [159](#room-159), [160](#room-160), [165](#room-165), [166](#room-166), [169](#room-169), [216](#room-216), [217](#room-217), [218](#room-218), [234](#room-234), [294](#room-294), [295](#room-295)
 
@@ -110,7 +110,7 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 1188 (HealthRgn enter; SanityRgn enter; MagicRgn enter)
 
-Co-op patterns (`ed patterns`): queued for a later frame (uncovered), who "the player" is (bracket).
+Co-op patterns (`ed patterns`): queued for a later frame (covered), who "the player" is (bracket).
 
 Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the room in play [helper].
 

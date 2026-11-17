@@ -233,7 +233,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 05	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	138	other	ed280	spell_node_acts_in_hold	fn0() ~= 3 and fn0() == 4		finds a node by id [hooked]; main [hooked]; equipment, 20 records by holder id [keyed]		
 05	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	139	other	fn26	zones_on	fn0() ~= 3 and fn0() == 4		hold word [helper]		global (covered)
 05	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	140	state	fn1	its state to 0	fn0() ~= 3 and fn0() == 4		the running script [per run]; the script words [hooked, picks]		
-05	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	1	chain	ed177	on_play_script(1188)					later (uncovered)
+05	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	1	chain	ed177	on_play_script(1188)					later (covered)
 05	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	2	other	fn23	in_zone			reads the zones' inside words [helper]; the room slot table [helper]		identity (bracket)
 05	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	3	other	fn52	track_volume	fn23(MagicRgn)		the room in play [helper]		
 05	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	6	other	fn23	in_zone	not fn23(MagicRgn)		reads the zones' inside words [helper]; the room slot table [helper]		identity (bracket)
@@ -1101,7 +1101,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 05	255	2277	HintPaintingRegion01 enter; HintPaintingRegion02 enter	7	examine	ed219	EXAMINE: PAINTING_BEFORE "An oil painting of the mansion's foyer hangs on the wall. Max wonders why the ar", close-up camera HintPaintCam02	not fn23(HintPaintingRegion01) and fn23(HintPaintingRegion02) and fn30(579) == 0		the two looks on offer, copied from it [one per game]; the look being set up [one per game]; the running script [hooked]; the six prompts [hooked]; the room slot table [helper]		global (uncovered)
 05	255	2277	HintPaintingRegion01 enter; HintPaintingRegion02 enter	10	examine	ed219	EXAMINE: PAINTING "An oil painting of the mansion's foyer hangs on the wall.", close-up camera HintPaintCam02	fn30(579) ~= 0		the two looks on offer, copied from it [one per game]; the look being set up [one per game]; the running script [hooked]; the six prompts [hooked]; the room slot table [helper]		global (uncovered)
 05	256	929	the room's arrival; CricketSoundRgn01 enter	1	other	fn23	in_zone			reads the zones' inside words [helper]; the room slot table [helper]		identity (covered); change (covered)
-05	256	929	the room's arrival; CricketSoundRgn01 enter	2	chain	ed177	on_play_script(929)	fn23(CricketSoundRgn01)				later (uncovered); change (covered)
+05	256	929	the room's arrival; CricketSoundRgn01 enter	2	chain	ed177	on_play_script(929)	fn23(CricketSoundRgn01)				later (covered); change (covered)
 05	256	929	the room's arrival; CricketSoundRgn01 enter	3	other	fn195	group_volume	fn23(CricketSoundRgn01)		the room in play [helper]		change (covered)
 05	256	899	Region02 enter	2	prompt	ed301	prompt OPEN_DOOR (button 2)	fn0() == 0		the running script [hooked]; the six prompts [hooked]; current [hooked]; the room slot table [hooked]		identity (covered); global (covered); fills (n/a)
 05	256	899	Region02 enter	3	door	fn71	room 257 queued (loaded ahead)	fn0() == 0		the room in play [helper]; the room slot table [helper]; the room change's ticket [helper]		

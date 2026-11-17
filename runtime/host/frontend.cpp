@@ -594,6 +594,12 @@ int g_options_row = 0;  // the Options row to come back to (its pages, Controls,
 Screen g_controls_return = Screen::Options;
 int g_controls_return_row = 0;
 
+// A page opened by the game's own menus (the Tome's Options, the title's Options: frontend_open_page): Back from it,
+// or any way up past it, closes the menu and the game's menu is there again as it was.
+bool g_root_closes = false;
+Screen g_root = Screen::InGame;
+bool g_from_title = false;  // opened from the title screen's More Options (no game going yet)
+
 Row mods_row(Screen from) {
     Row mods{"Mods"};
     mods.activate = [from] {
@@ -2300,6 +2306,38 @@ void build_options() {
         g_rows.push_back(disc);
     }
 
+    // Opened from the game's own menus (the debug menu off, these are the launcher's rows' only home in play): from the
+    // title's More Options, Mods too (co-op and the characters, before a game); from the Tome's Settings, the way back
+    // to the title screen. Quit from either.
+    if (g_root_closes && g_root == Screen::Options) {
+        if (g_from_title) {
+            Row mods = mods_row(Screen::Options);
+            mods.gap = true;
+            g_rows.push_back(mods);
+        } else {
+            Row title{"Return to title screen"};
+            title.gap = true;
+            title.note = "Unsaved progress is lost.";
+            title.enabled = quickstate_boot_path() != nullptr;
+            title.activate = [] {
+                settings_save();
+                hle_set_skip_intro(false);
+                quickstate_request_load(quickstate_boot_path());
+                g_close = true;
+            };
+            g_rows.push_back(title);
+        }
+        Row quit{"Quit game"};
+        quit.gap = !g_from_title;
+        quit.note = g_from_title ? "" : "Unsaved progress is lost.";
+        quit.activate = [] {
+            settings_save();
+            dol_aurora_request_quit();
+            g_close = true;
+        };
+        g_rows.push_back(quit);
+    }
+
     Row back{"Back"};
     back.gap = true;
     back.activate = [] {
@@ -2615,7 +2653,7 @@ void render() {
                           : g_screen == Screen::Slot     ? slot_heading.c_str()
                           : g_screen == Screen::SlotDelete ? "Delete Save?"
                           : g_screen == Screen::SlotOverwrite ? "Do you want to overwrite this save?"
-                          : g_screen == Screen::Options  ? "Options"
+                          : g_screen == Screen::Options  ? (g_root_closes ? (g_from_title ? "More Options" : "Settings") : "Options")
                           : g_screen == Screen::OptionsPage ? options_page_name()
                           : g_screen == Screen::Graphics ? "Graphics"
                           : g_screen == Screen::Controls ? (controls::menu_player() == 1
@@ -2763,10 +2801,6 @@ void render() {
                                     g_options_return == Screen::InGame));
 }
 
-// A page opened by the game's own menus (the Tome's Options, the title's Options: frontend_open_page): Back from it,
-// or any way up past it, closes the menu and the game's menu is there again as it was.
-bool g_root_closes = false;
-Screen g_root = Screen::InGame;
 bool past_root(Screen s) {
     if (s == Screen::InGame || s == Screen::Launcher)
         return true;
@@ -4444,6 +4478,7 @@ extern "C" void frontend_frame(void) {
     g_mods_return = Screen::InGame;
     g_selected = 0;
     g_root_closes = page >= 0;
+    g_from_title = page == FRONTEND_PAGE_TITLE_SETTINGS;
     g_menu_player = 0;
     if (page >= 0) {
         const int player = g_open_page_player.load();
@@ -4461,6 +4496,7 @@ extern "C" void frontend_frame(void) {
             g_selected = roster_index(chosen_character(), form_on(player, chosen_character()));
             break;
         case FRONTEND_PAGE_SETTINGS:
+        case FRONTEND_PAGE_TITLE_SETTINGS:
             dol_aurora_measure_screen();
             g_screen = g_root = Screen::Options;
             break;
@@ -4479,6 +4515,7 @@ extern "C" void frontend_frame(void) {
         dol_aurora_request_quit();  // window closed while paused
     hle_coop_ui_over(false);
     report_pause(false);
+    g_test_close_at = 0;  // (ED_PAGE_TEST_MS: a page closed sooner leaves no deadline for the next menu)
     g_root_closes = false;
     g_menu_player = 0;
     menu_was_held = false;

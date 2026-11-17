@@ -51,6 +51,7 @@ enum {
     FRONTEND_PAGE_SETTINGS = 1,    // Options: display, sound, graphics, controls
     FRONTEND_PAGE_MODS = 2,        // co-op, challenge, cheats
     FRONTEND_PAGE_STATES = 3,      // save states (player 1's)
+    FRONTEND_PAGE_TITLE_SETTINGS = 4,  // Options from the title screen: with Mods (co-op, characters) and Quit
 };
 void frontend_open_page(int page, int player);
 // Player 1's roster (frontend_open_page(FRONTEND_PAGE_CHARACTERS, 0)).

@@ -7,7 +7,7 @@ Rooms 10, scripts read 86, rows 907. The TSV beside this file has every row.
 Co-op: 16 rows flagged (a call that branches on a per-player word within one call, with no live host hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: the room in play 9, the look being set up 5, the script words 2.
 A flag is a place to look, not a bug found: the host can still cover it another way (a helper around the whole script run, a swap around the caller), and a word that is one per game may be fine for both.
 
-Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 7 (0), who "the player" is 72 (0), one global per game 9 (3), one script state for both 23 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 3 (0), queued for a later frame 13 (1), run inside player 2's change 8 (0), drawn from one camera 10 (0).
+Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 7 (0), who "the player" is 72 (0), one global per game 9 (3), one script state for both 23 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 3 (0), queued for a later frame 13 (0), run inside player 2's change 8 (0), drawn from one camera 10 (0).
 
 Rooms: [83](#room-83), [180](#room-180), [181](#room-181), [182](#room-182), [183](#room-183), [184](#room-184), [341](#room-341), [342](#room-342), [343](#room-343), [344](#room-344)
 
@@ -69,7 +69,7 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 1188 (HealthRgn enter; SanityRgn enter; MagicRgn enter)
 
-Co-op patterns (`ed patterns`): queued for a later frame (uncovered), who "the player" is (bracket).
+Co-op patterns (`ed patterns`): queued for a later frame (covered), who "the player" is (bracket).
 
 Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the room in play [helper].
 

@@ -1222,7 +1222,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 11	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	138	other	ed280	spell_node_acts_in_hold	fn0() ~= 3 and fn0() == 4		finds a node by id [hooked]; main [hooked]; equipment, 20 records by holder id [keyed]		
 11	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	139	other	fn26	zones_on	fn0() ~= 3 and fn0() == 4		hold word [helper]		global (covered)
 11	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	140	state	fn1	its state to 0	fn0() ~= 3 and fn0() == 4		the running script [per run]; the script words [hooked, picks]		
-11	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	1	chain	ed177	on_play_script(1188)					later (uncovered)
+11	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	1	chain	ed177	on_play_script(1188)					later (covered)
 11	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	2	other	fn23	in_zone			reads the zones' inside words [helper]; the room slot table [helper]		identity (bracket)
 11	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	3	other	fn52	track_volume	fn23(MagicRgn)		the room in play [helper]		
 11	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	6	other	fn23	in_zone	not fn23(MagicRgn)		reads the zones' inside words [helper]; the room slot table [helper]		identity (bracket)
@@ -1396,7 +1396,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 11	85	203	CameraRgn04 enter	2	other	fn3	camera_ease_eye					
 11	85	203	CameraRgn04 enter	3	other	fn2	camera_ease_target			the cameras' records [helper]		
 11	85	1886	EffigyRegion01 enter	1	examine	ed221	EXAMINE: EFFIGY "An Emerald Effigy sits upon a display stand.", close-up camera Camera06, unless the thing tagged 208 (Emerald Effigy) is carried			the two looks on offer, copied from it [one per game]; the look being set up [one per game, picks]; the running script [hooked]; finds a node by id [helper]; the six prompts [hooked]; main [helper]; the room in play [helper]; the room slot table [helper]; current [hooked]; current [hooked]	the look being set up	identity (bracket); global (uncovered)
-11	219	2407	the room's arrival	1	chain	ed177	on_play_script(2407)					later (uncovered); change (covered)
+11	219	2407	the room's arrival	1	chain	ed177	on_play_script(2407)					later (covered); change (covered)
 11	219	2407	the room's arrival	2	flag	fn30	asks flag 503					change (covered)
 11	219	2407	the room's arrival	3	other	fn52	track_volume	fn30(503) == 1		the room in play [helper]		change (covered)
 11	219	2407	the room's arrival	5	flag	fn30	asks flag 1129					change (covered)

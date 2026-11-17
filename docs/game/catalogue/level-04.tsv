@@ -538,7 +538,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 04	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	138	other	ed280	spell_node_acts_in_hold	fn0() ~= 3 and fn0() == 4		finds a node by id [hooked]; main [hooked]; equipment, 20 records by holder id [keyed]		
 04	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	139	other	fn26	zones_on	fn0() ~= 3 and fn0() == 4		hold word [helper]		global (covered)
 04	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	140	state	fn1	its state to 0	fn0() ~= 3 and fn0() == 4		the running script [per run]; the script words [hooked, picks]		
-04	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	1	chain	ed177	on_play_script(1188)					later (uncovered)
+04	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	1	chain	ed177	on_play_script(1188)					later (covered)
 04	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	2	other	fn23	in_zone			reads the zones' inside words [helper]; the room slot table [helper]		identity (bracket)
 04	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	3	other	fn52	track_volume	fn23(MagicRgn)		the room in play [helper]		
 04	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	6	other	fn23	in_zone	not fn23(MagicRgn)		reads the zones' inside words [helper]; the room slot table [helper]		identity (bracket)
@@ -669,7 +669,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 04	185	2346	the room's arrival	1	flag	fn30	asks flag 662		486			change (covered)
 04	185	2346	the room's arrival	2	other	fn52	track_volume	fn30(662) == 1	486	the room in play [helper]		change (covered)
 04	185	2346	the room's arrival	5	other	fn52	track_volume	fn30(662) ~= 1	486	the room in play [helper]		change (covered)
-04	185	2346	the room's arrival	7	chain	ed177	on_play_script(486)		486			later (uncovered); change (covered)
+04	185	2346	the room's arrival	7	chain	ed177	on_play_script(486)		486			later (covered); change (covered)
 04	185	2190	SKPlane04 cross_b	2	other	fn78	handle			finds a node by id [hooked]; the room in play [helper]; current [hooked]; current [hooked]		identity (covered)
 04	185	2190	SKPlane04 cross_b	3	other	ed16	alignment_of			finds a node by id [helper]; current [hooked]; current [hooked]		
 04	185	2190	SKPlane04 cross_b	5	other	ed61	insanity_effect_id	fn0() == 0				
@@ -1089,9 +1089,9 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 04	189	148	Region02 enter	8	door	fn66	door to room 195 at EntryMkr03, camera Camera01, transition 9	fn0() ~= 0 and fn0() == 1		finds a node by id [hooked]; the room change's ticket [hooked]; current [hooked]; the fade's ticks [hooked]; equipment, 20 records by holder id [hooked]; the spell being cast [hooked]; busy [hooked]; find's bit 2, script timers wait on it [hooked]; main [hooked]; current [hooked]; the room in play [hooked]; the pad routine's state [hooked]		identity (covered)
 04	189	148	Region02 enter	9	other	fn62	sound_pair	fn0() ~= 0 and fn0() == 1				
 04	189	148	Region02 enter	10	state	fn1	its state to 0	fn0() ~= 0 and fn0() == 1		the running script [per run]; the script words [hooked, picks]		
-04	189	2301	ElevatorRgn01 other_leave	1	room_test	fn25	asks the room in play			the room in play [helper]		room (uncovered)
-04	189	2301	ElevatorRgn01 other_leave	7	room_test	fn25	asks the room in play	fn25() ~= 190		the room in play [helper]		room (uncovered)
-04	189	2301	ElevatorRgn01 other_leave	8	other	fn23	in_zone	fn25() ~= 190 and fn25() == 189		reads the zones' inside words [helper]; the room slot table [helper]		identity (uncovered)
+04	189	2301	ElevatorRgn01 other_leave	1	room_test	fn25	asks the room in play			the room in play [helper]		room (covered)
+04	189	2301	ElevatorRgn01 other_leave	7	room_test	fn25	asks the room in play	fn25() ~= 190		the room in play [helper]		room (covered)
+04	189	2301	ElevatorRgn01 other_leave	8	other	fn23	in_zone	fn25() ~= 190 and fn25() == 189		reads the zones' inside words [helper]; the room slot table [helper]		identity (covered)
 04	189	2301	ElevatorRgn01 other_leave	9	state	fn1	script 146's state to 0	fn25() ~= 190 and fn25() == 189 and fn23(ElevatorRgn01)		the running script [per run]; the script words [hooked, picks]		
 04	189	2301	ElevatorRgn01 other_leave	10	chain	fn73	runs script 146 next	fn25() ~= 190 and fn25() == 189 and fn23(ElevatorRgn01)				
 04	189	2301	ElevatorRgn01 other_leave	1	other	fn78	handle		146	finds a node by id [hooked]; the room in play [helper]; current [hooked]; current [hooked]		identity (covered)
@@ -1104,9 +1104,9 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 04	189	2301	ElevatorRgn01 other_leave	29	prompt	ed301	prompt EXAMINE (button 2)	L2 == 1	146	the running script [hooked]; the six prompts [hooked]; current [hooked]; the room slot table [hooked]		identity (covered); global (covered); fills (n/a)
 04	189	2301	ElevatorRgn01 other_leave	30	door	fn71	room 190 queued (loaded ahead)	L2 == 1	146	the room in play [helper]; the room slot table [helper]; the room change's ticket [helper]		
 04	189	2301	ElevatorRgn01 other_leave	31	state	fn1	its state to 1	L2 == 1	146	the running script [per run]; the script words [hooked, picks]		state (n/a)
-04	189	2301	ElevatorRgn01 other_leave	34	other	fn23	in_zone	L2 ~= 1	146	reads the zones' inside words [helper]; the room slot table [helper]		identity (uncovered)
+04	189	2301	ElevatorRgn01 other_leave	34	other	fn23	in_zone	L2 ~= 1	146	reads the zones' inside words [helper]; the room slot table [helper]		identity (covered)
 04	189	2301	ElevatorRgn01 other_leave	35	chain	fn36	waits 5 frames	L2 ~= 1 and fn23(ElevatorRgn01)	146	the running script [per run]; the script words [hooked, picks]		later (covered)
-04	189	2301	ElevatorRgn01 other_leave	40	hold	fn21	hold(0)	fn0() ~= 0 and fn0() == 1	146	the player's object [helper]; hold's input channel [hooked]; hold's input channel [hooked]; hold's input channel [hooked]; finds a node by id [hooked]; busy [hooked]; current [hooked]		identity (uncovered); global (covered)
+04	189	2301	ElevatorRgn01 other_leave	40	hold	fn21	hold(0)	fn0() ~= 0 and fn0() == 1	146	the player's object [helper]; hold's input channel [hooked]; hold's input channel [hooked]; hold's input channel [hooked]; finds a node by id [hooked]; busy [hooked]; current [hooked]		identity (covered); global (covered)
 04	189	2301	ElevatorRgn01 other_leave	41	hold	fn91	busy_set(1)	fn0() ~= 0 and fn0() == 1	146	finds a node by id [hooked]; busy [hooked]; current [hooked]; current [hooked]		global (covered)
 04	189	2301	ElevatorRgn01 other_leave	42	words	ed12	room words ELEVATOR_ACTIVE "Should Karim use the device to ascend?  Yes      No"	fn0() ~= 0 and fn0() == 1	146	the open words window [hooked]; raw and processed pads, the input channels [helper]; the pad routine's state [helper]; hold word, 0x80006D0C asks it [hooked]; the player's object [hooked]; finds a node by id [hooked]; the cameras' records [hooked]; hold word [helper]; hold's input channel [hooked]; hold's input channel [hooked]; hold's input channel [hooked]; busy [hooked]; find's bit 2, script timers wait on it [helper]		
 04	189	2301	ElevatorRgn01 other_leave	43	state	fn1	its state to 2	fn0() ~= 0 and fn0() == 1	146	the running script [per run]; the script words [hooked, picks]		state (n/a)
@@ -1164,8 +1164,8 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 04	189	1923	SKPlane01 cross_b	34	flag	fn29	flag 913 on	fn0() ~= 1 and fn0() == 2				
 04	189	1923	SKPlane01 cross_b	35	hold	fn22	cutscene(0, 1)	fn0() ~= 1 and fn0() == 2		hold word, 0x80006D0C asks it [hooked]; the player's object [hooked]; finds a node by id [hooked]; the cameras' records [hooked]; the spell being cast [hooked]; hold word [helper]; hold's input channel [hooked]; hold's input channel [hooked]; hold's input channel [hooked]; busy [hooked]; find's bit 2, script timers wait on it [helper]; main [hooked]; current [hooked]		identity (covered)
 04	189	1923	SKPlane01 cross_b	36	state	fn1	its state to 0	fn0() ~= 1 and fn0() == 2		the running script [per run]; the script words [hooked, picks]		
-04	189	2738	MonsterCheckRgn00 other_enter	1	other	fn23	in_zone			reads the zones' inside words [helper]; the room slot table [helper]		identity (uncovered)
-04	189	2738	MonsterCheckRgn00 other_enter	2	other	fn23	in_zone	not (fn23(ElevatorRgn01))		reads the zones' inside words [helper]; the room slot table [helper]		identity (uncovered)
+04	189	2738	MonsterCheckRgn00 other_enter	1	other	fn23	in_zone			reads the zones' inside words [helper]; the room slot table [helper]		identity (covered)
+04	189	2738	MonsterCheckRgn00 other_enter	2	other	fn23	in_zone	not (fn23(ElevatorRgn01))		reads the zones' inside words [helper]; the room slot table [helper]		identity (covered)
 04	189	2738	MonsterCheckRgn00 other_enter	4	other	fn211	prompt_slot_clear			the six prompts [hooked]		global (covered)
 04	189	2738	MonsterCheckRgn00 other_enter	5	other	fn211	prompt_slot_clear			the six prompts [hooked]		global (covered)
 04	189	2738	MonsterCheckRgn00 other_enter	6	state	fn1	script 146's state to 0			the running script [per run]; the script words [hooked, picks]		
@@ -1180,9 +1180,9 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 04	189	2738	MonsterCheckRgn00 other_enter	29	prompt	ed301	prompt EXAMINE (button 2)	L2 == 1	146	the running script [hooked]; the six prompts [hooked]; current [hooked]; the room slot table [hooked]		identity (covered); global (covered); fills (n/a)
 04	189	2738	MonsterCheckRgn00 other_enter	30	door	fn71	room 190 queued (loaded ahead)	L2 == 1	146	the room in play [helper]; the room slot table [helper]; the room change's ticket [helper]		
 04	189	2738	MonsterCheckRgn00 other_enter	31	state	fn1	its state to 1	L2 == 1	146	the running script [per run]; the script words [hooked, picks]		state (n/a)
-04	189	2738	MonsterCheckRgn00 other_enter	34	other	fn23	in_zone	L2 ~= 1	146	reads the zones' inside words [helper]; the room slot table [helper]		identity (uncovered)
+04	189	2738	MonsterCheckRgn00 other_enter	34	other	fn23	in_zone	L2 ~= 1	146	reads the zones' inside words [helper]; the room slot table [helper]		identity (covered)
 04	189	2738	MonsterCheckRgn00 other_enter	35	chain	fn36	waits 5 frames	L2 ~= 1 and fn23(ElevatorRgn01)	146	the running script [per run]; the script words [hooked, picks]		later (covered)
-04	189	2738	MonsterCheckRgn00 other_enter	40	hold	fn21	hold(0)	fn0() ~= 0 and fn0() == 1	146	the player's object [helper]; hold's input channel [hooked]; hold's input channel [hooked]; hold's input channel [hooked]; finds a node by id [hooked]; busy [hooked]; current [hooked]		identity (uncovered); global (covered)
+04	189	2738	MonsterCheckRgn00 other_enter	40	hold	fn21	hold(0)	fn0() ~= 0 and fn0() == 1	146	the player's object [helper]; hold's input channel [hooked]; hold's input channel [hooked]; hold's input channel [hooked]; finds a node by id [hooked]; busy [hooked]; current [hooked]		identity (covered); global (covered)
 04	189	2738	MonsterCheckRgn00 other_enter	41	hold	fn91	busy_set(1)	fn0() ~= 0 and fn0() == 1	146	finds a node by id [hooked]; busy [hooked]; current [hooked]; current [hooked]		global (covered)
 04	189	2738	MonsterCheckRgn00 other_enter	42	words	ed12	room words ELEVATOR_ACTIVE "Should Karim use the device to ascend?  Yes      No"	fn0() ~= 0 and fn0() == 1	146	the open words window [hooked]; raw and processed pads, the input channels [helper]; the pad routine's state [helper]; hold word, 0x80006D0C asks it [hooked]; the player's object [hooked]; finds a node by id [hooked]; the cameras' records [hooked]; hold word [helper]; hold's input channel [hooked]; hold's input channel [hooked]; hold's input channel [hooked]; busy [hooked]; find's bit 2, script timers wait on it [helper]		
 04	189	2738	MonsterCheckRgn00 other_enter	43	state	fn1	its state to 2	fn0() ~= 0 and fn0() == 1	146	the running script [per run]; the script words [hooked, picks]		state (n/a)
@@ -1331,13 +1331,13 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 04	190	143	ElevatorRgn01 enter	79	other	fn3	camera_ease_eye	fn0() ~= 5 and fn0() == 100				
 04	190	143	ElevatorRgn01 enter	80	other	fn2	camera_ease_target	fn0() ~= 5 and fn0() == 100		the cameras' records [helper]		
 04	190	143	ElevatorRgn01 enter	81	state	fn1	its state to 0	fn0() ~= 5 and fn0() == 100		the running script [per run]; the script words [hooked, picks]		
-04	190	2726	ElevatorRgn02 other_enter	1	room_test	fn25	asks the room in play			the room in play [helper]		room (uncovered)
-04	190	2726	ElevatorRgn02 other_enter	2	other	fn23	in_zone	fn25() == 190		reads the zones' inside words [helper]; the room slot table [helper]		identity (uncovered)
+04	190	2726	ElevatorRgn02 other_enter	1	room_test	fn25	asks the room in play			the room in play [helper]		room (covered)
+04	190	2726	ElevatorRgn02 other_enter	2	other	fn23	in_zone	fn25() == 190		reads the zones' inside words [helper]; the room slot table [helper]		identity (covered)
 04	190	2726	ElevatorRgn02 other_enter	3	state	fn1	script 143's state to 0	fn25() == 190 and fn23(ElevatorRgn01)		the running script [per run]; the script words [hooked, picks]		
 04	190	2726	ElevatorRgn02 other_enter	4	other	fn211	prompt_slot_clear	fn25() == 190 and fn23(ElevatorRgn01)		the six prompts [hooked]		global (covered)
 04	190	2726	ElevatorRgn02 other_enter	5	other	fn211	prompt_slot_clear	fn25() == 190 and fn23(ElevatorRgn01)		the six prompts [hooked]		global (covered)
-04	190	2301	ElevatorRgn02 other_leave	1	room_test	fn25	asks the room in play			the room in play [helper]		room (uncovered)
-04	190	2301	ElevatorRgn02 other_leave	2	other	fn23	in_zone	fn25() == 190		reads the zones' inside words [helper]; the room slot table [helper]		identity (uncovered)
+04	190	2301	ElevatorRgn02 other_leave	1	room_test	fn25	asks the room in play			the room in play [helper]		room (covered)
+04	190	2301	ElevatorRgn02 other_leave	2	other	fn23	in_zone	fn25() == 190		reads the zones' inside words [helper]; the room slot table [helper]		identity (covered)
 04	190	2301	ElevatorRgn02 other_leave	3	state	fn1	script 143's state to 0	fn25() == 190 and fn23(ElevatorRgn01)		the running script [per run]; the script words [hooked, picks]		
 04	190	2301	ElevatorRgn02 other_leave	4	chain	fn73	runs script 143 next	fn25() == 190 and fn23(ElevatorRgn01)				
 04	190	2301	ElevatorRgn02 other_leave	1	other	fn78	handle		143	finds a node by id [hooked]; the room in play [helper]; current [hooked]; current [hooked]		identity (covered)
@@ -1353,7 +1353,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 04	190	2301	ElevatorRgn02 other_leave	26	door	fn71	room 189 queued (loaded ahead)		143	the room in play [helper]; the room slot table [helper]; the room change's ticket [helper]		
 04	190	2301	ElevatorRgn02 other_leave	27	state	fn1	its state to 1		143	the running script [per run]; the script words [hooked, picks]		state (n/a)
 04	190	2301	ElevatorRgn02 other_leave	30	chain	fn36	waits 5 frames	L3 ~= 1	143	the running script [per run]; the script words [hooked, picks]		later (covered)
-04	190	2301	ElevatorRgn02 other_leave	35	hold	fn21	hold(0)	fn0() ~= 0 and fn0() == 1	143	the player's object [helper]; hold's input channel [hooked]; hold's input channel [hooked]; hold's input channel [hooked]; finds a node by id [hooked]; busy [hooked]; current [hooked]		identity (uncovered); global (covered)
+04	190	2301	ElevatorRgn02 other_leave	35	hold	fn21	hold(0)	fn0() ~= 0 and fn0() == 1	143	the player's object [helper]; hold's input channel [hooked]; hold's input channel [hooked]; hold's input channel [hooked]; finds a node by id [hooked]; busy [hooked]; current [hooked]		identity (covered); global (covered)
 04	190	2301	ElevatorRgn02 other_leave	36	hold	fn91	busy_set(1)	fn0() ~= 0 and fn0() == 1	143	finds a node by id [hooked]; busy [hooked]; current [hooked]; current [hooked]		global (covered)
 04	190	2301	ElevatorRgn02 other_leave	37	words	ed12	room words ELEVATOR_ACTIVE "The shrine has risen from the floor, exposing what appears to be a lifting mechanism.  Sho"	fn0() ~= 0 and fn0() == 1	143	the open words window [hooked]; raw and processed pads, the input channels [helper]; the pad routine's state [helper]; hold word, 0x80006D0C asks it [hooked]; the player's object [hooked]; finds a node by id [hooked]; the cameras' records [hooked]; hold word [helper]; hold's input channel [hooked]; hold's input channel [hooked]; hold's input channel [hooked]; busy [hooked]; find's bit 2, script timers wait on it [helper]		
 04	190	2301	ElevatorRgn02 other_leave	38	state	fn1	its state to 2	fn0() ~= 0 and fn0() == 1	143	the running script [per run]; the script words [hooked, picks]		state (n/a)

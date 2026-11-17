@@ -51,3 +51,18 @@ Before: a sound a player's zone set up (the muffled voices) was put back for the
 ## Not ready to test yet
 - The 21 "two-path" hero checks: scripts that send the chapter's character down one path and anyone else down another.
   Your call whether player 2 should take the character's path. `python -I tools/ed/ed.py herogates --all` lists them.
+
+## 6. The game's own menus hold the launcher's settings now (2026-11-17)
+The launcher's menu no longer opens over the game on Esc / Back (it's a debug menu now: launcher Options > Display >
+"Debug menu in game", or ED_DEBUG_MENU=1). Everything is in the game's own menus:
+- **Player 1's Tome > Options** (L/R to the Options tab): under Controller / Audio / Display / Load/Save are four new
+  plaques, **Characters, Save States, Settings, Mods**. Down from Load/Save reaches them; the game's gold ring and
+  sounds move with you; A opens that page over the paused game; B comes straight back to the Tome.
+  Settings has Display, Sound, Graphics, Controls, then **Return to title screen** and **Quit game**.
+- **Player 2's own Tome > Options**: only their **Characters** plaque (their character, on their controller). The four
+  of the cross are player 1's (only player 1 saves).
+- **Title screen > Options**: a ninth row, **More Options**, under Language Select (Up from Save Settings reaches it).
+  It opens Display, Sound, Graphics, Controls, **Mods** (co-op on/off, characters) and Quit.
+Check: that everything you used to reach from Esc is reachable this way; how the plaques look (they're the game's own
+painted plaque with the word in the Tome's hand); player 2's page on player 2's controller; B always returning to the
+Tome or the title; nothing pressed by accident in the game when a page closes. Tell Claude what to move or rename.

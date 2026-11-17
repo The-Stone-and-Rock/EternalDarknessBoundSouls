@@ -1,4 +1,4 @@
-# HANDOFF 2026-11-17: START HERE (the kit and docs committed on tools/game-kit; FIVE GAME FIXES UNCOMMITTED IN runtime/host/hle.c FOR THE USER'S REVIEW; controls.cpp's test edits stay uncommitted by rule)
+# HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
 
 ## Overnight 2026-11-17: the kit's likely co-op bugs, fixed and shown in runs (read docs/research/kit-bugs/results.md)
 The kit (items 1 to 3 below) named five likely bugs; plans in docs/research/kit-bugs/plans.md, a run script per bug
@@ -25,8 +25,32 @@ stopped, hero gates flagged), `ed herogates [--all|--c]`. No hang report in any 
 A review (a reviewer per fix, two skeptics per finding) passed the duck, arrival and zone fixes; its two low findings
 (ed177's owner not reset on a state load; a gate left patched in a saved state with the switch off) are fixed, and every
 run was repeated on that build with the same results (results.md, "The review").
-**Next:** the user plays the five fixes (with ED_COOP_HERO_ID=1 for the gates) and decides the two-path gates; then
-commit hle.c. Then the to-do list below from item 4.
+**Next:** the user plays the five fixes (play-rooms-log.bat turns ED_COOP_HERO_ID=1 on) and decides the two-path gates.
+
+## 2026-11-17 (night, the user asleep): the launcher's settings in the game's own menus (to-do item 7, done in its first form)
+The user: the launcher's in-game menu goes (hidden, debug only); everything in the game's own menus, looking built in;
+in co-op only player 1's Tome Options get the extra (shared) settings, player 2's only their own Choose Character; a
+first-run "compile build" for the disc-made art before release. Research: docs/research/in-game-menu/01-06 (the
+launcher's every setting, the title menu, the Tome's Options page and sub-pages, the critic's checks, the texture bank).
+Built (901f2e5 and after; pictures in "Screenshots for Claude/zoom/"):
+- **Tome > Options**: under the cross, player 1 gets four plaques, Characters / Save States / Settings / Mods;
+  player 2's copy Tome (now allowed onto Options) only their Characters. The game's own cursor, gold ring and sounds
+  (hooks on the page's Up/Down 0x8010172C, Left/Right 0x8010179C, A 0x80101838, frame 0x80101980, exit 0x801016D8:
+  hle.c tome_stops_*). The plaques are pictures drawn through the game's own art path: a TEXPalette of transparent
+  stubs at 0x822F1000 swapped by the texture override (runtime/host/plaques.cpp), made from the game's painted Load/Save
+  plaque in the page picture in memory, its words rubbed out and the entry's word in the Tome's hand. Fallback without
+  that picture: a wash, a rim and the words as game text.
+- **A on a plaque** opens that page over the paused game for that player (frontend_open_page; player 2's controller
+  drives theirs), and Back returns to the Tome (g_root_closes). Settings has Return to title screen and Quit.
+- **Title > Options**: a ninth row "More Options" painted under Language Select in the same teal hand, lit when chosen
+  (titlevideo.cpp; hooks title_more_*); it opens Settings with Mods (co-op, characters) and Quit.
+- **The launcher's menu over the game**: only with Options > Display > Debug menu in game, or ED_DEBUG_MENU=1.
+- Kit: `ed zoom RUN FRAME [X Y W H] [--after MS]` (a run's picture cropped and enlarged into Screenshots for Claude).
+- docs/release-first-run.md: the plan for the first-run step that makes the disc's art and music on the player's PC.
+- The catalogue's patterns count tonight's fixes: only the looks on offer (ed219-221), four subtitle calls and the 10
+  two-path hero gates are left uncovered (`ed patterns`).
+**Next:** the user plays it (docs/coop-play-test.md section 6) and says what to move, rename or restyle; then the looks
+on offer (the next uncovered pattern) and the to-do list from item 4.
 
 # HANDOFF 2026-11-16 (committed through f5db56f on tools/game-kit; to-do items 1 to 3, the kit, done 2026-11-16)
 

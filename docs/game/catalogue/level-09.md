@@ -7,7 +7,7 @@ Rooms 37, scripts read 354, rows 6310. The TSV beside this file has every row.
 Co-op: 175 rows flagged (a call that branches on a per-player word within one call, with no live host hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: the room in play 85, the room in play (in an input mode's own code) 54, the script words 27, the look being set up 9.
 A flag is a place to look, not a bug found: the host can still cover it another way (a helper around the whole script run, a swap around the caller), and a word that is one per game may be fine for both.
 
-Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 32 (0), who "the player" is 200 (0), one global per game 15 (3), one script state for both 76 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 27 (0), queued for a later frame 50 (2), run inside player 2's change 50 (0), only for the chapter's character (a hero gate) 13 (2), drawn from one camera 45 (0).
+Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 32 (0), who "the player" is 200 (0), one global per game 15 (3), one script state for both 76 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 27 (0), queued for a later frame 50 (0), run inside player 2's change 50 (0), only for the chapter's character (a hero gate) 13 (2), drawn from one camera 45 (0).
 
 Rooms: [5](#room-5), [83](#room-83), [236](#room-236), [237](#room-237), [238](#room-238), [239](#room-239), [241](#room-241), [242](#room-242), [243](#room-243), [244](#room-244), [245](#room-245), [246](#room-246), [247](#room-247), [248](#room-248), [255](#room-255), [269](#room-269), [270](#room-270), [271](#room-271), [272](#room-272), [273](#room-273), [274](#room-274), [275](#room-275), [276](#room-276), [277](#room-277), [278](#room-278), [279](#room-279), [281](#room-281), [282](#room-282), [283](#room-283), [284](#room-284), [285](#room-285), [286](#room-286), [287](#room-287), [288](#room-288), [289](#room-289), [290](#room-290), [291](#room-291)
 
@@ -441,7 +441,7 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 1188 (HealthRgn enter; SanityRgn enter; MagicRgn enter)
 
-Co-op patterns (`ed patterns`): queued for a later frame (uncovered), who "the player" is (bracket).
+Co-op patterns (`ed patterns`): queued for a later frame (covered), who "the player" is (bracket).
 
 Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the room in play [helper].
 
@@ -2787,7 +2787,7 @@ Camera-only scripts (2: only camera moves and zone tests; their rows are in the 
 
 Picks by the room in play (fn25), 2 tests; 88 rows of other rooms' branches are left out (followed over the script's jumps).
 
-Co-op patterns (`ed patterns`): asks the room in play (covered), run inside player 2's change (covered), queued for a later frame (uncovered), who "the player" is (covered).
+Co-op patterns (`ed patterns`): asks the room in play (covered), run inside player 2's change (covered), queued for a later frame (covered), who "the player" is (covered).
 
 Co-op, reaches: the room in play [helper], the room slot table [helper], finds a node by id [hooked], current [hooked], the running script [per run], the script words [hooked].
 

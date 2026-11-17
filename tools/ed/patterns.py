@@ -50,7 +50,9 @@ PATTERNS = [
          what='A call reads the one player\'s object or node (r13-26524, -21492, -21496, -21488, -21484) or the zones\' '
               'inside words within one call: it acts on player 1 unless player 2\'s are put in.',
          fix=[('coop_be_player2', None, None), ('coop_zones_swap', None, 'the zones\' inside words'),
-              ('hle_object_model', None, 'what a chapter script is told the character is')],
+              ('hle_object_model', None, 'what a chapter script is told the character is'),
+              ('coop_scan_player1', '7ce15a5', 'other_* fields: player 2\'s body passed over by the game\'s own zone look'),
+              ('coop_run_script', '7ce15a5', 'player 2\'s own room\'s arrival script runs as theirs')],
          example='docs/coop-next-session.md "The pattern behind many of these bugs"',
          trust='Medium: a read within one call (not only a compare: these words are read and acted on); a pointer passed '
                'on further is not followed.'),
@@ -91,10 +93,12 @@ PATTERNS = [
               'the Tome\'s end (ed9). (A script run next with fn73 is not later: it runs inside the same run, 0x80164488.)',
          fix=[('coop_story_ticket', None, 'a film\'s or cinematic\'s next script'), ('g_story_bring', None, 'the bring'),
               ('coop_script_timers', None, 'a script\'s wait'), ('coop_p2_script_mark', None, 'a script player 2 started'),
-              ('g_stay_room_script', None, 'a room\'s script queued by player 2\'s change')],
-         example='the dream left player 2 behind (coop_story_ticket); the hanged body in room 81 (g_stay_room_script)',
-         trust='Partly: ed55 / ed83 end scripts are covered (coop_story_ticket), fn36 by the script timers, ed177 and ed9 '
-               'have no fix the kit sees; when they run and as whose is a run-time fact.'),
+              ('g_stay_room_script', None, 'a room\'s script queued by player 2\'s change'),
+              ('coop_play_script_left', '7ce15a5', 'ed177: play start\'s script runs as whoever stored it')],
+         example='the dream left player 2 behind (coop_story_ticket); the hanged body in room 81 (g_stay_room_script); '
+                 'the muffled voices of L03/933 (coop_play_script_left)',
+         trust='Partly: ed55 / ed83 end scripts are covered (coop_story_ticket), fn36 by the script timers, ed177 by '
+               'coop_play_script_left (7ce15a5); ed9 has no fix the kit sees; when they run and as whose is a run-time fact.'),
     dict(key='change', name='run inside player 2\'s change', unit='script',
          what='A room\'s arrival or leave script runs as part of a room change, and a door\'s after-script after it: in '
               'player 2\'s change it must run as theirs, with their room in.',
@@ -107,13 +111,14 @@ PATTERNS = [
          what='A script keeps the player\'s handle (fn78(1, 0), r13-21496) and tests it against 1, the chapter\'s character: '
               'run as player 2\'s (their handle, e.g. 161), it turns them away. Found in the bytecode (`ed herogates`): 52 '
               'compares in 47 script files, 31 turning the player away, 21 with two paths.',
-         fix=[('coop_hero_chunk', None, 'ED_COOP_HERO_ID=1 (testing): the gate\'s PUSHINT 1 is written to player 2\'s id in '
+         fix=[('coop_hero_chunk', '7ce15a5', 'ED_COOP_HERO_ID=1 (testing): the gate\'s PUSHINT 1 is written to player 2\'s id in '
                                        'their runs, so the turn-away gates open ("bracket": only in their runs); two-path '
                                        'compares are left')],
          example='Edward\'s lever L09/1951 (room 273): player 2 is turned away at `if L0 ~= 1` (logs/run-20261117-010635-duck-together, '
                  '`ed stops`)',
-         trust='High: the test is in the script. No fix yet: the handle has to mean player 2\'s body inside their runs (an '
-               'identity change, docs/research/kit-bugs/plans.md).'),
+         trust='High: the test is in the script. The one-path gates open for player 2 with ED_COOP_HERO_ID=1 (coop_hero_chunk, '
+               '7ce15a5; shown on L09/1951 in docs/research/kit-bugs/results.md); the 21 two-path compares wait for the '
+               'user\'s choice of path.'),
     dict(key='camera', name='drawn from one camera', unit='script',
          what='A script selects, saves or restores the camera set (fn8, fn10, fn134) and also holds play, plays a scene or '
               'starts an input mode: the set has one owner.',
@@ -182,11 +187,13 @@ def for_row(x, words, where, prims):
         """The cover of a word the bracket around player 2's own runs puts in (the room, the player, the zones'
         words, the script words): covered by a live hook or in a room's arrival script (coop_run_script puts the
         room in); 'bracket' when the script runs from a region's own fields (player 2's run goes through their turn:
-        coop_use_start); uncovered when it runs only from other_* fields (for anyone but the one who crosses)."""
+        coop_use_start). A script only in other_* fields (for anyone but the one who crosses) ran as player 1's for
+        player 2's body until coop_scan_player1 passed player 2's object over in the game's own zone look (7ce15a5):
+        now only monsters and others run them, so the player words in them are the game's own as in solo."""
         if hooked or arrival_row:
             return 'covered'
         if not own_field:
-            return 'uncovered'
+            return 'covered'
         return 'bracket'
 
     p = prims.get(name, {})
@@ -219,7 +226,7 @@ def for_row(x, words, where, prims):
     if name in ('fn36', 'ed9', 'ed55', 'ed83') or (name == 'ed177' and args and args[0] not in ('-1', '0')):
         # ed177(-1) only clears the word; ed177(script) leaves a script for play mode's next start (0x80008234), which
         # hle.c doesn't handle (no r13-24248): run as whoever is the player then.
-        out.append(('later', 'covered' if name in ('ed55', 'ed83', 'fn36') else 'uncovered', ('script',)))
+        out.append(('later', 'covered' if name in ('ed55', 'ed83', 'fn36', 'ed177') else 'uncovered', ('script',)))
     if any(w.startswith('the room\'s ') for w in where):
         out.append(('change', 'covered', ('script',)))  # a script it runs next with fn73 runs inside the same run
     if name == 'fn66' and len(args) > 4 and args[4] not in ('0', '-1', 'nil'):

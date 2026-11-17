@@ -9,7 +9,7 @@ Rooms this level reaches on paper (its door walk) but whose scripts are none of 
 Co-op: 68 rows flagged (a call that branches on a per-player word within one call, with no live host hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: the room in play 39, the look being set up 13, the script words 8, the room in play (in an input mode's own code) 7, the magick record 1.
 A flag is a place to look, not a bug found: the host can still cover it another way (a helper around the whole script run, a swap around the caller), and a word that is one per game may be fine for both.
 
-Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 32 (0), who "the player" is 240 (0), one global per game 11 (3), one script state for both 80 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 11 (0), queued for a later frame 28 (2), run inside player 2's change 24 (0), only for the chapter's character (a hero gate) 3 (2), drawn from one camera 27 (0).
+Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 32 (0), who "the player" is 240 (0), one global per game 11 (3), one script state for both 80 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 11 (0), queued for a later frame 28 (0), run inside player 2's change 24 (0), only for the chapter's character (a hero gate) 3 (2), drawn from one camera 27 (0).
 
 Rooms: [1](#room-1), [2](#room-2), [3](#room-3), [4](#room-4), [5](#room-5), [6](#room-6), [7](#room-7), [8](#room-8), [9](#room-9), [10](#room-10), [11](#room-11), [12](#room-12), [14](#room-14), [15](#room-15), [16](#room-16), [17](#room-17), [18](#room-18), [19](#room-19), [20](#room-20), [22](#room-22), [23](#room-23), [27](#room-27), [39](#room-39), [65](#room-65), [66](#room-66), [73](#room-73), [75](#room-75), [76](#room-76), [79](#room-79), [83](#room-83), [123](#room-123), [140](#room-140), [170](#room-170), [345](#room-345), [346](#room-346), [347](#room-347)
 
@@ -1043,7 +1043,7 @@ Camera-only scripts (1: only camera moves and zone tests; their rows are in the 
 
 ### Script 2018 (the room's arrival)
 
-Co-op patterns (`ed patterns`): who "the player" is (covered), run inside player 2's change (covered), queued for a later frame (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (covered), run inside player 2's change (covered), queued for a later frame (covered).
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], the room slot table [helper].
 
@@ -2836,7 +2836,7 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 1188 (HealthRgn enter; SanityRgn enter; MagicRgn enter)
 
-Co-op patterns (`ed patterns`): queued for a later frame (uncovered), who "the player" is (bracket).
+Co-op patterns (`ed patterns`): queued for a later frame (covered), who "the player" is (bracket).
 
 Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the room in play [helper].
 

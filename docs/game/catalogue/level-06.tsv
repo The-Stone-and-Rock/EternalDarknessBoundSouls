@@ -484,7 +484,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 06	52	2347	CodexRegion01 enter	1	flag	fn30	asks flag 929					
 06	52	2347	CodexRegion01 enter	2	examine	ed221	EXAMINE: CODEX "Hidden behind the cobwebs lies an engraved stone tablet.", close-up camera CamCodex01, unless the thing tagged 2163 (Codex) is carried	fn30(929) == 1		the two looks on offer, copied from it [one per game]; the look being set up [one per game, picks]; the running script [hooked]; finds a node by id [helper]; the six prompts [hooked]; main [helper]; the room in play [helper]; the room slot table [helper]; current [hooked]; current [hooked]	the look being set up	identity (bracket); global (uncovered)
 06	52	2347	CodexRegion01 enter	5	examine	ed219	EXAMINE: COBWEBS "The corner is shrouded with dense cobwebs casting it into shadow, perhaps even h", close-up camera CamCodex01	fn30(929) ~= 1		the two looks on offer, copied from it [one per game]; the look being set up [one per game]; the running script [hooked]; the six prompts [hooked]; the room slot table [helper]		global (uncovered)
-06	59	1987	the room's arrival	1	chain	ed177	on_play_script(1987)					later (uncovered); change (covered)
+06	59	1987	the room's arrival	1	chain	ed177	on_play_script(1987)					later (covered); change (covered)
 06	59	1987	the room's arrival	2	flag	fn30	asks flag 270					change (covered)
 06	59	1987	the room's arrival	3	flag	fn29	flag 809 on	fn30(270) == 0				change (covered)
 06	59	1987	the room's arrival	6	flag	fn29	flag 809 off	fn30(270) ~= 0				change (covered)
@@ -648,7 +648,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 06	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	138	other	ed280	spell_node_acts_in_hold	fn0() ~= 3 and fn0() == 4		finds a node by id [hooked]; main [hooked]; equipment, 20 records by holder id [keyed]		
 06	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	139	other	fn26	zones_on	fn0() ~= 3 and fn0() == 4		hold word [helper]		global (covered)
 06	83	381	TeleportRegion02 enter; TeleportRegion00 enter; TeleportRegion01 enter; TeleportRegion03 enter	140	state	fn1	its state to 0	fn0() ~= 3 and fn0() == 4		the running script [per run]; the script words [hooked, picks]		
-06	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	1	chain	ed177	on_play_script(1188)					later (uncovered)
+06	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	1	chain	ed177	on_play_script(1188)					later (covered)
 06	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	2	other	fn23	in_zone			reads the zones' inside words [helper]; the room slot table [helper]		identity (bracket)
 06	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	3	other	fn52	track_volume	fn23(MagicRgn)		the room in play [helper]		
 06	83	1188	HealthRgn enter; SanityRgn enter; MagicRgn enter	6	other	fn23	in_zone	not fn23(MagicRgn)		reads the zones' inside words [helper]; the room slot table [helper]		identity (bracket)
@@ -781,7 +781,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 06	139	1983	the room's arrival	8	other	fn195	group_volume	fn30(555) ~= 1	2245	the room in play [helper]		change (covered)
 06	139	1983	the room's arrival	9	other	fn195	group_volume	fn30(555) ~= 1	2245	the room in play [helper]		change (covered)
 06	139	1983	the room's arrival	10	other	fn79	send_event	fn30(555) ~= 1	2245	finds a node by id [helper]; control blocks [helper]		change (covered)
-06	139	1983	the room's arrival	12	chain	ed177	on_play_script(2245)		2245			later (uncovered); change (covered)
+06	139	1983	the room's arrival	12	chain	ed177	on_play_script(2245)		2245			later (covered); change (covered)
 06	139	1990	the room's leave	1	flag	fn30	asks flag 523					change (covered)
 06	139	1990	the room's leave	2	other	ed78	damage_field_remove_room	fn30(523) == 1		finds a node by id [helper]		change (covered)
 06	139	1558	BoxRegion01 enter	2	other	fn78	handle			finds a node by id [hooked]; the room in play [helper]; current [hooked]; current [hooked]		identity (covered)
@@ -1980,7 +1980,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 06	296	2270	the room's arrival	8	other	fn195	group_volume	fn30(555) ~= 1	2245	the room in play [helper]		change (covered)
 06	296	2270	the room's arrival	9	other	fn195	group_volume	fn30(555) ~= 1	2245	the room in play [helper]		change (covered)
 06	296	2270	the room's arrival	10	other	fn79	send_event	fn30(555) ~= 1	2245	finds a node by id [helper]; control blocks [helper]		change (covered)
-06	296	2270	the room's arrival	12	chain	ed177	on_play_script(2245)		2245			later (uncovered); change (covered)
+06	296	2270	the room's arrival	12	chain	ed177	on_play_script(2245)		2245			later (covered); change (covered)
 06	296	203	CameraRgn01 enter	1	camera	fn8	camera Camera03			control blocks [helper]; asks if anyone is busy [helper]; finds a node by id [helper]; the room slot table [helper]; the room in play [helper]; the player's object [helper]		
 06	296	203	CameraRgn01 enter	2	other	fn3	camera_ease_eye					
 06	296	203	CameraRgn01 enter	3	other	fn2	camera_ease_target			the cameras' records [helper]		
@@ -2119,7 +2119,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 06	297	1981	the room's arrival	8	other	fn195	group_volume	fn30(555) ~= 1	2245	the room in play [helper]		change (covered)
 06	297	1981	the room's arrival	9	other	fn195	group_volume	fn30(555) ~= 1	2245	the room in play [helper]		change (covered)
 06	297	1981	the room's arrival	10	other	fn79	send_event	fn30(555) ~= 1	2245	finds a node by id [helper]; control blocks [helper]		change (covered)
-06	297	1981	the room's arrival	12	chain	ed177	on_play_script(2245)		2245			later (uncovered); change (covered)
+06	297	1981	the room's arrival	12	chain	ed177	on_play_script(2245)		2245			later (covered); change (covered)
 06	297	1991	the room's leave	1	flag	fn30	asks flag 524					change (covered)
 06	297	1991	the room's leave	2	other	ed78	damage_field_remove_room	fn30(524) == 1		finds a node by id [helper]		change (covered)
 06	297	203	CameraRgn01 enter	1	camera	fn8	camera Camera03			control blocks [helper]; asks if anyone is busy [helper]; finds a node by id [helper]; the room slot table [helper]; the room in play [helper]; the player's object [helper]		
@@ -2193,7 +2193,7 @@ level	room	script	from	line	kind	call	what	if	via	coop_words	coop_flagged	patter
 06	298	1982	the room's arrival	8	other	fn195	group_volume	fn30(555) ~= 1	2245	the room in play [helper]		change (covered)
 06	298	1982	the room's arrival	9	other	fn195	group_volume	fn30(555) ~= 1	2245	the room in play [helper]		change (covered)
 06	298	1982	the room's arrival	10	other	fn79	send_event	fn30(555) ~= 1	2245	finds a node by id [helper]; control blocks [helper]		change (covered)
-06	298	1982	the room's arrival	12	chain	ed177	on_play_script(2245)		2245			later (uncovered); change (covered)
+06	298	1982	the room's arrival	12	chain	ed177	on_play_script(2245)		2245			later (covered); change (covered)
 06	298	1992	the room's leave	1	flag	fn30	asks flag 525					change (covered)
 06	298	1992	the room's leave	2	other	ed78	damage_field_remove_room	fn30(525) == 1		finds a node by id [helper]		change (covered)
 06	298	203	CameraRgn01 enter	1	camera	fn8	camera Camera03			control blocks [helper]; asks if anyone is busy [helper]; finds a node by id [helper]; the room slot table [helper]; the room in play [helper]; the player's object [helper]		

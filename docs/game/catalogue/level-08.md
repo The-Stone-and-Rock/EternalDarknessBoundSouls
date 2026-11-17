@@ -9,7 +9,7 @@ Rooms this level reaches on paper (its door walk) but whose scripts are none of 
 Co-op: 47 rows flagged (a call that branches on a per-player word within one call, with no live host hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: the room in play 31, the script words 11, the look being set up 5.
 A flag is a place to look, not a bug found: the host can still cover it another way (a helper around the whole script run, a swap around the caller), and a word that is one per game may be fine for both.
 
-Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 29 (0), who "the player" is 158 (0), one global per game 9 (3), one script state for both 59 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 9 (0), queued for a later frame 34 (2), run inside player 2's change 18 (0), drawn from one camera 33 (0).
+Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 29 (0), who "the player" is 158 (0), one global per game 9 (3), one script state for both 59 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 9 (0), queued for a later frame 34 (0), run inside player 2's change 18 (0), drawn from one camera 33 (0).
 
 Rooms: [5](#room-5), [82](#room-82), [83](#room-83), [196](#room-196), [197](#room-197), [198](#room-198), [199](#room-199), [200](#room-200), [201](#room-201), [202](#room-202), [203](#room-203), [204](#room-204), [206](#room-206), [207](#room-207), [208](#room-208), [209](#room-209), [210](#room-210), [211](#room-211), [212](#room-212), [213](#room-213), [215](#room-215)
 
@@ -531,7 +531,7 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 1188 (HealthRgn enter; SanityRgn enter; MagicRgn enter)
 
-Co-op patterns (`ed patterns`): queued for a later frame (uncovered), who "the player" is (bracket).
+Co-op patterns (`ed patterns`): queued for a later frame (covered), who "the player" is (bracket).
 
 Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the room in play [helper].
 
@@ -2229,7 +2229,7 @@ Co-op, reaches: the two looks on offer, copied from it [one per game], the look 
 
 Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the room in play** (helper, by stream_prepare).
 
-Co-op patterns (`ed patterns`): who "the player" is (covered), asks the room in play (bracket), a table player 2's things fill (n/a), queued for a later frame (uncovered).
+Co-op patterns (`ed patterns`): who "the player" is (covered), asks the room in play (bracket), a table player 2's things fill (n/a), queued for a later frame (covered).
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], the player's object [hooked], the camera's view [helper].
 

@@ -9,7 +9,7 @@ This level runs level 00's scripts (facts/levels.json: 0x8003F4F4 turns 16 into 
 Co-op: 13 rows flagged (a call that branches on a per-player word within one call, with no live host hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: the room in play 7, the script words 6.
 A flag is a place to look, not a bug found: the host can still cover it another way (a helper around the whole script run, a swap around the caller), and a word that is one per game may be fine for both.
 
-Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 6 (0), who "the player" is 47 (0), one global per game 7 (1), one script state for both 7 (0), a table player 2's things fill 1 (0), stamped with the room in play when made 3 (0), queued for a later frame 10 (1), run inside player 2's change 3 (0), drawn from one camera 7 (0).
+Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 6 (0), who "the player" is 47 (0), one global per game 7 (1), one script state for both 7 (0), a table player 2's things fill 1 (0), stamped with the room in play when made 3 (0), queued for a later frame 10 (0), run inside player 2's change 3 (0), drawn from one camera 7 (0).
 
 Rooms: [5](#room-5), [39](#room-39), [83](#room-83), [96](#room-96)
 
@@ -313,7 +313,7 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 ### Script 1188 (HealthRgn enter; SanityRgn enter; MagicRgn enter)
 
-Co-op patterns (`ed patterns`): queued for a later frame (uncovered), who "the player" is (bracket).
+Co-op patterns (`ed patterns`): queued for a later frame (covered), who "the player" is (bracket).
 
 Co-op, reaches: reads the zones' inside words [helper], the room slot table [helper], the room in play [helper].
 

@@ -1,4 +1,4 @@
-"""`ed zoom RUN FRAME [X Y W H] [--scale S] [--name NAME]`: one picture of a run at a game frame, a part of it enlarged,
+"""`ed zoom RUN FRAME [X Y W H] [--scale S] [--name NAME] [--after MS]`: one picture of a run at a game frame, a part of it enlarged,
 saved in "Screenshots for Claude/zoom/" (the folder CLAUDE.md asks for), to look at a detail closely: a Tome page's
 plaques, a prompt, a half. RUN is a run folder or the end of its name (as `ed stops`); the picture is the run's shot
 taken at or after FRAME (both.tsv gives the frame's time, shots/shots.csv each shot's). Without X Y W H, the whole shot.
@@ -22,8 +22,8 @@ def run_dir(name):
     return found[-1]
 
 
-def shot_at(run, frame):
-    """The shot file taken at or after the frame's time, and that time (ms)."""
+def shot_at(run, frame, after=0):
+    """The shot file taken at or after the frame's time (plus after ms: a menu over the paused game holds the frame)."""
     at = None
     with open(os.path.join(run, 'both.tsv'), encoding='utf8', errors='replace') as f:
         rows = csv.reader(f, delimiter='\t')
@@ -37,7 +37,7 @@ def shot_at(run, frame):
         raise SystemExit('ed zoom: frame %d is past the run' % frame)
     with open(os.path.join(run, 'shots', 'shots.csv'), encoding='utf8') as f:
         for r in csv.DictReader(f):
-            if int(r['ms']) >= at:
+            if int(r['ms']) >= at + after:
                 return os.path.join(run, 'shots', r['file'])
     raise SystemExit('ed zoom: no shot at or after frame %d' % frame)
 
@@ -45,7 +45,11 @@ def shot_at(run, frame):
 def cmd_zoom(argv):
     if len(argv) < 2:
         raise SystemExit(__doc__)
-    scale, name = 3.0, None
+    scale, name, after = None, None, 0
+    if '--after' in argv:
+        i = argv.index('--after')
+        after = int(argv[i + 1])
+        del argv[i:i + 2]
     if '--scale' in argv:
         i = argv.index('--scale')
         scale = float(argv[i + 1])
@@ -56,11 +60,13 @@ def cmd_zoom(argv):
         del argv[i:i + 2]
     run = run_dir(argv[0])
     frame = int(argv[1])
-    src = shot_at(run, frame)
+    src = shot_at(run, frame, after)
     if len(argv) >= 6:
         x, y, w, h = (int(v) for v in argv[2:6])
     else:
-        x, y, w, h, scale = 0, 0, 1280, 720, 1.0 if '--scale' not in argv else scale
+        x, y, w, h = 0, 0, 1280, 720
+    if scale is None:
+        scale = 3.0 if len(argv) >= 6 else 1.0
     os.makedirs(OUT, exist_ok=True)
     out = os.path.join(OUT, '%s-%d%s.png' % (os.path.basename(run).replace('run-', ''), frame, '-' + name if name else ''))
     subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',

@@ -1,26 +1,19 @@
 {
  "room": {
   "units": 264,
-  "covered": 80,
-  "bracket": 182,
-  "uncovered": 2,
+  "covered": 81,
+  "bracket": 183,
+  "uncovered": 0,
   "n/a": 0,
-  "top_uncovered": [
-   "script L04/2301: uncovered at 3 of its 3 places, e.g. L04/2301 room 189 line 1; L04/2301 room 189 line 7",
-   "script L04/2726: uncovered at 1 of its 3 places, e.g. L04/2726 room 190 line 1"
-  ]
+  "top_uncovered": []
  },
  "identity": {
   "units": 1512,
   "covered": 1260,
-  "bracket": 249,
-  "uncovered": 3,
+  "bracket": 252,
+  "uncovered": 0,
   "n/a": 0,
-  "top_uncovered": [
-   "fn23(2959409236): uncovered at 6 of its 8 places, e.g. L04/2301 room 189 line 8; L04/2301 room 189 line 34 (via 146)",
-   "fn21(0): uncovered at 3 of its 505 places, e.g. L04/2301 room 189 line 40 (via 146); L04/2738 room 189 line 40 (via 146)",
-   "fn23(2121100893): uncovered at 1 of its 2 places, e.g. L04/2738 room 189 line 2"
-  ]
+  "top_uncovered": []
  },
  "global": {
   "units": 30,
@@ -64,41 +57,11 @@
  },
  "later": {
   "units": 575,
-  "covered": 546,
+  "covered": 575,
   "bracket": 0,
-  "uncovered": 29,
+  "uncovered": 0,
   "n/a": 0,
-  "top_uncovered": [
-   "script L00/1188: uncovered at 2 of its 2 places, e.g. L00/1188 room 83 line 1; L00/1188 room 83 line 1",
-   "script L01/1188: uncovered at 1 of its 1 place, e.g. L01/1188 room 83 line 1",
-   "script L02/1188: uncovered at 1 of its 1 place, e.g. L02/1188 room 83 line 1",
-   "script L03/1011: uncovered at 1 of its 3 places, e.g. L03/1011 room 150 line 2",
-   "script L03/1188: uncovered at 1 of its 1 place, e.g. L03/1188 room 83 line 1",
-   "script L03/2465: uncovered at 1 of its 1 place, e.g. L03/2465 room 152 line 1",
-   "script L03/933: uncovered at 1 of its 2 places, e.g. L03/933 room 150 line 2",
-   "script L04/1188: uncovered at 1 of its 1 place, e.g. L04/1188 room 83 line 1",
-   "script L04/2346: uncovered at 1 of its 1 place, e.g. L04/2346 room 185 line 7 (via 486)",
-   "script L05/1188: uncovered at 1 of its 1 place, e.g. L05/1188 room 83 line 1",
-   "script L05/929: uncovered at 1 of its 1 place, e.g. L05/929 room 256 line 2",
-   "script L06/1188: uncovered at 1 of its 1 place, e.g. L06/1188 room 83 line 1",
-   "script L06/1981: uncovered at 1 of its 1 place, e.g. L06/1981 room 297 line 12 (via 2245)",
-   "script L06/1982: uncovered at 1 of its 1 place, e.g. L06/1982 room 298 line 12 (via 2245)",
-   "script L06/1983: uncovered at 1 of its 1 place, e.g. L06/1983 room 139 line 12 (via 2245)",
-   "script L06/1987: uncovered at 1 of its 1 place, e.g. L06/1987 room 59 line 1",
-   "script L06/2270: uncovered at 1 of its 1 place, e.g. L06/2270 room 296 line 12 (via 2245)",
-   "script L07/1188: uncovered at 1 of its 1 place, e.g. L07/1188 room 83 line 1",
-   "script L08/1188: uncovered at 1 of its 1 place, e.g. L08/1188 room 83 line 1",
-   "script L08/2446: uncovered at 1 of its 1 place, e.g. L08/2446 room 213 line 5",
-   "script L09/1188: uncovered at 1 of its 1 place, e.g. L09/1188 room 83 line 1",
-   "script L09/2196: uncovered at 1 of its 2 places, e.g. L09/2196 room 274 line 22",
-   "script L10/1188: uncovered at 1 of its 1 place, e.g. L10/1188 room 83 line 1",
-   "script L10/2018: uncovered at 1 of its 1 place, e.g. L10/2018 room 10 line 29",
-   "script L11/1188: uncovered at 1 of its 1 place, e.g. L11/1188 room 83 line 1",
-   "script L11/2407: uncovered at 1 of its 1 place, e.g. L11/2407 room 219 line 1",
-   "script L12/1188: uncovered at 1 of its 1 place, e.g. L12/1188 room 83 line 1",
-   "script L12/2196: uncovered at 1 of its 2 places, e.g. L12/2196 room 93 line 22",
-   "script L13/1188: uncovered at 1 of its 1 place, e.g. L13/1188 room 83 line 1"
-  ]
+  "top_uncovered": []
  },
  "change": {
   "units": 252,

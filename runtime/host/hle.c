@@ -17009,7 +17009,13 @@ static void tome_stops_call(CPUState* cpu, u32 fn, const u32* args, u32 count) {
 }
 static void tome_stops_sound(CPUState* cpu, u32 id, u32 volume) {
     const u32 a[2] = {id, volume};
+    // In player 2's copy Tome a sound started in the copy's memory is thrown away with it (tome_copy_sound_live forwards
+    // only the Tome's own calls, by their return address): start it in the real memory, as that does.
+    u8* was = cpu->ram;
+    if (g_tome_copy_turn && cpu->ram == g_tome_copy.copy && g_tome_copy.real != NULL)
+        cpu->ram = g_tome_copy.real;
     tome_stops_call(cpu, SOUND_PLAIN, a, 2u);
+    cpu->ram = was;
 }
 static void tome_stops_set(CPUState* cpu, s32 index) {
     const u32 a[3] = {tome_stops_list(cpu), (u32)index, 0u};
@@ -17157,8 +17163,9 @@ static void tome_stops_labels(CPUState* cpu, const TomeStop* stops, u32 count, s
 #define TITLE_OPTIONS 14u
 #define TITLE_MORE_ROW 8u
 void titlevideo_options_row(int row);
+#define TITLE_LANGUAGE 26284u  // r13-: 0 English (the only Options picture More Options is painted on)
 static bool title_on_options(CPUState* cpu) {
-    if (mem_read8(cpu, TITLE_STATE) != TITLE_OPTIONS)
+    if (mem_read8(cpu, TITLE_STATE) != TITLE_OPTIONS || !sda_ready(cpu) || mem_read32(cpu, cpu->gpr[13] - TITLE_LANGUAGE) != 0u)
         return false;
     u32 notice = 0u;
     hle_guest_call(cpu, TITLE_CARD_NOTICE, NULL, 0, 0.0, &notice);
@@ -17171,10 +17178,11 @@ static void title_more_updown(CPUState* cpu) {
 static void title_more_choose(CPUState* cpu) {
     if (title_on_options(cpu) && mem_read32(cpu, TITLE_CURSOR) == TITLE_MORE_ROW) {
         fprintf(stderr, "[title] More Options (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
-        frontend_open_page(FRONTEND_PAGE_SETTINGS, 0);
+        frontend_open_page(FRONTEND_PAGE_TITLE_SETTINGS, 0);
     }
 }
-static void title_more_draw(CPUState* cpu) { titlevideo_options_row((int)mem_read32(cpu, TITLE_CURSOR)); }
+// The draw's own cursor (r3, the one 0x8001D934 tests): during the fade out to the main menu it is the old screen's.
+static void title_more_draw(CPUState* cpu) { titlevideo_options_row((int)cpu->gpr[3]); }
 
 // The plaques' pictures (plaques.cpp): a TEXPalette of transparent CMPR stubs in host scratch, one per plaque, drawn
 // with the game's own art calls (docs/research/in-game-menu/06-texture-bank.md section 7); the renderer's texture
@@ -17185,7 +17193,8 @@ static void title_more_draw(CPUState* cpu) { titlevideo_options_row((int)mem_rea
 #define PLAQUE_HEADERS (PLAQUE_BANK + 12u + 8u * PLAQUE_COUNT)
 #define PLAQUE_CANARY (PLAQUE_BANK + 0xF0u)
 #define PLAQUE_DATA (PLAQUE_BANK + 0x100u)
-#define PLAQUE_CANARY_WORD 0x504C5131u  // 'PLQ1'
+// 'PLQ1' mixed with this build's stubs (their version, size and count): a bank left in a state by another build fails it.
+#define PLAQUE_CANARY_WORD (0x504C5131u ^ ((u32)plaques_generation() << 8) ^ PLAQUE_STUB_W ^ (PLAQUE_STUB_H << 16) ^ ((u32)PLAQUE_COUNT << 24))
 #define TOME_BANK_BIND 0x801E1B74u      // (bank) -> the bank bound before
 #define TOME_MATERIAL_IMAGE 0x8019C7C8u // (&rgba, field 0, image, 0x80000000)
 #define TOME_QUAD_TEXCOORDS 0x8019D178u // (array): the quads' texcoords
@@ -17316,7 +17325,8 @@ static void tome_stops_frame(CPUState* cpu) {
     }
     const u32 ring[6] = {(u32)x, (u32)y, (u32)w, (u32)h, 0xFFFFFFFFu, 3u};
     tome_stops_call(cpu, TOME_RING, ring, 6u);
-    if (!plaques)
+    // (After the page's exit in this frame, B or Start: no labels made again, they'd outlive the page.)
+    if (!plaques && mem_read32(cpu, cpu->gpr[13] - 24308u) == TOME_OPTIONS_EXIT)
         tome_stops_labels(cpu, stops, count, at);
     tome_stops_return(cpu);
 }

@@ -277,4 +277,4 @@ int plaques_apply(const uint8_t* rgba, uint32_t width, uint32_t height, uint64_t
     return 2;  // the stub (transparent) meanwhile
 }
 
-uint64_t plaques_generation(void) { return kVersion; }
+extern "C" uint64_t plaques_generation(void) { return kVersion; }
