@@ -6,6 +6,10 @@ Revised 2026-11-16 after a read-only check of this plan against the code, every 
 transcripts and the memories: the corrections and the gaps it found are folded in below. Nothing in it needs the game
 played: goals 1 to 3 are built from the disc data and the code alone.
 
+**Done 2026-11-16 (goals 1 to 3, committed through e8338a3): `ed needs`, `ed catalogue` (docs/game/catalogue/) and
+`ed patterns`. What was built, what it found and what's next: the to-do list at the top of docs/coop-next-session.md.
+Goal 4 (the play-check runner) is not started.**
+
 ---
 
 This session is dedicated to the project's knowledge kit (the `ed` tool), so that every later feature finds the co-op
