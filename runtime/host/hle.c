@@ -16387,6 +16387,8 @@ static void tome_copy_left(CPUState* cpu, s32 script, u32 next_cast, const u8* s
 #define TOME_COPY_FIND_STEP 0x80024434u
 #define TOME_COPY_FIND_RECORD 0x8030A6E8u
 #define TOME_COPY_WORDS_RECORD 0x8023E458u
+static void coop_subtitle_out_of_copy(CPUState* cpu, bool clean);
+static void coop_subtitle_clean_taken(void);
 static void tome_copy_no_window(CPUState* cpu) {
     const u32 sda = cpu->gpr[13], window = mem_read32(cpu, sda - 25960u);
     u32 ignore = 0u;
@@ -16780,6 +16782,7 @@ static bool tome_copy_step(CPUState* cpu) {
     u32 ignore = 0u;
     if (opening) {
         tome_copy_no_window(cpu);
+        coop_subtitle_out_of_copy(cpu, sharing_was);  // U3, plan E: no subtitle of the world's in a copy Tome
         tome_copy_fade(cpu);  // F3a/F3b/F3g (design-stayer-findings): in the copy
         if (!g_tome_copy_p1) {
             coop_tome_player(cpu, true);
@@ -17676,8 +17679,10 @@ static void tw_mode_change(CPUState* cpu) {
         if (g_tome_copy.clean == NULL)
             g_tome_copy.clean = (u8*)malloc(cpu->ram_size);
         g_tome_copy.clean_set = g_tome_copy.clean != NULL;
-        if (g_tome_copy.clean_set)
+        if (g_tome_copy.clean_set) {
             memcpy(g_tome_copy.clean, cpu->ram, cpu->ram_size);
+            coop_subtitle_clean_taken();  // U2's copy of a subtitle line in it, for a copy Tome taken from it (plan E)
+        }
     }
     const bool copy_ran = tome_copy_step(cpu);
     g_hle_passthrough = true;  // a nested dispatch passes itself through
@@ -21808,9 +21813,13 @@ static struct {
     bool copy_making;    // inside the copy's 0x801DB374
     unsigned no_copy_of; // the line whose "no copy" was logged
     bool after_log;      // log the pool once the line and its copy are gone
+    // U3: the record started in a Tome frame (the replay page, 0x80108044), so the Tome's frame counts it (coop_subtitle_tick).
+    bool tome_started;
+    bool tome_passing;   // the Tome's frame is passing over the updater (logged once each time it begins)
+    bool in_copy;        // coop_subtitle_out_of_copy's own end, in a copy Tome's memory: the real record's hooks keep out
 } g_sub;
 
-static bool coop_subtitles_on(void) { return g_settings.mod_coop && g_coop_p2 != 0u && !g_tome_copy_turn; }
+static bool coop_subtitles_on(void) { return g_settings.mod_coop && g_coop_p2 != 0u && !g_tome_copy_turn && !g_sub.in_copy; }
 
 // The ten shared elements (0x805F87D0): how many are free (0x801DB374 takes the first with +122 and +123 both 0).
 static int coop_subtitle_pool_free(CPUState* cpu) {
@@ -21843,6 +21852,7 @@ static void coop_subtitle_started(CPUState* cpu, const char* mode) {
     // the phone's state 2 included (a timer re-run in their bracket). The Tome's replay is player 1's real Tome.
     const bool p2 = cpu->lr != SUBTITLE_TOME_REPLAY && mem_read32(cpu, cpu->gpr[13] - 21496u) == mem_read32(cpu, g_coop_p2 + 16u);
     g_sub.owner = p2 ? 2 : 1;
+    g_sub.tome_started = cpu->lr == SUBTITLE_TOME_REPLAY;
     if (getenv("ED_COOP_LOG") != NULL)
         fprintf(stderr, "[coop] subtitle (%s, text group %d) started by player %d (lr 0x%08X, frame %llu)\n", mode, (s32)cpu->gpr[4],
                 g_sub.owner, cpu->lr, (unsigned long long)(cpu->timebase / 675000ull));
@@ -21861,6 +21871,7 @@ static void coop_subtitle_ended(CPUState* cpu) {
     g_sub.after_log = g_sub.owner != 0 || g_sub.element != 0u;
     g_sub.owner = 0;
     g_sub.element = 0u;
+    g_sub.tome_started = false;  // (the Tome's replay stops, 0x8010751C and 0x80107B04, come here too)
 }
 // 0x80008D7C: the record's line freed (the next row's line, or its frames run out): the copy goes with it.
 static void coop_subtitle_line_freed(CPUState* cpu) {
@@ -22070,6 +22081,77 @@ static void coop_subtitle_stop(CPUState* cpu) {
     g_sub.element = 0u;
     g_sub.owner = 0;
     g_sub.after_log = false;
+}
+
+// U3, plan D: the updater 0x800088A0 runs in the world's frame (lr 0x80008534) and in the Tome's (lr 0x801115DC). In solo
+// only one of the two runs at a time. Behind player 1's real Tome in co-op both run each shown frame (TW_WORLD_FRAMES 1),
+// so the record's +8 went up by two: player 2's phone ended at 100 frames, not 200, and its second line was made in a Tome
+// frame from the Tome's own pack (r13-26268), "The HORROR!!" on player 1's Tome page, not "Remember me"
+// (logs/run-20261117-114238-u3-before-p1tome-first). While player 1's Tome shares with the world, the Tome's call is passed
+// over, so the world's alone counts and makes the lines, as in solo with no Tome. A record the Tome's replay page started
+// (0x80108044) is the Tome's: its frame keeps its call, and the world's call is passed over instead. The world's frame runs
+// first each shown frame and would make the replay's due line from play's pack (any view but 3 reads r13-26264), or count
+// +8 twice a frame (read from the code, 0x8000897C..0x8000898C; not run). Player 2's copy Tome (its own memory) is never
+// passed over.
+#define SUBTITLE_TOME 0x801115DCu  // the updater's call in the Tome's frame (li r3,3)
+static void coop_subtitle_tick(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (g_tome_copy_turn || !g_settings.mod_coop || g_coop_p2 == 0u)
+        return;  // (a copy Tome's frame: its own memory, its own record, as solo)
+    if (cpu->lr == SUBTITLE_WORLD) {
+        // The Tome's replay behind player 1's real Tome: the Tome's call alone counts and makes its lines.
+        if (g_sub.tome_started && coop_subtitles_on() && hle_coop_player1_tome_up()) {
+            static unsigned logged_of = ~0u;
+            if (logged_of != g_sub.serial && getenv("ED_COOP_LOG") != NULL) {
+                logged_of = g_sub.serial;
+                fprintf(stderr, "[coop] subtitle: the world's frame passes over the updater (the Tome's own replay, frame %llu)\n",
+                        (unsigned long long)(cpu->timebase / 675000ull));
+            }
+            g_hle_passthrough = false;  // back to 0x80008534, as if it had run (its r3 isn't read)
+        }
+        return;
+    }
+    if (cpu->lr != SUBTITLE_TOME)
+        return;
+    const bool pass = coop_subtitles_on() && hle_coop_player1_tome_up() && !g_sub.tome_started;
+    // Logged as it changes while a record is on (+4, its table): not each Tome open with no subtitle.
+    const bool on = mem_read32(cpu, SUBTITLE_RECORD + 4u) != 0u;
+    if (on && pass != g_sub.tome_passing && getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] subtitle: the Tome's frame %s the updater (%s, frame %llu)\n", pass ? "passes over" : "runs",
+                pass ? "player 1's Tome shares with the world" : g_sub.tome_started ? "the Tome's own replay" : "no world behind it",
+                (unsigned long long)(cpu->timebase / 675000ull));
+    if (on)
+        g_sub.tome_passing = pass;
+    if (pass)
+        g_hle_passthrough = false;  // back to 0x801115DC, as if it had run (its r3 isn't read)
+}
+
+// U3, plan E: a copy Tome is a copy of all memory, the subtitle record and its line among it, and U2's copy of the line
+// too. Its frame runs only the Tome's updater, which made the record's next line from the Tome's own pack: player 1's
+// phone call read "Hello?" and then "The HORROR!!" on player 2's Tome page (logs/run-20261117-114334-u3-before-p2copy).
+// At a copy's opening, in the copy, the game's own end (0x80008DD4) frees its line and empties its record, and U2's copy is
+// freed with the game's free. Whoever's the record is: its next line in the copy would come from the wrong pack either way.
+// The real record plays on in the world, in its owner's half. A copy made beside player 1's real Tome is taken from the
+// memory as that Tome opened (g_tome_copy.clean): its U2 copy is the one up then (g_sub_clean_copy).
+static u32 g_sub_clean_copy;
+static void coop_subtitle_clean_taken(void) { g_sub_clean_copy = g_sub.copy; }
+static void coop_subtitle_out_of_copy(CPUState* cpu, bool clean) {
+    if (!g_settings.mod_coop || g_coop_p2 == 0u)
+        return;
+    u32 copy = clean ? g_sub_clean_copy : g_sub.copy, ignore = 0u;
+    const u32 line = mem_read32(cpu, SUBTITLE_RECORD + 20u), table = mem_read32(cpu, SUBTITLE_RECORD + 4u);
+    const bool copy_up = copy != 0u && copy != line && tw_element_used(cpu, copy);
+    if (line == 0u && table == 0u && !copy_up)
+        return;
+    g_sub.in_copy = true;  // the hooks on 0x80008DD4 are the real record's
+    if (copy_up)
+        hle_guest_call(cpu, PROMPT_FREE, &copy, 1, 0.0, &ignore);
+    if (line != 0u || table != 0u)
+        hle_guest_call(cpu, 0x80008DD4u, NULL, 0, 0.0, &ignore);
+    g_sub.in_copy = false;
+    if (getenv("ED_COOP_LOG") != NULL)
+        fprintf(stderr, "[coop] subtitle left out of player %d's copy Tome: line 0x%08X, record %s, U2's copy %s (%d of 10 free in the copy)\n",
+                g_tome_copy_p1 ? 1 : 2, line, table != 0u ? "ended" : "empty", copy_up ? "freed" : "none", coop_subtitle_pool_free(cpu));
 }
 
 static void hle_words_layout(CPUState* cpu) {
@@ -33852,6 +33934,13 @@ static void find_coop(CPUState* cpu) {
             else
                 fprintf(stderr, "[coop] subtitle hook 0x%08X not found: subtitles stay in player 1's half\n", kSubtitle[i].at);
         }
+        // U3, plan D: the updater, passed over in the Tome's frame behind player 1's Tome (coop_subtitle_tick).
+        HleDispatchEntry* tick = hle_dispatch_entry(0x800088A0u);
+        if (mem_read32(cpu, 0x800088A0u) == 0x9421FFD0u && mem_read32(cpu, SUBTITLE_TOME - 4u) == 0x4BEF72C9u && tick != NULL &&
+            tick->intercept == NULL && tick->notify == NULL)
+            tick->intercept = coop_subtitle_tick;
+        else
+            fprintf(stderr, "[coop] subtitle updater 0x800088A0 not found: behind player 1's Tome lines go at double speed\n");
     }
     // The look for things lying about (stwu r1,-32(r1); ... bl 0x800DA688 at +0x14),
     // player 2's in their own look.
@@ -34984,6 +35073,7 @@ void hle_coop_state_load(const void* in) {
     g_coop_p1_icon.id = -1;
     // A subtitle's owner and line are the old world's: a line the loaded state has up is player 1's (coop_subtitle_laid).
     memset(&g_sub, 0, sizeof g_sub);
+    g_sub_clean_copy = 0u;  // (the Tome's clean memory is taken again at its next open)
     g_coop_show_kept[0] = g_coop_show_kept[1] = false;
     g_coop_unseen_out_of[0] = g_coop_unseen_out_of[1] = -1;
     memset(g_coop_unseen_look, 0, sizeof g_coop_unseen_look);

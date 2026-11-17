@@ -3,6 +3,31 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: co-op subtitles, step U3 review fix (committed with step U3)
+- The Tome's replay page behind player 1's real Tome: the world frame's updater call still ran and would make the
+  replay's lines from play's pack (wrong words) or count twice a frame. Now `coop_subtitle_tick` passes over the
+  world's call while the record is the Tome's replay, so the Tome's call alone runs it. Read from the code only: no
+  run opens the replay page.
+- Seen unchanged on the new build: plan D (run-20261117-115953-u3r-p1tome-first), plan E
+  (run-20261117-120120-u3r-p2copy) and U2's follow run (run-20261117-120046-u3r-check-p2-follow). Pictures 06 to 09 in
+  `Screenshots for Claude/U3-subtitles-tome/`.
+
+## 2026-11-17: co-op subtitles, step U3: the Tomes (committed)
+Plans D and E of docs/research/coop-gaps/subtitles.md ("Built: step U3"), in hle.c:
+- **D** (`coop_subtitle_tick`): behind player 1's real Tome the updater ran in both the world's and the Tome's frame,
+  so a line went at double speed, and its second line came from the Tome's pack ("The HORROR!!" on player 1's Tome
+  page). Now the Tome frame's call is passed over while player 1's Tome shares with the world, unless the Tome's
+  replay page started the record. Seen: lines made 49 frames apart (before: about 25), both in player 2's half, nothing on
+  the Tome page (run-20261117-114634-u3-after-p1tome-first; before: run-20261117-114238-u3-before-p1tome-first).
+- **E** (`coop_subtitle_out_of_copy`): a copy Tome carried the world's line and U2's copy on its page, then the
+  Tome pack's wrong line. Now, at the copy's opening, the game's end 0x80008DD4 runs in the copy and U2's copy is
+  freed there. Done for any owner's line. Seen: player 2's Tome page clean, player 1's lines in their half
+  (run-20261117-114702-u3-after-p2copy; before: run-20261117-114334-u3-before-p2copy).
+- Player 1's Tome must be opened before player 2 answers: the game refuses Start in a scene.
+- Pictures: `Screenshots for Claude/U3-subtitles-tome/` (01 to 05). U2's follow run is unchanged (05).
+- Not seen: a Tome closed mid-line (scripted B and Start did not close either Tome here, even with no phone);
+  both Tomes up with a line (not reachable with the phone); the Tome's replay page. All runs used saves/slot3.state.
+
 ## 2026-11-17: co-op subtitles, step U2 review fixes (committed with step U2)
 - A save now waits while a subtitle's copy is up (`hle_save_held`). Before, a state saved then kept the copy, and
   after loading it nothing freed it: the line stayed drawn in the other half. Seen: the save waited and landed just

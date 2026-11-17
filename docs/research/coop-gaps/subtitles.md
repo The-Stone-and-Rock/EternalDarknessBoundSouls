@@ -578,3 +578,77 @@ shots), so both halves' "Hello?" still shows in the picture labelled F4656, afte
 
 Not checked: player 2 gone mid-line (an area change); the leave and mix runs again after these fixes (the changed
 code only runs with co-op off, player 2 gone, or a save waiting).
+
+## Built: step U3, plans D and E (2026-11-17, not yet played by the user)
+
+Both are in runtime/host/hle.c and gated on co-op with player 2 in. Solo never reaches them.
+
+- **D, behind player 1's real Tome** (`coop_subtitle_tick`, an intercept on the updater 0x800088A0).
+  - The world's frame (lr 0x80008534) and the Tome's frame (lr 0x801115DC) both ran it each shown frame. The count went
+    up by two, and a line made in a Tome frame came from the Tome's own pack.
+  - Now, while player 1's Tome shares with the world (`hle_coop_player1_tome_up`), the Tome frame's call is passed over.
+    The world's call alone counts and makes the lines, as solo does with no Tome.
+  - A record the Tome's replay page started (lr 0x80108048) keeps the Tome's call (`g_sub.tome_started`). The mark is
+    cleared at every end (0x80008DD4, which the replay's stops at 0x8010751C and 0x80107B04 call) and at 0x80008E40.
+  - A copy Tome's frame is never passed over: it is its own memory.
+- **E, a copy Tome** (`coop_subtitle_out_of_copy`, called right after `tome_copy_no_window` at the copy's opening).
+  - In the copy, the game's own end 0x80008DD4 frees the line and empties the record, and U2's copy of the line is
+    freed with the game's free. The real record plays on in the world, in its owner's half.
+  - This is done whoever owns the line, not only for player 1's (the plan said player 1's). The copy's frame runs only
+    the Tome's updater, which makes the next line from the Tome's pack: the wrong words for any world line.
+  - The real record's hooks are kept out while this runs (`g_sub.in_copy`), so the real line and copy stay tracked.
+  - A copy made beside player 1's real Tome is taken from the memory as that Tome opened. Its U2 copy is the one that
+    was up then (`g_sub_clean_copy`, kept when that memory is taken).
+
+Runs, from saves/slot3.state (the fallback), ED_RUN_AWAY=1, ED_SUBTITLES=1. Pictures in
+`Screenshots for Claude/U3-subtitles-tome/`:
+
+| Run | Log | Seen in pictures |
+|---|---|---|
+| run-20261117-114238-u3-before-p1tome-first (old build) | Player 1's Start at 4520, then player 2 answers the phone behind the Tome. 485 calls at lr 0x80008534 and 485 at 0x801115DC. "Hello?" made at 4605 (13 after the start), the record over at 4692. Line 2 made in a Tome frame: "The HORROR!!", "text 0 is the Tome's" | "Hello?" in player 2's half for about 15 frames; then "The HORROR!!" on player 1's Tome page; no "Remember me" anywhere (01) |
+| run-20261117-114634-u3-after-p1tome-first | "the Tome's frame passes over the updater" at 4593. Lines made at 4618 and 4667 (49 apart), over at 4792, as with no Tome | "Hello?" and "Remember me, Ellia?" in player 2's half for their whole length; nothing on player 1's Tome page (02) |
+| run-20261117-114334-u3-before-p2copy (old build) | Player 1 answers, player 2's Start at 4625 | "Hello?" on player 2's Tome page, then "The HORROR!!" there (03) |
+| run-20261117-114702-u3-after-p2copy | "subtitle left out of player 2's copy Tome: line 0x805F87D0, record ended, U2's copy freed (9 of 10 free in the copy)". The real record went on: line 2 at 4669, over at 4794. The real U2 copy freed as "a Tome is up" at 4627 | Nothing on player 2's Tome page; "Hello?" and "Remember me, Pius?" in player 1's half (04) |
+| run-20261117-114749-u3-check-p2-follow | Same pool counts and frames as U2's run | Both lines in both halves, as in U2 (05) |
+
+Seen besides: the phone's white flash with a stray triangle in player 1's half at about 4890 to 4960. It is the same in
+the before and after runs, so U3 did not cause it (the sanity flash, already researched).
+
+Not seen:
+- A Tome closed mid-line, and U2's copy made again after it. Scripted presses did not close either Tome in these runs
+  (Start, or B up to three times, 60 to 120 frames after opening), even with no phone call
+  (run-20261117-115107-u3-p2copy-nophone-b). An older run did not close it either (run-20261116-010024-tome-tabs).
+  An earlier JTG run did close player 2's copy with B, after other presses, 630 turns after it opened
+  (run-20261117-031922-jtg-stopsp2). Why these did not was not looked into.
+- Both Tomes up with a line: not reachable with the phone. Each player's Start is refused in their own scene, and the
+  other's scene holds the game's Start. So the copy made from the Tome's opening memory was not run with a line.
+- The Tome's replay page (its start and stops): not run.
+- The world's call during a Tome-started replay: fixed in the review (next section), from the code only.
+- Solo: checked by reading only (every path returns at once without co-op and player 2).
+
+## Built: step U3 review fix, the replay's world call (2026-11-17, not yet played by the user)
+
+- **The problem (read from the code, not run).** For a record the Tome's replay page started, D kept the Tome
+  frame's call. But the world frame's call (lr 0x80008534) still ran behind player 1's real Tome. The updater reads
+  the Tome's pack only for view 3 (0x8000897C..0x8000898C); the world's call is view 2, so it reads play's pack. The
+  world frame runs first each shown frame, so it would reach each row's start first and make the replay's line
+  from play's pack: wrong words, or a group out of range. With no clip to catch up to, +8 would count twice a frame.
+- **The fix** (`coop_subtitle_tick`): the intercept on 0x800088A0 now also looks at the world's call. When the
+  record is the Tome's replay (`g_sub.tome_started`) and player 1's real Tome shares with the world, the world's call
+  is passed over. The Tome's view-3 call alone counts and makes the lines, from the Tome's pack. This is the mirror of
+  D. The caller does not read r3 after 0x80008534 (the next word is a call). Logged once per line as "the world's
+  frame passes over the updater (the Tome's own replay ...)".
+- A replay line made in the Tome's frame is not the world's (`coop_subtitle_laying`), so it is not moved or copied.
+  It stays where the game puts it, on player 1's Tome page.
+- The copy Tome, solo and co-op off return before this, as before.
+
+Runs on the new build (saves/slot3.state, ED_RUN_AWAY=1, ED_SUBTITLES=1, the same switches as the U3 runs).
+Pictures 06 to 09 in `Screenshots for Claude/U3-subtitles-tome/`:
+
+| Run | Log | Seen in pictures |
+|---|---|---|
+| run-20261117-115953-u3r-p1tome-first | Same as U3's after run: Tome's frame passes over at 4593, lines at 4618 and 4667, over at 4792. No world pass-over line (no replay) | "Hello?" then "Remember me, Ellia?" in player 2's half, nothing on player 1's Tome page (06, 07) |
+| run-20261117-120046-u3r-check-p2-follow | Same frames and pool counts as U2's and U3's follow runs | "Remember me, Ellia?" in both halves (09) |
+| run-20261117-120120-u3r-p2copy | Left out of player 2's copy as in U3's run; line 2 at 4670, over at 4795 (one frame later than U3's run) | Nothing on player 2's Tome page, "Remember me, Pius?" in player 1's half (08) |
+
+Not seen: the replay page itself. The fix is from the code only. No run here opens the replay page.

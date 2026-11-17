@@ -183,7 +183,13 @@ Play with `play-rooms-log.bat subtitles`, co-op on, in Alex's mansion (chapter 0
 - One player at the phone, the other at the carriage clock in the next room (or in another room). Each one's words
   and EXAMINE prompts should stay in their own half.
 - Try the clock three times with player 2 (Alex's clock lines), and the ghost maid if you reach her.
-- If you can: open player 1's Tome or a close-up while player 2's line is up, and say where the line goes.
+- Open player 1's Tome first, then have player 2 answer the phone (the game refuses Start once the call has begun).
+  Player 2's lines should be in their half at normal speed, "Hello?" then "Remember me, ...", and nothing on player
+  1's Tome page. Close the Tome while a line is up and say if the line shows in both halves again.
+- Player 1 answers the phone, and player 2 opens their Tome during "Hello?". Player 2's Tome page should show no
+  subtitle; player 1's half keeps the lines. Close player 2's Tome mid-line and say what shows.
+- If you find a page in player 1's Tome that plays back a recording with subtitles, play it while player 2 walks
+  about. Its words should match what is said, at normal speed, on player 1's Tome page. Say if they are wrong words.
 - Save a state (F1) while a line is in both halves. The save should wait until the line goes. Load it later: no
   line should be left on either half once the talking stops.
 - Turn "Split-screen co-op" off in the mods menu while a line is up: one line, in the middle of the full screen, and
