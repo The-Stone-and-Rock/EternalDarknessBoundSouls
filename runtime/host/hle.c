@@ -13889,19 +13889,32 @@ static struct {
 static bool g_coop_tome_p2;
 static bool g_coop_b_release;
 void aurora_split_menu(int player, int layout);
+void aurora_split_page(int player, int layout);
 
 // The in-game menu over a Tome: the renderer took the menu's frames for the Tome's and the world's,
 // only keeping them, so nothing of the menu was shown and the game looked frozen. While it's up,
 // the frames are plain ones, and as the menu closes the views go back as the Tome had them.
-void hle_coop_ui_over(bool on) {
+// half 0 or 1: a Tome page of that player's (frontend.cpp, the Tome look). The halves stay on screen under it, drawn by
+// the renderer from the pictures it kept (aurora_split_page, told before the split is put off, so it can see how the
+// Tome's frames were shared): their Tome in their half, their partner's last view (or Tome) in the other. Answers
+// whether the page is in a half; -1 or nothing kept in halves, the page has the whole window, as before.
+bool hle_coop_ui_over(bool on, int half) {
     static bool over;
     if (on && (g_tw.sharing || g_tome_copy_open || g_coop_tome_owner >= 0)) {
         over = true;
+        const bool in_half = half == 0 || half == 1;
+        if (in_half) {
+            aurora_split_page(half, g_settings.mod_split);
+            fprintf(stderr, "[coop] a Tome page in player %d's half (sharing %d, copy %d%s, owner %d)\n", half + 1,
+                    g_tw.sharing ? 1 : 0, g_tome_copy_open ? 1 : 0, g_tome_copy_p1 ? " p1" : "", g_coop_tome_owner);
+        }
         aurora_split_menu(-1, 0);
         aurora_split_only_view(-1);
         split_skip_views_set(0);
+        return in_half;
     } else if (!on && over) {
         over = false;
+        aurora_split_page(-1, 0);
         if (g_tome_copy_open && g_tome_copy_p1) {
             aurora_split_menu(0, g_settings.mod_split);
             aurora_split_only_view(1);
@@ -13914,6 +13927,7 @@ void hle_coop_ui_over(bool on) {
             aurora_split_only_view(g_tome_copy_open ? 2 : g_coop_tome_owner >= 0 ? 1 - g_coop_tome_owner : -1);
         }
     }
+    return false;
 }
 
 

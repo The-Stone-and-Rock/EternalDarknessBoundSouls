@@ -141,9 +141,21 @@ Try, with co-op off:
   below says rows are hidden.
 - In 4:3 the leaf sits on the narrower page, clear of the medallion.
 - Say if the leaf should be darker, to match the Tome's page, or cover the whole page.
-- In co-op the page is still on the whole window. Player 2's page lies on their copy Tome, as solo. Player 1's page is
-  over the world's picture (no Tome is under it yet), so that picture is dimmed and the leaf sits in the middle. Putting
-  the page in the player's half, with the Tome under it, is the next step.
+- In co-op: see step 6 below.
+
+**Native menus, step 6 (2026-11-17 morning): the Tome look in co-op.** A Tome page now opens in its owner's half, on
+their Tome. The other half keeps the partner's last picture (the world, or their Tome if it is open too), dimmed.
+Both players are paused while a page is up, as before. Pictures: `Screenshots for Claude/s6-tome-coop/`.
+Try, with co-op on:
+- Player 1: Tome > Options > Settings, then Display. The page should sit on player 1's Tome in the left half. Player 2's
+  half is dimmed and still. Back twice: the plaques are back, and both players can walk.
+- Player 1: Characters. Move round the portraits. Back.
+- Player 2: their Tome > Options > Characters. The page sits on their copy Tome in their half, player 1's half dimmed.
+- Both Tomes open at once, then player 1's Settings: player 2's Tome stays in their half, dimmed.
+- Over and under split (Mods > Co-op): the page should go in the top half for player 1, the bottom for player 2.
+- Player 1: Tome > Options > Mods > Co-op, change "Screen split". The page should stay where it is. The new split shows
+  once you close the page.
+- Say if the page is too small to read in a half on your screen.
 
 ## 7. Karim's skeletal pedestal (chapter 4), for Claude to trace
 The gate you meant is **room 193** in Karim's chapter (the room numbers are the game's; "room 93" is a different room,

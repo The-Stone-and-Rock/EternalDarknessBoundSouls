@@ -610,6 +610,10 @@ bool in_play() { return g_in_game && !g_on_title; }
 enum class Skin { Launcher, Title, Tome };
 Skin g_skin = Skin::Launcher;
 int g_skin_half = -1;  // the Tome's: its co-op half (0 or 1), -1 the whole picture
+// The co-op split while that page is up (Mods > Co-op's "Screen split", 1 one above the other): taken once as the page
+// opens, as hle.c gives it to the renderer (aurora_split_page), so a change on the Mods page moves nothing until the
+// page closes and the renderer and the page keep the same halves.
+int g_skin_split = 0;
 
 // A list longer than its page scrolls by hand (RmlUi's own overflow scroll cut the last line): only rows
 // g_list_top .. g_list_top + g_list_lines - 1 are drawn, each keeping its row<i> id (the mouse). g_list_lines 0: no
@@ -2789,7 +2793,7 @@ WinRect tome_units_box(int half, float u0, float v0, float u1, float v1) {
             W = 1280;
             H = 720;
         }
-        const bool side = g_settings.mod_split != 1;
+        const bool side = g_skin_split != 1;
         const float hx = side ? W * 0.5f * half : 0.f, hy = side ? 0.f : H * 0.5f * half;
         const float hw = side ? W * 0.5f : static_cast<float>(W), hh = side ? static_cast<float>(H) : H * 0.5f;
         const float s = std::min(hw / v.w, hh / v.h);
@@ -2814,15 +2818,29 @@ WinRect tome_page_rect(int half) {
 constexpr float kTomeLeaf[4] = {166.f, 10.f, 554.f, 384.f};
 constexpr float kTomeFont = 0.036f;
 constexpr int kTomeLines = 9;
-// Whether a co-op Tome page goes in its owner's half (g_skin_half). Off until the split is kept under the page (step 6
-// of docs/research/in-game-menu/12-critic-and-plan.md): today the window behind it is one whole picture.
-constexpr bool kTomeInHalves = false;
-// Whether the Tome is the picture under a Tome page, so the page lies on it with no veil (body.tome-under). Seen in
-// pictures (s5): solo, yes; co-op player 2's copy Tome, yes (run -094421); co-op player 1's Tome, no: the last frame
-// kept is the world's, so the page there keeps the dim veil and its leaf in the middle (run -094534). Step 6 replaces
-// this with the split kept under the page.
+// Whether a co-op Tome page goes in its owner's half (g_skin_half): the renderer keeps the halves under it (hle.c
+// hle_coop_ui_over, aurora.cpp aurora_split_page), their Tome in theirs. g_skin_half is -1 when they are not kept.
+constexpr bool kTomeInHalves = true;
+// Whether the Tome is the picture under a Tome page, so the page lies on it with no veil (body.tome-under): solo the
+// whole picture is the Tome; in co-op the owner's half is their Tome (kTomeInHalves). Without the halves kept, a co-op
+// page is over one whole picture, which may be the world (s5, run -094534): there it keeps the dim veil and its leaf in
+// the middle.
 bool tome_under_page() {
-    return g_skin == Skin::Tome && (g_skin_half < 0 || g_skin_half == 1);
+    return g_skin == Skin::Tome && (kTomeInHalves || g_skin_half < 0 || g_skin_half == 1);
+}
+// A co-op half of the window (as aurora.cpp half_of): 0 or 1, side by side or one above the other (the page's split,
+// g_skin_split).
+WinRect window_half(int half) {
+    float aspect = 16.f / 9.f;
+    uint32_t W = 0, H = 0;
+    dol_aurora_get_display_info(&aspect, &W, &H);
+    if (W == 0 || H == 0) {
+        W = 1280;
+        H = 720;
+    }
+    const bool side = g_skin_split != 1;
+    return {side ? W * 0.5f * half : 0.f, side ? 0.f : H * 0.5f * half, side ? W * 0.5f : static_cast<float>(W),
+            side ? static_cast<float>(H) : H * 0.5f};
 }
 // The leaf's shift with no Tome under it: to the middle of the -80..720 picture (the leaf's middle is at 360).
 constexpr float kTomeLeafCentre = -40.f;
@@ -3141,15 +3159,23 @@ void render() {
         book->SetProperty("font-size", px(title_picture_rect().h * kTitleFont));
     } else if (g_skin == Skin::Tome) {
         // The Tome look: every page (the roster and the cards too) on the leaf laid on the Tome's page.
-        // (In co-op the picture under the page is still the whole window: hle_coop_ui_over turns the split off. Until
-        // it keeps the halves (plan step 6), the page goes on the whole picture, not in its owner's half.)
-        // With no Tome under it (co-op player 1, tome_under_page) the leaf goes in the middle of the dimmed picture.
+        // In co-op, on their Tome in their half (the halves kept under the page by the renderer); the partner's half,
+        // paused while the page is up, under a veil (#veil).
+        // With no Tome under it (tome_under_page) the leaf goes in the middle of the dimmed picture.
         const int half = kTomeInHalves ? g_skin_half : -1;
         const float shift = tome_under_page() ? 0.f : kTomeLeafCentre;
         place(book, tome_units_box(half, kTomeLeaf[0] + shift, kTomeLeaf[1], kTomeLeaf[2] + shift, kTomeLeaf[3]));
         book->SetProperty("font-size", px(tome_page_rect(half).h * kTomeFont));
     } else {
         unplace(book);
+    }
+    if (Rml::Element* veil = g_doc->GetElementById("veil"); veil != nullptr) {
+        const bool halves = g_skin == Skin::Tome && kTomeInHalves && g_skin_half >= 0;
+        g_doc->SetClass("tome-halves", halves);
+        if (halves)
+            place(veil, window_half(1 - g_skin_half));
+        else
+            unplace(veil);
     }
 }
 
@@ -4824,7 +4850,7 @@ void update_start_up_cover() {
                         IM_COL32(0, 0, 0, 255));
 }
 
-extern "C" void hle_coop_ui_over(bool on);
+extern "C" bool hle_coop_ui_over(bool on, int half);
 
 extern "C" void frontend_frame(void) {
     update_start_up_cover();
@@ -5040,10 +5066,14 @@ extern "C" void frontend_frame(void) {
         }
     }
     report_pause(true);
-    hle_coop_ui_over(true);
+    // A Tome page in co-op: in its owner's half, with the halves kept under it (hle.c), else on the whole window. The
+    // split is read here, just before hle.c gives the same value to the renderer, and held till the page closes.
+    g_skin_split = g_settings.mod_split;
+    if (!hle_coop_ui_over(true, g_skin == Skin::Tome ? g_skin_half : -1))
+        g_skin_half = -1;
     if (!run_menu())
         dol_aurora_request_quit();  // window closed while paused
-    hle_coop_ui_over(false);
+    hle_coop_ui_over(false, -1);
     report_pause(false);
     g_test_close_at = 0;  // (ED_PAGE_TEST_MS: a page closed sooner leaves no deadline for the next menu)
     g_test_key_next = 0;

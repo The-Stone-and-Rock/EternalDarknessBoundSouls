@@ -962,6 +962,10 @@ body.cards .row {
 	display: none;
 }
 
+#veil {
+	display: none;
+}
+
 #rule {
 	display: none;
 }
@@ -2061,4 +2065,13 @@ body.skin-tome .meter-value {
 	width: 2.6em;
 	margin-left: 0.5em;
 	font-size: 0.58em;
+}
+
+/* A co-op Tome page (body.tome-halves): the page in its owner's half, on their Tome (the renderer keeps the halves
+   under it); the partner's half, paused while the page is up, under a veil (#veil, placed by frontend.cpp render). */
+body.skin-tome.tome-halves #veil {
+	display: block;
+	position: absolute;
+	z-index: -1;
+	background-color: #000000a0;
 }

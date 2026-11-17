@@ -1,7 +1,65 @@
-# HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit, through native menus step 5, the Tome look solo; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
+# HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit, through native menus step 6, the Tome look in co-op; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
 
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
+
+## 2026-11-17 (morning): native menus, step 6 review fix (committed with step 6)
+A review found one real problem (two reviewers, the same one). It is fixed and seen in pictures
+(`Screenshots for Claude/s6-tome-coop/` 16-22).
+- The problem. The renderer took the split layout once, as the page opened (hle.c gives `g_settings.mod_split` to
+  `aurora_split_page`). The page read `mod_split` again every frame (`window_half`, and `tome_units_box` with a half).
+  Player 1's Tome has Mods, and Mods > Co-op > "Screen split" changes `mod_split` at once. So after a change the leaf and
+  the veil moved to the new halves while the renderer still drew the old ones.
+- The fix (frontend.cpp). New `g_skin_split`, set from `mod_split` just before `hle_coop_ui_over(true, ...)`, the same
+  value hle.c hands the renderer. `window_half` and `tome_units_box` use it. A split change shows once the page closes.
+- Seen:
+  - Side by side, player 1's Mods > Co-op, Screen split changed to "Above and below": the leaf stays on player 1's Tome
+    in the left half, player 2's half dimmed (16). After Back, the plaques are in the top half (17), and both halves
+    play one above the other (18; run logs/run-20261117-102519-jtg-s6-split-change, "[split] on ... (above and below)").
+  - Over and under from the start: the Co-op page sits on player 1's Tome in the top half, the bottom half dimmed (19).
+    Changed to "Side by side": the leaf stays in the top half (20; run -102706-jtg-s6-split-over-under; that run's game
+    was closed by the run's time limit before the last Back, as my key list was too long).
+  - Over and under, Settings: on the Tome in the top half (21), then after Back both played one above the other, both
+    walked (22; run -102825-jtg-s6-over-under-close; P1 -11,832 to -70,967, P2 -10,682 to -145,900).
+- No failed attempts.
+- The "over-and-under not seen" line below is now seen (19-22). The rest of that list still stands.
+
+## 2026-11-17 (morning): native menus, step 6: the Tome look in co-op (committed)
+A Tome page in co-op now opens in its owner's half, on their own Tome. The partner's half keeps their last picture,
+dimmed. Pictures: `Screenshots for Claude/s6-tome-coop/` 01-15.
+- How. Before step 6, `hle_coop_ui_over(true)` put the split off for any page over a co-op Tome (split menu -1, only
+  view -1, skip views 0), so the window showed one whole frame. That stays: it is what lets the page's frames reach the
+  window (the "nothing shown" bug in its comment, and the `s_keepOnly` entry in coop-failed-attempts.md). What is new
+  is only how the paused frames are drawn.
+  - aurora.cpp `aurora_split_page(player, layout)`: told by hle.c just before the split goes off. It notes where the
+    halves' pictures come from, while the split state still says it: both menus up (only view 2) uses each menu's kept
+    picture (`s_menuKept`); a menu sharing frames with the world uses the menu's kept picture and the world's last
+    (`s_held`); otherwise the frame shown and the partner's last view (as `menuHalf`).
+  - In the present, `pageHalves`: the partner's picture in their half, the page owner's Tome fitted in theirs, then the
+    RmlUi page over the whole window. The "menu kept" copy is not taken while a page is up.
+  - hle.c `hle_coop_ui_over(on, half)` now answers whether the page is in a half. frontend.cpp sets `g_skin_half` to
+    -1 when it is not, so the page then has the whole window as before.
+  - frontend.cpp: `kTomeInHalves = true`. `tome_under_page()` is true for every Tome page (no veil on the Tome). A new
+    `#veil` (menu.rml, menu.rcss `body.skin-tome.tome-halves #veil`) dims the partner's half, placed by `window_half`.
+  - The GXRuntime patch is regenerated (patches/gxruntime/eternal-darkness.patch).
+- Seen (all fresh Jump to Game runs, chapter 1, 16:9, side by side, 1280x720 shots):
+  - Player 1's Settings and Display on their Tome in the left half, player 2's half dimmed (01, 02; run
+    logs/run-20261117-101118-jtg-s6-p1-settings, log "[coop] a Tome page in player 1's half (sharing 1, copy 0, owner 0)").
+    Back twice: plaques back (03), then both walked (04; both.tsv: P1 -11,832 to -70,967, P2 -10,682 to -145,900).
+  - Player 1's Characters in their half, a portrait chosen with the test keys (05, 06), plaques after (07), both walked
+    (08; run -101323-jtg-s6-p1-chars).
+  - Player 2's Characters on their copy Tome in the right half, player 1's world dimmed (09), their plaque after (10),
+    both walked (11; run -101441-jtg-s6-p2-chars, "sharing 1, copy 1, owner -1").
+  - Both Tomes open, player 1's Settings: player 2's Tome (Inventory) dimmed in the right half (12), both Tomes back after
+    (13), both walked after closing them (14; run -101601-jtg-s6-two-tomes).
+  - Solo is unchanged: the page on the whole Tome, no "[coop] a Tome page" line (15; run -101716-jtg-s6-solo-check).
+- No failed attempts: the first build worked in every case above.
+- Not seen: over-and-under split (mod_split 1); 4:3 and 21:9 in co-op; player 1 with a copy Tome over player 2's close-up
+  (`g_tome_copy_p1`); player 2 holding the real Tome (`g_coop_tome_owner == 1`); a state loaded from Save States while
+  a co-op page is up (the kept pictures would stay until the page closes); real B, Esc, mouse and wheel presses (only
+  the test keys); a window resize with a co-op page open. At 1280x720 the page in a half is small (about 13 px letters);
+  the user should say if it is too small on their screen.
+- Committed with its review fix (above).
 
 ## 2026-11-17 (morning): native menus, step 5 review fixes (committed with step 5)
 A review found two real problems. Both are fixed and seen in pictures (`Screenshots for Claude/s5-tome-skin/` 24-29).
