@@ -1101,3 +1101,66 @@ extern "C" int titlevideo_options_painted(void) { return g_options_ready.load() 
 extern "C" void titlevideo_menu_row(int row) { g_menu_row = row; }
 // The main menu's picture has been repainted with Choose Character (hle.c adds the row only then).
 extern "C" int titlevideo_menu_painted(void) { return g_menu_painted.load() ? 1 : 0; }
+
+// The menu's title look (frontend.cpp): the Options picture with its painted words erased, upright, as
+// DIR/options-clean.png, and the list's scroll marks (the painted list's pen-stroke chevrons, larger, in its ink) as
+// DIR/mark-up.png and DIR/mark-down.png. False when the picture isn't kept yet or isn't the one measured (then no
+// picture is written; the marks always are).
+bool titlevideo_title_art(const std::string& dir) {
+    auto write = [](const std::string& path, uint32_t w, uint32_t h, const std::vector<uint8_t>& rgba) {
+        png_image png{};
+        png.version = PNG_IMAGE_VERSION;
+        png.width = w;
+        png.height = h;
+        png.format = PNG_FORMAT_RGBA;
+        return png_image_write_to_file(&png, path.c_str(), 0, rgba.data(), 0, nullptr) != 0;
+    };
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    // The marks: 48 x 32, a chevron of two soft strokes (as paint_options' chevron, three times its size).
+    for (int dir_y : {-1, 1}) {
+        constexpr int kW = 48, kH = 32;
+        std::vector<uint8_t> mark(static_cast<size_t>(kW) * kH * 4, 0);
+        const float cx = kW / 2.f, cy = kH / 2.f, half = 19.f, tall = 9.f, width = 3.2f;
+        const float tip[2] = {cx, cy + dir_y * tall};
+        const float ends[2][2] = {{cx - half, cy - dir_y * tall}, {cx + half, cy - dir_y * tall}};
+        for (int y = 0; y < kH; y++)
+            for (int x = 0; x < kW; x++) {
+                const float px = x + 0.5f, py = y + 0.5f;
+                float best = 1e9f;
+                for (const auto& e : ends) {
+                    const float vx = tip[0] - e[0], vy = tip[1] - e[1];
+                    const float t = std::clamp(((px - e[0]) * vx + (py - e[1]) * vy) / (vx * vx + vy * vy), 0.f, 1.f);
+                    const float dx = px - (e[0] + vx * t), dy = py - (e[1] + vy * t);
+                    best = std::min(best, std::sqrt(dx * dx + dy * dy));
+                }
+                uint8_t* p = &mark[(static_cast<size_t>(y) * kW + x) * 4];
+                p[0] = 88;
+                p[1] = 118;
+                p[2] = 126;
+                p[3] = static_cast<uint8_t>(255.f * clamp01(width - best + 0.5f));
+            }
+        write(dir + (dir_y < 0 ? "/mark-up.png" : "/mark-down.png"), kW, kH, mark);
+    }
+    std::vector<uint8_t> pic;
+    {
+        std::lock_guard<std::mutex> lock(g_word_mutex);
+        pic = skull();
+    }
+    if (pic.size() != static_cast<size_t>(kTitleW) * kTitleH * 4)
+        return false;
+    std::lock_guard<std::mutex> lock(g_more_mutex);
+    if (!find_rows(pic.data(), kTitleW, kTitleH))
+        return false;
+    std::vector<uint8_t> up(pic.size());
+    for (uint32_t y = 0; y < kTitleH; y++)
+        std::memcpy(&up[static_cast<size_t>(y) * kTitleW * 4], &pic[static_cast<size_t>(kTitleH - 1 - y) * kTitleW * 4],
+                    kTitleW * 4);
+    for (int y = 0; y < kBoxH; y++)
+        for (int x = 0; x < kBoxW; x++)
+            if (g_row_of[static_cast<size_t>(y) * kBoxW + x] >= 0) {
+                uint8_t* d = &up[(static_cast<size_t>(kBoxY0 + y) * kTitleW + kBoxX0 + x) * 4];
+                d[0] = d[1] = d[2] = 0;
+            }
+    return write(dir + "/options-clean.png", kTitleW, kTitleH, up);
+}

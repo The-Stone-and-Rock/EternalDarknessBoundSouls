@@ -4,6 +4,9 @@
 	<link type="text/rcss" href="menu.rcss"/>
 </head>
 <body>
+	<!-- The title look's picture (body.skin-title): the game's picture in the window, and in it the title's Options
+	     picture, placed by frontend.cpp render. -->
+	<div id="backdrop"><div id="backdrop-picture"></div></div>
 	<!-- One sheet of parchment (res/ui/pause.png): the heading, the rows (Button
 	     mapping in two columns), and the chosen row's help under them. -->
 	<div id="book">

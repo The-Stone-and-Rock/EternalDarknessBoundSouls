@@ -11,6 +11,7 @@
 #include "host/report.h"
 #include "host/settings.h"
 #include "host/texpack.h"
+#include "host/titlevideo.h"
 
 #include <aurora/gfx.h>
 #include <aurora/imgui.h>
@@ -2682,6 +2683,90 @@ void list_wheel(int dy) {
         }
 }
 
+// The title look (Skin::Title): the title's Options picture with its words erased (titlevideo_title_art writes it as
+// res/video/options-clean.png) laid where the game lays it, and a list page in the picture's word column.
+struct WinRect {
+    float x, y, w, h;
+};
+// The game's picture in the window (as gpu.cpp calculate_present_viewport), and whether the game's 2D is wide (its
+// projection -80..720 across, 0..640 in 4:3: hle.c sync_widescreen_option follows the launcher's aspect).
+WinRect game_viewport(bool* wide) {
+    float aspect = 16.f / 9.f;
+    uint32_t W = 0, H = 0;
+    dol_aurora_get_display_info(&aspect, &W, &H);
+    if (W == 0 || H == 0) {
+        W = 1280;
+        H = 720;
+    }
+    if (!(aspect > 0.f))
+        aspect = 16.f / 9.f;
+    float vw = static_cast<float>(W), vh = std::round(W / aspect);
+    if (vh > H) {
+        vh = static_cast<float>(H);
+        vw = std::round(H * aspect);
+    }
+    *wide = aspect > 1.5f;
+    return {(W - vw) / 2.f, (H - vh) / 2.f, vw, vh};
+}
+// The title's 850x480 pictures in the window: the game's quad for them is x -106..745, y 0..480 of its 2D units.
+// At 21:9 (aspect 4) the renderer keeps the game's 2D at its 16:9 shape, narrowed about the middle with black at the
+// sides (aurora_backend.cpp set_wide_scale, gxcore_draw.cpp wide_scale): its 800 units span a 16:9 box in the middle.
+WinRect title_picture_rect() {
+    bool wide = true;
+    const WinRect v = game_viewport(&wide);
+    const float left = wide ? -80.f : 0.f, units = wide ? 800.f : 640.f;
+    const float span = wide && g_settings.aspect == 4 ? std::min(v.w, std::round(v.h * 16.f / 9.f)) : v.w;
+    const float k = span / units;
+    return {v.x + (v.w - span) / 2.f + (-106.f - left) * k, v.y, 851.f * k, v.h};
+}
+// A box of that picture (850x480, upright) in the window.
+WinRect title_box(float x0, float y0, float x1, float y1) {
+    const WinRect p = title_picture_rect();
+    return {p.x + x0 / 850.f * p.w, p.y + y0 / 480.f * p.h, (x1 - x0) / 850.f * p.w, (y1 - y0) / 480.f * p.h};
+}
+// The list page's box: the column where the game paints its Options rows (x 170..440, y 85..470), a little wider to
+// the left for the scroll marks and to the right for the values (the skull's face starts near x 490), and its letters'
+// size, a part of the picture's height (every size in the title look's list rcss is in em of it). kTitleLines rows show
+// at a time; the rest scroll.
+constexpr float kTitleBox[4] = {150.f, 56.f, 480.f, 476.f};
+constexpr float kTitleFont = 0.05f;
+constexpr int kTitleLines = 9;
+
+// Writes the title look's pictures (once a run, tried again at each title page until the picture is kept): the clean
+// Options picture and the scroll marks.
+void ensure_title_art() {
+    static bool done = false;
+    if (done)
+        return;
+    const bool ok = titlevideo_title_art(res_dir() + "/video");
+    done = ok;
+    static bool told = false;
+    if (ok || !told)
+        std::fprintf(stderr, "[frontend] the title look's picture %s\n",
+                     ok ? "written (res/video/options-clean.png)" : "NOT written (no Options picture kept yet): black behind");
+    told = true;
+}
+// The title look's wide pages keep their own places on a dark panel: the roster, the two cards, Button Mapping (with or
+// without its right-hand keys) and any page with a right-hand column. The rest are lists in the picture's word column.
+bool title_wide_page() {
+    if (g_screen == Screen::Characters || (g_screen == Screen::ModsPage && g_mods_section == 3) || g_screen == Screen::Mapping)
+        return true;
+    for (const Row& r : g_rows)
+        if (r.page == 1 && r.card == 0 && !r.tile)
+            return true;
+    return false;
+}
+// Whether res/video/options-clean.png is there to show. The page asks RmlUi for it (body class title-art) only then:
+// RmlUi never tries a picture again once it failed to load, so asking before it is written would leave it black all run.
+bool title_art_ready() {
+    static bool ready = false;
+    if (!ready) {
+        std::error_code ec;
+        ready = std::filesystem::is_regular_file(std::filesystem::path(res_dir()) / "video" / "options-clean.png", ec);
+    }
+    return ready;
+}
+
 std::string roster_panel_end() {
     const RosterTile shown = g_selected < roster_count() ? roster_tiles()[g_selected]
                                                           : RosterTile{chosen_character(), form_on(g_characters_player, chosen_character())};
@@ -2762,13 +2847,17 @@ void render() {
         g_slots_page = g_selected / kSlotsShown;
     if (slot_list)
         g_slots_page = std::clamp(g_slots_page, 0, std::max(slot_rows - 1, 0) / kSlotsShown);
-    // A list that scrolls: the rows in view, a mark above and below where rows are hidden.
+    // A list that scrolls: the rows in view, a mark above and below where rows are hidden. In the title look the marks
+    // are the painted list's chevrons, beside the first and the last row in view (as the game's list has them).
     const bool scrolls = list_scrolls();
+    // (A wide page on the title's dark panel keeps the launcher's marks: the chevrons are sized for the word column.)
+    const bool title_marks = scrolls && g_skin == Skin::Title && !title_wide_page();
     if (scrolls) {
         list_keep_in_view();
-        if (g_list_top > 0)
+        if (g_list_top > 0 && !title_marks)
             rml[0] += "<div class=\"list-more up\"><img src=\"tome/mark.png\"/></div>";
     }
+    const int list_end = std::min(g_list_top + g_list_lines, static_cast<int>(g_rows.size()));
     for (size_t i = 0; i < g_rows.size(); i++) {
         const Row& r = g_rows[i];
         if (slot_list && static_cast<int>(i) < slot_rows && static_cast<int>(i) / kSlotsShown != g_slots_page)
@@ -2832,9 +2921,6 @@ void render() {
             out += " back";
         if (r.experimental)
             out += " tagged";
-        out += "\" id=\"row" + std::to_string(i) + "\"><span class=\"label\">" + escape(r.label) + "</span>";
-        if (r.experimental)
-            out += "<span class=\"tag\">(Experimental, expect glitches)</span>";
         // On the settings pages, a row that opens another page says so.
         const bool opens = settings_page && !is_back && r.enabled && r.activate && !r.change;
         const std::string control = row_control(r, slot_list, opens);
@@ -2844,18 +2930,32 @@ void render() {
                            : !slot_list && r.change && (r.enabled || r.browse)      ? " choice"
                            : opens && r.value.empty() && r.value_rml.empty()        ? " opens"
                                                                                     : " plain";
+        if (std::strcmp(kind, " opens") == 0)
+            out += " opener";  // (the title look: its arrow right after the name)
+        out += "\" id=\"row" + std::to_string(i) + "\">";
+        if (title_marks && static_cast<int>(i) == g_list_top && g_list_top > 0)
+            out += "<img class=\"row-mark\" src=\"../video/mark-up.png\"/>";
+        else if (title_marks && static_cast<int>(i) == list_end - 1 && list_end < static_cast<int>(g_rows.size()))
+            out += "<img class=\"row-mark\" src=\"../video/mark-down.png\"/>";
+        out += "<span class=\"label\">" + escape(r.label) + "</span>";
+        if (r.experimental)
+            out += "<span class=\"tag\">(Experimental, expect glitches)</span>";
         if (!control.empty())
             out += "<span class=\"leader\"></span><span class=\"value" + std::string(kind) + "\">" + control + "</span>";
         out += "</div>";
     }
     if (in_roster)
         rml[0] += roster_panel_end();
-    if (scrolls && g_list_top + g_list_lines < static_cast<int>(g_rows.size()))
+    if (scrolls && !title_marks && g_list_top + g_list_lines < static_cast<int>(g_rows.size()))
         rml[0] += "<div class=\"list-more down\"><img src=\"tome/mark.png\"/></div>";
     g_doc->GetElementById("menu0")->SetInnerRML(rml[0]);
     g_doc->GetElementById("menu1")->SetInnerRML(rml[1]);
     const bool have = g_selected < static_cast<int>(g_rows.size());
-    g_doc->GetElementById("note")->SetInnerRML(have ? escape(g_rows[g_selected].note) : "");
+    // (The title look's list has no room for a row's experimental tag: its help says it instead.)
+    std::string note = have ? g_rows[g_selected].note : "";
+    if (have && g_skin == Skin::Title && g_rows[g_selected].experimental)
+        note = "Experimental, expect glitches. " + note;
+    g_doc->GetElementById("note")->SetInnerRML(escape(note));
     g_doc->GetElementById("hint")->SetInnerRML(
         g_screen == Screen::InGame    ? "Up/Down choose &#183; Left/Right change &#183; A select &#183; B resume"
         : g_screen == Screen::Problem ? "Up/Down choose &#183; A select"
@@ -2893,6 +2993,50 @@ void render() {
     // The look the caller chose (frontend_open_page_skin); the launcher's has no class of its own.
     g_doc->SetClass("skin-title", g_skin == Skin::Title);
     g_doc->SetClass("skin-tome", g_skin == Skin::Tome);
+    // The title look: the Options picture behind, where the game lays it; a list page in its word column, its letters
+    // sized by the picture; the wide pages (the roster, the two cards, Button Mapping's two columns) keep their own
+    // places, on a dark panel over the picture.
+    const bool title = g_skin == Skin::Title;
+    if (title)
+        ensure_title_art();  // (tried again at each render until the Options picture has been kept)
+    g_doc->SetClass("title-art", title && title_art_ready());
+    // (Button Mapping always: a controller-only player's has no right-hand rows, and keeps the same panel.)
+    const bool wide_page = title_wide_page();
+    g_doc->SetClass("title-list", title && !wide_page);
+    auto px = [](float v) { return std::to_string(static_cast<int>(std::lround(v))) + "px"; };
+    auto place = [&](Rml::Element* e, const WinRect& r) {
+        e->SetProperty("left", px(r.x));
+        e->SetProperty("top", px(r.y));
+        e->SetProperty("width", px(r.w));
+        e->SetProperty("height", px(r.h));
+    };
+    auto unplace = [](Rml::Element* e) {
+        for (const char* name : {"left", "top", "width", "height", "font-size"})
+            e->RemoveProperty(name);
+    };
+    Rml::Element* book = g_doc->GetElementById("book");
+    Rml::Element* backdrop = g_doc->GetElementById("backdrop");
+    Rml::Element* picture = g_doc->GetElementById("backdrop-picture");
+    if (backdrop != nullptr && picture != nullptr) {
+        if (title) {
+            bool wide = true;
+            const WinRect v = game_viewport(&wide);
+            WinRect p = title_picture_rect();
+            p.x -= v.x;  // (inside the viewport's box)
+            p.y -= v.y;
+            place(backdrop, v);
+            place(picture, p);
+        } else {
+            unplace(backdrop);
+            unplace(picture);
+        }
+    }
+    if (title && !wide_page) {
+        place(book, title_box(kTitleBox[0], kTitleBox[1], kTitleBox[2], kTitleBox[3]));
+        book->SetProperty("font-size", px(title_picture_rect().h * kTitleFont));
+    } else {
+        unplace(book);
+    }
 }
 
 // A screen above the page that was opened: Back (or a Back row) going there leaves the opened page, so the menu closes.
@@ -3183,6 +3327,12 @@ void update_cursor() {
 // after_s seconds in, close it hold_ms later, and again every every_s seconds
 // (test runs without a controller).
 static Uint64 g_test_close_at = 0;
+// ED_PAGE_TEST_KEYS="d,d,a,b|a" (testing): in a page the game opened, a press every ED_PAGE_TEST_STEP_MS (default
+// 700) from 1 s after it opens: u d l r (the arrows), a, b (Back), w s (the right stick: the list scroll up, down).
+// "|" separates the pages opened in turn (the first list for the first page, and so on).
+static std::string g_test_keys;
+static size_t g_test_key_at = 0;
+static Uint64 g_test_key_next = 0;
 
 // The first launcher's music: the song of the game's own Options screen
 // (MusyX music, taken from the player's own game: one loop, cut by
@@ -3239,6 +3389,24 @@ bool run_menu() {
     while (!g_close) {
         g_launcher_music.tick();
         update_cursor();
+        // The title look is placed in window pixels (render). The renderer takes a new aspect at its next present, after
+        // the row that changed it rebuilt the page, and a window takes its new size later still (Fullscreen, a resize):
+        // when the window's size, the shown aspect or the aspect setting changes, it is placed again.
+        if (g_skin == Skin::Title) {
+            static float placed_aspect = 0.f;
+            static uint32_t placed_w = 0, placed_h = 0;
+            static int placed_setting = -1;
+            float aspect = 0.f;
+            uint32_t w = 0, h = 0;
+            dol_aurora_get_display_info(&aspect, &w, &h);
+            if (aspect != placed_aspect || w != placed_w || h != placed_h || g_settings.aspect != placed_setting) {
+                placed_aspect = aspect;
+                placed_w = w;
+                placed_h = h;
+                placed_setting = g_settings.aspect;
+                render();
+            }
+        }
         if (controls::capturing()) {
             const bool done = controls::poll_capture();
             if (done || !controls::capturing()) {
@@ -3254,6 +3422,20 @@ bool run_menu() {
             continue;
         }
         g_input.poll(pressed);
+        if (g_test_key_next != 0 && SDL_GetTicks() >= g_test_key_next) {
+            while (g_test_key_at < g_test_keys.size() && (g_test_keys[g_test_key_at] == ',' || g_test_keys[g_test_key_at] == ' '))
+                g_test_key_at++;
+            if (g_test_key_at < g_test_keys.size()) {
+                const char c = g_test_keys[g_test_key_at++];
+                const int b = c == 'u' ? kUp : c == 'd' ? kDown : c == 'l' ? kLeft : c == 'r' ? kRight : c == 'a' ? kAccept
+                              : c == 'b' ? kBack : c == 'w' ? kScrollUp : c == 's' ? kScrollDown : -1;
+                if (b >= 0)
+                    pressed[b] = true;
+                std::fprintf(stderr, "[frontend] test key %c on screen %d row %d\n", c, static_cast<int>(g_screen), g_selected);
+            }
+            static const int step = std::getenv("ED_PAGE_TEST_STEP_MS") != nullptr ? std::atoi(std::getenv("ED_PAGE_TEST_STEP_MS")) : 700;
+            g_test_key_next = g_test_key_at < g_test_keys.size() ? SDL_GetTicks() + std::max(step, 50) : 0;
+        }
         bool dirty = false;
         if (g_screen == Screen::Characters) {
             // A grid: every arrow moves (and left/right change nothing).
@@ -4636,8 +4818,31 @@ extern "C" void frontend_frame(void) {
         const int skin = g_open_page_skin.load();
         g_skin = skin == FRONTEND_SKIN_TITLE ? Skin::Title : skin == FRONTEND_SKIN_TOME ? Skin::Tome : Skin::Launcher;
         g_skin_half = g_skin == Skin::Tome ? g_open_page_half.load() : -1;
+        if (g_skin == Skin::Title) {
+            ensure_title_art();
+            if (g_list_lines == 0)
+                g_list_lines = kTitleLines;
+        }
         std::fprintf(stderr, "[frontend] page %d opened from the game's menu for player %d (skin %d, half %d)\n", page,
                      player + 1, skin, g_skin_half);
+        // ED_PAGE_TEST_KEYS (testing): presses in the page, "|" between the pages opened in turn (see run_menu).
+        if (const char* t = std::getenv("ED_PAGE_TEST_KEYS"); t != nullptr) {
+            static int opened = 0;
+            std::string all = t;
+            g_test_keys.clear();
+            for (int i = 0; i <= opened; i++) {
+                const size_t bar = all.find('|');
+                if (i == opened)
+                    g_test_keys = all.substr(0, bar);
+                else if (bar == std::string::npos)
+                    break;  // no list for this page
+                else
+                    all = all.substr(bar + 1);
+            }
+            g_test_key_at = 0;
+            g_test_key_next = g_test_keys.empty() ? 0 : SDL_GetTicks() + 1000;
+            opened++;
+        }
         // ED_PAGE_TEST_MS=N (testing): the page closes by itself after N ms, as Back would (scripted runs can't press in it).
         if (const char* t = std::getenv("ED_PAGE_TEST_MS"); t != nullptr && std::atoi(t) > 0)
             g_test_close_at = SDL_GetTicks() + static_cast<Uint64>(std::atoi(t));
@@ -4721,6 +4926,7 @@ extern "C" void frontend_frame(void) {
     hle_coop_ui_over(false);
     report_pause(false);
     g_test_close_at = 0;  // (ED_PAGE_TEST_MS: a page closed sooner leaves no deadline for the next menu)
+    g_test_key_next = 0;
     g_root_closes = false;
     g_on_title = false;
     g_skin = Skin::Launcher;  // the Esc debug menu and the launcher keep the launcher's look

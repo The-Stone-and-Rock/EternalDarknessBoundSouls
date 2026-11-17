@@ -100,6 +100,28 @@ time; a small mark at the left of the top or bottom row says more rows are hidde
   them. Say if you'd rather have the disc's spacing at the top.
 - Our six rows are in the Tome's hand (La Belle Aurore), as large as the game's. Say if the size or colour is off.
 
+**Native menus, step 4 (2026-11-17 morning, committed):** every page opened from the title now has **the title
+look**: the Options screen's skull picture behind it (its words wiped), no parchment, the rows in the game's hand and
+teal, the lit row pale cyan with a soft glow, values in small print. Pictures: `Screenshots for Claude/s4-title-skin/`.
+Try:
+- Title > Options > Display, Sound, Graphics (and its four pages), Controls, Mods (and its pages), Quit game. Each
+  page has its name at the top in the game's size, its rows in the column where the game's rows are, and a Back row.
+  B, Esc or Back goes back one page; Back from the page you opened returns to the Options list.
+- Display and Controls are longer than the space: a small pen-stroke mark at the left of the top or bottom row says
+  more rows are hidden. Down past the last row in view moves the list. The right stick also scrolls it.
+- Button Mapping, Choose Character's two cards and the character roster are wider: they sit on a dark panel over the
+  skull, in teal, with the gold and blue of the two players kept.
+- The title's main menu > Choose Character: the same cards, same look.
+- If you play in 4:3, the picture should sit where the game's own Options picture sits, black at the sides.
+- Say if the rows are too small. They are smaller than the game's own rows so the values fit left of the skull's face.
+- The page's help line sits at the bottom of the column. The "Experimental" tag is in the help line on this look.
+- At 21:9 (Display > Aspect ratio), the skull and logo should sit exactly where the game's own Options screen has them,
+  with black at the sides. Change Aspect ratio on the Display page: the page should follow the new shape at once.
+- Turn Fullscreen on and off on the Display page, and drag the window to a new size with a title page open. The
+  picture and the list should follow the window at once. (Not tried by Claude yet.)
+- Controls > Plays with: Controller, then Button mapping: the same dark panel as with a keyboard, 9 rows at a time,
+  with a small red mark under the list while rows are hidden.
+
 ## 7. Karim's skeletal pedestal (chapter 4), for Claude to trace
 The gate you meant is **room 193** in Karim's chapter (the room numbers are the game's; "room 93" is a different room,
 the mansion's teleporter hub in Alex's last chapter, where the game's ending starts). In room 193 the portcullis

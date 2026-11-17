@@ -1,7 +1,67 @@
-# HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit, through native menus step 3; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
+# HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit, through native menus step 4, the title look; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
 
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
+
+## 2026-11-17 (morning): native menus, step 4 review fixes (committed with step 4)
+A review found four real problems. All four are fixed and seen in pictures (`Screenshots for Claude/s4-review-fixes/`).
+- 21:9 was placed wrong. At 21:9 the renderer keeps the game's 2D at 16:9, narrowed into the middle
+  (aurora_backend.cpp `set_wide_scale`, gxcore_draw.cpp `wide_scale`). `title_picture_rect` now uses a 16:9 box in
+  the middle when `g_settings.aspect == 4`. Seen: the page's skull and logo sit where the game's own 21:9 Options has
+  them (pictures 01, 02; run logs/run-20261117-090350-jtg-s4fix-219).
+- The page did not follow a new aspect or window size. The renderer takes a new aspect only at its next present.
+  `run_menu` now checks the window size, the shown aspect and the aspect setting each frame on a title page, and
+  calls `render()` again when one changes. Seen: Aspect ratio 21:9 > 16:9 > 21:9 on the Display page, the page
+  follows each time (pictures 03, 04; same run). Not tried: Fullscreen on/off, or dragging the window.
+- A page opened before the picture was written stayed black all run. RmlUi never loads a picture again once a load
+  failed. The picture's decorator now needs the body class `title-art`, set only once `options-clean.png` exists
+  (`title_art_ready`). `render()` also tries `ensure_title_art` again on each title page. Seen with res/video's
+  options.rgba and options-clean.png moved aside: Choose Character first, black behind (as expected); then Controls,
+  picture shown (pictures 05, 06; run -090616-jtg-s4fix-fresh-map). The two files came back the same (md5).
+- Button Mapping for a controller-only player had no right-hand rows, so it became a list in the skull column.
+  `title_wide_page()` now counts Mapping as wide always, and the scroll marks go by it too: a wide page on the title
+  panel uses the launcher's small red mark (the chevrons are only for the column). Seen: controller-only Mapping on
+  the panel, scrolled to Back, and with the mark under the list; keyboard Mapping as before; Display's marks as
+  before (pictures 07-10; runs -090616-jtg-s4fix-fresh-map, -090846-jtg-s4fix-final). Picture 07 is from the build
+  before the mark change.
+- Rejected: taking the shape from `g_settings.aspect` alone (a reviewer's idea). The per-frame check covers it and
+  also covers window size changes.
+
+## 2026-11-17 (morning): native menus, step 4: the title look for every page opened from the title (committed)
+Every page opened from the title (Display, Sound, Graphics and its pages, Controls, Button Mapping, Mods and its pages,
+Quit's question, the two cards, both rosters) is drawn in the title look, not the launcher's parchment.
+- titlevideo.cpp `titlevideo_title_art(dir)`: writes `res/video/options-clean.png` (the kept Options picture upright,
+  its painted words erased with the same ink map as the list, `find_rows`) and the scroll marks `mark-up.png`,
+  `mark-down.png` (the list's pen chevrons, larger). res/video is git-ignored: the picture comes from the player's disc.
+  frontend.cpp `ensure_title_art` calls it once a run, when the first title page opens. If no Options picture was ever
+  kept, the log says "NOT written" and the page has black behind it.
+- frontend.cpp: `game_viewport`, `title_picture_rect`, `title_box`: the game's picture in the window (as gpu.cpp), and
+  the 850x480 picture in it (the title's 2D is -80..720 across in the wide layout, 0..640 in 4:3; the picture's quad is
+  x -106..745). `render()` places `#backdrop` on the viewport and `#backdrop-picture` in it, and a list page's `#book`
+  on picture x 150..480, y 56..476 with its letters 0.05 of the picture's height (class `title-list`; every size in its
+  rcss is em). Wide pages (roster, cards, Button Mapping) keep their vh sizes on a dark panel. Title pages scroll 9 rows
+  (`kTitleLines`). In the title look the scroll marks are images in the first and last row in view (`row-mark`), and a
+  row's experimental tag goes into its help line. A row that opens a page has class `opener` (its arrow follows the name).
+- menu.rml: `#backdrop` > `#backdrop-picture`. menu.rcss: the `body.skin-title` block (teal 72,97,104 family, lit
+  0xA0E3F1 with a glow, values in IM Fell with a dark halo over the logo).
+- RmlUi traps met (both fixed, both in coop-failed-attempts.md): a positioned box paints over boxes in the flow, so the
+  absolute backdrop hid every wide page (fix: `z-index: -1`); and `overflow: hidden` does not clip a positioned child
+  (fix: `clip: always`), so at 4:3 the picture ran into the black side bars.
+- Testing switch: `ED_PAGE_TEST_KEYS="d,d,a,b|..."` presses in a page the game opened (u d l r a b, w s = the right
+  stick), one every `ED_PAGE_TEST_STEP_MS` (700), "|" between pages opened in turn. Logged as "[frontend] test key".
+- Seen in pictures (Screenshots for Claude/s4-title-skin/), 16:9: Display at the top and scrolled (marks above and
+  below), Sound, Graphics > Effects, Controls (sections, long values), Button Mapping, Mods > Co-op, Challenge, Cheats
+  (greyed), Quit's question, the cards, player 1's and player 2's rosters (runs logs/run-20261117-083544-jtg-s4-title-b,
+  -084438-jtg-s4-title-final, -084649-jtg-s4-title-final2). 4:3 (aspect 1 in a 16:9 window): Display and the roster;
+  the picture sits where the game's own 4:3 Options picture sits (-084055-jtg-s4-title-43, -084259-jtg-s4-title-43b).
+  The Tome's Settings page and plaques as before (-084910-jtg-s4-tome).
+  The last build (ensure_title_art tries again until the picture is kept) was run once more: Display, the
+  marks, the log line "picture written" (-085134-jtg-s4-title-last).
+- Not seen: a window that is itself 4:3 (only 4:3 pillarboxed in a 16:9 window; 21:9 seen letterboxed in a 16:9 window, see the review fixes above); a real B / Esc / mouse press
+  (only the test keys); the mouse wheel; the title video OFF (all runs had it on, which does not change these pages);
+  a first run with no options.rgba kept is now seen (review fixes above); the Mods root page on the title shows a
+  Characters row (opens the cards: as before this step).
+- Next: step 5 (the Tome look, solo).
 
 ## 2026-11-17 (morning): native menus, step 3: the title's Options as one scrolling list (committed)
 The title's Options is one list of 14 rows: the game's 8, then Display, Sound, Graphics, Controls, Mods, Quit game.

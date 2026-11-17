@@ -917,3 +917,18 @@ What worked: a piece of fewer than 20 points goes to the row of the nearest lett
 none alone). The slots are evenly spaced from the first row's baseline to the last's (111, 153, ... 406, 448), and each
 row moves by slot - its own baseline (hle.c kTitleSlotY / kTitleRowY, titlevideo.cpp kSlotY / kRowY). Seen in
 logs/run-20261117-080018-jtg-s3-scroll2 and -080444-jtg-s3-scroll3.
+
+## The title look's picture: wide pages gone, 4:3 sides not cut (2026-11-17, native menus step 4)
+1. With the skull picture behind the page, the roster, the two cards and Button Mapping showed nothing but the hint
+   and the roster's scroll bar (logs/run-20261117-082948-jtg-s4-title-a). The picture's box was absolutely placed:
+```css
+body.skin-title #backdrop { display: block; position: absolute; decorator: image(../video/options-clean.png fill); }
+```
+   RmlUi paints a positioned box after the boxes in the flow (its RenderOrder::Positioned), so the picture covered
+   `#book` wherever `#book` was not itself positioned. The list pages looked fine only because their `#book` is
+   absolute too, and comes later.
+2. At 4:3 in a 16:9 window the picture ran into the black side bars (the game's own is cut at its viewport,
+   logs/run-20261117-084055-jtg-s4-title-43). `overflow: hidden` on the viewport box did not cut its absolute child:
+   RmlUi clips only when it counts content as overflowing, and a positioned child is not counted.
+What worked: `z-index: -1` on `#backdrop` (it paints first), and `clip: always` with the overflow (it always cuts).
+Seen in -083544-jtg-s4-title-b (wide pages back) and -084259-jtg-s4-title-43b (sides cut as the game's).

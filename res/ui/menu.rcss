@@ -956,4 +956,496 @@ body.cards .row {
 }
 
 /* The looks the caller chooses (frontend_open_page_skin): body.skin-title over the title screen, body.skin-tome on a
-   Tome page. Each gets its block here, after every rule above, so it wins. None yet: both look as the launcher's. */
+   Tome page. Each gets its block here, after every rule above, so it wins. The Tome's: none yet (the launcher's). */
+
+#backdrop {
+	display: none;
+}
+
+/* ---- The title look: every page opened from the title. ----
+   The title's Options picture, its painted words erased (res/video/options-clean.png, made from the player's own disc
+   by titlevideo.cpp), laid where the game lays it (frontend.cpp render sets #backdrop's place). No parchment: the
+   game's hand (La Belle Aurore) in the painted rows' teal (72, 97, 104), the chosen row pale cyan (0xA0E3F1) with a
+   soft glow, as the game lights its words. Values and notes in IM Fell, lighter, to stay readable small. */
+body.skin-title {
+	background-color: #000000;
+	decorator: none;
+	color: #5e848d;
+}
+
+/* #backdrop is the game's picture in the window (cut to it, as the game's is), #backdrop-picture the Options picture
+   where the game lays it, wider than the window at 16:9 and 4:3 alike. */
+body.skin-title #backdrop {
+	display: block;
+	position: absolute;
+	z-index: -1;  /* under the page: a positioned box paints over the ones in the flow */
+	overflow: hidden;
+	clip: always;  /* (RmlUi clips only content it counts as overflow, which a positioned child is not) */
+}
+
+body.skin-title #backdrop-picture {
+	position: absolute;
+}
+
+/* Only once the picture is written (frontend.cpp title_art_ready): RmlUi never loads a picture again after one try
+   failed, so asking for it too early would keep it black for the whole run. */
+body.skin-title.title-art #backdrop-picture {
+	decorator: image(../video/options-clean.png fill);
+}
+
+body.skin-title #book {
+	decorator: none;
+	background-color: #03090bd8;
+	border: 1px #48616890;
+	border-radius: 1.6vh;
+}
+
+body.skin-title #heading {
+	font-family: "La Belle Aurore";
+	color: #6a939c;
+}
+
+body.skin-title .row {
+	font-family: "La Belle Aurore";
+	border-width: 0;
+	border-radius: 0;
+	background-color: transparent;
+	box-shadow: none;
+	color: #5e848d;
+}
+
+body.skin-title .row.selected,
+body.skin-title .row.selected .value {
+	color: #a0e3f1;
+	font-effect: glow(1px 9px #a0e3f188);
+}
+
+body.skin-title .row.disabled,
+body.skin-title .row.disabled .value {
+	color: #2f4348;
+}
+
+body.skin-title .row.selected.disabled {
+	color: #4a6a72;
+}
+
+body.skin-title .row.chosen .label {
+	color: #c9ab68;
+}
+
+body.skin-title .value {
+	font-family: "IM FELL English";
+	color: #8db2ba;
+}
+
+body.skin-title .chev {
+	color: #6a939c;
+}
+
+body.skin-title .switch {
+	border-color: #5e848d;
+	background-color: #000000c0;
+}
+
+body.skin-title .switch.on {
+	border-color: #7fb9c6;
+	background-color: #2f5a64;
+}
+
+body.skin-title .knob {
+	background-color: #6a939c;
+}
+
+body.skin-title .switch.on .knob {
+	background-color: #a0e3f1;
+}
+
+body.skin-title .slider {
+	border-color: #486168;
+	background-color: #00000080;
+}
+
+body.skin-title .slider-fill {
+	background-color: #5f98a5;
+}
+
+body.skin-title .row.disabled .switch {
+	border-color: #2f4348;
+	background-color: transparent;
+}
+
+body.skin-title .row.disabled .switch .knob {
+	background-color: #2f4348;
+}
+
+body.skin-title .section {
+	font-family: "IM FELL English SC";
+	color: #486168;
+}
+
+body.skin-title .gap {
+	decorator: none;
+}
+
+body.skin-title .tag {
+	font-family: "IM FELL English";
+	color: #8a6a4a;
+}
+
+body.skin-title .note {
+	color: #6d9098;
+}
+
+body.skin-title #hint {
+	color: #486168;
+	font-size: 2vh;
+}
+
+body.skin-title .keycap {
+	border-color: #486168;
+	color: #8db2ba;
+}
+
+body.skin-title .unbound {
+	color: #3c5459;
+}
+
+/* A list page (frontend.cpp: class title-list): in the column where the game paints its Options rows, every size in em
+   of the letters' size frontend.cpp sets (a part of the picture's height), so it keeps the picture's proportions in any
+   window. The page's name at the game's own row size, then the rows, left-aligned as the game's, the help under them. */
+body.skin-title.title-list #book {
+	position: absolute;
+	margin: 0;
+	padding: 0;
+	align-items: stretch;
+	justify-content: flex-start;
+	background-color: transparent;
+	border-width: 0;
+}
+
+body.skin-title.title-list #heading {
+	height: 1.55em;
+	line-height: 1.55em;
+	margin: 0;
+	padding: 0 0 0 0.45em;
+	font-size: 1.9em;
+	text-align: left;
+}
+
+body.skin-title.title-list .page {
+	position: relative;
+	padding: 0;
+}
+
+body.skin-title.title-list .menu {
+	justify-content: flex-start;
+	margin: 0;
+}
+
+body.skin-title.title-list .row,
+body.skin-title.title-list.dense .row,
+body.skin-title.title-list.centered .row,
+body.skin-title.title-list .row.back {
+	width: auto;
+	min-height: 1.3em;
+	height: 1.3em;
+	line-height: 1.3em;
+	margin: 0;
+	padding: 0 0.2em 0 0.85em;
+	font-size: 1em;
+	justify-content: flex-start;
+}
+
+body.skin-title.title-list .row .label {
+	white-space: nowrap;
+}
+
+body.skin-title.title-list.centered .row .leader {
+	flex: 1;
+	width: auto;
+}
+
+body.skin-title.title-list .value {
+	font-size: 0.66em;
+	line-height: 1.6em;
+	font-effect: glow(2px 4px #000000c0);  /* a dark halo: readable where a value crosses the logo */
+}
+
+/* Controls: its values are long ("Automatic (XInput Controller #1)"): smaller, so the row stays clear of the skull. */
+body.skin-title.title-list.dense .value {
+	font-size: 0.56em;
+}
+
+body.skin-title.title-list.settings .value {
+	min-width: 7em;
+}
+
+/* A row that opens a page: its arrow right after its name. */
+body.skin-title.title-list .row.opener .leader {
+	flex: 0;
+	min-width: 0.3em;
+	width: 0.3em;
+}
+
+body.skin-title.title-list.settings .row.opener .value {
+	min-width: 0;
+}
+
+body.skin-title.title-list .chev {
+	width: 1em;
+	height: 1.6em;
+	line-height: 1.6em;
+	font-size: 1.3em;
+}
+
+body.skin-title.title-list .pick {
+	min-width: 4.6em;
+}
+
+body.skin-title.title-list .switch {
+	width: 2.2em;
+	height: 1.1em;
+	border-radius: 0.55em;
+	border-width: 1px;
+}
+
+body.skin-title.title-list .knob {
+	width: 0.7em;
+	height: 0.7em;
+	margin: 0.15em 0 0 0.15em;
+	border-radius: 0.35em;
+}
+
+body.skin-title.title-list .switch.on .knob {
+	margin-left: 1.25em;
+}
+
+body.skin-title.title-list .slider {
+	width: 4.5em;
+	height: 0.4em;
+	border-radius: 0.2em;
+}
+
+body.skin-title.title-list .slider-fill {
+	border-radius: 0.2em;
+}
+
+body.skin-title.title-list .slider-value {
+	width: 2.6em;
+}
+
+body.skin-title.title-list .tag {
+	display: none;
+}
+
+body.skin-title.title-list .section {
+	height: 1.1em;
+	line-height: 1.1em;
+	margin: 0.4em 0 1.1em 0;
+	padding: 0 0 0 1.5em;
+	font-size: 0.55em;
+}
+
+body.skin-title.title-list .gap {
+	height: 0.3em;
+}
+
+body.skin-title.title-list img.glyph {
+	width: 1.5em;
+	height: 1.5em;
+	margin-left: 0.2em;
+}
+
+body.skin-title.title-list .keycap {
+	font-size: 0.8em;
+	padding: 0 0.4em;
+}
+
+body.skin-title.title-list .note {
+	height: 2.7em;
+	margin: 0.3em 0 0 0;
+	padding: 0 0 0 1.5em;
+	font-size: 0.52em;
+	text-align: left;
+}
+
+body.skin-title.title-list #hint {
+	display: none;
+}
+
+/* The scroll marks: the painted list's pen-stroke chevrons (res/video/mark-up.png, mark-down.png), beside the first and
+   the last row in view, left of their names, as the game's list has them (frontend.cpp render). */
+body.skin-title.title-list .row {
+	position: relative;
+}
+
+.row-mark {
+	display: none;
+}
+
+body.skin-title.title-list .row-mark {
+	display: block;
+	position: absolute;
+	left: 0;
+	top: 0.42em;
+	width: 0.66em;
+	height: 0.44em;
+}
+
+/* The wide pages (the roster, the two players' cards, Button Mapping's two columns): their own places, on the dark,
+   half-clear panel above (body.skin-title #book), so the picture shows round it and doesn't fight the frames. */
+body.skin-title.roster .row,
+body.skin-title.cards .row {
+	font-size: 3.6vh;
+}
+
+body.skin-title .pcard {
+	decorator: none;
+	background-color: #0a1518e8;
+	border: 1px #3b5359;
+	box-shadow: #000000a0 0 1vh 2.6vh 0;
+}
+
+body.skin-title .pcard.p1.selected,
+body.skin-title .pcard.p2.selected {
+	border-width: 2px;
+	border-color: #a0e3f1;
+	box-shadow: #a0e3f150 0 0 34dp 8dp;
+}
+
+body.skin-title .pcard-rule {
+	decorator: none;
+	height: 1px;
+	background-color: #486168;
+}
+
+body.skin-title .pcard-who {
+	color: #c9ab68;
+	font-effect: glow(0px 4px #c9ab6840);
+}
+
+body.skin-title .pcard.p2 .pcard-who {
+	color: #8fc8f0;
+	font-effect: glow(0px 4px #8fc8f040);
+}
+
+body.skin-title .pcard-frame {
+	decorator: none;
+	background-color: #000000;
+	border-color: #486168;
+	box-shadow: #c9ab6830 0 0 18dp 4dp;
+}
+
+body.skin-title .pcard.p2 .pcard-frame {
+	border-color: #486168;
+	box-shadow: #8fc8f030 0 0 18dp 4dp;
+}
+
+body.skin-title .pcard-name {
+	font-family: "La Belle Aurore";
+	color: #a0e3f1;
+}
+
+body.skin-title .pcard-form,
+body.skin-title .tile-form,
+body.skin-title .bio-form-name {
+	color: #c9ab68;
+}
+
+body.skin-title .pcard-default,
+body.skin-title .pcard-foot {
+	color: #6d9098;
+}
+
+body.skin-title .pcard-press {
+	color: #a0e3f1;
+}
+
+body.skin-title .pcards-line {
+	background-color: #48616890;
+}
+
+body.skin-title .meter-bar {
+	border-color: #486168;
+	background-color: #ffffff10;
+}
+
+body.skin-title .meter-value {
+	color: #8db2ba;
+}
+
+body.skin-title .tile {
+	color: #6a939c;
+}
+
+body.skin-title .name {
+	font-family: "La Belle Aurore";
+}
+
+body.skin-title .portrait {
+	border-color: #486168;
+	background-color: #000000;
+}
+
+body.skin-title .tile.selected {
+	color: #a0e3f1;
+	border-color: #a0e3f1;
+	background-color: #a0e3f114;
+	box-shadow: #a0e3f150 0 0 22dp 4dp;
+}
+
+body.skin-title .tile.chosen {
+	border-color: #c9ab68;
+	background-color: #c9ab6818;
+	box-shadow: #c9ab6850 0 0 22dp 5dp;
+}
+
+body.skin-title .tile.chosen.selected {
+	border-color: #e8dcae;
+	background-color: #a0e3f118;
+	box-shadow: #c9ab6860 0 0 26dp 6dp, #a0e3f170 0 0 10dp 2dp inset;
+}
+
+body.skin-title .tile.chosen .name {
+	color: #c9ab68;
+}
+
+body.skin-title .roster-details {
+	decorator: none;
+	background-color: #0a1518e8;
+	border: 1px #3b5359;
+}
+
+body.skin-title .bio-name {
+	decorator: none;
+	background-color: #0f2328;
+	font-family: "La Belle Aurore";
+	color: #a0e3f1;
+	font-effect: none;
+	border-bottom: 1px #486168;
+}
+
+body.skin-title .bio-year,
+body.skin-title .bio-plays {
+	color: #6d9098;
+}
+
+body.skin-title .bio-about {
+	color: #8db2ba;
+}
+
+body.skin-title .bio-form-rule {
+	decorator: none;
+	height: 1px;
+	margin: 0.9vh 0;
+	background-color: #486168;
+}
+
+body.skin-title .roster-track {
+	background-color: #48616890;
+}
+
+body.skin-title .roster-thumb {
+	border-color: #a0e3f1;
+	decorator: vertical-gradient(#5f98a5 #2f5a64);
+}

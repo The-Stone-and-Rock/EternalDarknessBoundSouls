@@ -4,6 +4,7 @@
 // card and labels hidden, headed "Load"). Part of the renderer's one texture
 // override (buttons.cpp).
 #include <cstdint>
+#include <string>
 
 // By format and size, then by name hash.
 bool titlevideo_claims(uint32_t format, uint32_t width, uint32_t height);
@@ -12,3 +13,6 @@ int titlevideo_apply(const uint8_t* rgba, uint32_t width, uint32_t height, uint6
                      uint32_t* out_width, uint32_t* out_height);
 // The pictures' changes with each video frame while it plays.
 uint64_t titlevideo_generation(uint32_t width, uint32_t height);
+// The menu's title look (frontend.cpp): DIR/options-clean.png (the Options picture, its words erased, upright) and the
+// list's scroll marks DIR/mark-up.png, DIR/mark-down.png. False when the picture couldn't be written.
+bool titlevideo_title_art(const std::string& dir);
