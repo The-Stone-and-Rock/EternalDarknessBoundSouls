@@ -49,8 +49,35 @@ Built (901f2e5 and after; pictures in "Screenshots for Claude/zoom/"):
 - docs/release-first-run.md: the plan for the first-run step that makes the disc's art and music on the player's PC.
 - The catalogue's patterns count tonight's fixes: only the looks on offer (ed219-221), four subtitle calls and the 10
   two-path hero gates are left uncovered (`ed patterns`).
-**Next:** the user plays it (docs/coop-play-test.md section 6) and says what to move, rename or restyle; then the looks
-on offer (the next uncovered pattern) and the to-do list from item 4.
+**Next:** the user plays it (docs/coop-play-test.md section 6) and says what to move, rename or restyle.
+
+## 2026-11-17 (later that night): the kit's last uncovered rows mapped, and `ed check`
+- **`ed check LNN/ID`** (tools/ed/check.py, in the ed skill): one script or region checked in play from the kit's tables:
+  the chapter, a door in and out (doors_table), the flags it tests named, each player put in and pressing, solo /
+  together / apart runs with pictures, every run of the script compared with solo (build/check/NAME/report.md). Shown
+  on Edward's lever (4bb75cd). It is the fast loop for a bug: `ed check` before, fix, `ed check` after.
+- **The looks on offer** (docs/research/coop-gaps/looks-on-offer.md, with its skeptic): the kit's alarm was false
+  (player 2 has their own looks since 2026-11-05; the tables are corrected). The likely real bug left: ONE thing
+  offered to both players (ed221 PICK UP, follow mode or both in one room apart) and taken by one: the other's offer
+  stays, and their press re-runs the find (a second "has found", the after-script again): "an item on both screens".
+  Plan: after hle_coop_found, withdraw the other player's matching offer through the game's own zone leave
+  (0x801170D4) with their whole set in, so their next look re-runs ed221's own taken test. Not built: needs a run
+  first (two players in one pickup sphere: L01/183's Granite Block, L02/217's Bronze Necklace).
+- **The subtitles** (docs/research/coop-gaps/subtitles.md, with its skeptic): the one record (0x80308DE8) has no owner.
+  Player 2 answering the mansion phone (L00/1801) gets "Hello?" / "Remember me, Alex?" in player 1's half. Plan A+B:
+  note who started it (r13-21496 at the start calls), and move the line into their half in the words layout hook
+  (+4096, as player 2's own words). **The user decides first:** with both players in one room, should both halves show
+  a subtitle? Tests need a new game into the mansion (JTG_NEWGAME, doors 1000, 1389) and the Subtitles option on.
+- **The two-path hero gates**: docs/research/coop-gaps/two-path-hero-gates.md (each gate's two paths and a
+  recommendation for the user). The real list is 18 compares in 6 scripts (`ed herogates` kept a slot past a later
+  `local Lk = call()`: fixed). In solo the "other" branch is the creature a Summon spell controls, so player 2 takes the
+  summon's branch. **One opened** (the reader's "likely real bug"): L09/L12/L13 1010 line 152 (+0x883), room 93 with
+  flag 37 at the game's end, whose other branch turns player 2's model off and never starts the ending; now in
+  kHeroGates (with ED_COOP_HERO_ID=1). NOT RUN: `ed check` has no route into room 93 (its door 2204 is run by no
+  region). The other 17 wait for the user (858 and 1010's hub pad: lean "the character's path together, today's apart").
+- The catalogue now leaves uncovered only the four subtitle calls and the 10 two-path hero gates (`ed patterns`).
+Order after the user's play: the user's menu changes; the subtitles (A+B once they decide); the shared pickup offer;
+the to-do list from item 4 (one "run as player N" helper, then camera modes per player).
 
 # HANDOFF 2026-11-16 (committed through f5db56f on tools/game-kit; to-do items 1 to 3, the kit, done 2026-11-16)
 

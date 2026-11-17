@@ -77,6 +77,8 @@ def door_in(level, room):
     for d in coopplan.table('doors_table.json'):
         if d.get('to_room') != room or d.get('level') not in ('%02d' % level, '00') or d.get('entry_in_to_room') is False:
             continue
+        if d.get('source') != 'region' or not d.get('from'):
+            continue  # (a door no region runs, as L12/2204 into room 93, didn't move anyone when run by itself)
         key = (0 if d['level'] == '%02d' % level else 1, len(d.get('asks_in_script') or []), d['script'])
         if best is None or key < best[0]:
             best = (key, d)
@@ -330,7 +332,9 @@ def cmd_check(argv):
     for mode, r in reach.items():
         if mode == 'solo':
             continue
-        if base is None:
+        if r == 0 and not base:
+            rep.append('  %s: the script never ran here, nor solo: reach it first (its flags, the spot, a press)' % mode)
+        elif base is None:
             rep.append('  %s: reached line %d (no solo run to compare)' % (mode, r))
         elif r < base:
             rep.append('  %s: STOPPED SOONER: line %d against solo\'s %d' % (mode, r, base))

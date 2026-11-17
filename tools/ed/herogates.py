@@ -36,6 +36,7 @@ def _end_at(code, pc, depth=0):
 def gates_of(f, out, path=()):
     code = f.code
     holds = set()
+    handle_calls = set()  # the pcs of fn78(1, 0)'s CALLs
     for pc, w in enumerate(code):
         name, u, s, b, a = lua40.fields(w)
         if name == 'GETGLOBAL' and f.kstr[u] == 'fn78' and pc + 3 < len(code):
@@ -46,7 +47,12 @@ def gates_of(f, out, path=()):
                 slot = a3  # CALL A B: the function's stack position, where the result lands
                 n4, u4, _, _, _ = lua40.fields(code[pc + 4]) if pc + 4 < len(code) else ('', 0, 0, 0, 0)
                 holds.add(u4 if n4 == 'SETLOCAL' else slot)
-        elif name == 'SETLOCAL' and pc > 0 and lua40.fields(code[pc - 1])[0] != 'CALL':
+                handle_calls.add(pc + 3)
+        elif name == 'CALL' and pc not in handle_calls:
+            # Another call's result landing in a held slot is a new local there (a later `local Lk = call()`, its
+            # scope's slot reused): it no longer holds the handle (L12/2778 line 87, L09/2026 line 74).
+            holds.discard(a)
+        elif name == 'SETLOCAL' and not (pc > 0 and (pc - 1) in handle_calls):
             holds.discard(u)
         elif name == 'GETLOCAL' and u in holds and pc + 2 < len(code):
             n1, _, s1, _, _ = lua40.fields(code[pc + 1])
@@ -81,9 +87,15 @@ def all_gates():
     return rows
 
 
+# Two-path compares opened for player 2 too, chosen one by one (docs/research/coop-gaps/two-path-hero-gates.md): 1010's
+# second (line 152, room 93 with flag 37: the game's end) sends anyone but the chapter's character down the summoned
+# creature's branch, their model off and the ending never started.
+OPEN_TWO_PATH = {(1010, 0x883)}
+
+
 def cmd_herogates(argv):
     rows = all_gates()
-    keep = [r for r in rows if r['turns_away'] and not r['path']]
+    keep = [r for r in rows if not r['path'] and (r['turns_away'] or (r['script'], r['offset']) in OPEN_TWO_PATH)]
     if '--c' in argv:
         print('// tools/ed/herogates.py (`ed herogates --c`): each hero gate\'s PUSHINT 1 in its script\'s chunk, by level and')
         print('// script; the byte offset from the chunk\'s start, the handle\'s local slot, and the jump. Regenerate after the disc or')

@@ -20624,16 +20624,18 @@ static void coop_play_script_left(CPUState* cpu) {
 // before it runs, the gate's own PUSHINT 1 is written to player 2's id when player 2 is the one running it, and back to 1
 // otherwise, so only that compare changes; fn78, every native, the queues and the r13-21496 / -21488 compares still see
 // player 2's real id, as they do today. The 31 gates that turn the player away (the jump on a mismatch goes to the end),
-// from tools/ed/herogates.py (`ed herogates --c`); the 21 compares with two paths are left as they are.
+// from tools/ed/herogates.py (`ed herogates --c`); of the 18 compares with two paths, only 1010's at the game's end is
+// opened too (its other branch is the summoned creature's: player 2's model off, the ending never started;
+// docs/research/coop-gaps/two-path-hero-gates.md), the rest are left for the user to choose.
 #define LUA_DOBUFFER 0x80159D38u
 static const struct { s8 level; s16 script; u16 offset; u8 slot; u8 jmpeq; } kHeroGates[] = {
-    {0, 583, 0x1AB, 0, 0},   {0, 1438, 0x1E2, 0, 0},  {2, 1422, 0x10E, 0, 0},  {2, 2361, 0x10E, 0, 0},  {4, 1438, 0x1E2, 0, 0},
+    {0, 583, 0x1AB, 0, 0},  {0, 1438, 0x1E2, 0, 0},  {2, 1422, 0x10E, 0, 0},  {2, 2361, 0x10E, 0, 0},  {4, 1438, 0x1E2, 0, 0},
     {5, 2055, 0x191, 0, 0},  {6, 1422, 0x10E, 0, 0},  {6, 2055, 0x191, 0, 0},  {6, 2549, 0x10E, 0, 0},  {6, 2550, 0x10E, 0, 0},
-    {6, 2551, 0x10E, 0, 0},  {6, 2552, 0x10E, 0, 0},  {6, 2553, 0x87, 0, 0},   {7, 2055, 0x191, 0, 0},  {9, 1821, 0x166, 0, 0},
-    {9, 1949, 0x1A8, 0, 0},  {9, 1951, 0x29F, 0, 0},  {9, 1952, 0x187, 0, 0},  {9, 1954, 0x172, 0, 0},  {9, 1956, 0x1B7, 0, 0},
-    {9, 1959, 0x167, 0, 0},  {9, 1961, 0x198, 0, 0},  {9, 1963, 0x14D, 0, 0},  {9, 2320, 0xF5, 0, 0},   {9, 2474, 0x10F, 0, 0},
-    {10, 2055, 0x191, 0, 0}, {10, 2474, 0x10F, 0, 0}, {11, 1438, 0x1E2, 0, 0}, {11, 2474, 0x10F, 0, 0}, {12, 1963, 0x14D, 0, 0},
-    {16, 2474, 0x10F, 0, 0},
+    {6, 2551, 0x10E, 0, 0},  {6, 2552, 0x10E, 0, 0},  {6, 2553, 0x87, 0, 0},  {7, 2055, 0x191, 0, 0},  {9, 1010, 0x883, 0, 0},
+    {9, 1821, 0x166, 0, 0},  {9, 1949, 0x1A8, 0, 0},  {9, 1951, 0x29F, 0, 0},  {9, 1952, 0x187, 0, 0},  {9, 1954, 0x172, 0, 0},
+    {9, 1956, 0x1B7, 0, 0},  {9, 1959, 0x167, 0, 0},  {9, 1961, 0x198, 0, 0},  {9, 1963, 0x14D, 0, 0},  {9, 2320, 0xF5, 0, 0},
+    {9, 2474, 0x10F, 0, 0},  {10, 2055, 0x191, 0, 0},  {10, 2474, 0x10F, 0, 0},  {11, 1438, 0x1E2, 0, 0},  {11, 2474, 0x10F, 0, 0},
+    {12, 1010, 0x883, 0, 0},  {12, 1963, 0x14D, 0, 0},  {13, 1010, 0x883, 0, 0},  {16, 2474, 0x10F, 0, 0},
 };
 static u32 hero_word_at(CPUState* cpu, u32 at) {  // a chunk's instruction: little-endian, maybe unaligned
     return (u32)mem_read8(cpu, at) | (u32)mem_read8(cpu, at + 1u) << 8 | (u32)mem_read8(cpu, at + 2u) << 16 | (u32)mem_read8(cpu, at + 3u) << 24;
