@@ -436,3 +436,25 @@ restart for the other mode. Fix before building: the 0x8013E154 step and the whi
 picker and the new process choosing the title file (wrong 4), no early unset (wrong 5), the title-save wait (wrong 6),
 the restart point under a live page (wrong 7), and the test kit (wrong 8 and 9: ED_TITLE_PICK and the boot-time state
 mode belong in step 3). Then the six card tests (missed 1) and player 2's Default (wrong 10).
+
+## The user's choices (2026-11-17)
+
+- Solo / Co-op cards: the character portraits (01-portraits-one-and-two.jpg). They follow Choose Character: Solo shows
+  player 1's pick, Co-op both players' picks; the Controls cards show each player's picture and name.
+- Default's picture: the game over scene (room 69, script 1500): the skull on the open Tome, without the "Eternal
+  Darkness: Sanity's Requiem" logo. It is a 3D scene, not a flat picture: capture it from the running game at a high
+  resolution with the logo's draw hidden, crop it wide for the card (the skull and the open book), and ship it as
+  res/ui/default.png in place of emblem.png on Choose Character, the Solo / Co-op cards and the Controls cards.
+- A new "Random" choice on Choose Character, with a shadowed figure as its picture (from the default-art search in
+  Screenshots for Claude/default-art/). The user (2026-11-17): the random character is rolled once and kept, across
+  chapters and restarts (saved in the settings), until the player changes it on Choose Character at the main menu or in
+  the Tome's Options during play. Choosing Random again rolls a new one. It stays a surprise: every card (Choose
+  Character, Solo / Co-op, Controls) keeps the shadowed figure and the name "Random", never the rolled character.
+- Random's picture (the user, 2026-11-17): the user's own picture of every character's silhouette in the mansion's hall,
+  docs/research/solo-coop-picker/random-source.jpg (1316x800). Card crop: x 20, y 30, 1096x770 (keeps every figure;
+  Screenshots for Claude/default-art/user-random-card-crops.jpg). Ship it as res/ui/random.jpg at the card's size.
+- Default's picture, found (2026-11-17, default-art search): the skull-on-the-Tome scene is already a flat picture
+  without the logo: UMnMenu.tpl image 26 (= UMnMenu.cmp image 12), 640x480 CMPR, XXH64 90abb11e0abc338a. HD copy:
+  textures/GED/flashbacks/tex1_640x480_90abb11e0abc338a_14.dds, 2560x1920 BC7, stored bottom row first (flip the rows);
+  card crop x 100-2560, y 197-1934 upright. Not UMnMenu.tpl image 12 (a redder variant, no HD copy). This replaces the
+  live capture of room 69. Mock-up: Screenshots for Claude/default-art/00-top-picks.jpg (pick 1).
