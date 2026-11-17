@@ -47,6 +47,8 @@ The game, not a room:
 
 A run, both players at once (a run comes from tools/ed/run.sh):
   check [RUN]           the whole-game rules on a run: who froze, camera jumps, falls, stalls, still pictures
+  stops RUN [SCRIPT] [--p2] [--level N]  every script run: who ran it (player 1 / 2), its calls, and the test it stopped
+                        at (a gate that turns player 2 away shows here first)
   timeline [RUN] [FROM TO]  both players side by side, a line each time anything changes
   see FRAME [RUN]       one frame: both players' full state, and its picture's path
   sheet RUN F1 F2 ...   a contact sheet of frames, captioned with both players, to look at in one read
@@ -616,6 +618,11 @@ def cmd_catalogue(argv):
 def cmd_patterns(argv):
     import patterns
     patterns.cmd_patterns(argv)
+
+
+def cmd_stops(argv):
+    import stops
+    stops.cmd_stops(argv)
 
 
 def cmd_keep(argv):

@@ -103,6 +103,15 @@ PATTERNS = [
          trust='Covered for the script\'s own rows and the scripts it runs next with fn73 (they run inside the same run, '
                '0x80164488); a wait (fn36) resumes later through the script timers (coop_script_timers); a door\'s '
                'after-script is n/a (it\'s not followed here).'),
+    dict(key='hero', name='only for the chapter\'s character (a hero gate)', unit='script',
+         what='A script keeps the player\'s handle (fn78(1, 0), r13-21496) and tests it against 1, the chapter\'s character: '
+              'run as player 2\'s (their handle, e.g. 161), it turns them away. 44 of the 73 also pass that handle on '
+              '(holds, reloads, walks, look-ats).',
+         fix=[('coop_be_player2', None, 'makes player 2 the player for their runs, so the handle is theirs: the gate then fails')],
+         example='Edward\'s lever L09/1951 (room 273): player 2 is turned away at `if L0 ~= 1` (logs/run-20261117-010635-duck-together, '
+                 '`ed stops`)',
+         trust='High: the test is in the script. No fix yet: the handle has to mean player 2\'s body inside their runs (an '
+               'identity change, docs/research/kit-bugs/plans.md).'),
     dict(key='camera', name='drawn from one camera', unit='script',
          what='A script selects, saves or restores the camera set (fn8, fn10, fn134) and also holds play, plays a scene or '
               'starts an input mode: the set has one owner.',
@@ -215,6 +224,23 @@ def for_row(x, words, where, prims):
         out.append(('change', 'n/a', ('call', 'door after-script', (args[4],))))
     if name in CAMERA_CALLS:
         out.append(('camera', 'n/a', ('script',)))  # kept only for scripts that also hold, play a scene or a mode
+    return out
+
+
+HERO_VAR = re.compile(r'(?:local\s+)?(\w+)\s*=\s*(?:handle\[fn78\]|fn78)\(1, 0\)')
+
+
+def hero_gate(body):
+    """The line numbers (1-based) where a script tests the player's handle against 1, or []."""
+    if not body:
+        return []
+    names = set(HERO_VAR.findall(body))
+    out = []
+    for i, line in enumerate(body.split('\n'), 1):
+        if re.search(r'\bif (?:%s) (?:~=|==) 1 then' % '|'.join(map(re.escape, names)), line) if names else False:
+            out.append(i)
+        elif re.search(r'\bif (?:handle\[fn78\]|fn78)\(1, 0\) (?:~=|==) 1 then', line):
+            out.append(i)
     return out
 
 

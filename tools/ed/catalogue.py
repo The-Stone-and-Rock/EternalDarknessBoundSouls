@@ -661,6 +661,13 @@ def generate(only_level=None, out=OUT):
                     not w.startswith('the room\'s ') for w in where)
                 script_words, script_flags, script_patterns = collections.OrderedDict(), collections.OrderedDict(), collections.OrderedDict()
                 cam_ok = patterns.keep_camera(rows)
+                hero_lines = patterns.hero_gate(d.body(sid, pack))
+                if hero_lines:  # a script-level pattern: the script itself tests the player's handle against 1
+                    for k in hero_lines:
+                        here = 'L%s/%s room %d line %d' % (pack, sid, rid, k)
+                        level_units.add('hero', ('script', pack, sid), 'uncovered', here)
+                        all_units.add('hero', ('script', pack, sid), 'uncovered', here)
+                    script_patterns.setdefault('hero', set()).add('uncovered')
                 for x in rows:
                     if x['kind'] == 'door' and x['call'] == 'fn66':
                         doors.append('%s (script %s%s)' % (x['args'][0] if x['args'] else '?', x.get('via') or sid,

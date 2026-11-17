@@ -7,7 +7,7 @@ Rooms 41, scripts read 291, rows 3347. The TSV beside this file has every row.
 Co-op: 124 rows flagged (a call that branches on a per-player word within one call, with no live host hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: the room in play 83, the script words 32, the room in play (in an input mode's own code) 5, the look being set up 4.
 A flag is a place to look, not a bug found: the host can still cover it another way (a helper around the whole script run, a swap around the caller), and a word that is one per game may be fine for both.
 
-Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 31 (0), who "the player" is 268 (0), one global per game 21 (7), one script state for both 65 (0), a table player 2's things fill 3 (0), stamped with the room in play when made 42 (0), queued for a later frame 34 (1), run inside player 2's change 28 (0), drawn from one camera 33 (0).
+Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 31 (0), who "the player" is 268 (0), one global per game 21 (7), one script state for both 65 (0), a table player 2's things fill 3 (0), stamped with the room in play when made 42 (0), queued for a later frame 34 (1), run inside player 2's change 28 (0), only for the chapter's character (a hero gate) 3 (3), drawn from one camera 33 (0).
 
 Rooms: [5](#room-5), [37](#room-37), [51](#room-51), [67](#room-67), [68](#room-68), [69](#room-69), [70](#room-70), [71](#room-71), [72](#room-72), [74](#room-74), [77](#room-77), [78](#room-78), [80](#room-80), [81](#room-81), [83](#room-83), [84](#room-84), [86](#room-86), [87](#room-87), [89](#room-89), [90](#room-90), [91](#room-91), [92](#room-92), [93](#room-93), [94](#room-94), [96](#room-96), [97](#room-97), [98](#room-98), [99](#room-99), [100](#room-100), [102](#room-102), [136](#room-136), [137](#room-137), [245](#room-245), [261](#room-261), [262](#room-262), [263](#room-263), [264](#room-264), [265](#room-265), [266](#room-266), [267](#room-267), [268](#room-268)
 
@@ -666,7 +666,7 @@ Co-op, reaches: the player's object [helper], the room in play [helper], the roo
 
 Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the room in play** (helper, by spawns chr 136 model 140 in the room in play, tag 2134).
 
-Co-op patterns (`ed patterns`): who "the player" is (covered), drawn from one camera (n/a), one script state for both (n/a), queued for a later frame (covered), a table player 2's things fill (n/a), stamped with the room in play when made (bracket).
+Co-op patterns (`ed patterns`): only for the chapter's character (a hero gate) (uncovered), who "the player" is (covered), drawn from one camera (n/a), one script state for both (n/a), queued for a later frame (covered), a table player 2's things fill (n/a), stamped with the room in play when made (bracket).
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], hold word, 0x80006D0C asks it [hooked], the player's object [hooked], the cameras' records [hooked], the spell being cast [hooked], hold word [helper], hold's input channel [hooked], busy [hooked], find's bit 2, script timers wait on it [helper], main [hooked], control blocks [helper], asks if anyone is busy [helper], the room slot table [helper], equipment, 20 records by holder id [keyed], the running script [per run], the script words [hooked], the camera's view [helper], interact word [hooked], players shown [one per game].
 
@@ -1906,7 +1906,7 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 Co-op, flagged (a per-player word branched on within one call, with no live host hook where it's read): **the room in play** (helper, by spawns chr 25 model 128 in the room in play, tag 335, spawns chr 68 model 154 in the room in play, tag 2197); **the script words** (hooked, by its state kept off, its state kept on).
 
-Co-op patterns (`ed patterns`): who "the player" is (bracket), drawn from one camera (n/a), queued for a later frame (covered), one script state for both (n/a), stamped with the room in play when made (bracket), a table player 2's things fill (n/a), one global per game (uncovered).
+Co-op patterns (`ed patterns`): only for the chapter's character (a hero gate) (uncovered), who "the player" is (bracket), drawn from one camera (n/a), queued for a later frame (covered), one script state for both (n/a), stamped with the room in play when made (bracket), a table player 2's things fill (n/a), one global per game (uncovered).
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], hold word, 0x80006D0C asks it [hooked], the player's object [hooked], the cameras' records [hooked], the spell being cast [hooked], hold word [helper], hold's input channel [hooked], busy [hooked], find's bit 2, script timers wait on it [helper], main [hooked], control blocks [helper], asks if anyone is busy [helper], the room slot table [helper], the running script [per run], the script words [hooked], equipment, 20 records by holder id [keyed], interact word [hooked], players shown [one per game], the camera's view [helper], the subtitle record [one per game], reads the zones' inside words [helper], the six prompts [hooked], the Tome's mode [helper], the open words window [hooked], raw and processed pads, the input channels [helper], the pad routine's state [helper], find word, script timers wait on it [hooked].
 
@@ -2200,7 +2200,7 @@ Co-op, reaches: reads the zones' inside words [helper], the room slot table [hel
 
 ### Script 1081 (ExtiRgn01 enter)
 
-Co-op patterns (`ed patterns`): who "the player" is (covered), run inside player 2's change (n/a).
+Co-op patterns (`ed patterns`): only for the chapter's character (a hero gate) (uncovered), who "the player" is (covered), run inside player 2's change (n/a).
 
 Co-op, reaches: the room in play [helper], the room slot table [helper], the room change's ticket [helper], finds a node by id [hooked], current [hooked], control blocks [helper], the fade's ticks [hooked], equipment, 20 records by holder id [hooked], the spell being cast [hooked], busy [hooked], find's bit 2, script timers wait on it [hooked], main [hooked], the pad routine's state [hooked].
 
