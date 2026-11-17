@@ -1,4 +1,4 @@
-# HANDOFF 2026-11-15 evening: START HERE (committed through 5dad661 on tools/game-kit: the evening's work in 74a7989 and f8e5d82, the Choose Character button, the first to-do list and the kit prompt in 5dad661; the 2026-11-16 revision of the list and the prompt and kit item 1's first rows are uncommitted; controls.cpp's test edits stay uncommitted by rule)
+# HANDOFF 2026-11-16: START HERE (committed through f5db56f on tools/game-kit; to-do items 1 to 3, the kit, done 2026-11-16; controls.cpp's test edits stay uncommitted by rule)
 
 ## THE TO-DO LIST, in order (the user, 2026-11-16)
 The kit first, so later work finds each co-op rule before play instead of during it (the user will run a session
@@ -7,7 +7,7 @@ plan against the code, every branch and stash, the earlier transcripts and the m
 before, on any branch; the addresses for lights, mist and effects were already worked out in docs/research/separate-rooms/).
 Items 1 to 3 need no play: they are built from the disc data and the code.
 Waiting on the user beside this list: the play test (the Open list below, item 1: nothing in it played yet).
-1. **Kit: `ed needs` up to date with separate rooms.** The one-player words it knows (tools/ed/player_data.tsv) predate
+1. **(Done 2026-11-16.)** **Kit: `ed needs` up to date with separate rooms.** The one-player words it knows (tools/ed/player_data.tsv) predate
    the two room slots: add the room in play (r13-23276), the slot table (0x8058AFC0), the input mode byte (0x80323AEB),
    the keep (0x80307184), the subtitle record (0x80308DE8), the mist's r13-22144 and r13-21808, the light grid
    (0x804F0784) and dynamic lights (0x80604E60), each with the host helper that puts player 2's in, or "one per game" /
@@ -42,7 +42,7 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
    - A table's hits are one row with the offsets seen; the header names the script, or says a decomp name's number is
      the USA address (fn_8008210C is this disc's 0x8007F254).
    Then items 2 and 3.
-2. **Kit: a per-room catalogue generated from the disc** (`build/ed-db`: 297 rooms, 2,832 regions, 2,172 script ids in
+2. **(Done 2026-11-16.)** **Kit: a per-room catalogue generated from the disc** (`build/ed-db`: 297 rooms, 2,832 regions, 2,172 script ids in
    4,404 level files): every level, room and region with what it runs (examine words, prompts, items given or taken,
    doors and where, flags, input modes, cutscenes, spawns, cameras), names and IDs, plus a co-op column (the per-player
    words each interaction reaches and which helper covers it). Written as docs per level, by one new `ed` command over
@@ -81,12 +81,28 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
    coop_stay_room_in (the R6 bracket at hle.c ~24330 covers player 2's own events, not other_enter scripts).
    Refuted by the review's skeptics: ed10 magick_give giving player 2's rune to player 1, ed162's teleport, fn148's
    room-39 case.
-   **Item 3 started (f7f4c38): `ed patterns`, tools/ed/patterns.py.** The nine known patterns, each with its detection
-   rule over catalogue rows, the fix in hle.c (definition line and the commit that added it, from git) and how far the
-   check can be trusted; every catalogue row tagged (TSV column `patterns`, "uncovered" when flagged), counts per
-   script, per level and in index.md's pattern table; `ed needs` names the patterns of what a function picks by. A
-   review workflow is checking the rules and the fix links (some patterns may be better counted per script).
-   **Then: a play check of bugs (1) to (3), when the user asks (runs from fresh Jump-to-Game states, ED_RUN_AWAY=1).**
+   **Item 3 done 2026-11-16 (f7f4c38, then a review's 12 real findings in f5db56f; no play): `ed patterns [KEY]`,
+   tools/ed/patterns.py.** The nine known patterns, each with its detection rule over catalogue rows, the fix in hle.c
+   (definition line and commit; a fix can name its own commit where the symbol is older than the fix) and how far the
+   check can be trusted. Every row is tagged (TSV column `patterns`); counted in units, per script or per distinct
+   call, each covered, bracket (covered only when player 2's run goes through their bracket: a region's own
+   enter/leave/stay script), uncovered or n/a (a run-time fact). Counts and uncovered units with places in
+   docs/game/catalogue/patterns.json and index.md; `ed needs` names the patterns of what a function picks by. Found on
+   the way (hle.c's own comment at coop_run_script): a script run next with fn73 runs inside the same run (0x80164488),
+   so it keeps the bracket of the script that ran it on; the review had assumed it ran later.
+   **The counts (units: covered / bracket / uncovered / n/a):** room 264: 80 / 182 / 2 / 0; identity 1,512: 1,260 /
+   249 / 3 / 0; global 30: 23 / 0 / 7 / 0; stamped 197: 122 / 75 / 0 / 0; later 575: 546 / 0 / 29 / 0; change 252: 205
+   / 0 / 0 / 47; state 846, fills 3 and camera 358 all n/a (whether two players meet in them is a run-time fact).
+   **The uncovered fix list:** (a) rooms 189/190's elevator scripts L04/2301, 2726, 2738 run only from other_* fields
+   (for anyone but player 1: ElevatorRgn01/02 other_leave, MonsterCheckRgn00 other_enter), outside player 2's bracket,
+   and pick by the room in play and the zones' words: the same shape as bug (3), the L06 traps. (b) the looks on offer
+   (ed219 315 places, ed221 93, ed220 85): one copy, never swapped; fine one at a time, uncovered if both players look
+   at once. (c) the subtitles (EDStartSubtitlesForAlexClockPuzzle in the clock's L00/1551, ...GhostMaid L00/583,
+   ...InsanityPhoneCall and EDCleanUpSubtitles L00/1801): one record, no fix. (d) 29 scripts leave a script for play
+   mode's next start with ed177 (L*/1188 in room 83 in every level, L03/1011, 933, 2465, L04/2346, L05/929, L06/1981,
+   L11/2407, L12/2196): hle.c has no handling of r13-24248, so it runs as whoever is the player then.
+   **Next, when the user asks: a play check of bugs (1) to (3) and fix list (a) (runs from fresh Jump-to-Game states,
+   ED_RUN_AWAY=1), then to-do item 4 (one "run this as player N" helper) or item 5 (the play-check runner).**
    **Groundwork done 2026-11-16 (committed in ec7f923; every field read from the code that uses it, by a reader
    and a refuter each: docs/game/research/kit-groundwork.md):**
    - `ed cinematic [N|TEXT]`, `ed film [N]`, `ed mode [N]` (tools/ed/facts/cinematics.py -> facts/cinematics.json): the
@@ -114,7 +130,7 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
      wording, the search matching field names, return-address rows read backwards and filed under the wrong function
      (function starts now include prologues after a blr), `NAME + 4u`, and debug installs taking a slot. Each
      return-address test is now checked to follow a call (that found the fn151 bug in item 9).
-3. **Kit: the known patterns as checks** flagged per interaction and in `ed needs`: asks the room in play; who "the
+3. **(Done 2026-11-16, see item 2's notes above: `ed patterns`.)** **Kit: the known patterns as checks** flagged per interaction and in `ed needs`: asks the room in play; who "the
    player" is; one global per game (busy word, input mode, keep, show and hold words, prompts, subtitles: subtitles have
    no fix yet); one script state for both; tables player 2's things fill; stamped with the room when made; queued for a
    later frame; run inside player 2's change; one camera. "Covered" per address, from a map of hle.c's hooks.
