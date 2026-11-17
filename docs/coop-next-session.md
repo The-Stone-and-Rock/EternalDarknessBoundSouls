@@ -1,5 +1,8 @@
 # HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
 
+**REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
+docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
+
 ## Overnight 2026-11-17: the kit's likely co-op bugs, fixed and shown in runs (read docs/research/kit-bugs/results.md)
 The kit (items 1 to 3 below) named five likely bugs; plans in docs/research/kit-bugs/plans.md, a run script per bug
 beside it (build-run-*.sh, from fresh Jump-to-Game states, both players recorded, shots every 250 ms). In
