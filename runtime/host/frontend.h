@@ -44,7 +44,16 @@ bool frontend_photo_active(void);
 void frontend_toast(const char* text);
 // The same in one co-op player's half (0 or 1), for longer.
 void frontend_toast_player(int player, const char* text);
-// The Tome's Options page's "Choose Character" (testing): the menu opens on player 1's character roster.
+// A page asked for by the game's own menus (the Tome's Options, the title's Options), for player 0 or 1: the menu opens
+// on it over the paused game, driven by that player's controller, and Back from it closes the menu.
+enum {
+    FRONTEND_PAGE_CHARACTERS = 0,  // that player's character roster
+    FRONTEND_PAGE_SETTINGS = 1,    // Options: display, sound, graphics, controls
+    FRONTEND_PAGE_MODS = 2,        // co-op, challenge, cheats
+    FRONTEND_PAGE_STATES = 3,      // save states (player 1's)
+};
+void frontend_open_page(int page, int player);
+// Player 1's roster (frontend_open_page(FRONTEND_PAGE_CHARACTERS, 0)).
 void frontend_open_characters(void);
 // A button drawn as part of a Tome page, for this frame (asked each frame while the page is up): its text, the co-op half
 // it's in (-1 the whole screen) and its centre as parts of that half's width and height.

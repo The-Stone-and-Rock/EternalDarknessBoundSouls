@@ -572,3 +572,64 @@ int tome_apply(const uint8_t* rgba, uint32_t width, uint32_t height, uint8_t** o
 }
 
 uint64_t tome_generation() { return controls::bindings_signature(); }
+
+// The Tome's hand (La Belle Aurore) as a coverage mask, for words painted into other pictures (titlevideo.cpp's title
+// Options row): the text px tall (ascender to descender), strokes thickened by bold pixels. The mask is w by h, upright,
+// its baseline at row *baseline and its first letter at column px / 4.
+bool tome_hand_cover(const char* text, float px, float bold, std::vector<uint8_t>* out, int* out_w, int* out_h,
+                     int* out_baseline) {
+    const Font& f = hand();
+    if (!f.ok || text == nullptr)
+        return false;
+    const std::string s = text;
+    const float scale = stbtt_ScaleForPixelHeight(&f.info, px);
+    const int w = static_cast<int>(text_width(s, px)) + static_cast<int>(px);
+    const int h = static_cast<int>(px * 1.6f);
+    const int baseline = static_cast<int>(px * 1.1f);
+    std::vector<unsigned char> cover(static_cast<size_t>(w) * h, 0);
+    float pen = px * 0.25f;
+    for (size_t i = 0; i < s.size(); i++) {
+        const int ch = static_cast<unsigned char>(s[i]);
+        int adv = 0, lsb = 0;
+        stbtt_GetCodepointHMetrics(&f.info, ch, &adv, &lsb);
+        int x0, y0, x1, y1;
+        const float shift = pen - std::floor(pen);
+        stbtt_GetCodepointBitmapBoxSubpixel(&f.info, ch, scale, scale, shift, 0, &x0, &y0, &x1, &y1);
+        const int gw = x1 - x0, gh = y1 - y0;
+        if (gw > 0 && gh > 0) {
+            std::vector<unsigned char> glyph(static_cast<size_t>(gw) * gh);
+            stbtt_MakeCodepointBitmapSubpixel(&f.info, glyph.data(), gw, gh, gw, scale, scale, shift, 0, ch);
+            const int ox = static_cast<int>(std::floor(pen)) + x0, oy = baseline + y0;
+            for (int gy = 0; gy < gh; gy++)
+                for (int gx = 0; gx < gw; gx++) {
+                    const int cx = ox + gx, cy = oy + gy;
+                    if (cx >= 0 && cy >= 0 && cx < w && cy < h) {
+                        unsigned char& d = cover[static_cast<size_t>(cy) * w + cx];
+                        d = std::max(d, glyph[static_cast<size_t>(gy) * gw + gx]);
+                    }
+                }
+        }
+        pen += adv * scale;
+        if (i + 1 < s.size())
+            pen += stbtt_GetCodepointKernAdvance(&f.info, ch, static_cast<unsigned char>(s[i + 1])) * scale;
+    }
+    const int reach = static_cast<int>(bold) + 1;
+    out->assign(cover.size(), 0);
+    for (int cy = 0; cy < h; cy++)
+        for (int cx = 0; cx < w; cx++) {
+            float m = 0;
+            for (int dy = -reach; dy <= reach; dy++)
+                for (int dx = -reach; dx <= reach; dx++) {
+                    const int sx = cx + dx, sy = cy + dy;
+                    if (sx < 0 || sy < 0 || sx >= w || sy >= h)
+                        continue;
+                    const float r = std::min(1.f, std::max(0.f, bold + 0.5f - std::sqrt(static_cast<float>(dx * dx + dy * dy))));
+                    m = std::max(m, cover[static_cast<size_t>(sy) * w + sx] * r);
+                }
+            (*out)[static_cast<size_t>(cy) * w + cx] = static_cast<uint8_t>(m + 0.5f);
+        }
+    *out_w = w;
+    *out_h = h;
+    *out_baseline = baseline;
+    return true;
+}

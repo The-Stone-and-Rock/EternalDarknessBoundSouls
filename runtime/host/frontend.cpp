@@ -100,8 +100,31 @@ SDL_Gamepad* gamepad() {
 
 bool key(int scancode) { return dol_aurora_key_down(scancode); }
 
+// Whose page the menu is (frontend_open_page): 1 when player 2's own Tome asked for it, so their controller drives it
+// (settings pad_slot: the Nth connected, or automatic: the next one player 1 is not using, as controls.cpp picks).
+int g_menu_player = 0;
+SDL_Gamepad* g_pad2 = nullptr;
+SDL_Gamepad* menu_gamepad() {
+    if (g_menu_player != 1 || !controls::player_has_controller(1))
+        return gamepad();
+    const int slot = g_settings.pad_slot[1];
+    const int index = slot > 0 ? slot - 1
+                               : (!controls::player_has_controller(0) ? 0 : (g_settings.pad_slot[0] <= 1 ? 1 : 0));
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    const SDL_JoystickID want = ids != nullptr && index < count ? ids[index] : 0;
+    SDL_free(ids);
+    if (g_pad2 != nullptr && (!SDL_GamepadConnected(g_pad2) || SDL_GetGamepadID(g_pad2) != want)) {
+        SDL_CloseGamepad(g_pad2);
+        g_pad2 = nullptr;
+    }
+    if (g_pad2 == nullptr && want != 0)
+        g_pad2 = SDL_OpenGamepad(want);
+    return g_pad2;
+}
+
 void read_buttons(bool held[kButtonCount]) {
-    SDL_Gamepad* pad = gamepad();
+    SDL_Gamepad* pad = menu_gamepad();
     auto btn = [&](SDL_GamepadButton b) {
         return pad != nullptr && SDL_GetGamepadButton(pad, b);
     };
@@ -2122,6 +2145,15 @@ void build_options_rows() {
     fps.change = [](int) { g_settings.fps_counter = !g_settings.fps_counter; };
     g_rows.push_back(fps);
 
+    // The launcher's menu over the game is for testing: in play, the game's own menus hold everything (the Tome's
+    // Options for player 1, the title screen's Options before a game).
+    Row debug{"Debug menu in game", on_off(g_settings.debug_menu)};
+    debug.toggle = true;
+    debug.page = 1;
+    debug.note = "Esc or Back opens this menu over the game. Off: settings are in the Tome's Options and the title's Options.";
+    debug.change = [](int) { g_settings.debug_menu = !g_settings.debug_menu; };
+    g_rows.push_back(debug);
+
     Row mods = mods_row(Screen::Options);
     mods.section = "VI \u00b7 Mods";
     mods.page = 1;
@@ -2731,7 +2763,22 @@ void render() {
                                     g_options_return == Screen::InGame));
 }
 
+// A page opened by the game's own menus (the Tome's Options, the title's Options: frontend_open_page): Back from it,
+// or any way up past it, closes the menu and the game's menu is there again as it was.
+bool g_root_closes = false;
+Screen g_root = Screen::InGame;
+bool past_root(Screen s) {
+    if (s == Screen::InGame || s == Screen::Launcher)
+        return true;
+    return g_root == Screen::Characters && s == Screen::ModsPage;
+}
+
 void build_rows() {
+    if (g_root_closes && past_root(g_screen)) {
+        settings_save();
+        g_screen = g_root;  // (drawn no more: the menu closes)
+        g_close = true;
+    }
     g_rows.clear();
     switch (g_screen) {
     case Screen::Launcher: build_launcher(); break;
@@ -4253,9 +4300,15 @@ void frame(bool start) {
 
 extern "C" bool frontend_photo_active(void) { return photo::g_state != photo::State::Off; }
 
-// The Tome's Options page's "Choose Character" asked for (any thread): frontend_frame opens the roster.
-static std::atomic<bool> g_open_characters{false};
-extern "C" void frontend_open_characters(void) { g_open_characters = true; }
+// A page asked for by the game's own menus (any thread): the Tome's Options stops (hle.c tome_stops) and the title's
+// Options row. frontend_frame opens it over the paused game, driven by that player's controller; Back closes it.
+static std::atomic<int> g_open_page{-1};
+static std::atomic<int> g_open_page_player{0};
+extern "C" void frontend_open_page(int page, int player) {
+    g_open_page_player = player == 1 ? 1 : 0;
+    g_open_page = page;
+}
+extern "C" void frontend_open_characters(void) { frontend_open_page(FRONTEND_PAGE_CHARACTERS, 0); }
 // A Tome-looking button for this frame (any thread): text, the half it's in (-1 the whole screen) and its centre.
 extern "C" void frontend_tome_button(const char* text, int half, float x, float y) {
     std::lock_guard<std::mutex> lock(g_toast_mutex);
@@ -4375,20 +4428,50 @@ extern "C" void frontend_frame(void) {
         g_test_close_at = SDL_GetTicks() + test_hold;
         std::fprintf(stderr, "[frontend] test menu open for %llu ms\n", (unsigned long long)test_hold);
     }
-    // The Tome's Options page's "Choose Character" (hle.c tome_options_button, testing the native in-game menu): the menu
-    // opens straight on player 1's character roster.
-    const bool characters = g_open_characters.exchange(false);
-    if ((!press && !test_press && !characters) || !ensure_ui())
+    // A page the game's own menus asked for (the Tome's Options, the title's Options): the menu opens straight on it.
+    // Esc / Back open the launcher's menu over the game only as a debug menu (Options > Debug menu in game,
+    // or ED_DEBUG_MENU=1): in play everything is in the game's own menus.
+    const int page = g_open_page.exchange(-1);
+    static int debug_env = -1;
+    if (debug_env < 0)
+        debug_env = std::getenv("ED_DEBUG_MENU") != nullptr && std::atoi(std::getenv("ED_DEBUG_MENU")) != 0;
+    const bool debug = g_settings.debug_menu || debug_env == 1;
+    if ((!(press && debug) && !test_press && page < 0) || !ensure_ui())
         return;
     g_in_game = true;
     g_screen = Screen::InGame;
     g_options_return = Screen::InGame;
+    g_mods_return = Screen::InGame;
     g_selected = 0;
-    if (characters) {
-        g_characters_player = 0;
-        g_characters_return_row = 0;
-        g_screen = Screen::Characters;
-        g_selected = roster_index(chosen_character(), form_on(0, chosen_character()));
+    g_root_closes = page >= 0;
+    g_menu_player = 0;
+    if (page >= 0) {
+        const int player = g_open_page_player.load();
+        std::fprintf(stderr, "[frontend] page %d opened from the game's menu for player %d\n", page, player + 1);
+        // ED_PAGE_TEST_MS=N (testing): the page closes by itself after N ms, as Back would (scripted runs can't press in it).
+        if (const char* t = std::getenv("ED_PAGE_TEST_MS"); t != nullptr && std::atoi(t) > 0)
+            g_test_close_at = SDL_GetTicks() + static_cast<Uint64>(std::atoi(t));
+        g_menu_player = player;
+        switch (page) {
+        case FRONTEND_PAGE_CHARACTERS:
+        default:
+            g_characters_player = player;
+            g_characters_return_row = 0;
+            g_screen = g_root = Screen::Characters;
+            g_selected = roster_index(chosen_character(), form_on(player, chosen_character()));
+            break;
+        case FRONTEND_PAGE_SETTINGS:
+            dol_aurora_measure_screen();
+            g_screen = g_root = Screen::Options;
+            break;
+        case FRONTEND_PAGE_MODS:
+            g_screen = g_root = Screen::Mods;
+            break;
+        case FRONTEND_PAGE_STATES:
+            g_screen = g_root = Screen::States;
+            g_selected = std::max(newest_slot() - 1, 0);  // at the save made last
+            break;
+        }
     }
     report_pause(true);
     hle_coop_ui_over(true);
@@ -4396,6 +4479,8 @@ extern "C" void frontend_frame(void) {
         dol_aurora_request_quit();  // window closed while paused
     hle_coop_ui_over(false);
     report_pause(false);
+    g_root_closes = false;
+    g_menu_player = 0;
     menu_was_held = false;
 }
 

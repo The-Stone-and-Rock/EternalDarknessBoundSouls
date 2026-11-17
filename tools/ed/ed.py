@@ -630,6 +630,11 @@ def cmd_herogates(argv):
     herogates.cmd_herogates(argv)
 
 
+def cmd_zoom(argv):
+    import zoom
+    zoom.cmd_zoom(argv)
+
+
 def cmd_keep(argv):
     import know
     know.cmd_keep(argv)

@@ -112,7 +112,7 @@ if(ED_ENABLE_AURORA)
     # Launcher and in-game menu (RmlUi documents in res/ui).
     list(APPEND ED_HOST_SOURCES runtime/host/frontend.cpp runtime/host/controls.cpp
          runtime/host/buttons.cpp runtime/host/fonts.cpp runtime/host/lightmaps.cpp
-         runtime/host/texpack.cpp runtime/host/tome.cpp runtime/host/glyph_art.cpp
+         runtime/host/texpack.cpp runtime/host/tome.cpp runtime/host/plaques.cpp runtime/host/glyph_art.cpp
          runtime/host/titlevideo.cpp
          runtime/host/guestprof.c runtime/host/report.c)
 endif()

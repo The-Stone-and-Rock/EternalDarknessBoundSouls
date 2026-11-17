@@ -29,6 +29,7 @@
 #include "host/camera.h"
 #include "host/controls.h"
 #include "host/frontend.h"
+#include "host/plaques.h"
 #include "host/report.h"
 // Aurora (aurora/gfx.h): a movie is playing (HDR shows it at video white).
 // Declared here: the Mac app and the Linux package build this file on the
@@ -4295,7 +4296,6 @@ static bool pad_read_by_monitor(CPUState* cpu) {
 }
 
 void sanity_door_run(CPUState* cpu);
-static void tome_options_button(CPUState* cpu, DolPadState* p1);  // (below: the Tome's Options page's Choose Character)
 static void hle_PADRead(CPUState* cpu) {
 #ifdef ED_AURORA
     const bool monitor = pad_read_by_monitor(cpu);
@@ -4485,7 +4485,6 @@ static void hle_PADRead(CPUState* cpu) {
     if (coop_dream_no_tome(cpu, menu, cutscene))
         state[0].button &= (u16)~0x1000u;  // player 1's Start: no Tome in the dream
 #ifdef ED_AURORA
-    tome_options_button(cpu, &state[0]);  // (the Tome's Options page's Choose Character; after the test presses)
     if (g_coop_press_b) {
         state[0].button |= 0x0200u;  // PAD_BUTTON_B
         state[0].analog_b = 0xFFu;
@@ -16887,68 +16886,439 @@ static void tome_copy_tab(CPUState* cpu) {
     g_hle_tail_call = true;
     cpu->pc = to;
 }
-// The native in-game menu's first test (the user, 2026-11-16): player 1's Tome on its Options page (0x80101600, outside
-// player 2's copy turn) shows "Y: Choose Character", and Y there opens the in-game menu on their character roster
-// (frontend_open_characters; the change itself is the built characters_reload). A hint, not a row of the game's list.
-static unsigned long long g_tome_options_frame;
-static bool g_tome_on_options;  // player 1's Tome went to Options (0x80101600 runs once, as the tab is entered)
+// Options entered: player 1's real Tome as the game has it (its stops, tome_stops_*, below); player 2's copy Tome too
+// now, for their own Characters (their stop alone); player 1's copy (in player 2's close-up) still goes on past it.
 static void tome_options_page(CPUState* cpu) {
-    if (!g_tome_copy_turn) {
-        g_tome_options_frame = cpu->timebase / 675000ull;
-        g_tome_on_options = true;
-    }
-    tome_copy_tab(cpu);
-}
-// Any other tab entered (Journal through tome_copy_tab's hook; Inventory, Map, Magick by their own entries): not Options.
-static void tome_journal_page(CPUState* cpu) {
-    if (!g_tome_copy_turn)
-        g_tome_on_options = false;
-    tome_copy_tab(cpu);
-}
-static void tome_other_page(CPUState* cpu) {
-    if (!g_tome_copy_turn)
-        g_tome_on_options = false;
-}
-static void tome_options_button(CPUState* cpu, DolPadState* p1) {
-    const unsigned long long frame = cpu->timebase / 675000ull;
-    static unsigned long long said;
-    static bool y_was;
-    // ED_TOME_HINT_ANY=1 (testing, to picture it): any page of player 1's open Tome (the game's mode word 3) counts.
-    static int any = -1;
-    if (any < 0)
-        any = getenv("ED_TOME_HINT_ANY") != NULL;
-    const bool tome_up = sda_ready(cpu) && !g_tome_copy_turn && (hle_coop_player1_tome_up() || mem_read32(cpu, cpu->gpr[13] - 26240u) == 3u);
-    if (!tome_up && sda_ready(cpu) && !g_tome_copy_turn && !g_tw.sharing)
-        g_tome_on_options = false;  // (the Tome closed: it opens on its own page next time)
-    const bool on = tome_up && (g_tome_on_options || any);
-    // (In co-op the world's frames run between the Tome's: a press is noted on either kind and taken while the page is up.)
-    const bool y = (p1->button & 0x0800u) != 0u;
-    static unsigned long long y_at;
-    if (y && !y_was)
-        y_at = frame;
-    y_was = y;
-    if (!on)
+    if (g_tome_copy_turn && !g_tome_copy_p1) {
+        g_hle_passthrough = true;
         return;
-    // Co-op (side by side): a button of the Options page itself, under its cross of four (Load/Save's at 0.54, 0.36 of
-    // player 1's half: logs/run-20261116-011045-jtg-tome-options-page). Solo and the halves above one another: the corner
-    // hint till those layouts are measured.
-    if (g_settings.mod_coop && g_coop_p2 != 0u && g_settings.mod_split != 1) {
-        static bool told;
-        if (!told) {
-            told = true;
-            fprintf(stderr, "[tome] the Options page's Choose Character button shown (frame %llu)\n", frame);
+    }
+    tome_copy_tab(cpu);
+}
+// Journal through tome_copy_tab's hook (player 2's copy goes on past it); Inventory, Map, Magick are noted only.
+// Player 2's copy has Options now: past the Journal is Options going right (from Magick or Map), and Magick (or Map)
+// going left from Options (its L/R handler 0x801018C0..0x8010197C).
+#define TOME_PAGE_OPTIONS 0x80101600u
+static void tome_journal_page(CPUState* cpu) {
+    if (g_tome_copy_turn && !g_tome_copy_p1) {
+        u32 to = TOME_PAGE_OPTIONS;
+        if (cpu->lr >= 0x801018C0u && cpu->lr < 0x80101980u) {
+            u32 has = 0u;
+            hle_guest_call(cpu, TOME_HAS_MAGICK, NULL, 0, 0.0, &has);
+            to = has != 0u ? TOME_PAGE_MAGICK : TOME_PAGE_MAP;
         }
-        frontend_tome_button("Y   Choose Character", 0, 0.54f, 0.405f);
-    } else if (frame >= said + 45ull || said > frame) {
-        said = frame;
-        frontend_toast("Y: Choose Character");
+        g_hle_passthrough = false;
+        g_hle_tail_call = true;
+        cpu->pc = to;
+        return;
     }
-    if (y_at != 0ull && frame >= y_at && frame - y_at <= 4ull) {
-        y_at = 0ull;
-        fprintf(stderr, "[tome] Choose Character from the Tome's Options (frame %llu)\n", frame);
-        frontend_open_characters();
+    tome_copy_tab(cpu);
+}
+static void tome_other_page(CPUState* cpu) { (void)cpu; }
+// The Tome's Options page holds the recomp's settings beside the game's own (the user, 2026-11-17: the launcher's menu
+// leaves the game; everything it had is in the game's own menus and looks built in). Under the game's cross of four
+// (Controller, Audio, Display, Load/Save: indexes 0-3 of the page's own cursor) are more stops, 4 and up, moved to with
+// the game's own cursor and ring and sounds (docs/research/in-game-menu/03-tome-options.md section 9):
+//   player 1's Tome: Characters, Save States, Settings, Mods (their pages open over the paused game, Back returns here);
+//   player 2's copy Tome: their own Characters alone (only player 1 has the shared settings and saves).
+// All on the page's own functions, gated to the Options page being the page (r13-24304 is its frame):
+//   Up/Down 0x8010172C and Left/Right 0x8010179C move among the stops (the game's own sets 0-3 as before);
+//   A 0x80101838 on a stop opens its page; the frame 0x80101980 is drawn whole here when a stop is on the page
+//   (the game's frame only knows rings 0-3: its index 4 read past its table); the exit 0x801016D8 frees the labels.
+#define TOME_OPTIONS_FRAME 0x80101980u
+#define TOME_OPTIONS_EXIT 0x801016D8u
+#define TOME_OPTIONS_UPDOWN 0x8010172Cu
+#define TOME_OPTIONS_SIDES 0x8010179Cu
+#define TOME_OPTIONS_A 0x80101838u
+#define TOME_OPTIONS_RINGS 0x8023A130u  // {x, y, w, h} shorts for 0-3, 640x480 units
+#define TOME_OPTIONS_PAGE 24304u       // r13-: the page's frame
+#define TOME_OPTIONS_CURSOR 24544u     // r13-: the page's list object (index at +12)
+#define TOME_BACKDROP 0x801117F4u      // (section, alpha): the book and the page's picture
+#define TOME_RING 0x8019CC10u          // (x, y, w, h, z, thickness): the game's gold ring
+#define TOME_FRAME_PLAIN 0x8019C9C8u   // (x, y, w, h, z, thickness, &rgba)
+#define TOME_INPUT_TAKEN 0x8013E154u
+#define TOME_LIST_SET 0x801DD354u      // (list, index, top)
+#define TOME_TEXT_MAKE 0x801DB374u     // (bank, group, entry, 0, 1, style)
+#define TOME_TEXT_FORMAT 0x801DA8CCu   // (element, format, r, g, b, a, argument)
+#define TOME_TEXT_PLACE 0x801DA9CCu    // (element, x, y)
+#define TOME_TEXT_FREE 0x801DA4D8u
+#define TOME_PROMPTS_BANK 26488u       // r13-: the prompts' words (the Options hints are made from it)
+#define TOME_BUTTON_STYLE 0x8024EE78u  // "ButtonText"
+#define TOME_SOUND_MOVE 545u
+#define TOME_SOUND_CHOOSE 546u
+#define TOME_SOUND_DENIED 611u
+// Host scratch for the labels' words and the frames' colour: between the co-op Tome's memory (SCRATCH_TOME +
+// TW_TOME_MEMORY, 0x822D8020) and SPELL_COLOUR (0x82300000).
+#define SCRATCH_MENU 0x822F0000u
+#define TOME_STOP_MAX 4
+
+typedef struct {
+    const char* label;
+    s16 x, y, w, h;  // 640x480 units, as the game's ring table
+    int page;        // FRONTEND_PAGE_*
+    s8 up, down, left, right;  // the index each direction goes to (-1: stays)
+} TomeStop;
+// Player 1's: two by two under Load/Save (its ring 292..413, y 87..119), as wide as the cross (217..506).
+// The rectangles are the rings' (as the game's ring table); each plaque's picture is 140x40 round it, from 8 left and 3
+// above (the painted Load/Save plaque's art round its ring: plaques.cpp).
+static const TomeStop kTomeStopsP1[] = {
+    {"Characters", 226, 131, 122, 32, FRONTEND_PAGE_CHARACTERS, 3, 6, -1, 5},
+    {"Save States", 374, 131, 122, 32, FRONTEND_PAGE_STATES, 3, 7, 4, -1},
+    {"Settings", 226, 173, 122, 32, FRONTEND_PAGE_SETTINGS, 4, -1, -1, 7},
+    {"Mods", 374, 173, 122, 32, FRONTEND_PAGE_MODS, 5, -1, 6, -1},
+};
+// Player 2's (their copy Tome): their own Characters, under Load/Save; the cross's four are not theirs.
+static const TomeStop kTomeStopsP2[] = {
+    {"Characters", 292, 131, 122, 32, FRONTEND_PAGE_CHARACTERS, -1, -1, -1, -1},
+};
+#define PLAQUE_LEFT 8   // the plaque's picture from its ring
+#define PLAQUE_TOP 3
+#define PLAQUE_W 140
+#define PLAQUE_H 40
+// The labels: game text elements, one memory's each (the copy Tome's turn runs in a copy of the memory: its own pool).
+static struct {
+    u32 element[2][TOME_STOP_MAX];
+    s32 shown[2];  // the index the labels were last styled for
+} g_tome_stops;
+
+static bool tome_stops_on(CPUState* cpu) {
+    return sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - TOME_OPTIONS_PAGE) == TOME_OPTIONS_FRAME;
+}
+// Whose Options these are: 0 player 1, 1 player 2, -1 none (player 1's copy Tome, in player 2's close-up, has no Options).
+static int tome_stops_player(void) {
+    if (g_tome_copy_turn)
+        return g_tome_copy_p1 ? -1 : 1;
+    return g_coop_tome_p2 ? 1 : 0;
+}
+static const TomeStop* tome_stops_of(int player, u32* count) {
+    if (player == 1) {
+        *count = sizeof kTomeStopsP2 / sizeof kTomeStopsP2[0];
+        return kTomeStopsP2;
     }
-    p1->button &= (u16)~0x0800u;  // (the Options page doesn't see this Y)
+    *count = sizeof kTomeStopsP1 / sizeof kTomeStopsP1[0];
+    return kTomeStopsP1;
+}
+static u32 tome_stops_list(CPUState* cpu) { return mem_read32(cpu, cpu->gpr[13] - TOME_OPTIONS_CURSOR); }
+static s32 tome_stops_index(CPUState* cpu) {
+    const u32 list = tome_stops_list(cpu);
+    return guest_ram_range_valid(cpu, list, 16u) ? (s32)mem_read32(cpu, list + 12u) : -1;
+}
+static void tome_stops_call(CPUState* cpu, u32 fn, const u32* args, u32 count) {
+    u32 ignore = 0u;
+    hle_guest_call(cpu, fn, args, count, 0.0, &ignore);
+}
+static void tome_stops_sound(CPUState* cpu, u32 id, u32 volume) {
+    const u32 a[2] = {id, volume};
+    tome_stops_call(cpu, SOUND_PLAIN, a, 2u);
+}
+static void tome_stops_set(CPUState* cpu, s32 index) {
+    const u32 a[3] = {tome_stops_list(cpu), (u32)index, 0u};
+    tome_stops_call(cpu, TOME_LIST_SET, a, 3u);
+}
+static void tome_stops_taken(CPUState* cpu) { tome_stops_call(cpu, TOME_INPUT_TAKEN, NULL, 0u); }
+static void tome_stops_return(CPUState* cpu) {
+    (void)cpu;
+    g_hle_passthrough = false;  // (the dispatcher returns to the caller: the game's own handler doesn't run)
+}
+static void tome_stops_free(CPUState* cpu) {
+    const int m = g_tome_copy_turn ? 1 : 0;
+    for (int i = 0; i < TOME_STOP_MAX; i++)
+        if (g_tome_stops.element[m][i] != 0u) {
+            tome_stops_call(cpu, TOME_TEXT_FREE, &g_tome_stops.element[m][i], 1u);
+            g_tome_stops.element[m][i] = 0u;
+        }
+    g_tome_stops.shown[m] = -2;
+}
+// A state loaded: the elements were the old memory's.
+static void tome_stops_forget(void) {
+    memset(&g_tome_stops, 0, sizeof g_tome_stops);
+    g_tome_stops.shown[0] = g_tome_stops.shown[1] = -2;
+}
+
+// Up/Down: Down from Load/Save (3) onto the stops, and among them; Up from the top ones back to Load/Save.
+static void tome_stops_updown(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const int player = tome_stops_player();
+    if (player < 0 || !tome_stops_on(cpu))
+        return;
+    u32 count = 0u;
+    const TomeStop* stops = tome_stops_of(player, &count);
+    const s32 dir = (s32)(s16)cpu->gpr[3], at = tome_stops_index(cpu);
+    s32 to = -1;
+    if (player == 1)
+        to = at;  // player 2's page: their stop alone
+    else if (at == 3 && dir > 0)
+        to = 4;
+    else if (at >= 4 && at < 4 + (s32)count)
+        to = dir < 0 ? stops[at - 4].up : stops[at - 4].down;
+    else
+        return;  // the cross's own moves
+    if (to >= 0 && to != at) {
+        tome_stops_set(cpu, to);
+        tome_stops_sound(cpu, TOME_SOUND_MOVE, 50u);
+    }
+    tome_stops_taken(cpu);
+    tome_stops_return(cpu);
+}
+static void tome_stops_sides(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const int player = tome_stops_player();
+    if (player < 0 || !tome_stops_on(cpu))
+        return;
+    u32 count = 0u;
+    const TomeStop* stops = tome_stops_of(player, &count);
+    const s32 dir = (s32)(s16)cpu->gpr[3], at = tome_stops_index(cpu);
+    if (player != 1 && (at < 4 || at >= 4 + (s32)count))
+        return;
+    const s32 to = player == 1 || at < 4 ? -1 : dir < 0 ? stops[at - 4].left : stops[at - 4].right;
+    if (to >= 0 && to != at) {
+        tome_stops_set(cpu, to);
+        tome_stops_sound(cpu, TOME_SOUND_MOVE, 50u);
+    }
+    tome_stops_taken(cpu);
+    tome_stops_return(cpu);
+}
+// A: a stop's page opens over the paused game (the Tome stays on its Options underneath); the cross's own as before.
+static void tome_stops_choose(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const int player = tome_stops_player();
+    if (player < 0 || !tome_stops_on(cpu))
+        return;
+    u32 count = 0u;
+    const TomeStop* stops = tome_stops_of(player, &count);
+    const s32 at = tome_stops_index(cpu);
+    if (at >= 4 && at < 4 + (s32)count) {
+        tome_stops_sound(cpu, TOME_SOUND_CHOOSE, 100u);
+        fprintf(stderr, "[tome] Options: %s for player %d (frame %llu)\n", stops[at - 4].label, player + 1,
+                (unsigned long long)(cpu->timebase / 675000ull));
+        frontend_open_page(stops[at - 4].page, player);
+    } else if (player == 1) {
+        tome_stops_sound(cpu, TOME_SOUND_DENIED, 50u);  // (not theirs: the cursor never goes there)
+    } else {
+        return;
+    }
+    tome_stops_taken(cpu);
+    tome_stops_return(cpu);
+}
+static void tome_stops_exit(CPUState* cpu) {
+    if (sda_ready(cpu))
+        tome_stops_free(cpu);
+}
+
+// The labels: made from the Options hints' own entry (so laid out and lettered as the Tome's words), their words
+// written in, placed in their frames; the chosen one in full ink, the others faded as the painted ones are dark-ringed.
+static void tome_stops_labels(CPUState* cpu, const TomeStop* stops, u32 count, s32 at) {
+    const int m = g_tome_copy_turn ? 1 : 0;
+    for (u32 i = 0u; i < count && i < TOME_STOP_MAX; i++) {
+        u32* element = &g_tome_stops.element[m][i];
+        if (*element == 0u) {
+            const u32 make[6] = {mem_read32(cpu, cpu->gpr[13] - TOME_PROMPTS_BANK), 1u, 2u, 0u, 1u, TOME_BUTTON_STYLE};
+            u32 made = 0u;
+            if (!hle_guest_call(cpu, TOME_TEXT_MAKE, make, 6u, 0.0, &made) || !guest_ram_range_valid(cpu, made, 0x100u))
+                continue;
+            *element = made;
+            g_tome_stops.shown[m] = -2;
+        }
+        if (g_tome_stops.shown[m] == at)
+            continue;
+        // The words, as the game styles its own (its FINISH HIM look, 0x80252D74): a scale, then the colour as four
+        // characters of the format (%c each, from the call's colour), then the label. Dark ink, as the painted labels.
+        const u32 words = SCRATCH_MENU + 64u * i;
+        static const char kLook[] = "\\s0.78\\c%c%c%c%c";  // (the handwritten sheet, \f1, drew faint and thin here)
+        u32 n = 0u;
+        for (const char* c = kLook; *c != 0; c++)
+            mem_write8(cpu, words + n++, (u8)*c);
+        for (const char* c = stops[i].label; *c != 0 && n < 62u; c++)
+            mem_write8(cpu, words + n++, (u8)*c);
+        mem_write8(cpu, words + n, 0u);
+        const bool chosen = (s32)(4u + i) == at;
+        const u32 look[7] = {*element, words, 52u, 34u, 18u, chosen ? 255u : 170u, 0u};
+        tome_stops_call(cpu, TOME_TEXT_FORMAT, look, 7u);
+        // The element's x is the words' centre (as the hints'), its y their top.
+        const u32 place[3] = {*element, (u32)(s32)(stops[i].x + stops[i].w / 2), (u32)(s32)(stops[i].y + 5)};
+        tome_stops_call(cpu, TOME_TEXT_PLACE, place, 3u);
+    }
+    g_tome_stops.shown[m] = at;
+}
+
+// The title screen's Options gets a ninth row, "More Options" (painted by titlevideo.cpp under "Language Select"):
+// the game's own cursor goes there (its row count raised to 9 at each Up/Down: the screens write their 8 back), and A
+// on it opens the recomp's settings over the paused title (Display, Sound, Graphics, Controls, Mods with co-op and the
+// characters), Back returning to the title's Options. The game itself draws no glow for a row past 7 and plays its
+// own A sound (docs/research/in-game-menu/02-title-menu.md, Way B).
+#define TITLE_RECORD 0x80309124u
+#define TITLE_STATE (TITLE_RECORD + 62u)  // byte: 14 is Options
+#define TITLE_CURSOR (TITLE_RECORD + 28u)
+#define TITLE_ROWS (TITLE_RECORD + 40u)
+#define TITLE_UPDOWN 0x8001B588u
+#define TITLE_A 0x80019F30u
+#define TITLE_OPTIONS_DRAW 0x8001D52Cu
+#define TITLE_CARD_NOTICE 0x800AF00Cu  // () != 0: a memory card notice takes the presses
+#define TITLE_OPTIONS 14u
+#define TITLE_MORE_ROW 8u
+void titlevideo_options_row(int row);
+static bool title_on_options(CPUState* cpu) {
+    if (mem_read8(cpu, TITLE_STATE) != TITLE_OPTIONS)
+        return false;
+    u32 notice = 0u;
+    hle_guest_call(cpu, TITLE_CARD_NOTICE, NULL, 0, 0.0, &notice);
+    return notice == 0u;
+}
+static void title_more_updown(CPUState* cpu) {
+    if (title_on_options(cpu))
+        mem_write32(cpu, TITLE_ROWS, TITLE_MORE_ROW + 1u);
+}
+static void title_more_choose(CPUState* cpu) {
+    if (title_on_options(cpu) && mem_read32(cpu, TITLE_CURSOR) == TITLE_MORE_ROW) {
+        fprintf(stderr, "[title] More Options (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+        frontend_open_page(FRONTEND_PAGE_SETTINGS, 0);
+    }
+}
+static void title_more_draw(CPUState* cpu) { titlevideo_options_row((int)mem_read32(cpu, TITLE_CURSOR)); }
+
+// The plaques' pictures (plaques.cpp): a TEXPalette of transparent CMPR stubs in host scratch, one per plaque, drawn
+// with the game's own art calls (docs/research/in-game-menu/06-texture-bank.md section 7); the renderer's texture
+// override swaps each stub for its plaque. The bank is written into whichever memory is in (player 2's copy Tome turn
+// runs on a whole copy), the same bytes at the same address in both. The plaques' frame is the game's own Options page
+// picture, handed over once from the game's memory (UBookPak image 27, from the art bank r13-24316).
+#define PLAQUE_BANK (SCRATCH_MENU + 0x1000u)  // to SCRATCH_MENU + 0xA000 (SPELL_COLOUR is at + 0x10000)
+#define PLAQUE_HEADERS (PLAQUE_BANK + 12u + 8u * PLAQUE_COUNT)
+#define PLAQUE_CANARY (PLAQUE_BANK + 0xF0u)
+#define PLAQUE_DATA (PLAQUE_BANK + 0x100u)
+#define PLAQUE_CANARY_WORD 0x504C5131u  // 'PLQ1'
+#define TOME_BANK_BIND 0x801E1B74u      // (bank) -> the bank bound before
+#define TOME_MATERIAL_IMAGE 0x8019C7C8u // (&rgba, field 0, image, 0x80000000)
+#define TOME_QUAD_TEXCOORDS 0x8019D178u // (array): the quads' texcoords
+#define TOME_QUAD_UV_FULL 0x80254D10u   // the game's whole-picture texcoords
+#define TOME_QUAD_DRAW 0x8019D1A4u      // (x0, y0, x1, y1, z, 0, 5), 640x480 units
+#define TOME_ART_BANK 24316u            // r13-: UBookPak's pictures (a TEXPalette)
+#define TOME_OPTIONS_PICTURE 27u
+static int g_plaques_page = -1;  // the page picture handed over: -1 not yet, 1 yes, 0 not there (the words instead)
+
+static void tome_plaques_page(CPUState* cpu) {
+    if (g_plaques_page >= 0)
+        return;
+    g_plaques_page = 0;
+    const u32 bank = mem_read32(cpu, cpu->gpr[13] - TOME_ART_BANK);
+    if (!guest_ram_range_valid(cpu, bank, 12u) || mem_read32(cpu, bank + 4u) <= TOME_OPTIONS_PICTURE)
+        return;
+    const u32 desc = mem_read32(cpu, bank + 8u) + 8u * TOME_OPTIONS_PICTURE;
+    const u32 header = guest_ram_range_valid(cpu, desc, 8u) ? mem_read32(cpu, desc) : 0u;
+    if (!guest_ram_range_valid(cpu, header, 12u))
+        return;
+    const u32 h = mem_read16(cpu, header), w = mem_read16(cpu, header + 2u), format = mem_read32(cpu, header + 4u);
+    const u32 data = mem_read32(cpu, header + 8u), size = ((w + 7u) / 8u) * ((h + 7u) / 8u) * 32u;
+    if (format != 14u || w != 432u || h != 480u || !guest_ram_range_valid(cpu, data, size)) {
+        fprintf(stderr, "[plaques] the Options page picture isn't 432x480 CMPR here (%ux%u, format %u): the words instead\n", w, h, format);
+        return;
+    }
+    u8* bytes = (u8*)malloc(size);
+    if (bytes == NULL)
+        return;
+    for (u32 i = 0u; i < size; i++)
+        bytes[i] = mem_read8(cpu, data + i);
+    plaques_page(bytes, w, h);
+    free(bytes);
+    g_plaques_page = 1;
+}
+
+static void tome_plaques_bank(CPUState* cpu) {
+    if (mem_read32(cpu, PLAQUE_BANK) == 0x0020AF30u && mem_read32(cpu, PLAQUE_CANARY) == PLAQUE_CANARY_WORD)
+        return;
+    mem_write32(cpu, PLAQUE_BANK, 0x0020AF30u);
+    mem_write32(cpu, PLAQUE_BANK + 4u, PLAQUE_COUNT);
+    mem_write32(cpu, PLAQUE_BANK + 8u, PLAQUE_BANK + 12u);
+    u8 stub[PLAQUE_STUB_BYTES];
+    for (u32 i = 0u; i < PLAQUE_COUNT; i++) {
+        const u32 header = PLAQUE_HEADERS + 36u * i, data = PLAQUE_DATA + PLAQUE_STUB_BYTES * i;
+        mem_write32(cpu, PLAQUE_BANK + 12u + 8u * i, header);
+        mem_write32(cpu, PLAQUE_BANK + 16u + 8u * i, 0u);
+        mem_write16(cpu, header, (u16)PLAQUE_STUB_H);
+        mem_write16(cpu, header + 2u, (u16)PLAQUE_STUB_W);
+        mem_write32(cpu, header + 4u, 14u);  // CMPR
+        mem_write32(cpu, header + 8u, data);
+        mem_write32(cpu, header + 12u, 0u);  // clamp, clamp
+        mem_write32(cpu, header + 16u, 0u);
+        mem_write32(cpu, header + 20u, 1u);  // linear, linear
+        mem_write32(cpu, header + 24u, 1u);
+        mem_write32(cpu, header + 28u, 0u);  // LOD bias 0.0
+        mem_write32(cpu, header + 32u, 0x00000001u);  // edge LOD 0, LODs 0-0, unpacked
+        plaques_stub((int)i, stub);
+        for (u32 b = 0u; b < PLAQUE_STUB_BYTES; b++)
+            mem_write8(cpu, data + b, stub[b]);
+    }
+    mem_write32(cpu, PLAQUE_CANARY, PLAQUE_CANARY_WORD);
+}
+
+// Draws the stops' plaques (player 2's Characters is plaque 0, as player 1's); false when there are no pictures.
+static bool tome_plaques_draw(CPUState* cpu, const TomeStop* stops, u32 count, int player) {
+    tome_plaques_page(cpu);
+    if (g_plaques_page != 1)
+        return false;
+    tome_plaques_bank(cpu);
+    const u32 white = SCRATCH_MENU + 0x408u;
+    mem_write32(cpu, white, 0xFFFFFFFFu);
+    u32 old = 0u;
+    const u32 bind[1] = {PLAQUE_BANK};
+    hle_guest_call(cpu, TOME_BANK_BIND, bind, 1, 0.0, &old);
+    const u32 uv[1] = {TOME_QUAD_UV_FULL};
+    tome_stops_call(cpu, TOME_QUAD_TEXCOORDS, uv, 1u);
+    for (u32 i = 0u; i < count; i++) {
+        const u32 id = player == 1 ? 0u : i;
+        const u32 material[4] = {white, 0u, id, 0x80000000u};
+        tome_stops_call(cpu, TOME_MATERIAL_IMAGE, material, 4u);
+        const s32 x0 = stops[i].x - PLAQUE_LEFT, y0 = stops[i].y - PLAQUE_TOP;
+        const u32 quad[7] = {(u32)x0, (u32)y0, (u32)(x0 + PLAQUE_W), (u32)(y0 + PLAQUE_H), 0xFFFFFFFFu, 0u, 5u};
+        tome_stops_call(cpu, TOME_QUAD_DRAW, quad, 7u);
+    }
+    tome_stops_call(cpu, TOME_BANK_BIND, &old, 1u);
+    return true;
+}
+
+// The frame: the game's own three calls with the stops in (its backdrop, then one gold ring), and the stops' frames.
+static void tome_stops_frame(CPUState* cpu) {
+    g_hle_passthrough = true;
+    const int player = tome_stops_player();
+    if (player < 0 || !tome_stops_on(cpu))
+        return;
+    u32 count = 0u;
+    const TomeStop* stops = tome_stops_of(player, &count);
+    s32 at = tome_stops_index(cpu);
+    if (player == 1 && at != 4) {  // player 2's page opens on their stop (the game's entry put it on Controller)
+        tome_stops_set(cpu, 4);
+        at = 4;
+    }
+    const u32 alpha = cpu->gpr[3];
+    const u32 backdrop[2] = {0u, alpha};
+    tome_stops_call(cpu, TOME_BACKDROP, backdrop, 2u);
+    const bool plaques = tome_plaques_draw(cpu, stops, count, player);
+    if (!plaques) {
+        // Without the plaques' pictures (no 432x480 Options page in this language's art): each a wash of the
+        // parchment (a frame as thick as half its height fills it) with a thin dark rim, and the words as text.
+        const u32 wash = SCRATCH_MENU + 0x400u, brown = SCRATCH_MENU + 0x404u;
+        mem_write32(cpu, wash, 0xF0DDB040u);
+        mem_write32(cpu, brown, 0x2E1A0CE0u);
+        for (u32 i = 0u; i < count; i++) {
+            const u32 x = (u32)(s32)stops[i].x, y = (u32)(s32)stops[i].y, w = (u32)(s32)stops[i].w, h = (u32)(s32)stops[i].h;
+            const u32 fill[7] = {x, y, w, h, 0xFFFFFFFFu, h / 2u, wash};
+            tome_stops_call(cpu, TOME_FRAME_PLAIN, fill, 7u);
+            const u32 rim[7] = {x, y, w, h, 0xFFFFFFFFu, 3u, brown};
+            tome_stops_call(cpu, TOME_FRAME_PLAIN, rim, 7u);
+        }
+    }
+    s32 x, y, w, h;
+    if (at >= 4 && at < 4 + (s32)count) {
+        x = stops[at - 4].x, y = stops[at - 4].y, w = stops[at - 4].w, h = stops[at - 4].h;
+    } else {
+        const u32 row = TOME_OPTIONS_RINGS + 8u * (u32)(at >= 0 && at < 4 ? at : 0);
+        x = (s16)mem_read16(cpu, row), y = (s16)mem_read16(cpu, row + 2u);
+        w = (s16)mem_read16(cpu, row + 4u), h = (s16)mem_read16(cpu, row + 6u);
+    }
+    const u32 ring[6] = {(u32)x, (u32)y, (u32)w, (u32)h, 0xFFFFFFFFu, 3u};
+    tome_stops_call(cpu, TOME_RING, ring, 6u);
+    if (!plaques)
+        tome_stops_labels(cpu, stops, count, at);
+    tome_stops_return(cpu);
 }
 
 // The world's frame on the Tome's camera (8) with nothing pushed to go back to: the game never leaves it so (its every 8
@@ -33040,6 +33410,48 @@ static void find_coop(CPUState* cpu) {
                     fprintf(stderr, "[sound] the copy Tome's sounds NOT forwarded: 0x%08X / 0x%08X taken or not as expected\n", SOUND_PLAIN, SOUND_PLAIN_STOP);
                 }
             }
+            // The Tome's Options stops (tome_stops_*): solo and co-op, player 1's and player 2's copy.
+            {
+                static const struct { u32 at, first; void (*fn)(CPUState*); bool notify; } kStops[] = {
+                    {TOME_OPTIONS_UPDOWN, 0x9421FFF0u, tome_stops_updown, false},
+                    {TOME_OPTIONS_SIDES, 0x9421FFF0u, tome_stops_sides, false},
+                    {TOME_OPTIONS_A, 0x9421FFF0u, tome_stops_choose, false},
+                    {TOME_OPTIONS_FRAME, 0x9421FFD0u, tome_stops_frame, false},
+                    {TOME_OPTIONS_EXIT, 0x9421FFF0u, tome_stops_exit, true},
+                };
+                bool ok = true;
+                for (u32 i = 0u; i < sizeof kStops / sizeof kStops[0]; i++) {
+                    HleDispatchEntry* e = hle_dispatch_entry(kStops[i].at);
+                    ok = ok && e != NULL && e->intercept == NULL && e->notify == NULL && mem_read32(cpu, kStops[i].at) == kStops[i].first;
+                }
+                if (ok) {
+                    for (u32 i = 0u; i < sizeof kStops / sizeof kStops[0]; i++) {
+                        HleDispatchEntry* e = hle_dispatch_entry(kStops[i].at);
+                        if (kStops[i].notify)
+                            e->notify = kStops[i].fn;
+                        else
+                            e->intercept = kStops[i].fn;
+                    }
+                } else {
+                    fprintf(stderr, "[tome] the Options page's stops NOT installed (its functions taken or not as expected)\n");
+                }
+                // The title Options' ninth row (title_more_*).
+                static const struct { u32 at, first; void (*fn)(CPUState*); } kMore[] = {
+                    {TITLE_UPDOWN, 0x9421FFE0u, title_more_updown},
+                    {TITLE_A, 0x9421FED0u, title_more_choose},
+                    {TITLE_OPTIONS_DRAW, 0x9421FF50u, title_more_draw},
+                };
+                bool more = true;
+                for (u32 i = 0u; i < sizeof kMore / sizeof kMore[0]; i++) {
+                    HleDispatchEntry* e = hle_dispatch_entry(kMore[i].at);
+                    more = more && e != NULL && e->notify == NULL && mem_read32(cpu, kMore[i].at) == kMore[i].first;
+                }
+                if (more)
+                    for (u32 i = 0u; i < sizeof kMore / sizeof kMore[0]; i++)
+                        hle_dispatch_entry(kMore[i].at)->notify = kMore[i].fn;
+                else
+                    fprintf(stderr, "[title] the Options' More Options row NOT installed (its functions taken or not as expected)\n");
+            }
             buffer->intercept = tw_room_buffer;
             for (int i = 0; i < 11; i++) {
                 HleDispatchEntry* e = hle_dispatch_entry(kept[i]);
@@ -34199,6 +34611,7 @@ void hle_state_loaded(CPUState* cpu) {
     g_fx_request_count = 0;                 // effect requests noted in the old world's frames (fx_request_note)
     memset(g_flashes, 0, sizeof g_flashes);  // and its screen flashes' rooms (fx_flash_make)
     g_flash_out_of = -1;
+    tome_stops_forget();  // the Tome's Options labels were the old memory's
     coop_state_loaded(cpu);
     for (u32 i = 0; i < g_callback_count; i++)
         delay_callback(cpu, (g_callback_read + i) % HLE_CALLBACK_QUEUE_CAPACITY);

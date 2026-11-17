@@ -41,6 +41,7 @@ typedef struct {
     int hdr_black;
     bool fullscreen;
     bool fps_counter;     // frames per second in the window title
+    bool debug_menu;      // the launcher's menu over the game on Esc / Back (testing); off: only the game's own menus
     int music_volume;     // disc-streamed music, 0-100
     int effects_volume;   // the game's own mix (effects, voices), 0-100
     int audio_buffer_ms;  // audio queued ahead of the output: 60 ms, not a

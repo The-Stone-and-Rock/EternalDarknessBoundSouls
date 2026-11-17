@@ -15,3 +15,7 @@ int tome_apply(const uint8_t* rgba, uint32_t width, uint32_t height, uint8_t** o
                uint32_t* out_width, uint32_t* out_height);
 // Changes with the layout, the bindings and the controller family.
 uint64_t tome_generation();
+#include <vector>
+// The Tome's hand (La Belle Aurore) as an upright coverage mask: text px tall, strokes thickened by bold pixels; the
+// first letter at column px / 4, the baseline at row *baseline. False without the font.
+bool tome_hand_cover(const char* text, float px, float bold, std::vector<uint8_t>* out, int* w, int* h, int* baseline);

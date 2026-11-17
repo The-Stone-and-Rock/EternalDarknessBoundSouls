@@ -44,6 +44,7 @@ Settings g_settings = {
     .hdr_black = 0,
     .fullscreen = true,
     .fps_counter = false,
+    .debug_menu = false,
     .music_volume = 100,
     .effects_volume = 100,
     .audio_buffer_ms = 60,
@@ -187,6 +188,8 @@ void settings_load(void) {
             g_settings.fullscreen = n != 0;
         else if (strcmp(key, "fps_counter") == 0)
             g_settings.fps_counter = n != 0;
+        else if (strcmp(key, "debug_menu") == 0)
+            g_settings.debug_menu = n != 0;
         else if (strcmp(key, "music_volume") == 0)
             g_settings.music_volume = clamp_int(n, 0, 100);
         else if (strcmp(key, "effects_volume") == 0)
@@ -295,6 +298,7 @@ void settings_save(void) {
     fprintf(f, "hdr_black = %d\n", g_settings.hdr_black);
     fprintf(f, "fullscreen = %d\n", g_settings.fullscreen ? 1 : 0);
     fprintf(f, "fps_counter = %d\n", g_settings.fps_counter ? 1 : 0);
+    fprintf(f, "debug_menu = %d\n", g_settings.debug_menu ? 1 : 0);
     fprintf(f, "music_volume = %d\n", g_settings.music_volume);
     fprintf(f, "effects_volume = %d\n", g_settings.effects_volume);
     fprintf(f, "controls_layout = %d\n", g_settings.controls_layout);

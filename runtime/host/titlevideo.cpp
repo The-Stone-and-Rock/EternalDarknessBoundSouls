@@ -9,6 +9,7 @@
 
 #include "host/frontend.h"
 #include "host/settings.h"
+#include "host/tome.h"
 
 #define PL_MPEG_IMPLEMENTATION
 #include "third_party/pl_mpeg.h"
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -298,6 +300,73 @@ int give(std::vector<uint8_t>& out, uint32_t w, uint32_t h, uint8_t** out_rgba, 
     return 1;
 }
 
+// The title Options' ninth row (hle.c title_more_*: the game's own cursor goes there, A opens the recomp's settings):
+// "More Options" painted under "Language Select" in the Tome's hand, in the painted rows' teal; lit pale cyan with a
+// soft glow while it is the chosen row, as the game lights its own. Measured on the kept picture (upright 850x480):
+// the rows' tops step 41-47 (Language Select's at 384), their first letters at x 174, their ink about (67, 90, 96)
+// and at most (90, 117, 123).
+std::atomic<int> g_options_row{-1};  // the title Options' cursor, as its frame last drew (hle.c)
+constexpr uint64_t kOptionsMoreSerial = 0x4D4F52450000ull;  // the Options picture's generations ("MORE")
+struct Painted {
+    std::vector<uint8_t> rgba;
+    bool lit = false, ready = false;
+};
+std::mutex g_more_mutex;
+Painted g_more[2];
+
+std::vector<uint8_t> paint_more(const uint8_t* rgba, uint32_t w, uint32_t h, bool lit) {
+    std::vector<uint8_t> out(rgba, rgba + static_cast<size_t>(w) * h * 4);
+    std::vector<uint8_t> cover;
+    int cw = 0, ch = 0, base = 0;
+    constexpr float kPx = 44.f;
+    if (!tome_hand_cover("More Options", kPx, 0.7f, &cover, &cw, &ch, &base))
+        return out;
+    const int left = 174 - static_cast<int>(kPx / 4.f), baseline = 452;
+    const float ink[3] = {72.f, 97.f, 104.f}, light[3] = {0xA0, 0xE3, 0xF1};
+    auto put = [&](int x, int y, const float rgb[3], float a) {
+        if (x < 0 || y < 0 || x >= static_cast<int>(w) || y >= static_cast<int>(h) || a <= 0.f)
+            return;
+        uint8_t* p = &out[(static_cast<size_t>(h - 1 - y) * w + x) * 4];  // stored upside down
+        for (int c = 0; c < 3; c++)
+            p[c] = static_cast<uint8_t>(std::clamp(p[c] + (rgb[c] - p[c]) * std::min(a, 1.f), 0.f, 255.f));
+    };
+    if (lit) {  // the glow: the letters spread 6 pixels, faint
+        constexpr int kR = 6;
+        for (int y = -kR; y < ch + kR; y++)
+            for (int x = -kR; x < cw + kR; x++) {
+                float m = 0.f;
+                for (int dy = -kR; dy <= kR; dy += 2)
+                    for (int dx = -kR; dx <= kR; dx += 2) {
+                        const int sx = x + dx, sy = y + dy;
+                        if (sx < 0 || sy < 0 || sx >= cw || sy >= ch)
+                            continue;
+                        const float d = std::sqrt(static_cast<float>(dx * dx + dy * dy));
+                        if (d <= kR)
+                            m = std::max(m, cover[static_cast<size_t>(sy) * cw + sx] / 255.f * (1.f - d / (kR + 1)));
+                    }
+                put(left + x, baseline - base + y, light, m * 0.35f);
+            }
+    }
+    for (int y = 0; y < ch; y++)
+        for (int x = 0; x < cw; x++)
+            if (const uint8_t v = cover[static_cast<size_t>(y) * cw + x])
+                put(left + x, baseline - base + y, lit ? light : ink, v / 255.f * (lit ? 1.f : 0.9f));
+    return out;
+}
+
+int options_picture(const uint8_t* rgba, uint32_t w, uint32_t h, uint8_t** out_rgba, uint32_t* out_width,
+                    uint32_t* out_height) {
+    const bool lit = g_options_row.load() == 8;
+    std::lock_guard<std::mutex> lock(g_more_mutex);
+    Painted& p = g_more[lit ? 1 : 0];
+    if (!p.ready || p.rgba.size() != static_cast<size_t>(w) * h * 4) {
+        p.rgba = paint_more(rgba, w, h, lit);
+        p.lit = lit;
+        p.ready = true;
+    }
+    return give(p.rgba, w, h, out_rgba, out_width, out_height);
+}
+
 int load_screen(const uint8_t* rgba, uint32_t width, uint32_t height, uint8_t** out_rgba, uint32_t* out_width,
                 uint32_t* out_height) {
     uint32_t ow = width, oh = height;
@@ -455,7 +524,11 @@ bool titlevideo_claims_hash(uint32_t width, uint32_t height, uint64_t hash) {
 }
 
 uint64_t titlevideo_generation(uint32_t width, uint32_t height) {
-    return is_picture(width, height) && video_on() ? g.serial.load() : 1u;
+    if (!is_picture(width, height))
+        return 1u;
+    // The Options picture is redrawn when its ninth row is lit or not (the video's frames change the title's).
+    const uint64_t more = kOptionsMoreSerial | (g_options_row.load() == 8 ? 1u : 0u);
+    return video_on() ? g.serial.load() * 2u + (more & 1u) : more;
 }
 
 int titlevideo_apply(const uint8_t* rgba, uint32_t width, uint32_t height, uint64_t hash, uint8_t** out_rgba,
@@ -475,7 +548,7 @@ int titlevideo_apply(const uint8_t* rgba, uint32_t width, uint32_t height, uint6
         return load_screen(rgba, width, height, out_rgba, out_width, out_height);
     if (hash == kOptionsHash) {
         keep_skull(rgba);
-        return 0;  // kept as it is
+        return options_picture(rgba, width, height, out_rgba, out_width, out_height);
     }
     return hash == kTitleHash ? title_picture(rgba, width, height, out_rgba, out_width, out_height) : 0;
 }
@@ -532,3 +605,6 @@ int title_picture(const uint8_t* rgba, uint32_t width, uint32_t height, uint8_t*
 }
 
 }  // namespace
+
+// The title Options' cursor row as its frame draws (hle.c, the game thread): row 8 lights "More Options".
+extern "C" void titlevideo_options_row(int row) { g_options_row = row; }

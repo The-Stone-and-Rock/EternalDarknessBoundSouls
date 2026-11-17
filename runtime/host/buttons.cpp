@@ -13,6 +13,7 @@
 #include "host/fonts.h"
 #include "host/glyph_art.h"
 #include "host/lightmaps.h"
+#include "host/plaques.h"
 #include "host/tome.h"
 #include "host/titlevideo.h"
 #include "host/frontend.h"
@@ -279,7 +280,7 @@ bool load_png_rgba(const std::string& path, std::vector<uint8_t>* rgba, uint32_t
 bool claims_any(uint32_t format, uint32_t width, uint32_t height) {
     return titlevideo_claims(format, width, height) || claims(format, width, height) ||
            fonts_claims(format, width, height) || tome_claims(format, width, height) ||
-           art_claims(format, width, height);
+           art_claims(format, width, height) || plaques_claims(format, width, height);
 }
 
 // Of the textures the size of a redrawn one, only that one: the rest keep the
@@ -287,6 +288,8 @@ bool claims_any(uint32_t format, uint32_t width, uint32_t height) {
 bool claims_hash_any(uint32_t format, uint32_t width, uint32_t height, uint64_t hash) {
     if (titlevideo_claims(format, width, height) && titlevideo_claims_hash(width, height, hash))
         return true;
+    if (plaques_claims(format, width, height))
+        return plaques_claims_hash(hash);
     if (!tome_claims(format, width, height) && !art_claims(format, width, height))
         return true;
     return (tome_claims(format, width, height) && tome_claims_hash(hash)) ||
@@ -305,6 +308,8 @@ int apply_any(const uint8_t* rgba, uint32_t width, uint32_t height, uint64_t has
         return art_apply(rgba, width, height, hash, out_rgba, out_width, out_height);
     if (tome_claims(kCmpr, width, height) && tome_claims_hash(hash))
         return tome_apply(rgba, width, height, out_rgba, out_width, out_height);
+    if (plaques_claims(kCmpr, width, height) && plaques_claims_hash(hash))
+        return plaques_apply(rgba, width, height, hash, out_rgba, out_width, out_height);
     return lightmaps_apply(rgba, width, height, out_rgba, out_width, out_height);
 }
 
@@ -319,6 +324,8 @@ uint64_t generation_any(uint32_t format, uint32_t width, uint32_t height) {
         return fonts_generation();
     if (tome_claims(format, width, height) || art_claims(format, width, height))
         return art_generation();
+    if (plaques_claims(format, width, height))
+        return plaques_generation();
     return lightmaps_generation();
 }
 
