@@ -21,7 +21,8 @@ TRACE = re.compile(r'^\[trace\] script run r3 (-?\d+) r4 (-?\d+) lr (0x[0-9A-Fa-
 CALL = re.compile(r'^\[script\] calls (0x[0-9A-Fa-f]+) \((\d+) args\)')
 LR_NAMES = {'0x80134B38': 'a zone (enter/leave/stay or other_*)', '0x80163E5C': 'a timer or a queued run (waits)',
             '0x8000704C': 'a prompt press', '0x0BADF010': 'a host guest call', '0x80008280': 'play mode\'s start (ed177)',
-            '0x800082AC': 'the Tome\'s end (ed9)', '0x80164488': 'run next (fn73)'}
+            '0x800082AC': 'the Tome\'s end (ed9)', '0x80164488': 'run next (fn73)',
+            '0x7FFF0070': "player 2's run resumed by the host (their wait or press)"}
 
 
 def natives_by_addr():

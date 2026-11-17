@@ -635,6 +635,11 @@ def cmd_zoom(argv):
     zoom.cmd_zoom(argv)
 
 
+def cmd_check(argv):
+    import check
+    check.cmd_check(argv)
+
+
 def cmd_keep(argv):
     import know
     know.cmd_keep(argv)

@@ -65,3 +65,11 @@ A recording holds only what it reads, so believe what the user saw over it. The 
 **A fresh state for each step, from Jump to Game (the user, 2026-11-11):** a `.state` made on an older build is not a clean start once the host code changes, so make one per step and throw it away after. `sh tools/ed/jtg.sh CHAPTER NAME` boots through the title and Jump to Game; `ED_RUN_SCRIPT` takes the door scripts to the room (`ed door ROOM` for the chain, a prompted door twice 60 frames apart); `ED_SAVE_STATE=FRAME:PATH[,...]` (absolute frame, as `ED_PUT` counts) saves the state from the run, with both players idle. Chapter 1 to room 183 is in `docs/coop-next-session.md`. `JTG_EXE=build-win/var-NAME.exe JTG_SLOT=1` runs a `tools/ed/variant.sh` build without touching the user's exe. `ED_ROOM_SLOTS=2` turns the game's own two-slot room system on with 8 MB more RAM (a state made with it is 56 MB and loads only with it; `[rooms]` lines); `ED_COOP_STAY=1` with it: the other player stays in their room when one takes a door, each half its own room, doors from either side, and the sound rule (player 1 holds the music; the stayer's room keeps its sounds; `[stay]`, `[sound]` and `[dtk]` lines; the separate-rooms step, R1-R5). `ED_LOAD_STATE=FRAME:PATH[,...]` loads a state at an absolute frame inside a run (a load under an open window); the frame goes back to the state's, `ED_RUN_SCRIPT`'s delays then count from the load, and absolute entries re-arm, so put a load last. A variant run through `tools/ed/.run_exe_tmp.sh` (RUN_EXE) is closed by its own exe name.
 
 `ED_INPUT_SCRIPT` goes round `controls.cpp`, so player 1's button handling needs the user's play. Say what wasn't covered.
+
+## Checking a script or region in play: `ed check`
+
+`ed check L09/1951 [--flag N] [--press a|b|none] [--modes solo,together,apart,p1] [--hero] [--dry]` (or `ROOM:REGION
+--level N`): from the kit's tables it finds the chapter, a door script into the room and one out, puts each player in
+the region and presses, runs solo, together (follow mode) and apart (the stay), all logged with pictures, and reports
+every run of the script: who ran it, from where, where it stopped, against solo. `--dry` prints the plan only. Then
+`ed stops RUN SCRIPT` and `ed zoom RUN FRAME [X Y W H]` for the detail. build/check/NAME/report.md keeps the report.
