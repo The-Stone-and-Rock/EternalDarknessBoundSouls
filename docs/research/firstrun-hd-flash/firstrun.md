@@ -467,3 +467,139 @@ again in the code, disasm.txt, the logs and both pipeline databases (sqlite, ope
   game thread. With them, step 2 is less risky than the page says.
 - Step 5 is the weak part. Its press script, card and cache folder need the changes above, and the user should first
   say which "music" they mean.
+
+## Built: step F4 (2026-11-17)
+
+Steps 1-4, 6 and 8 are built. Step 5 (the launcher music) is not: the user said the launcher music is fine to keep.
+Step 7 was already done by F3 (the boot workers); the page waits for it. Nothing is committed.
+
+### What was built
+
+- **Step 1, the shipped pipeline list.** `tools/pipeline_seed.py make` copies the player's `pipeline_cache.db` (and its
+  -wal) to a temp folder and reads only the copy. It keeps only rows at the current versions, read from the renderer's
+  source (GX 13, Rml 2, GXCore 13, Clear 2). `res/initial_pipeline_cache.db` is now 6,642 rows (6,626 GXCore v13),
+  7,073,792 B. `tools/pipeline_seed.py check` fails on a stale list; the old one failed ("295 GXCore rows at version 10").
+- **The seed merge (GXRuntime patch, pipeline_cache.cpp).** A seed row at another version is skipped. A seed row replaces
+  a player's row only when the player's row is older (`... DO UPDATE ... WHERE pipeline_cache.config_version <
+  excluded.config_version`). So a seed can never age a newer row. The merge prints on stderr: "[pipelines] seeded from
+  '...' (6642 rows merged, 0 skipped ...)".
+- **Step 2, the Options picture from the game's memory.** `title_options_from_bank` (hle.c), called from
+  `title_main_draw`. Once a run, and only while `options.rgba` is missing, it reads the bank at TITLE_RECORD+16, checks
+  the magic 0x0020AF30 and the count, and walks the pictures (picture 2 first). Only an 850x480 CMPR picture whose
+  XXH64 is `kOptionsHash` is handed to `titlevideo_options_from_bank` (titlevideo.cpp). That decodes it on a worker with
+  `gxruntime::gxcore::decode_texture` and calls `keep_skull`. No flip, and no `titlevideo_title_art` call in the hook.
+  CMakeLists.txt links `GXRuntime::gxcore` into the host.
+- **Step 3, the portraits.** `portrait_rml` calls `ensure_portraits` when a portrait file is missing, so a card or the
+  roster makes them. `ensure_portraits` reads the launcher's disc, else the run's disc (`frontend_set_disc`, called by
+  main.c once the disc path is known), so it also works with no launcher.
+- **Step 4, the "Preparing the game from your disc" page** (`run_preparing`, frontend.cpp; style `body.preparing` in
+  menu.rcss). It sits on the launcher's parchment, before the launcher menu, once a playable disc is found. It shows what
+  is being made, a bar, and "N of M" for the shaders. Pieces: the portraits (`ensure_portraits`), the pipelines (waits
+  until `aurora_get_stats()->queuedPipelines` is 0; bar = created / (created + queued)), and the HD title pictures (waits
+  for the boot's HD workers, `titlevideo_hd_busy`). B skips; what is not done is offered again next start. It stops after
+  5 minutes. The page is shown only when the work takes longer than 0.7 s, so a quick piece doesn't flash it. The page
+  waits 33 ms a frame (`ED_PREPARE_FRAME_MS`), see "Found" below. The launcher music goes on under it.
+  `ED_PREPARE=0` skips it, `ED_PREPARE=1` makes every piece again. A test with `ED_MENU_OPEN` skips it.
+  `--no-launcher`, `ED_QUICKLOAD` and `ED_NO_LAUNCHER` never reach it.
+- **Step 6, the stamps.** `res/firstrun.txt` ("portraits 1 GEDP01", "hd ..." with the pack file's size, time and path,
+  or "hd off") and `prepared.txt` in the renderer's cache folder ("pipelines SIZE XXH64" of the shipped list). A cleared
+  cache, a new shipped list, an older portraits version, or a new pack shows the page again. `.gitignore` has
+  `res/firstrun.txt`.
+- **Step 8, package checks** (make-win-package.sh): it fails if `res/music/*`, `res/video/options*`, `mark-*`,
+  `res/firstrun.txt` or one of the 12 disc portraits is in the package, and runs `pipeline_seed.py check` on the packed
+  list. Tried on a made-up folder (clean, then with three made files, then with the old list). The whole script was not
+  run (no stage folder here). The stale note in tools/title_video.py is fixed.
+- Test switch: `ED_LAUNCHER_TEST_KEYS="a"` presses on the launcher (as `ED_PAGE_TEST_KEYS`).
+
+### What was seen (runs with a scratch install: ED_RES_DIR, AURORA_CACHE_DIR, ED_SETTINGS and ED_CARD in a scratch
+folder; the user's res, caches, settings and card not used; the user's pipeline_cache.db md5 unchanged)
+
+- **A true fresh install** (empty res made files, empty caches, new settings and card): logs/run-20261117-141833-fresh4-first.
+  - The page and its bar: Screenshots for Claude/f4-first-run/01 to 03 (36 of 6,642, then the bar near the end).
+  - "[prepare] done in 132227 ms (portraits 23 ms, pipelines 132225 ms)". The seed merged 6,642 rows.
+  - Then the title (English, "Continue without saving" on the new card's questions), then Choose Character at frame
+    1121, before Options was ever opened. The log has "the Options picture handed over from the title bank (picture 2
+    of 83, frame 861)", "taken from the game's memory at the title (5 ms)", then "the title look's picture written" and
+    "the title look's backdrop: the disc's". No "NOT written ... black" line. Picture 04: the cards on the skull, not
+    black. Picture 05: the roster with the disc's portraits.
+  - The kept `options.rgba` and the written `options-clean.png` have the same md5 as the user's own files
+    (f38273fc... and 8e720ee7...), here and in run -140943.
+- **The second start** (same scratch): "[prepare] everything prepared already", no page; the warm list built in the
+  background in 4,724 ms (run -141417-fresh3-second).
+- **HD turned on** (same scratch, the pack named with ED_TEXTURE_PACK): only the HD piece, 319 ms; Choose Character
+  on the HD skull (picture 07, run -141459-fresh3-hd). After the 0.7 s rule, the same case (235 ms) shows no page
+  (run -141617).
+- **No launcher, a chosen character** (`mod_p1_character = 4`, no portraits in res): the card made them and shows
+  Karim (picture 06, run -142420-fresh6-nolauncher-card).
+
+### Timings on this PC
+
+- Cold (empty Dawn cache): 163 s and 162 s with a busy page loop; 132 s with 33 ms frames (run -141833); 132 s with
+  100 ms frames (run -142146-fresh5-cold-100ms). So 132 s is the compile itself, about 20 ms a pipeline on one worker.
+- Warm (Dawn cache kept, `ED_PREPARE=1`): 30.1 s with the busy loop (run -141626-fresh3-warm-again), 3.1 s with 33 ms frames
+  (run -141808-fresh3-warm-33ms).
+- Portraits: 18-26 ms. HD pictures: 233-306 ms. Options picture from memory: 5-6 ms on the worker.
+
+### Found
+
+- **A busy UI loop starves the pipeline worker.** With the page drawn as fast as it could go, a warm build took 30 s;
+  with a 33 ms wait a frame, 3 s. The launcher menu's own loop (run_menu) has no wait either, so pipelines building
+  behind the launcher menu are likely slowed the same way [inferred, not measured]. Not changed here.
+- **A new card asks for the language first** ("Please select your language", then "Save Game Settings", then which slot).
+  This is the game's own first-start flow, not ours. A fresh install's player sees it once.
+
+### Not seen
+
+- A real release folder (play.bat, the zip) and the full package script.
+- Another language's disc: step 2 then takes nothing (the hash check), and Options keeps it as before.
+- The user's own first start: their cache has no `prepared.txt` and their res has no `firstrun.txt`, so they will see
+  the page once, for about 3-5 s (warm), then never again until an update.
+- Closing the window during the page (it returns false, and the launcher closes: from the code only).
+
+## Built: step F4 review fixes (2026-11-17)
+
+Three review findings. Two were the same problem, and both were real. The third was real too.
+
+- **The shipped list held both anti-aliasing settings, and all of it was built.** The list came from the user's own
+  cache, which has rows from play at 4x MSAA as well as 1x. Of its 6,626 GXCore rows, 4,568 are 4x and 2,058 are 1x (counted again
+  here: the run's log says "4568 ... left unbuilt"). A new player starts with anti-aliasing off (settings.c), so the
+  renderer runs at 1x (main.c `.msaa`), and its sample count is fixed for the run (webgpu `g_graphicsConfig`). The
+  page still waited for all 6,642.
+  - **Fix (GXRuntime patch, pipeline_cache.cpp `load_pipeline_cache_entries`):** a row whose `msaaSamples` is not 1
+    and not this run's count is skipped at start. It is not deleted, so a later run with that setting still builds it.
+    1x rows are always built, because the offscreen passes draw at 1x (common.cpp). The log says
+    "[pipelines] N cached pipelines of type 3 left unbuilt: another anti-aliasing setting (1x now)".
+  - **The stamp now names the setting** (frontend.cpp `run_preparing`): `prepared.txt` is
+    "pipelines SIZE XXH64 msaa N". Turning 4x on (or off) shows the page once more, for the other setting's rows.
+  - The list itself is unchanged (`tools/pipeline_seed.py` keeps both settings, and says so).
+- **The package check read the versions from this checkout's `.deps`, not from the packaged commit.** On a machine
+  with no `.deps`, or with `.deps` unpatched, it crashed or read GXCore 8 and failed a good list.
+  - **Fix:** `pipeline_seed.py check DB --commit COMMIT` reads the GXRuntime pin from that commit's
+    `tools/setup-deps.sh`, the pinned header with `git show`, and the patch's own `+constexpr ... = N;` line from that
+    commit's `patches/gxruntime/eternal-darkness.patch`. The working tree's `.deps` state does not matter. A missing
+    `.deps` gives a clear message. `make-win-package.sh` passes `--commit "$COMMIT"`.
+  - Tried: HEAD and the working tree pass (GXCore 13); the old 295-row list fails at HEAD; the new list fails at
+    7a4c662 (wants 11) and at 76986e6 (no patch line, the pinned header's 8); the old list passes at 77d35b0 (10).
+
+### Seen (scratch install in the scratch folder f4r1: ED_RES_DIR, AURORA_CACHE_DIR, ED_SETTINGS, ED_CARD)
+
+- **Fresh install, default settings (1x), cold:** logs/run-20261117-143748-f4fix-cold1x. "4568 ... left unbuilt",
+  "2074 cached pipelines built at start in 46023 ms", "[prepare] done in 45307 ms". It was 132 s before the fix.
+  Pictures in `Screenshots for Claude/f4-review-fixes/`: 01 the page at "313 of 2,074", 02 the launcher after it,
+  03 Choose Character on the skull (frame 1121, before Options was opened), 04 the roster with the disc's portraits.
+  The Options picture was again taken from the title bank (picture 2 of 83, frame 861).
+- **The same scratch, 4x turned on:** logs/run-20261117-144018-f4fix-aa4-after1x. The page came again (stamp
+  "msaa 1" against "msaa 4"). No rows left unbuilt; all 6,642 built in 113 s (the 4x ones cold). Picture 05: the page at
+  "1,448 of 6,642".
+- **Back to 1x:** logs/run-20261117-144237-f4fix-back-to-1x. 2,074 built in 1.3 s; the step was done in 689 ms, under
+  the 0.7 s rule, so no page was shown.
+- The user's own `pipeline_cache.db` and -wal md5 are unchanged, and there is still no `prepared.txt` in their folder.
+
+### Not seen
+
+- A player who turns 4x on after a 1x run builds the 4x rows cold once (the page, about 70-110 s here). After a 1x run,
+  Dawn's prune (gpu_cache.cpp `cache_prune`) drops the 4x compiled blobs it did not use. So going 4x, 1x, 4x builds the
+  4x rows cold again [from the code; the 1x-then-4x case was seen, the second 4x was not run].
+- The full package script on a real stage folder (there is none here).
+- The user's own next start. Their settings.ini says `anti_aliasing = 0` now, so the 4x rows in their cache will be
+  left unbuilt, and the page should be shorter than the 3-5 s expected before (warm, 1x rows only).

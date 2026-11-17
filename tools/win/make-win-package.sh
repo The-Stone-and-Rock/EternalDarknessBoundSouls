@@ -59,6 +59,24 @@ found=$(find "$P" \( -iname '*.dol' -o -iname '*.iso' -o -iname '*.gcm' -o -inam
     -o -iname '*.dolcard' -o -iname '*.state' -o -name settings.ini -o -name env.txt \) -print)
 [ -z "$found" ] || { echo "make-win-package.sh: game or player files in the package:" >&2; echo "$found" >&2; exit 2; }
 
+# What the first-run step makes from the player's own disc (frontend.cpp run_preparing, hle.c
+# title_options_from_bank) never ships: the launcher's music, the title Options picture and its paints, the twelve
+# characters' portraits (the forms' NAME-FORM.png are the project's own and ship), and the step's stamps.
+made=$(find "$P" \( -path "$P/res/music/*" -o -path "$P/res/video/options*" -o -path "$P/res/video/mark-*" \
+    -o -path "$P/res/firstrun.txt" \) -print)
+for name in Pius Ellia Anthony Karim Roberto Max Edward Paul Michael Peter Lindsey Alex; do
+    [ -e "$P/res/ui/portraits/$name.png" ] && made="$made
+$P/res/ui/portraits/$name.png"
+done
+made=$(printf '%s\n' "$made" | sed '/^$/d')
+[ -z "$made" ] || { echo "make-win-package.sh: pictures or music made from a disc in the package:" >&2; echo "$made" >&2; exit 2; }
+
+# The shipped pipeline list must be at the renderer's current versions, or it does nothing at all (each version
+# bump empties it): python -I tools/pipeline_seed.py make, from a full play's list. The versions are those of the
+# exe's commit (its GXRuntime pin and patch), not of this checkout's .deps.
+python -I "$SRC/tools/pipeline_seed.py" check "$P/res/initial_pipeline_cache.db" --commit "$COMMIT" ||
+    { echo "make-win-package.sh: the shipped pipeline list is stale" >&2; exit 2; }
+
 mkdir -p "$OUTDIR"
 zip_path="$OUTDIR/EternalDarknessBoundSouls-windows-x64-${VERSION:+$VERSION-}$STAMP-$COMMIT.zip"
 rm -f "$zip_path"

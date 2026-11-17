@@ -232,3 +232,16 @@ Turn the title video off (Mods) with HD textures on (Graphics), and restart.
     outline of the old "Options" letters. A soft, slightly lighter patch of hair there is expected; say if it shows.
   - If you install a different HD pack, the skull behind Choose Character should match the new pack on the next start.
   - Close the launcher right after it opens: the game should close at once, with no error.
+
+## 11. The first start: "Preparing the game from your disc" (2026-11-17)
+- Start the game from play.bat or the launcher as usual. The first time after this change, a page "Preparing the game
+  from your disc" should show on the launcher's parchment for a few seconds, with a bar, then the launcher menu.
+- Start again: the page should not show.
+- On a new PC (or after deleting `%APPDATA%\Eternal Darkness`), the page takes longer (about 2 minutes here, the
+  shaders built for the graphics card; about 45 s after the review fix, with anti-aliasing off). Say how long it took, and whether the game looked smoother after it.
+- Press B on the page: the launcher should open at once, and the page should come back on the next start.
+- Then on the title, open Choose Character before Options: the skull should be behind the cards, not black.
+- Say if the page looks out of place, or if the bar ever stops moving for a long time.
+- (Added after the review, 2026-11-17.) The page builds only the shaders for your anti-aliasing setting. On a new PC
+  with anti-aliasing off it took about 45 s here. Turn 4x MSAA on in the launcher's Options and start again: the page
+  should come once more, longer (about 2 minutes here), then not again. Turn it off again: no page, or a very short one.

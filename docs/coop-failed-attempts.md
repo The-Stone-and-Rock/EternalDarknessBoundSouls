@@ -999,3 +999,20 @@ had almost nothing to keep in the middle (`keep` near 0): hard-edged dark square
 (run logs/run-20261117-132942-jtg-f3fix-ghost, `Screenshots for Claude/f3-review-fixes/paint-hd-unlit.png`).
 What worked: the same test only within 2k of the letters (`prox`, the letters' mask grown by 2k), then grown by k/2
 (run -133138, compare-ghost-before-after-lit-2x.png).
+
+## The first-run page drawn as fast as it could go: the pipeline worker starved (2026-11-17, step F4)
+The first "Preparing the game" page (`run_preparing`, frontend.cpp) drew a frame each loop with no wait, as
+`run_menu` does:
+```cpp
+        if (!dol_aurora_ui_frame()) {
+            open = false;
+            break;
+        }
+        frames++;
+    }
+```
+With a warm shader cache the shipped list (6,642 pipelines) then took 30.1 s to build (logs/run-20261117-141626-
+fresh3-warm-again), against 3-5 s when the game ran instead. A cold cache took 162-170 s (runs -140005, -140421,
+-140943).
+What worked: a 33 ms wait after each frame (`SDL_Delay`, `ED_PREPARE_FRAME_MS`): warm 3.1 s (run -141808), cold 132 s
+(run -141833). 100 ms gave the same cold time (run -142146), so 132 s is the compile itself.

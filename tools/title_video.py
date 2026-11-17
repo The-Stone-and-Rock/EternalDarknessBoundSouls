@@ -3,8 +3,8 @@
 
 Mods' Title video plays it in a loop behind the title menu, in place of the
 game's still picture (titlevideo.cpp); the game's own music goes on. The
-video is made from the game's art, so it is not in this repository: this
-converts yours into res/video/title.mpg (git ignores it), MPEG-1 for the
+project ships its own video there (res/video/title.mpg, kept by .gitignore's
+!res/video/title.mpg); this converts yours over it, MPEG-1 for the
 decoder the program carries (runtime/third_party/pl_mpeg.h), without sound,
 1280x720 at 60 frames a second, with its bottom-left corner (a small label)
 blurred.

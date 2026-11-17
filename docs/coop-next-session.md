@@ -3,6 +3,42 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: step F4 review fixes (checkpoint commit with F4)
+docs/research/firstrun-hd-flash/firstrun.md ("Built: step F4 review fixes").
+- **The first start now builds only the shaders for the player's anti-aliasing setting.** The shipped list has 4,568
+  rows for 4x MSAA and 2,074 others; a new player is at 1x, so the 4x ones are left unbuilt (kept for later). A cold
+  fresh install's page went from 132 s to 45 s (run -143748-f4fix-cold1x; pictures 01-04 in
+  `Screenshots for Claude/f4-review-fixes/`: the page "313 of 2,074", the launcher, Choose Character on the skull, the
+  roster's portraits). GXRuntime patch: pipeline_cache.cpp `load_pipeline_cache_entries`.
+- **Turning 4x on shows the page once more** (`prepared.txt` now ends "msaa N"): run -144018, all 6,642 in 113 s,
+  picture 05. Back to 1x: 0.7 s, no page (run -144237).
+- **The package's list check reads the versions of the packaged commit** (`pipeline_seed.py check --commit`), not the
+  working tree's `.deps`. Tried on old commits (passes and fails as it should). The full package script was not run.
+- Not seen: 4x, then 1x, then 4x again (Dawn's prune should make the 4x rows cold again: from the code).
+
+## 2026-11-17: the first-run preparing step, step F4 (checkpoint commit with its review fixes)
+docs/research/firstrun-hd-flash/firstrun.md ("Built: step F4"). The launcher music (step 5) was left out: the user
+said it is fine to keep.
+- **The launcher shows "Preparing the game from your disc"** on the first start, after an update (a new shipped
+  pipeline list), after the cache is cleared, or with a new HD pack: a bar on the launcher's parchment while the
+  portraits are made, the shaders are built from the shipped list and the HD title pictures are made. Stamps:
+  `res/firstrun.txt` and `prepared.txt` in the cache folder. The second start skips it. B skips it for now.
+- **The shipped pipeline list is current again** (6,642 rows at GXCore 13; it was 295 rows at version 10, all thrown
+  away at each start). `tools/pipeline_seed.py make` / `check`; the package fails on a stale one. The seed merge can no
+  longer age a newer row (GXRuntime patch).
+- **The title's Options picture is taken from the game's memory on the title's first frame** (`title_options_from_bank`
+  in hle.c, decoded with the renderer's own decoder). So Choose Character from the title has the skull behind it on a
+  fresh install, before Options is ever opened. The file is byte-identical to the one Options used to make.
+- **The portraits are made wherever one is shown** (a card, the roster), also with no launcher.
+- Seen in a true fresh install in a scratch folder (run -141833-fresh4-first, pictures in
+  `Screenshots for Claude/f4-first-run/`): the page and bar (01-03), the cards on the skull (04), the roster's portraits
+  (05); a second start with no page; HD on (07); no launcher with Karim chosen (06).
+- Timings here: a cold first start 132 s for the shaders; a warm rebuild 3 s; portraits 20 ms; HD 0.3 s.
+- Found: a UI loop with no wait starves the pipeline worker (warm 30 s instead of 3 s). The page waits 33 ms a frame.
+  The launcher menu's loop has no wait either [inferred to slow pipelines behind it; not changed].
+- The user's own next start shows the page once (their cache has no stamp yet), about 3-5 s.
+- For the user: docs/coop-play-test.md section 11.
+
 ## 2026-11-17: the HD title picture with the title video off, step F3 (checkpoint commit, with the review's fixes)
 docs/research/firstrun-hd-flash/hdtitle.md ("Built: step F3" and "Built: step F3 review fixes").
 - **Review fixes:** the HD backdrop now has a stamp beside it (`options-clean-hd.png.stamp`: code version, scale, the

@@ -708,6 +708,10 @@ int main(int argc, char** argv) {
         iso_path = getenv("ED_ISO");
     if (iso_path == NULL || iso_path[0] == '\0')
         iso_path = "dump/" ED_GAME_ID ".iso";
+#ifdef ED_AURORA
+    if (aurora_enabled)
+        frontend_set_disc(iso_path);  // (the portraits are made from it, also with no launcher)
+#endif
     // A ready-made build has no main.dol of its own: take it from the disc.
     FILE* have_dol = fopen(dol_path, "rb");
     if (have_dol != NULL)

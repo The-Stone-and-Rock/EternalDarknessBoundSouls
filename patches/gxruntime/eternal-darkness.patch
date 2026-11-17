@@ -12191,7 +12191,7 @@ index 0000000..6b99030
 +                       PhotoFlare flare, const Mist* mist = nullptr);
 +} // namespace aurora::gfx::interp
 diff --git a/graphics/aurora/lib/gfx/pipeline_cache.cpp b/graphics/aurora/lib/gfx/pipeline_cache.cpp
-index 822a560..16ff80d 100644
+index 822a560..9ddfad5 100644
 --- a/graphics/aurora/lib/gfx/pipeline_cache.cpp
 +++ b/graphics/aurora/lib/gfx/pipeline_cache.cpp
 @@ -1,3 +1,4 @@
@@ -12231,7 +12231,17 @@ index 822a560..16ff80d 100644
      // Prune GPU cache entries after fully loading the pipeline cache.
      webgpu::cache_prune();
    }
-@@ -597,6 +609,14 @@ static std::string pipeline_cache_seed_path() {
+@@ -586,7 +598,8 @@ static void pipeline_cache_abort() {
+   }
+ }
+ 
+-static bool write_pipeline_cache_record(const PipelineCacheWrite& write);
++// GXRuntime recomp patch: the seed's rows go through their own statement (seed_pipeline_cache).
++static bool write_pipeline_cache_record(const PipelineCacheWrite& write, sqlite3_stmt* stmt = nullptr);
+ 
+ static std::string pipeline_cache_seed_path() {
+   if (g_config.resourcesPath == nullptr || g_config.resourcesPath[0] == '\0') {
+@@ -597,6 +610,14 @@ static std::string pipeline_cache_seed_path() {
    if (path.back() != '/' && path.back() != '\\') {
      path += '/';
    }
@@ -12246,7 +12256,171 @@ index 822a560..16ff80d 100644
    path += InitialPipelineCacheName;
    return path;
  }
-@@ -1031,8 +1051,34 @@ static void pipeline_worker() {
+@@ -635,6 +656,28 @@ static sqlite3* open_pipeline_cache_seed_db(const std::string& path) {
+   return seedDb;
+ }
+ 
++// GXRuntime recomp patch: the version each type's rows must have to be kept (prune_old_pipeline_cache_versions
++// deletes the rest); 0 for a type this build doesn't have.
++static uint32_t current_pipeline_config_version(int type) {
++  if (type == underlying(ShaderType::Clear)) {
++    return clear::ClearPipelineConfigVersion;
++  }
++  if (type == underlying(ShaderType::GX)) {
++    return gx::GXPipelineConfigVersion;
++  }
++#ifdef AURORA_ENABLE_RMLUI
++  if (type == underlying(ShaderType::Rml)) {
++    return rmlui::RmlPipelineConfigVersion;
++  }
++#endif
++#ifdef AURORA_ENABLE_GXCORE
++  if (type == underlying(ShaderType::GXCore)) {
++    return gxcore::GXCorePipelineConfigVersion;
++  }
++#endif
++  return 0;
++}
++
+ static void seed_pipeline_cache() {
+   if (g_pipelineCacheBroken || g_pipelineCacheDb == nullptr || g_pipelineCacheUpsertStmt == nullptr) {
+     return;
+@@ -647,13 +690,34 @@ static void seed_pipeline_cache() {
+   }
+ 
+   sqlite3_stmt* seedStmt = nullptr;
++  // GXRuntime recomp patch: a seed row replaces a player's row only when the player's is older (and would be pruned):
++  // the runtime's own upsert would put an older seed row over a newer one, and the prune would then delete it.
++  sqlite3_stmt* mergeStmt = nullptr;
+   auto closeSeed = [&] {
+     if (seedStmt != nullptr) {
+       sqlite3_finalize(seedStmt);
+       seedStmt = nullptr;
+     }
++    if (mergeStmt != nullptr) {
++      sqlite3_finalize(mergeStmt);
++      mergeStmt = nullptr;
++    }
+     sqlite3_close(seedDb);
+   };
++  if (sqlite3_prepare_v3(g_pipelineCacheDb,
++                         "INSERT INTO pipeline_cache (type, hash, config_version, config_size, config, first_frame_used) "
++                         "VALUES (?, ?, ?, ?, ?, ?) "
++                         "ON CONFLICT(type, hash) DO UPDATE SET "
++                         "config_version = excluded.config_version, "
++                         "config_size = excluded.config_size, "
++                         "config = excluded.config, "
++                         "first_frame_used = MIN(pipeline_cache.first_frame_used, excluded.first_frame_used) "
++                         "WHERE pipeline_cache.config_version < excluded.config_version",
++                         -1, 0, &mergeStmt, nullptr) != SQLITE_OK) {
++    Log.warn("Failed to prepare pipeline cache seed merge: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    closeSeed();
++    return;
++  }
+ 
+   auto ret = sqlite3_prepare_v3(seedDb,
+                                 "SELECT type, hash, config_version, config_size, config, first_frame_used "
+@@ -693,6 +757,11 @@ static void seed_pipeline_cache() {
+         ++skippedRows;
+         continue;
+       }
++      // GXRuntime recomp patch: a row at another version would only be pruned (or age a newer row): left out.
++      if (static_cast<uint32_t>(configVersionValue) != current_pipeline_config_version(typeValue)) {
++        ++skippedRows;
++        continue;
++      }
+ 
+       PipelineCacheWrite write{
+           .type = static_cast<ShaderType>(typeValue),
+@@ -705,7 +774,7 @@ static void seed_pipeline_cache() {
+         std::memcpy(write.config.data(), configBlob, static_cast<size_t>(configBlobSize));
+       }
+ 
+-      if (!write_pipeline_cache_record(write)) {
++      if (!write_pipeline_cache_record(write, mergeStmt)) {
+         writeFailed = true;
+         break;
+       }
+@@ -730,7 +799,9 @@ static void seed_pipeline_cache() {
+   }
+ 
+   if (!readFailed) {
+-    Log.info("Seeded pipeline cache from '{}' ({} rows merged, {} rows skipped)", seedPath, mergedRows, skippedRows);
++    // GXRuntime recomp patch: on stderr, so a run's log shows the seed was read (and whether it was stale).
++    std::fprintf(stderr, "[pipelines] seeded from '%s' (%u rows merged, %u skipped: other versions or bad)\n",
++                 seedPath.c_str(), mergedRows, skippedRows);
+   }
+ }
+ 
+@@ -895,52 +966,55 @@ static void prune_old_pipeline_cache_versions() {
+ #endif
+ }
+ 
+-static bool write_pipeline_cache_record(const PipelineCacheWrite& write) {
++static bool write_pipeline_cache_record(const PipelineCacheWrite& write, sqlite3_stmt* stmt) {
++  if (stmt == nullptr) {
++    stmt = g_pipelineCacheUpsertStmt;
++  }
+   const auto fail = [&]() {
+-    sqlite3_reset(g_pipelineCacheUpsertStmt);
+-    sqlite3_clear_bindings(g_pipelineCacheUpsertStmt);
++    sqlite3_reset(stmt);
++    sqlite3_clear_bindings(stmt);
+     return false;
+   };
+ 
+-  auto ret = sqlite3_bind_int(g_pipelineCacheUpsertStmt, 1, underlying(write.type));
++  auto ret = sqlite3_bind_int(stmt, 1, underlying(write.type));
+   if (ret != SQLITE_OK) {
+     Log.error("Failed to bind pipeline cache type: {}", sqlite3_errmsg(g_pipelineCacheDb));
+     return fail();
+   }
+-  ret = sqlite3_bind_int64(g_pipelineCacheUpsertStmt, 2, static_cast<sqlite3_int64>(write.hash));
++  ret = sqlite3_bind_int64(stmt, 2, static_cast<sqlite3_int64>(write.hash));
+   if (ret != SQLITE_OK) {
+     Log.error("Failed to bind pipeline cache hash: {}", sqlite3_errmsg(g_pipelineCacheDb));
+     return fail();
+   }
+-  ret = sqlite3_bind_int(g_pipelineCacheUpsertStmt, 3, static_cast<int>(write.configVersion));
++  ret = sqlite3_bind_int(stmt, 3, static_cast<int>(write.configVersion));
+   if (ret != SQLITE_OK) {
+     Log.error("Failed to bind pipeline cache config version: {}", sqlite3_errmsg(g_pipelineCacheDb));
+     return fail();
+   }
+-  ret = sqlite3_bind_int(g_pipelineCacheUpsertStmt, 4, static_cast<int>(write.config.size()));
++  ret = sqlite3_bind_int(stmt, 4, static_cast<int>(write.config.size()));
+   if (ret != SQLITE_OK) {
+     Log.error("Failed to bind pipeline cache config size: {}", sqlite3_errmsg(g_pipelineCacheDb));
+     return fail();
+   }
+-  ret = sqlite3_bind_blob64(g_pipelineCacheUpsertStmt, 5, write.config.data(), write.config.size(), SQLITE_TRANSIENT);
++  ret = sqlite3_bind_blob64(stmt, 5, write.config.data(), write.config.size(), SQLITE_TRANSIENT);
+   if (ret != SQLITE_OK) {
+     Log.error("Failed to bind pipeline cache config blob: {}", sqlite3_errmsg(g_pipelineCacheDb));
+     return fail();
+   }
+-  ret = sqlite3_bind_int64(g_pipelineCacheUpsertStmt, 6, static_cast<sqlite3_int64>(write.firstFrameUsed));
++  ret = sqlite3_bind_int64(stmt, 6, static_cast<sqlite3_int64>(write.firstFrameUsed));
+   if (ret != SQLITE_OK) {
+     Log.error("Failed to bind pipeline cache first-frame-used: {}", sqlite3_errmsg(g_pipelineCacheDb));
+     return fail();
+   }
+ 
+-  ret = sqlite3_step(g_pipelineCacheUpsertStmt);
++  ret = sqlite3_step(stmt);
+   if (ret != SQLITE_DONE) {
+     Log.error("Failed to upsert pipeline cache row: {}", sqlite3_errmsg(g_pipelineCacheDb));
+     return fail();
+   }
+ 
+-  sqlite3_reset(g_pipelineCacheUpsertStmt);
+-  sqlite3_clear_bindings(g_pipelineCacheUpsertStmt);
++  sqlite3_reset(stmt);
++  sqlite3_clear_bindings(stmt);
+   return true;
+ }
+ 
+@@ -1031,8 +1105,34 @@ static void pipeline_worker() {
    }
  }
  
@@ -12283,15 +12457,16 @@ index 822a560..16ff80d 100644
    if (!prepare_pipeline_cache_db()) {
      return 0;
    }
-@@ -1051,6 +1097,7 @@ static size_t load_pipeline_cache_entries(ShaderType type, uint32_t configVersio
+@@ -1051,6 +1151,8 @@ static size_t load_pipeline_cache_entries(ShaderType type, uint32_t configVersio
    }
  
    size_t acceptedRows = 0;
++  size_t otherSampleRows = 0;
 +  std::vector<PipelineRef> stale;
    while ((ret = sqlite3_step(g_pipelineCacheLoadStmt)) == SQLITE_ROW) {
      const auto* configBlob = static_cast<const uint8_t*>(sqlite3_column_blob(g_pipelineCacheLoadStmt, 0));
      const auto configSize = sqlite3_column_bytes(g_pipelineCacheLoadStmt, 0);
-@@ -1064,6 +1111,10 @@ static size_t load_pipeline_cache_entries(ShaderType type, uint32_t configVersio
+@@ -1064,6 +1166,19 @@ static size_t load_pipeline_cache_entries(ShaderType type, uint32_t configVersio
      if (config.version != configVersion) {
        continue;
      }
@@ -12299,18 +12474,31 @@ index 822a560..16ff80d 100644
 +      stale.push_back(xxh3_hash(config, static_cast<HashType>(type)));
 +      continue;
 +    }
++    // GXRuntime recomp patch: a row for another anti-aliasing sample count can't be drawn with by this run (the
++    // renderer's count is fixed at start: the main pass at g_graphicsConfig.msaaSamples, the offscreen passes at 1).
++    // Not built, so the first-run page doesn't wait for it, but kept in the cache for a run with that setting.
++    if constexpr (requires { config.msaaSamples; }) {
++      if (config.msaaSamples != 1 && config.msaaSamples != webgpu::g_graphicsConfig.msaaSamples) {
++        ++otherSampleRows;
++        continue;
++      }
++    }
  
      find_pipeline_impl(type, config, [=] { return create(config); }, PipelinePriority::Background, firstFrameUsed);
      ++acceptedRows;
-@@ -1076,6 +1127,7 @@ static size_t load_pipeline_cache_entries(ShaderType type, uint32_t configVersio
+@@ -1076,6 +1191,11 @@ static size_t load_pipeline_cache_entries(ShaderType type, uint32_t configVersio
  
    sqlite3_reset(g_pipelineCacheLoadStmt);
    sqlite3_clear_bindings(g_pipelineCacheLoadStmt);
 +  delete_pipeline_cache_rows(type, stale);
++  if (otherSampleRows > 0) {
++    std::fprintf(stderr, "[pipelines] %zu cached pipelines of type %d left unbuilt: another anti-aliasing setting (%ux now)\n",
++                 otherSampleRows, underlying(type), webgpu::g_graphicsConfig.msaaSamples);
++  }
    return acceptedRows;
  }
  
-@@ -1090,16 +1142,18 @@ static size_t load_pipeline_cache() {
+@@ -1090,16 +1210,18 @@ static size_t load_pipeline_cache() {
  
    size_t acceptedRows = 0;
  #ifdef AURORA_ENABLE_RMLUI
@@ -12334,7 +12522,7 @@ index 822a560..16ff80d 100644
  #endif
    return acceptedRows;
  }
-@@ -1146,9 +1200,62 @@ PipelineRef find_pipeline(ShaderType type, const rmlui::PipelineConfig& config,
+@@ -1146,9 +1268,62 @@ PipelineRef find_pipeline(ShaderType type, const rmlui::PipelineConfig& config,
  #endif
  
  #ifdef AURORA_ENABLE_GXCORE
@@ -12398,7 +12586,7 @@ index 822a560..16ff80d 100644
  }
  #endif
  
-@@ -1165,7 +1272,9 @@ void initialize_pipeline_cache() {
+@@ -1165,7 +1340,9 @@ void initialize_pipeline_cache() {
      g_pipelineThread = std::thread(pipeline_worker);
    }
  
@@ -12408,7 +12596,7 @@ index 822a560..16ff80d 100644
    if (!g_pipelineCacheBroken && loadedCount > 0) {
      g_gpuCachePrunePending = true;
    }
-@@ -1221,3 +1330,13 @@ bool get_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline) {
+@@ -1221,3 +1398,13 @@ bool get_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline) {
  }
  
  } // namespace aurora::gfx

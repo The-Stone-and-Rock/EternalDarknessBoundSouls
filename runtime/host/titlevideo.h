@@ -1,4 +1,6 @@
 #pragma once
+#include <stddef.h>
+#include <stdint.h>
 // The title menu's pictures (titlevideo.cpp): Mods' Title video behind the
 // title menu, and the Load screen (its memory card screen passed over, its
 // card and labels hidden, headed "Load"). Part of the renderer's one texture
@@ -12,6 +14,12 @@ void titlevideo_preload(void);
 // Waits (at most 3 s) for the HD workers still running, before main returns: they use statics the exit destroys.
 // main.c calls it when the launcher is closed; titlevideo_preload also registers it with atexit.
 void titlevideo_shutdown(void);
+// The title Options picture (res/video/options.rgba) is kept: 1 yes.
+int titlevideo_options_kept(void);
+// hle.c, at the title's first frame: a CMPR picture of the game's title bank; when it is the Options picture (850x480,
+// the renderer's hash), it is decoded on a worker and kept, so the title look has its backdrop before Options is ever
+// opened. 1 when it was the Options picture.
+int titlevideo_options_from_bank(const uint8_t* cmpr, uint32_t w, uint32_t h, size_t size);
 #ifdef __cplusplus
 }
 
@@ -32,4 +40,8 @@ bool titlevideo_title_art(const std::string& dir);
 // written and up to date for this run (false without the pack or with HD textures off). With HD textures on and the
 // pack's picture not read yet (turned on after boot), it starts the read, so the backdrop follows a few frames later.
 bool titlevideo_title_art_hd();
+// The first-run step (frontend.cpp): the HD backdrop's source for its stamp ("off" with no pack or HD off), and whether
+// the boot's HD workers (the pack's pictures, the backdrop) are still running.
+std::string titlevideo_hd_id();
+bool titlevideo_hd_busy();
 #endif

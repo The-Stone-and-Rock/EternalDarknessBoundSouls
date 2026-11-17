@@ -17,6 +17,9 @@
 #define PL_MPEG_IMPLEMENTATION
 #include "third_party/pl_mpeg.h"
 
+#include <gxruntime/gxcore/texture_decode.hpp>
+#include <xxhash.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -2027,6 +2030,35 @@ extern "C" void titlevideo_menu_row(int row) { g_menu_row = row; }
 // The main menu's picture has been repainted with Choose Character (hle.c adds the row only then).
 extern "C" int titlevideo_menu_painted(void) { return g_menu_painted.load() ? 1 : 0; }
 
+extern "C" int titlevideo_options_kept(void) {
+    std::lock_guard<std::mutex> lock(g_word_mutex);
+    return skull().empty() ? 0 : 1;
+}
+
+// The Options picture from the game's own bank at the title's first frame (hle.c title_options_from_bank): checked by
+// size and by the renderer's own hash of the raw texels (XXH64 of the base level, as gxcore_draw.cpp hashes it), then
+// decoded with the renderer's own decoder (gxc::decode_texture) on a worker and kept, as the renderer's decode would
+// keep it when Options is first drawn: the same function on the same bytes, so the same file. Rows in stored order (the
+// picture is stored upside down; titlevideo_title_art turns it over).
+extern "C" int titlevideo_options_from_bank(const uint8_t* cmpr, uint32_t w, uint32_t h, size_t size) {
+    if (w != kTitleW || h != kTitleH || cmpr == nullptr || XXH64(cmpr, size, 0) != kOptionsHash)
+        return 0;
+    std::vector<uint8_t> bytes(cmpr, cmpr + size);
+    hd_thread([bytes = std::move(bytes)] {
+        const int64_t t0 = now_ms();
+        const std::vector<uint8_t> rgba = gxruntime::gxcore::decode_texture(kCmpr, kTitleW, kTitleH, bytes.data(), bytes.size());
+        if (rgba.size() != static_cast<size_t>(kTitleW) * kTitleH * 4) {
+            std::fprintf(stderr, "[titlevideo] the Options picture from the game's memory did not decode (%zu bytes)\n",
+                         rgba.size());
+            return;
+        }
+        keep_skull(rgba.data());
+        std::fprintf(stderr, "[titlevideo] the Options picture taken from the game's memory at the title (%lld ms)\n",
+                     static_cast<long long>(ms_since(t0)));
+    });
+    return 1;
+}
+
 extern "C" void titlevideo_shutdown(void) {
     // (At most 3 s: a pack read and the title's paint take well under one.)
     for (int i = 0; i < 300 && g_hd_workers.load() > 0; i++)
@@ -2047,6 +2079,22 @@ extern "C" void titlevideo_preload(void) {
     if (!g_settings.mod_title_video)
         hd_want_title();  // (with the video it is the video; read later if the video's file is missing)
 }
+
+// The first-run step (frontend.cpp run_preparing): what the title look's HD backdrop is made from, "off" with HD textures
+// off or no pack, "none" when the pack has no Options picture; and whether the boot's HD workers are still at work.
+std::string titlevideo_hd_id() {
+    if (!g_settings.hd_textures || texpack_count() == 0)
+        return "off";
+    const std::string pack = texpack_file(kCmpr, kTitleW, kTitleH, kOptionsHash);
+    if (pack.empty())
+        return "none";
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(pack, ec);
+    const auto time = std::filesystem::last_write_time(pack, ec);
+    return std::to_string(kArtHdVersion) + " " + std::to_string(ec ? 0 : size) + " " +
+           std::to_string(ec ? 0 : static_cast<long long>(time.time_since_epoch().count())) + " " + pack;
+}
+bool titlevideo_hd_busy() { return g_hd_workers.load() > 0; }
 
 bool titlevideo_title_art_hd() {
     // HD textures turned on after boot (off at boot, so preload read nothing): the pack's Options picture is read now,

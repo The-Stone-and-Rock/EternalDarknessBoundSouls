@@ -720,6 +720,70 @@ body.pause .gap {
 	decorator: image(tome/rule.png contain center center);
 }
 
+/* The first-run step (frontend.cpp run_preparing): "Preparing the game from your disc" on the launcher's parchment,
+   what is being made, a bar in the launcher's ink and how far it is. */
+body.preparing .prep {
+	display: block;
+	width: 100%;
+	text-align: center;
+	color: #2a1810;
+}
+
+body.preparing .prep-title {
+	font-size: 36dp;
+	line-height: 40dp;
+}
+
+body.preparing .prep-sub {
+	font-size: 24dp;
+	line-height: 28dp;
+	color: #4a3018;
+}
+
+body.preparing .prep .gap {
+	margin: 10dp 70dp 14dp 70dp;
+}
+
+body.preparing .prep-doing {
+	font-size: 20dp;
+	line-height: 24dp;
+}
+
+body.preparing .prep-bar {
+	width: 78%;
+	height: 14dp;
+	margin: 10dp auto 6dp auto;
+	border: 1dp #2a1810;
+	border-radius: 5dp;
+	background-color: #2a181026;
+}
+
+body.preparing .prep-fill {
+	height: 100%;
+	border-radius: 5dp;
+	background-color: #6b1a12;
+}
+
+body.preparing .prep-count {
+	font-size: 16dp;
+	line-height: 20dp;
+	color: #4a3018;
+}
+
+body.preparing .prep-note {
+	margin-top: 18dp;
+	font-size: 14dp;
+	line-height: 18dp;
+	color: #5a4028;
+}
+
+body.preparing .prep-skip {
+	margin-top: 4dp;
+	font-size: 13dp;
+	line-height: 16dp;
+	color: #7a6a52;
+}
+
 /* The pause menu (the game's menu over it, dimmed): the launcher's parchment
    in its frame (res/ui/pause.png, cut from launcher.png), the rows centred
    on it in the launcher's ink, the chosen one in the glowing frame. */

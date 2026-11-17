@@ -32,6 +32,18 @@ the disc may ship in the release zip (docs/memory: release-steps; the package ex
 5. **Package:** `tools/win/make-win-package.sh` keeps excluding `res/music/`, `res/video/options.rgba` and the 12
    disc portraits (already in .gitignore); add a check that fails the package if any of them is inside the zip.
 
+## Built (step F4, 2026-11-17; docs/research/firstrun-hd-flash/firstrun.md "Built: step F4")
+
+- The page is built in the launcher (`run_preparing`, frontend.cpp): the portraits, the shaders from the shipped list
+  (`res/initial_pipeline_cache.db`, made with `tools/pipeline_seed.py make`), and the HD title pictures. Stamps:
+  `res/firstrun.txt` and `prepared.txt` in the cache folder.
+- The title Options picture is NOT made by a hidden game run: the game itself hands it over on the title's first frame
+  (`title_options_from_bank`, hle.c). Nothing to do in the launcher.
+- The launcher's music is left as it is (the user, 2026-11-17).
+- The package fails on a made file in the zip, or on a stale shipped list.
+- The title presses for a scripted run changed: with the Choose Character row, Up x2 lands on Jump to Game and Down x3
+  on Options (tools/ed/jtg.sh). A new card first asks for the language and whether to save the settings.
+
 ## Not decided
 
 - Whether the first-run step should also build the shader cache it already builds behind the launcher (it is fast:

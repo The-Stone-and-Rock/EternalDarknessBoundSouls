@@ -180,6 +180,9 @@ if(ED_ENABLE_AURORA)
     target_compile_features(EternalDarkness PRIVATE cxx_std_20)
     target_link_libraries(EternalDarkness PRIVATE ${ED_AURORA_RT})
     set_target_properties(EternalDarkness PROPERTIES LINKER_LANGUAGE CXX)
+    # The renderer's own texture decoder (gxc::decode_texture): titlevideo.cpp decodes the title Options picture from
+    # the game's memory with it, so the kept picture is the renderer's to the byte.
+    target_link_libraries(${ED_HOST_TARGET} PRIVATE GXRuntime::gxcore)
 endif()
 
 if(ED_SPLIT_HOST)

@@ -10,6 +10,8 @@ res/music/
 res/video/*
 # The title video itself is the project's own (an AI-made video, no game asset): it ships.
 !res/video/title.mpg
+# The first-run step's stamps (frontend.cpp run_preparing): made on each player's PC.
+res/firstrun.txt
 # Your own video to convert from.
 Background video/
 generated/

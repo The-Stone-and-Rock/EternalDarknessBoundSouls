@@ -17288,10 +17288,68 @@ static void title_main_choose(CPUState* cpu) {
     g_title_idle_reset = true;
     frontend_open_page_skin(FRONTEND_PAGE_TITLE_CHARACTERS, 0, FRONTEND_SKIN_TITLE, -1);
 }
+// The first-run step (docs/research/firstrun-hd-flash/firstrun.md, step 2): the title Options picture taken from the
+// game's own title bank on the title's first frame, so the title look (Choose Character, More Options, Load's skull)
+// has it before Options is ever opened. The title load unpacks UMnMenu's bank and keeps it at TITLE_RECORD+16
+// (0x80019850-0x8001985C, before any title draw); its pictures are walked as tome_plaques_page walks UBookPak's. Only an
+// 850x480 CMPR picture with the renderer's own hash of the Options picture is handed over (titlevideo.cpp decodes it with
+// the renderer's decoder and keeps it): another language or another bank does nothing, and Options keeps it as before.
+#define TITLE_BANK (TITLE_RECORD + 16u)
+#define TITLE_BANK_MAGIC 0x0020AF30u  // the game's unpack checks it (docs/research/in-game-menu/06-texture-bank.md)
+int titlevideo_options_kept(void);
+int titlevideo_options_from_bank(const u8* cmpr, u32 w, u32 h, size_t size);
+static void title_options_from_bank(CPUState* cpu) {
+    static int tries = 0;  // (the bank is unpacked before the first draw; a few frames' grace all the same)
+    if (tries < 0 || ++tries > 120) {
+        if (tries == 121)
+            fprintf(stderr, "[title] no title bank at 0x%08X: the Options picture is kept when Options is drawn\n", TITLE_BANK);
+        tries = -1;
+        return;
+    }
+    if (titlevideo_options_kept()) {
+        tries = -1;
+        return;
+    }
+    const u32 bank = mem_read32(cpu, TITLE_BANK);
+    if (!guest_ram_range_valid(cpu, bank, 12u) || mem_read32(cpu, bank) != TITLE_BANK_MAGIC)
+        return;
+    tries = -1;
+    const u32 count = mem_read32(cpu, bank + 4u), table = mem_read32(cpu, bank + 8u);
+    if (count < 3u || count > 512u || !guest_ram_range_valid(cpu, table, 8u * count)) {
+        fprintf(stderr, "[title] the title bank has %u pictures at 0x%08X: no Options picture taken\n", count, table);
+        return;
+    }
+    // Picture 2 first (UMnMenu.cmp's Options picture, docs/research/in-game-menu/02-title-menu.md), then the others.
+    for (u32 k = 0u; k < count; k++) {
+        const u32 i = k == 0u ? 2u : k <= 2u ? k - 1u : k;
+        const u32 header = mem_read32(cpu, table + 8u * i);
+        if (!guest_ram_range_valid(cpu, header, 12u))
+            continue;
+        const u32 h = mem_read16(cpu, header), w = mem_read16(cpu, header + 2u), format = mem_read32(cpu, header + 4u);
+        const u32 data = mem_read32(cpu, header + 8u), size = ((w + 7u) / 8u) * ((h + 7u) / 8u) * 32u;
+        if (format != 14u || w != 850u || h != 480u || !guest_ram_range_valid(cpu, data, size))
+            continue;
+        u8* bytes = (u8*)malloc(size);
+        if (bytes == NULL)
+            return;
+        for (u32 b = 0u; b < size; b++)
+            bytes[b] = mem_read8(cpu, data + b);
+        const int taken = titlevideo_options_from_bank(bytes, w, h, size);
+        free(bytes);
+        if (taken) {
+            fprintf(stderr, "[title] the Options picture handed over from the title bank (picture %u of %u, frame %llu)\n", i,
+                    count, (unsigned long long)(cpu->timebase / 675000ull));
+            return;
+        }
+    }
+    fprintf(stderr, "[title] the title bank's %u pictures have no Options picture of this language: kept when Options is drawn\n",
+            count);
+}
 // Every title screen's draw: r3 the state, r4 its cursor (during a cross-fade the old screen is drawn with its own).
 static void title_main_draw(CPUState* cpu) {
     if (cpu->gpr[3] != TITLE_MAIN || !sda_ready(cpu))
         return;
+    title_options_from_bank(cpu);
     const bool english = mem_read32(cpu, cpu->gpr[13] - TITLE_LANGUAGE) == 0u;
     titlevideo_menu_row(english ? (int)cpu->gpr[4] : -1);
     title_quads_put(cpu, english && titlevideo_menu_painted());

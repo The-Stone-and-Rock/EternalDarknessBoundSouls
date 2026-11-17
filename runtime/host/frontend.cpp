@@ -19,6 +19,7 @@
 #include <imgui.h>
 
 #include <RmlUi/Core.h>
+#include <xxhash.h>
 #include <RmlUi_Platform_SDL.h>
 #include <SDL3/SDL_audio.h>
 #include <SDL3/SDL_filesystem.h>
@@ -396,6 +397,13 @@ bool slot_used(int slot) {
 
 bool disc_playable() {
     return !g_discs.empty() && g_discs[g_disc].id == ed_game_id();
+}
+
+std::string g_run_disc;  // the disc this run plays (frontend_set_disc), when it is one this build runs
+
+// The disc to read the menus' pictures from: the launcher's choice, else this run's (a run with no launcher).
+std::string picture_disc() {
+    return disc_playable() ? g_discs[g_disc].path : g_run_disc;
 }
 
 void build_rows();
@@ -1058,10 +1066,10 @@ bool ensure_portraits() {
         return true;
     };
     static bool tried = false;
-    if (have_all() || tried || !disc_playable())
+    if (have_all() || tried || picture_disc().empty())
         return have_all();
     tried = true;
-    const std::vector<uint8_t> tpl = read_disc_file(g_discs[g_disc].path, "UMnMenu.tpl");
+    const std::vector<uint8_t> tpl = read_disc_file(picture_disc(), "UMnMenu.tpl");
     auto u32_at = [&](size_t at) {
         return at + 4 <= tpl.size()
                    ? (uint32_t(tpl[at]) << 24) | (uint32_t(tpl[at + 1]) << 16) | (uint32_t(tpl[at + 2]) << 8) | tpl[at + 3]
@@ -1093,7 +1101,9 @@ std::string portrait_rml(const RosterTile& t) {
     const std::string form_picture = std::string("portraits/") + kCharacters[t.character] + "-" + std::to_string(t.form) + ".png";
     if (t.form != 0 && stat((res_dir() + "/ui/" + form_picture).c_str(), &st) == 0)
         return "<img src=\"" + form_picture + "\"/>";
-    if (stat((res_dir() + "/ui/" + portrait_file(t.character)).c_str(), &st) == 0)
+    // (Made here when missing, wherever a portrait is shown first: a card, the roster; once a run.)
+    if (stat((res_dir() + "/ui/" + portrait_file(t.character)).c_str(), &st) == 0 ||
+        (ensure_portraits() && stat((res_dir() + "/ui/" + portrait_file(t.character)).c_str(), &st) == 0))
         return "<img src=\"" + portrait_file(t.character) + "\"/>";
     return "";
 }
@@ -3701,6 +3711,293 @@ bool run_menu() {
     return open;
 }
 
+// --- The first-run step --------------------------------------------------------------------------------------------
+// "Preparing the game from your disc": on the first start (or after an update or a pack change) the launcher makes what
+// the menus take from the player's own disc and builds the renderer's pipelines from the shipped list before the game
+// starts, so nothing is made in front of the player (docs/research/firstrun-hd-flash/firstrun.md, step 4). Each piece
+// is stamped when it is done: res/firstrun.txt (the portraits, the HD backdrop's source) and prepared.txt in the
+// renderer's cache folder (the shipped list it was built from: a cleared cache shows the step again). A piece not done
+// (skipped with B, or timed out) is offered again at the next start. The title Options picture is not here: it is in
+// the game's memory only, and is taken at the title's first frame (hle.c title_options_from_bank).
+constexpr int kPortraitsVersion = 1;  // raised when ensure_portraits makes other pictures: they are made again
+
+std::string firstrun_path() { return res_dir() + "/firstrun.txt"; }
+
+// The renderer's cache folder (aurora.cpp: AURORA_CACHE_DIR, else the app's own folder).
+std::string cache_dir() {
+    if (const char* dir = std::getenv("AURORA_CACHE_DIR"); dir != nullptr && dir[0] != '\0') {
+        std::string path{dir};
+        if (path.back() != '/' && path.back() != '\\')
+            path += '/';
+        return path;
+    }
+    char* pref = SDL_GetPrefPath(nullptr, "Eternal Darkness");
+    std::string path = pref != nullptr ? pref : "";
+    SDL_free(pref);
+    return path;
+}
+
+// The shipped pipeline list the renderer merged at start (pipeline_cache.cpp pipeline_cache_seed_path: res/ beside the
+// executable, one level up, or in the working folder), as "SIZE XXH64", or "none".
+std::string seed_id() {
+    std::string base;
+    if (const char* b = SDL_GetBasePath(); b != nullptr)
+        base = b;
+    for (const std::string& dir : {base + "res/", base + "../res/", std::string("res/")}) {
+        FILE* f = std::fopen((dir + "initial_pipeline_cache.db").c_str(), "rb");
+        if (f == nullptr)
+            continue;
+        std::vector<uint8_t> data;
+        std::vector<uint8_t> buf(1 << 16);
+        size_t n;
+        while ((n = std::fread(buf.data(), 1, buf.size(), f)) > 0)
+            data.insert(data.end(), buf.begin(), buf.begin() + static_cast<std::ptrdiff_t>(n));
+        std::fclose(f);
+        char id[64];
+        std::snprintf(id, sizeof id, "%zu %016llx", data.size(),
+                      static_cast<unsigned long long>(XXH64(data.data(), data.size(), 0)));
+        return id;
+    }
+    return "none";
+}
+
+std::string read_text(const std::string& path) {
+    std::string out;
+    if (FILE* f = std::fopen(path.c_str(), "rb")) {
+        char buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof buf, f)) > 0)
+            out.append(buf, n);
+        std::fclose(f);
+    }
+    return out;
+}
+
+// The line of a stamp that starts with KEY and a space ("" when none).
+std::string stamp_line(const std::string& text, const std::string& key) {
+    size_t at = 0;
+    while (at < text.size()) {
+        size_t end = text.find('\n', at);
+        if (end == std::string::npos)
+            end = text.size();
+        std::string line = text.substr(at, end - at);
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line.rfind(key + " ", 0) == 0)
+            return line;
+        at = end + 1;
+    }
+    return "";
+}
+
+bool write_text(const std::string& path, const std::string& text) {
+    const std::string tmp = path + ".tmp";
+    FILE* f = std::fopen(tmp.c_str(), "wb");
+    if (f == nullptr)
+        return false;
+    const bool ok = std::fwrite(text.data(), 1, text.size(), f) == text.size();
+    std::fclose(f);
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);
+    return ok && !ec;
+}
+
+std::string with_commas(uint32_t v) {
+    const std::string digits = std::to_string(v);
+    std::string out;
+    for (size_t i = 0; i < digits.size(); i++) {
+        if (i > 0 && (digits.size() - i) % 3 == 0)
+            out += ',';
+        out += digits[i];
+    }
+    return out;
+}
+
+bool have_portraits() {
+    for (int i = 1; i <= 12; i++) {
+        struct stat st;
+        if (stat((res_dir() + "/ui/" + portrait_file(i)).c_str(), &st) != 0)
+            return false;
+    }
+    return true;
+}
+
+// The page: the launcher's picture, and on its parchment the heading, what is being made, a bar and how far. False
+// when the window was closed.
+bool run_preparing() {
+    const char* force = std::getenv("ED_PREPARE");  // 0: never (tests), 1: every piece again
+    if (force != nullptr && force[0] == '0')
+        return true;
+    const bool again = force != nullptr && force[0] == '1';
+    if (!again && std::getenv("ED_MENU_OPEN") != nullptr)
+        return true;  // (a test that opens a page: as before)
+    const std::string disc_id = ed_game_id();
+    const std::string res_stamp = read_text(firstrun_path());
+    const std::string cache_stamp_path = cache_dir() + "prepared.txt";
+    const std::string cache_stamp = read_text(cache_stamp_path);
+    // The portraits: all twelve there, made by this version (a stamp of an older one makes them again).
+    const std::string portraits_want = "portraits " + std::to_string(kPortraitsVersion) + " " + disc_id;
+    const std::string portraits_had = stamp_line(res_stamp, "portraits");
+    const bool portraits_old = !portraits_had.empty() && portraits_had != portraits_want;
+    bool need_portraits = again || portraits_old || !have_portraits();
+    // The pipelines: built from this shipped list into this cache folder, for this run's anti-aliasing (the renderer
+    // builds only the rows of its own sample count, pipeline_cache.cpp: another setting is a build of its own).
+    const std::string pipelines_want =
+        "pipelines " + seed_id() + " msaa " + std::to_string(g_running_anti_aliasing ? 4 : 1);
+    const bool need_pipelines = again || stamp_line(cache_stamp, "pipelines") != pipelines_want;
+    // The HD backdrop: made from this pack's picture (the boot's workers make it: titlevideo_preload).
+    const std::string hd_id = titlevideo_hd_id(), hd_want = "hd " + hd_id;
+    const bool hd_none = hd_id == "off" || hd_id == "none";
+    const bool need_hd = (again || stamp_line(res_stamp, "hd") != hd_want) && !hd_none;
+    if (!need_portraits && !need_pipelines && !need_hd) {
+        std::fprintf(stderr, "[prepare] everything prepared already (%s, %s)\n", firstrun_path().c_str(),
+                     cache_stamp_path.c_str());
+        return true;
+    }
+    std::fprintf(stderr, "[prepare] the first-run step: portraits %s, pipelines %s, HD backdrop %s\n",
+                 need_portraits ? "to make" : "ready", need_pipelines ? "to build" : "built",
+                 need_hd ? "to make" : hd_none ? "off" : "ready");
+    const Uint64 t0 = SDL_GetTicks();
+    bool portraits_done = !need_portraits, hd_done = !need_hd, pipelines_done = !need_pipelines;
+    bool skipped = false, open = true;
+    Uint64 portraits_ms = 0, hd_ms = 0, pipelines_ms = 0;
+    uint32_t pipelines_total = 0;
+    int frames = 0;
+    for (const char* c : {"spread", "pause", "centered", "slots", "dense", "settings", "roster", "cards", "overlay",
+                          "skin-title", "skin-tome", "tome-under", "title-art", "title-art-hd", "title-list", "tome-halves"})
+        g_doc->SetClass(c, false);
+    g_doc->SetClass("launcher", true);
+    g_doc->SetClass("preparing", true);
+    g_doc->GetElementById("heading")->SetInnerRML("");
+    g_doc->GetElementById("menu1")->SetInnerRML("");
+    g_doc->GetElementById("note")->SetInnerRML("");
+    g_doc->GetElementById("hint")->SetInnerRML("");
+    // The page is shown only when the work takes longer than a moment (kGraceMs): a stamp changed by a quick piece alone
+    // (the HD pictures, about 0.3 s) doesn't flash it on and off.
+    constexpr Uint64 kGraceMs = 700;
+    bool page_up = false;
+    bool pressed[kButtonCount];
+    g_input.poll(pressed);
+    std::string shown;
+    while (true) {
+        g_launcher_music.tick();  // (the launcher's music goes on under the page, as under the menu)
+        const Uint64 now = SDL_GetTicks();
+        // The pieces: the portraits in one go once the page is up, the pipelines and the HD pictures in the background
+        // (the renderer's worker, titlevideo's), the bar shared out between the pieces needed.
+        if (!portraits_done && frames >= 2) {
+            const Uint64 p0 = SDL_GetTicks();
+            if (again || portraits_old)
+                for (int i = 1; i <= 12; i++) {
+                    std::error_code ec;
+                    std::filesystem::remove(res_dir() + "/ui/" + portrait_file(i), ec);
+                }
+            const bool ok = ensure_portraits();
+            portraits_ms = SDL_GetTicks() - p0;
+            portraits_done = true;
+            std::fprintf(stderr, "[prepare] the character portraits %s (%llu ms)\n", ok ? "made" : "NOT made",
+                         static_cast<unsigned long long>(portraits_ms));
+            if (!ok)
+                need_portraits = false;  // (not stamped: offered again next start)
+        }
+        const AuroraStats* stats = aurora_get_stats();
+        const uint32_t queued = stats != nullptr ? stats->queuedPipelines : 0;
+        const uint32_t created = stats != nullptr ? stats->createdPipelines : 0;
+        pipelines_total = std::max(pipelines_total, queued + created);
+        if (!pipelines_done && queued == 0 && frames >= 2) {
+            pipelines_done = true;
+            pipelines_ms = now - t0;
+            std::fprintf(stderr, "[prepare] the pipelines built (%u, %llu ms on this page)\n", created,
+                         static_cast<unsigned long long>(pipelines_ms));
+        }
+        if (!hd_done && !titlevideo_hd_busy()) {
+            hd_done = true;
+            hd_ms = now - t0;
+            std::fprintf(stderr, "[prepare] the HD title pictures %s (%llu ms on this page)\n",
+                         titlevideo_title_art_hd() ? "made" : "NOT made", static_cast<unsigned long long>(hd_ms));
+        }
+        const bool timed_out = now - t0 > 300000;  // (5 minutes: the rest is offered again next start)
+        if ((portraits_done && pipelines_done && hd_done) || skipped || timed_out) {
+            if (timed_out && !skipped)
+                std::fprintf(stderr, "[prepare] stopped after 5 minutes: the rest is offered again next start\n");
+            break;
+        }
+        // The bar: the portraits a twentieth, the HD pictures a tenth, the pipelines the rest (of the pieces needed).
+        const float wp = need_portraits ? 0.05f : 0.f, wh = need_hd ? 0.10f : 0.f, wl = need_pipelines ? 0.85f : 0.f;
+        const float pf = pipelines_done ? 1.f : pipelines_total == 0 ? 0.f : static_cast<float>(created) / pipelines_total;
+        const float total = wp + wh + wl;
+        const float frac =
+            total <= 0.f ? 1.f : (wp * (portraits_done ? 1.f : 0.f) + wh * (hd_done ? 1.f : 0.f) + wl * pf) / total;
+        std::string doing, count;
+        if (!portraits_done) {
+            doing = "Painting the character portraits";
+        } else if (!pipelines_done) {
+            doing = "Building the shaders for your graphics card";
+            count = with_commas(std::min(created, pipelines_total)) + " of " + with_commas(pipelines_total);
+        } else {
+            doing = "Making the title pictures in high definition";
+        }
+        const int pct = static_cast<int>(std::lround(std::clamp(frac, 0.f, 1.f) * 100.f));
+        const std::string rml =
+            "<div class=\"prep\"><div class=\"prep-title\">Preparing the game</div>"
+            "<div class=\"prep-sub\">from your disc</div><div class=\"gap\"></div>"
+            "<div class=\"prep-doing\">" + escape(doing) + "</div>"
+            "<div class=\"prep-bar\"><div class=\"prep-fill\" style=\"width: " + std::to_string(pct) + "%;\"></div></div>"
+            "<div class=\"prep-count\">" + (count.empty() ? std::to_string(pct) + "%" : count) + "</div>"
+            "<div class=\"prep-note\">Only on the first start, and after an update.</div>"
+            "<div class=\"prep-skip\">B &#8212; skip for now</div></div>";
+        if (rml != shown) {
+            g_doc->GetElementById("menu0")->SetInnerRML(rml);
+            shown = rml;
+        }
+        if (!page_up && now - t0 >= kGraceMs) {
+            page_up = true;
+            g_doc->Show(Rml::ModalFlag::None, Rml::FocusFlag::Document);
+            std::fprintf(stderr, "[prepare] the page is up (the work takes longer than %llu ms)\n",
+                         static_cast<unsigned long long>(kGraceMs));
+        }
+        g_input.poll(pressed);
+        if (pressed[kBack]) {
+            skipped = true;
+            std::fprintf(stderr, "[prepare] skipped with B: what is not done is offered again next start\n");
+        }
+        if (!dol_aurora_ui_frame()) {
+            open = false;
+            break;
+        }
+        frames++;
+        // (A slow page leaves the renderer's pipeline worker the device: ED_PREPARE_FRAME_MS, default 33.)
+        static const int frame_ms = std::getenv("ED_PREPARE_FRAME_MS") != nullptr ? std::atoi(std::getenv("ED_PREPARE_FRAME_MS")) : 33;
+        if (frame_ms > 0)
+            SDL_Delay(static_cast<Uint32>(frame_ms));
+    }
+    // The stamps of what was done (a piece not done keeps its old line, or none).
+    std::string res_text = "# The first-run step's stamps (frontend.cpp run_preparing). Delete this file to see it again.\n";
+    const std::string had_hd = stamp_line(res_stamp, "hd");
+    if (need_portraits ? portraits_done : have_portraits())
+        res_text += (need_portraits || portraits_had.empty() ? portraits_want : portraits_had) + "\n";
+    if ((need_hd && hd_done) || hd_none)
+        res_text += hd_want + "\n";
+    else if (!had_hd.empty())
+        res_text += had_hd + "\n";
+    if (res_text != res_stamp && !write_text(firstrun_path(), res_text))
+        std::fprintf(stderr, "[prepare] could not write %s\n", firstrun_path().c_str());
+    if (pipelines_done && need_pipelines && !write_text(cache_stamp_path, pipelines_want + "\n"))
+        std::fprintf(stderr, "[prepare] could not write %s\n", cache_stamp_path.c_str());
+    std::fprintf(stderr, "[prepare] done in %llu ms (portraits %llu ms, pipelines %llu ms, HD %llu ms)%s\n",
+                 static_cast<unsigned long long>(SDL_GetTicks() - t0), static_cast<unsigned long long>(portraits_ms),
+                 static_cast<unsigned long long>(pipelines_ms), static_cast<unsigned long long>(hd_ms),
+                 skipped ? ", skipped" : "");
+    g_doc->SetClass("preparing", false);
+    g_doc->GetElementById("menu0")->SetInnerRML("");
+    // Wait for B to be let go, so the launcher does not take it.
+    while (open && g_input.any_held()) {
+        g_input.poll(pressed);
+        if (!dol_aurora_ui_frame())
+            open = false;
+    }
+    return open;
+}
+
 }  // namespace
 
 std::string frontend_res_dir() { return res_dir(); }
@@ -3734,6 +4031,12 @@ extern "C" void frontend_init(int argc, char** argv) {
     uint32_t w = 0, h = 0;
     if (load_png_rgba(res_dir() + "/icon/window.png", &icon, &w, &h))
         dol_aurora_set_window_icon(icon.data(), w, h);
+}
+
+extern "C" void frontend_set_disc(const char* path) {
+    Disc d;
+    if (path != nullptr && read_disc(path, &d) && d.id == ed_game_id())
+        g_run_disc = path;
 }
 
 extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
@@ -3806,6 +4109,17 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
     g_play = false;
     g_load_slot = 0;
     g_launcher_music.start();
+    // The first start (or after an update): the disc's pictures and the shaders made before the menu (run_preparing).
+    if (disc_playable() && !run_preparing()) {
+        g_launcher_music.stop();
+        return false;
+    }
+    // ED_LAUNCHER_TEST_KEYS="a" (testing): presses on the launcher as ED_PAGE_TEST_KEYS's, the first 1.5 s after it opens.
+    if (const char* t = std::getenv("ED_LAUNCHER_TEST_KEYS"); t != nullptr && t[0] != '\0') {
+        g_test_keys = t;
+        g_test_key_at = 0;
+        g_test_key_next = SDL_GetTicks() + 1500;
+    }
     const bool played = run_menu();
     g_launcher_music.stop();
     if (!played || !g_play)

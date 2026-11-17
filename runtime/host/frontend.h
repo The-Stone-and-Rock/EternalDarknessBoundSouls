@@ -17,6 +17,10 @@ void frontend_init(int argc, char** argv);
 bool frontend_run_launcher(const char* default_iso, char* iso_out,
                            size_t iso_cap);
 
+// The disc this run plays (main.c, once it is known): the portraits are made from it when they are first shown, also in
+// a run with no launcher (whose disc list is empty).
+void frontend_set_disc(const char* path);
+
 // Once a game frame: open the in-game menu when asked for, and run it with
 // the game paused until the player resumes.
 void frontend_frame(void);
