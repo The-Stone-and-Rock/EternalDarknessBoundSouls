@@ -17149,11 +17149,13 @@ static void tome_stops_labels(CPUState* cpu, const TomeStop* stops, u32 count, s
     g_tome_stops.shown[m] = at;
 }
 
-// The title screen's Options gets a ninth row, "More Options" (painted by titlevideo.cpp under "Language Select"):
-// the game's own cursor goes there (its row count raised to 9 at each Up/Down: the screens write their 8 back), and A
-// on it opens the recomp's settings over the paused title (Display, Sound, Graphics, Controls, Mods with co-op and the
-// characters), Back returning to the title's Options. The game itself draws no glow for a row past 7 and plays its
-// own A sound (docs/research/in-game-menu/02-title-menu.md, Way B).
+// The title screen's Options is one list of 14 rows that scrolls (docs/research/in-game-menu/09-title-options-scroll.md):
+// the game's 8, then Display, Sound, Graphics, Controls, Mods and Quit game. Nine show at a time. The game's own cursor
+// runs over all 14 (its row count raised to 14 at each Up/Down: the screens write their 8 back). A on one of ours
+// opens its page over the paused title, Back returning to the same row. The game draws no glow for a row past 7 and
+// plays its own A sound. The scroll: titlevideo.cpp repaints the picture (texture 2) for each (scroll, lit row), with
+// the game's rows lifted to their slots and ours painted in; the game's value words and glows follow their rows because
+// the Options draw is handed a shifted copy of its quad table (title_options_bind). English only.
 #define TITLE_RECORD 0x80309124u
 #define TITLE_STATE (TITLE_RECORD + 62u)  // byte: 14 is Options
 #define TITLE_CURSOR (TITLE_RECORD + 28u)
@@ -17163,11 +17165,16 @@ static void tome_stops_labels(CPUState* cpu, const TomeStop* stops, u32 count, s
 #define TITLE_OPTIONS_DRAW 0x8001D52Cu
 #define TITLE_CARD_NOTICE 0x800AF00Cu  // () != 0: a memory card notice takes the presses
 #define TITLE_OPTIONS 14u
-#define TITLE_MORE_ROW 8u
-void titlevideo_options_row(int row);
-#define TITLE_LANGUAGE 26284u  // r13-: 0 English (the only Options picture More Options is painted on)
+#define TITLE_OUR_ROW 8u      // the first of ours (Display)
+#define TITLE_OPTION_ROWS 14u
+#define TITLE_SLOTS 9u
+#define TITLE_SCROLL_MAX (TITLE_OPTION_ROWS - TITLE_SLOTS)
+void titlevideo_options_row(int row, int scroll, int values);
+int titlevideo_options_painted(void);
+#define TITLE_LANGUAGE 26284u  // r13-: 0 English (the only Options picture the list is painted on)
 static bool title_on_options(CPUState* cpu) {
-    if (mem_read8(cpu, TITLE_STATE) != TITLE_OPTIONS || !sda_ready(cpu) || mem_read32(cpu, cpu->gpr[13] - TITLE_LANGUAGE) != 0u)
+    if (mem_read8(cpu, TITLE_STATE) != TITLE_OPTIONS || !sda_ready(cpu) || mem_read32(cpu, cpu->gpr[13] - TITLE_LANGUAGE) != 0u ||
+        !titlevideo_options_painted())
         return false;
     u32 notice = 0u;
     hle_guest_call(cpu, TITLE_CARD_NOTICE, NULL, 0, 0.0, &notice);
@@ -17280,21 +17287,117 @@ static void title_quad_draw(CPUState* cpu) {
 }
 
 static void title_more_updown(CPUState* cpu) {
-    if (title_on_options(cpu))
-        mem_write32(cpu, TITLE_ROWS, TITLE_MORE_ROW + 1u);
-    else
-        title_main_updown(cpu);
+    if (title_on_options(cpu)) {
+        mem_write32(cpu, TITLE_ROWS, TITLE_OPTION_ROWS);
+        return;
+    }
+    // Options without the list (another language, chosen in Language Select, or its picture not painted): the game's
+    // own 8 rows. Language Select's return to Options writes no row count, so the 14 from English would stay.
+    if (mem_read8(cpu, TITLE_STATE) == TITLE_OPTIONS && sda_ready(cpu) &&
+        !(mem_read32(cpu, cpu->gpr[13] - TITLE_LANGUAGE) == 0u && titlevideo_options_painted())) {
+        if (mem_read32(cpu, TITLE_ROWS) > TITLE_OUR_ROW) {
+            fprintf(stderr, "[title] Options without the list: 8 rows again (frame %llu)\n",
+                    (unsigned long long)(cpu->timebase / 675000ull));
+            mem_write32(cpu, TITLE_ROWS, TITLE_OUR_ROW);
+        }
+        if (mem_read32(cpu, TITLE_CURSOR) >= TITLE_OUR_ROW)
+            mem_write32(cpu, TITLE_CURSOR, TITLE_OUR_ROW - 1u);
+        return;
+    }
+    title_main_updown(cpu);
 }
+static const char* const kTitleOurRows[TITLE_OPTION_ROWS - TITLE_OUR_ROW] = {"Display", "Sound", "Graphics",
+                                                                             "Controls", "Mods", "Quit game"};
 static void title_more_choose(CPUState* cpu) {
-    if (title_on_options(cpu) && mem_read32(cpu, TITLE_CURSOR) == TITLE_MORE_ROW) {
-        fprintf(stderr, "[title] More Options (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
-        frontend_open_page_skin(FRONTEND_PAGE_TITLE_SETTINGS, 0, FRONTEND_SKIN_TITLE, -1);
+    const u32 at = mem_read32(cpu, TITLE_CURSOR);
+    if (title_on_options(cpu) && at >= TITLE_OUR_ROW && at < TITLE_OPTION_ROWS) {
+        fprintf(stderr, "[title] Options row %u, %s (frame %llu)\n", at, kTitleOurRows[at - TITLE_OUR_ROW],
+                (unsigned long long)(cpu->timebase / 675000ull));
+        // Rows 8-13 are page ids 6-11 (Display, Sound, Graphics, Controls, Mods, Quit), each opened alone.
+        frontend_open_page_skin(FRONTEND_PAGE_TITLE_DISPLAY + (int)(at - TITLE_OUR_ROW), 0, FRONTEND_SKIN_TITLE, -1);
     } else {
         title_main_choose(cpu);
     }
 }
-// The draw's own cursor (r3, the one 0x8001D934 tests): during the fade out to the main menu it is the old screen's.
-static void title_more_draw(CPUState* cpu) { titlevideo_options_row((int)cpu->gpr[3]); }
+// The scroll: s rows hidden above, 0..5. It follows the draw's own cursor (r3, the one 0x8001D934 tests; during the
+// fade out to the main menu it is the old screen's): s = clamp(s, cursor - 8, cursor). So entering at row 0 shows the
+// top, and coming back from Volume, Brightness, Language Select or a page keeps the place.
+static u32 g_title_scroll;
+static bool g_title_list;  // this Options draw is the list (English, its picture painted)
+// The game's 8 painted rows' baselines (upright picture y = the draw's menu y), unevenly spaced (39-48 apart), and the
+// nine slots' baselines, evenly spaced from the first row's to the last's (titlevideo.cpp kSlotY, kRowY: the same).
+static const s16 kTitleRowY[8] = {111, 150, 188, 236, 276, 323, 370, 406};
+static const s16 kTitleSlotY[TITLE_SLOTS] = {111, 153, 195, 237, 280, 322, 364, 406, 448};
+// The quads of each of the game's rows (name glow, value words): 09 section 1.2.
+static const u8 kTitleRowQuads[8][4] = {{23, 0, 0, 0}, {14, 16, 17, 0}, {15, 18, 19, 0}, {5, 12, 13, 0},
+                                        {6, 0, 0, 0},  {7, 0, 0, 0},    {8, 20, 21, 22}, {9, 0, 0, 0}};
+// A copy of quads 0-23 per scroll 0..5 in host scratch (the game's table is never written: Aurora keeps an array's
+// upload while its base stays the same, so each scroll has its own base). Same bytes each time it is written.
+#define TITLE_QUAD_COPIES (SCRATCH_MENU + 0xA000u)  // to + 0xAD80 (the plaque bank ends at + 0xA000)
+#define TITLE_QUAD_COPY_SIZE 0x240u                 // 24 quads x 24 bytes
+#define TITLE_OPTIONS_BIND 0x8019D358u              // (texcoords, positions): GXSetArray for the quads
+#define TITLE_OPTIONS_BIND_RETURN 0x8001D598u       // its call in the Options draw
+#define TITLE_SUBTITLES 0x80307180u  // word: bit 0 subtitles on
+#define TITLE_WIDESCREEN 24660u      // r13-: non-zero 16:9
+#define TITLE_RUMBLE 23608u          // r13-: bit 0 set, rumble off (0x8013D97C(1))
+#define TITLE_AUDIO_MODE 23012u      // r13-: 0, 1, 2
+static void title_quads_copy(CPUState* cpu, u32 s) {
+    const u32 copy = TITLE_QUAD_COPIES + s * TITLE_QUAD_COPY_SIZE;
+    for (u32 i = 0u; i < TITLE_QUAD_COPY_SIZE; i += 4u)
+        mem_write32(cpu, copy + i, mem_read32(cpu, TITLE_QUADS + i));
+    for (u32 r = 0u; r < 8u; r++)
+        for (u32 k = 0u; k < 4u && kTitleRowQuads[r][k] != 0u; k++) {
+            const u32 q = copy + kTitleRowQuads[r][k] * 24u;
+            if (r < s) {  // scrolled off the top: every corner on the first, a quad of no size
+                for (u32 c = 1u; c < 4u; c++)
+                    for (u32 j = 0u; j < 3u; j++)
+                        mem_write16(cpu, q + 6u * c + 2u * j, mem_read16(cpu, q + 2u * j));
+            } else {
+                const s16 dy = (s16)(kTitleSlotY[r - s] - kTitleRowY[r]);
+                for (u32 c = 0u; c < 4u; c++)
+                    mem_write16(cpu, q + 6u * c + 2u, (u16)(s16)((s16)mem_read16(cpu, q + 6u * c + 2u) + dy));
+            }
+        }
+}
+static void title_more_draw(CPUState* cpu) {
+    g_title_list = sda_ready(cpu) && mem_read32(cpu, cpu->gpr[13] - TITLE_LANGUAGE) == 0u && titlevideo_options_painted();
+    if (!g_title_list) {
+        g_title_scroll = 0u;
+        titlevideo_options_row(-1, 0, 0);
+        return;
+    }
+    const s32 at = (s32)cpu->gpr[3];
+    s32 s = (s32)g_title_scroll;
+    if (s < at - (s32)(TITLE_SLOTS - 1u))
+        s = at - (s32)(TITLE_SLOTS - 1u);
+    if (s > at)
+        s = at;
+    s = s < 0 ? 0 : s > (s32)TITLE_SCROLL_MAX ? (s32)TITLE_SCROLL_MAX : s;
+    if ((u32)s != g_title_scroll)
+        fprintf(stderr, "[title] Options scroll %d (row %d, frame %llu)\n", s, at, (unsigned long long)(cpu->timebase / 675000ull));
+    g_title_scroll = (u32)s;
+    title_quads_copy(cpu, (u32)s);
+    // Which value words the draw shows (as 0x8001D52C tests them): the picture darkens the logo under the ones moved
+    // into it. Bit 0 Subtitles on, 1 Widescreen 16:9, 2 Rumble off, 3-4 Audio Mode 0-2.
+    const u32 r13 = cpu->gpr[13];
+    const u32 audio = mem_read32(cpu, r13 - TITLE_AUDIO_MODE);
+    const int values = (int)((mem_read32(cpu, TITLE_SUBTITLES) & 1u) | (mem_read32(cpu, r13 - TITLE_WIDESCREEN) != 0u ? 2u : 0u) |
+                             ((mem_read32(cpu, r13 - TITLE_RUMBLE) & 1u) != 0u ? 4u : 0u) | ((audio < 3u ? audio : 0u) << 3));
+    titlevideo_options_row(at, s, values);
+}
+// The Options draw binds its quads: as the list, it gets the scroll's copy instead (a notify: the function then runs
+// with the changed r4).
+static void title_options_bind(CPUState* cpu) {
+    if (cpu->lr != TITLE_OPTIONS_BIND_RETURN || !g_title_list || cpu->gpr[4] != TITLE_QUADS)
+        return;
+    static u32 traced = ~0u;
+    if (traced != g_title_scroll) {
+        traced = g_title_scroll;
+        fprintf(stderr, "[title] Options quads from the copy for scroll %u (0x%08X)\n", g_title_scroll,
+                TITLE_QUAD_COPIES + g_title_scroll * TITLE_QUAD_COPY_SIZE);
+    }
+    cpu->gpr[4] = TITLE_QUAD_COPIES + g_title_scroll * TITLE_QUAD_COPY_SIZE;
+}
 
 // The plaques' pictures (plaques.cpp): a TEXPalette of transparent CMPR stubs in host scratch, one per plaque, drawn
 // with the game's own art calls (docs/research/in-game-menu/06-texture-bank.md section 7); the renderer's texture
@@ -33559,22 +33662,25 @@ static void find_coop(CPUState* cpu) {
                 } else {
                     fprintf(stderr, "[tome] the Options page's stops NOT installed (its functions taken or not as expected)\n");
                 }
-                // The title Options' ninth row (title_more_*).
+                // The title Options' scrolling list (title_more_*, title_options_bind).
                 static const struct { u32 at, first; void (*fn)(CPUState*); } kMore[] = {
                     {TITLE_UPDOWN, 0x9421FFE0u, title_more_updown},
                     {TITLE_A, 0x9421FED0u, title_more_choose},
                     {TITLE_OPTIONS_DRAW, 0x9421FF50u, title_more_draw},
+                    {TITLE_OPTIONS_BIND, 0x9421FFF0u, title_options_bind},
                 };
-                bool more = true;
+                bool more = mem_read32(cpu, TITLE_OPTIONS_BIND_RETURN - 4u) ==
+                            0x48000001u + ((TITLE_OPTIONS_BIND - (TITLE_OPTIONS_BIND_RETURN - 4u)) & 0x03FFFFFCu);
                 for (u32 i = 0u; i < sizeof kMore / sizeof kMore[0]; i++) {
                     HleDispatchEntry* e = hle_dispatch_entry(kMore[i].at);
-                    more = more && e != NULL && e->notify == NULL && mem_read32(cpu, kMore[i].at) == kMore[i].first;
+                    more = more && e != NULL && e->notify == NULL && e->intercept == NULL &&
+                           mem_read32(cpu, kMore[i].at) == kMore[i].first;
                 }
                 if (more)
                     for (u32 i = 0u; i < sizeof kMore / sizeof kMore[0]; i++)
                         hle_dispatch_entry(kMore[i].at)->notify = kMore[i].fn;
                 else
-                    fprintf(stderr, "[title] the Options' More Options row NOT installed (its functions taken or not as expected)\n");
+                    fprintf(stderr, "[title] the Options' scrolling list NOT installed (its functions taken or not as expected)\n");
                 // The main menu's Choose Character (title_main_*): its Up/Down and A ride on the notifies above.
                 HleDispatchEntry* screen = hle_dispatch_entry(TITLE_SCREEN_DRAW);
                 HleDispatchEntry* quad = hle_dispatch_entry(TITLE_QUAD_DRAW);

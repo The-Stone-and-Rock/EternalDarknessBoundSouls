@@ -320,7 +320,7 @@ std::string region_name(const std::string& id) {
 // --- Menu model -------------------------------------------------------------
 
 enum class Screen { Launcher, Play, States, Slot, SlotDelete, SlotOverwrite, Options, OptionsPage, Graphics, Controls, Mapping, InGame,
-                    Problem, Mods, ModsPage, Characters };
+                    Problem, Mods, ModsPage, Characters, QuitAsk };
 
 struct Row {
     std::string label;
@@ -1715,6 +1715,27 @@ void build_slot_overwrite() {
     g_rows.push_back(save);
 }
 
+// Quit game from the title's Options list, asked first: Up from the row Options opens on wraps to it.
+void build_quit_ask() {
+    Row no{"No, go back"};
+    no.note = "Back to Options.";
+    no.activate = [] {
+        g_screen = Screen::InGame;  // past the page: the menu closes
+        g_selected = 0;
+    };
+    g_rows.push_back(no);
+
+    Row yes{"Yes, quit"};
+    yes.note = "These settings are saved. The game's own options reach the memory card only when you leave Options with B.";
+    yes.activate = [] {
+        std::fprintf(stderr, "[frontend] Quit game from the title\n");
+        settings_save();
+        dol_aurora_request_quit();
+        g_close = true;
+    };
+    g_rows.push_back(yes);
+}
+
 Row layout_row() {
     // On the keyboard alone every layout has the same keys: Default or Custom.
     if (!controls::player_has_controller(controls::menu_player())) {
@@ -2722,6 +2743,7 @@ void render() {
                           : g_screen == Screen::Characters ? (g_characters_player == 1 ? "Player 2 Character"
                                                                                        : "Player 1 Character")
                           : g_screen == Screen::Problem  ? g_problem_heading.c_str()
+                          : g_screen == Screen::QuitAsk  ? "Quit the game?"
                                                          : "Paused";
     g_doc->GetElementById("heading")->SetInnerRML(heading);
     std::string rml[2];
@@ -2731,7 +2753,8 @@ void render() {
     const bool slot_list = g_screen == Screen::States || g_screen == Screen::Play;
     // The plain lists of actions: their rows centred, no controls.
     const bool centered = g_screen == Screen::Slot || g_screen == Screen::SlotDelete ||
-                          g_screen == Screen::SlotOverwrite || g_screen == Screen::Problem;
+                          g_screen == Screen::SlotOverwrite || g_screen == Screen::Problem ||
+                          g_screen == Screen::QuitAsk;
     const bool settings_page = !centered && !slot_list && g_screen != Screen::Launcher && g_screen != Screen::InGame &&
                                g_screen != Screen::Characters;
     const int slot_rows = static_cast<int>(g_rows.size()) - 1;
@@ -2836,6 +2859,7 @@ void render() {
     g_doc->GetElementById("hint")->SetInnerRML(
         g_screen == Screen::InGame    ? "Up/Down choose &#183; Left/Right change &#183; A select &#183; B resume"
         : g_screen == Screen::Problem ? "Up/Down choose &#183; A select"
+        : g_screen == Screen::QuitAsk ? "Up/Down choose &#183; A select &#183; B back"
         : g_screen == Screen::Characters ? "Arrows choose &#183; Right stick scrolls &#183; A select &#183; B back"
         : g_screen == Screen::ModsPage && g_mods_section == 3 ? "Left/Right choose the player &#183; A choose their character &#183; B back"
         : slot_list                   ? "Up/Down choose &#183; LB/RB page &#183; A select &#183; B back"
@@ -2856,7 +2880,7 @@ void render() {
     // Choose Character: the two players' cards on one wide page.
     g_doc->SetClass("cards", g_screen == Screen::ModsPage && g_mods_section == 3);
     // Over the game the page lies on the dimmed, paused frame.
-    g_doc->SetClass("overlay", g_screen == Screen::InGame || g_screen == Screen::Problem ||
+    g_doc->SetClass("overlay", g_screen == Screen::InGame || g_screen == Screen::Problem || g_screen == Screen::QuitAsk ||
                                    g_screen == Screen::States ||
                                    ((g_screen == Screen::Slot || g_screen == Screen::SlotDelete ||
                                      g_screen == Screen::SlotOverwrite) && g_slot_from_states) ||
@@ -2913,6 +2937,7 @@ void build_rows() {
     case Screen::Mods: build_mods(); break;
     case Screen::ModsPage: build_mods_page(); break;
     case Screen::Characters: build_characters(); break;
+    case Screen::QuitAsk: build_quit_ask(); break;
     }
     // Back on the launcher from a page it opened: at the row that opened it.
     static Screen built = Screen::Launcher;
@@ -3008,6 +3033,10 @@ void go_back() {
         break;
     case Screen::InGame:
         g_close = true;
+        break;
+    case Screen::QuitAsk:
+        g_screen = Screen::InGame;  // past the page: the menu closes
+        g_selected = 0;
         break;
     case Screen::Launcher:
     case Screen::Problem:  // only its rows close it (no quitting by accident)
@@ -4674,13 +4703,10 @@ extern "C" void frontend_frame(void) {
             g_controls_return_row = 0;
             g_screen = g_root = Screen::Controls;
             break;
-        case FRONTEND_PAGE_TITLE_QUIT:  // no page: as Options' Quit game
-            std::fprintf(stderr, "[frontend] Quit game from the title\n");
-            settings_save();
-            dol_aurora_request_quit();
-            none();
-            g_menu_closed++;
-            return;
+        case FRONTEND_PAGE_TITLE_QUIT:  // asked first (Yes/No), "No" the first choice
+            g_screen = g_root = Screen::QuitAsk;
+            g_selected = 0;
+            break;
         default:
             std::fprintf(stderr, "[frontend] page %d: no such page\n", page);
             none();

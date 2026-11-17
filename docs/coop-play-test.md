@@ -61,8 +61,8 @@ The launcher's menu no longer opens over the game on Esc / Back (it's a debug me
   Settings has Display, Sound, Graphics, Controls, then **Return to title screen** and **Quit game**.
 - **Player 2's own Tome > Options**: only their **Characters** plaque (their character, on their controller). The four
   of the cross are player 1's (only player 1 saves).
-- **Title screen > Options**: a ninth row, **More Options**, under Language Select (Up from Save Settings reaches it).
-  It opens Display, Sound, Graphics, Controls, **Mods** (co-op on/off, characters) and Quit.
+- **Title screen > Options**: since step 3 below, one scrolling list: the game's 8 rows, then Display, Sound,
+  Graphics, Controls, **Mods** (co-op on/off, characters) and Quit game. (Before, a ninth row, More Options.)
 Check: that everything you used to reach from Esc is reachable this way; how the plaques look (they're the game's own
 painted plaque with the word in the Tome's hand); player 2's page on player 2's controller; B always returning to the
 Tome or the title; nothing pressed by accident in the game when a page closes. Tell Claude what to move or rename.
@@ -82,6 +82,23 @@ Options (English). Try:
 - Leave the cards open a few minutes, close them: the title should not jump straight into its attract movie.
 - With Mods > Title video off and the HD pack on: the title's picture is now the disc's, not the HD pack's. Say if
   that matters.
+
+**Native menus, step 3 (2026-11-17 morning):** the title's **Options is one list that scrolls** (English). More
+Options is gone. The rows: Save Settings, Subtitles, Widescreen, Rumble Feature, Volume Adjustment, Brightness
+Adjustment, Audio Mode, Language Select, then **Display, Sound, Graphics, Controls, Mods, Quit game**. Nine show at a
+time; a small mark at the left of the top or bottom row says more rows are hidden that way. Try:
+- Down through all 14 rows and back Up: the list moves one row at a time once the lit row reaches the top or bottom.
+  Up from Save Settings goes to Quit game (the list jumps to its end); Down from Quit game goes to Save Settings.
+- The game's own rows at any place in the list: A on Subtitles, Widescreen, Rumble and Audio Mode changes the word
+  beside it; Volume and Brightness open their pages; Language Select works; Save Settings saves.
+- A on Display, Sound, Graphics, Controls or Mods: that page (still the launcher's look). B, Esc or Back: back to the
+  list on the same row. **Quit game asks "Quit the game?"** with No lit first; Yes saves the settings and quits.
+  Changes to the game's own rows reach the memory card only when you leave Options with B, so leave that way first.
+- Pick another language in Language Select: Options shows the game's own 8 rows in that language, and Down from the
+  last row goes back to the first (no hidden rows). Pick English again: the list of 14 comes back.
+- The rows are now evenly spaced, so even at the top the game's own rows sit a few pixels from where the disc painted
+  them. Say if you'd rather have the disc's spacing at the top.
+- Our six rows are in the Tome's hand (La Belle Aurore), as large as the game's. Say if the size or colour is off.
 
 ## 7. Karim's skeletal pedestal (chapter 4), for Claude to trace
 The gate you meant is **room 193** in Karim's chapter (the room numbers are the game's; "room 93" is a different room,

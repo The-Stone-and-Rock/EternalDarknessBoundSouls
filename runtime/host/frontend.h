@@ -59,7 +59,7 @@ enum {
     FRONTEND_PAGE_TITLE_GRAPHICS = 8,
     FRONTEND_PAGE_TITLE_CONTROLS = 9,    // player 1's
     FRONTEND_PAGE_TITLE_MODS = 10,
-    FRONTEND_PAGE_TITLE_QUIT = 11,       // no page: the game quits (settings saved)
+    FRONTEND_PAGE_TITLE_QUIT = 11,       // "Quit the game?" (No first); Yes saves the settings and quits
 };
 // How the page is drawn, chosen by whoever opens it: the launcher's parchment, the title's look (over the title
 // screen), or a Tome page (over the Tome: in `half` 0 or 1, that co-op half, -1 the whole picture).

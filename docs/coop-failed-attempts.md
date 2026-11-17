@@ -899,3 +899,21 @@ put(left + x - kR, top + y - kR, dark, clamp01(m * 2.2f) * 0.45f);
 ```
 What worked: the box starts at y 325 (under Load Game), and the shadow is scaled by `1 - menu_ink(pixel)` so it never
 darkens another word's ink (logs/run-20261117-073702-jtg-s2-cc-video2, Screenshots for Claude/s2-choose-character/zoom4-*.png).
+
+## The title Options list: the first paint (2026-11-17, native menus step 3)
+Two faults seen in the first run's pictures (logs/run-20261117-075554-jtg-s3-scroll1, shots 51-64).
+1. A stray dot under "Rumble Feature" once the list scrolled. Each piece of ink went to the row whose baseline - 8 was
+   nearest its middle. The dot of the j in "Volume Adjustment" (6 points, upright y 245-247) is nearer Rumble's line
+   than its own, so it moved with Rumble.
+```cpp
+const float mid = kBoxY0 + (y0 + y1) / 2.f;  // every piece, dots too
+```
+2. Rows moved up looked cramped or far apart (Volume and Brightness Adjustment nearly touching, a wide gap after
+   Sound). The slots were the disc's own baselines, which are 39-48 px apart and fit only the rows painted there.
+```cpp
+constexpr int kSlotY[kSlots] = {111, 150, 188, 236, 276, 323, 370, 406, 452};  // the disc's baselines as slots
+```
+What worked: a piece of fewer than 20 points goes to the row of the nearest letter within 15 px (52 pieces, 6 dots,
+none alone). The slots are evenly spaced from the first row's baseline to the last's (111, 153, ... 406, 448), and each
+row moves by slot - its own baseline (hle.c kTitleSlotY / kTitleRowY, titlevideo.cpp kSlotY / kRowY). Seen in
+logs/run-20261117-080018-jtg-s3-scroll2 and -080444-jtg-s3-scroll3.

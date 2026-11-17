@@ -1,7 +1,54 @@
-# HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
+# HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit, through native menus step 3; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
 
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
+
+## 2026-11-17 (morning): native menus, step 3: the title's Options as one scrolling list (committed)
+The title's Options is one list of 14 rows: the game's 8, then Display, Sound, Graphics, Controls, Mods, Quit game.
+Nine show at a time. "More Options" and its paint are gone. English only; other languages keep the game's 8 rows.
+Our rows open their pages in the launcher look for now (step 4 is the title look).
+- hle.c `title_more_*`: Up/Down sets the row count to 14 (the game's own cursor and step do the rest). A on rows
+  8-13 opens page ids 6-11 (`FRONTEND_PAGE_TITLE_DISPLAY` + row - 8). The draw notify on `0x8001D52C` works out the
+  scroll s (0..5) from the draw's own cursor: `s = clamp(s, cursor - 8, cursor)`. It writes a copy of quads 0-23 for
+  that s into host scratch (`SCRATCH_MENU + 0xA000 + s * 0x240`), each row's quads moved to its slot, rows above the
+  view collapsed to a point. A new notify on `0x8019D358` (lr `0x8001D598` only) swaps r4 to that copy, so the game's
+  value words (On, 16:9, Stereo Surround) and glows follow their rows. The game's table is never written. It also
+  tells titlevideo the cursor, s, and which value words show.
+- titlevideo.cpp `find_rows`, `paint_options`, `options_list`: the Options picture (texture 2) split into its 8 rows
+  once (52 pieces of ink; a dot goes to its nearest letter's row), the words erased (black ground), each shown row
+  copied up to its slot, ours painted in La Belle Aurore 52 px (lit pale cyan with a glow), small chevrons left of the
+  top or bottom row when rows are hidden. Rows moved into the logo get a soft dark patch behind them and their value
+  word. The last 8 paints are kept. The 850x480 generation word now holds (lit row of ours, s, values). If the picture
+  isn't as measured, nothing is painted and hle.c keeps the game's 8 rows.
+- **The slots are evenly spaced** (baselines 111, 153, ... 406, 448), not the disc's uneven 39-48 px. The first try
+  used the disc's baselines as slots: rows moved up looked cramped or far apart. So at the top the game's rows sit up
+  to 7 px from where the disc painted them. Told the user (coop-play-test.md section 6).
+- Seen in pictures (Screenshots for Claude/s3-options-scroll/, runs logs/run-20261117-075554-jtg-s3-scroll1 (the
+  traced run, first look), -080018-jtg-s3-scroll2, -080444-jtg-s3-scroll3 (final paint)): the top (s 0), the middle
+  (s 2, 3, 4) and the bottom (s 5); wrap Up 0 -> 13 and Down 13 -> 0; the copy taken at every s (log
+  "[title] Options quads from the copy for scroll N"); quads of no size draw nothing; Audio Mode changed at s 5,
+  Subtitles at s 1, Rumble at s 2 (Right does nothing there, as in the game); Volume's page at s 1 and s 4; Display,
+  Sound, Graphics, Controls and Mods opened and closed by the test Back, the list back on the same row and s; B from s 5
+  fades to the main menu, then Jump to Game reached chapter 1 (control at 2208, -080647-jtg-s3-back-jump); the Tome's
+  plaques and a Settings page as before (-080753-jtg-s3-tome).
+- **Careful in tests: Audio Mode is kept across runs** in `ed-GEDP01-sram.bin` (the console's SRAM, mmio.c). My first
+  run pressed it to Mono; that file did not exist before, so I deleted it (and its .tmp) to give back the default
+  (stereo). Also seen: mmio.c `save_sram` can only write that file once on Windows: `rename` onto an existing file
+  fails, leaving `.sram.bin.tmp`. Not fixed (not this step's).
+- After review, two fixes:
+  - **Another language keeps 8 rows.** Language Select's return to Options writes no row count, so the 14 from English
+    stayed: in French, Down from row 7 walked 6 invisible rows. Now `title_more_updown` writes 8 back (and puts a
+    cursor past 7 on 7) whenever Options is up without the list. Seen in -081859-jtg-s3-quit-lang: French chosen, then
+    Down from Choix de la langue went to Sauvegarde des parametres, then Sous-titres (log "Options without the list:
+    8 rows again"; pictures 16-19).
+  - **Quit game asks first.** Up from Save Settings (where Options opens) wraps to Quit game, and Quit skipped the
+    game's card save. Page id 11 is now a page, `Screen::QuitAsk` in frontend.cpp: "Quit the game?", No first, then
+    Yes. Back or No closes it to the list. Seen in the same run: the page (picture 14), and the test Back back on
+    Quit game (picture 15). Yes was not pressed in a run.
+- Not seen: a real B, Start or Esc press on a page (only ED_PAGE_TEST_BACK); Yes on the quit page; Save Settings and Language Select pressed while scrolled; Brightness while scrolled; the title video OFF on
+  this build (all runs had it on, from the run settings) and the HD pack on; German, Spanish or Italian (French seen); a 4:3 window (the
+  chevrons sit at picture x 150, inside 4:3's view by the numbers); a save state loaded on Options.
+- Next: step 4 of the plan (the title look for every page opened from the title).
 
 ## 2026-11-17 (morning): native menus, step 2: "Choose Character" on the title's main menu (committed)
 The title's main menu now reads Start Game, Load Game, **Choose Character**, Options, Jump to Game, Credits. A on the

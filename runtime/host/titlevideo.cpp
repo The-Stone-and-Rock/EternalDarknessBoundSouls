@@ -303,58 +303,351 @@ int give(std::vector<uint8_t>& out, uint32_t w, uint32_t h, uint8_t** out_rgba, 
     return 1;
 }
 
-// The title Options' ninth row (hle.c title_more_*: the game's own cursor goes there, A opens the recomp's settings):
-// "More Options" painted under "Language Select" in the Tome's hand, in the painted rows' teal; lit pale cyan with a
-// soft glow while it is the chosen row, as the game lights its own. Measured on the kept picture (upright 850x480):
-// the rows' tops step 41-47 (Language Select's at 384), their first letters at x 174, their ink about (67, 90, 96)
-// and at most (90, 117, 123).
-std::atomic<int> g_options_row{-1};  // the title Options' cursor, as its frame last drew (hle.c)
-constexpr uint64_t kOptionsMoreSerial = 0x4D4F52450000ull;  // the Options picture's generations ("MORE")
+// The title Options as one list of 14 rows that scrolls (hle.c title_more_*, docs/research/in-game-menu/
+// 09-title-options-scroll.md): the game's 8 painted rows, then Display, Sound, Graphics, Controls, Mods and Quit game.
+// Nine show at a time, in the nine slots (the painted rows' baselines, then one more under Language Select). For each
+// (scroll s, lit row) the picture is painted again: the painted words erased (their ground is black), each of the
+// game's rows still shown copied up to its slot (the game moves its glow and value words the same, by a shifted copy of
+// its quads), ours painted in the Tome's hand at theirs, lit pale cyan with a soft glow while chosen (the game draws no
+// glow past row 7), and a small mark beside the top or bottom slot while rows are hidden there. Measured on the kept
+// picture (upright 850x480): the words' ink is the only thing brighter than 6 in x 140..440, y 60..470 (less the logo,
+// x 400.. above y 200); it makes 52 pieces that each sit clearly on one row.
+constexpr int kOptionRows = 14, kGameRows = 8, kSlots = 9, kScrollMax = kOptionRows - kSlots;
+// The game's rows' baselines as painted (39-48 apart), and the slots' (upright): evenly spaced from the first row's to the
+// last's, so a row moved up keeps the same room above and below (hle.c kTitleRowY, kTitleSlotY: the same).
+constexpr int kRowY[kGameRows] = {111, 150, 188, 236, 276, 323, 370, 406};
+constexpr int kSlotY[kSlots] = {111, 153, 195, 237, 280, 322, 364, 406, 448};
+const char* const kOurRows[kOptionRows - kGameRows] = {"Display", "Sound", "Graphics", "Controls", "Mods", "Quit game"};
+// The cursor (bits 0-7), scroll (8-15) and value words shown (16-20, hle.c title_more_draw) as the frame last drew,
+// -1 not in use (hle.c).
+std::atomic<int> g_options_key{-1};
+std::atomic<int> g_options_asked{-1};  // the same, as the renderer last asked the generation (its paint uses this)
+std::atomic<bool> g_options_ready{false};
+constexpr uint64_t kOptionsMoreSerial = 0x4D4F52450000ull;  // the 850x480 pictures' generations without the video
 struct Painted {
     std::vector<uint8_t> rgba;
     bool lit = false, ready = false;
 };
 std::mutex g_more_mutex;
-Painted g_more[2];
+// Which row each point of the words' box belongs to (its ink grown 3 pixels), -1 none: made once.
+constexpr int kBoxX0 = 140, kBoxX1 = 441, kBoxY0 = 60, kBoxY1 = 471;
+constexpr int kBoxW = kBoxX1 - kBoxX0, kBoxH = kBoxY1 - kBoxY0;
+std::vector<int8_t> g_row_of;
+bool g_rows_tried = false;
+struct OptionsPaint {
+    int key;
+    std::vector<uint8_t> rgba;
+};
+std::vector<OptionsPaint> g_options_paints;  // the last few painted, newest last
 
-std::vector<uint8_t> paint_more(const uint8_t* rgba, uint32_t w, uint32_t h, bool lit) {
+float lum_of(const uint8_t* p) { return 0.3f * p[0] + 0.59f * p[1] + 0.11f * p[2]; }
+
+// The rows' pieces of ink (under g_more_mutex); false if the picture isn't the one measured.
+bool find_rows(const uint8_t* rgba, uint32_t w, uint32_t h) {
+    if (g_rows_tried)
+        return !g_row_of.empty();
+    g_rows_tried = true;
+    auto src = [&](int x, int y) { return &rgba[(static_cast<size_t>(h - 1 - y) * w + x) * 4]; };
+    std::vector<uint8_t> ink(static_cast<size_t>(kBoxW) * kBoxH, 0);
+    for (int y = 0; y < kBoxH; y++)
+        for (int x = 0; x < kBoxW; x++) {
+            const int px = kBoxX0 + x, py = kBoxY0 + y;
+            if (px >= 400 && py < 200)
+                continue;  // the logo
+            ink[static_cast<size_t>(y) * kBoxW + x] = lum_of(src(px, py)) > 6.f;
+        }
+    // Pieces (8-connected). Each letter's piece goes to the row whose baseline - 8 is nearest its middle. A dot (of an i
+    // or j) or a fleck goes to the row of the nearest letter: the j of "Volume Adjustment" has its dot nearer Rumble
+    // Feature's baseline than its own.
+    std::vector<int> piece(ink.size(), -1);
+    std::vector<int8_t> row_of(ink.size(), -1);
+    std::vector<int> stack;
+    std::vector<std::vector<int>> all;
+    int per_row[kGameRows] = {}, closest = 1 << 20;
+    constexpr size_t kDot = 20;  // points: smaller is a dot
+    for (size_t start = 0; start < ink.size(); start++) {
+        if (!ink[start] || piece[start] >= 0)
+            continue;
+        std::vector<int> cells;
+        stack.assign(1, static_cast<int>(start));
+        piece[start] = static_cast<int>(all.size());
+        int y0 = kBoxH, y1 = -1;
+        while (!stack.empty()) {
+            const int i = stack.back();
+            stack.pop_back();
+            cells.push_back(i);
+            const int x = i % kBoxW, y = i / kBoxW;
+            y0 = std::min(y0, y);
+            y1 = std::max(y1, y);
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++) {
+                    const int nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= kBoxW || ny >= kBoxH)
+                        continue;
+                    const int n = ny * kBoxW + nx;
+                    if (ink[n] && piece[n] < 0) {
+                        piece[n] = static_cast<int>(all.size());
+                        stack.push_back(n);
+                    }
+                }
+        }
+        if (cells.size() >= kDot) {
+            const float mid = kBoxY0 + (y0 + y1) / 2.f;
+            int best = 0;
+            float d1 = 1e9f, d2 = 1e9f;
+            for (int r = 0; r < kGameRows; r++) {
+                const float d = std::fabs(mid - (kRowY[r] - 8));
+                if (d < d1) {
+                    d2 = d1;
+                    d1 = d;
+                    best = r;
+                } else if (d < d2) {
+                    d2 = d;
+                }
+            }
+            closest = std::min(closest, static_cast<int>(d2 - d1));
+            per_row[best] += static_cast<int>(cells.size());
+            for (int i : cells)
+                row_of[i] = static_cast<int8_t>(best);
+        }
+        all.push_back(std::move(cells));
+    }
+    const int pieces = static_cast<int>(all.size());
+    int dots = 0, dots_alone = 0;
+    for (const std::vector<int>& cells : all) {
+        if (cells.size() >= kDot)
+            continue;
+        dots++;
+        const int x = cells[0] % kBoxW, y = cells[0] / kBoxW;
+        int best = -1, bd = 15 * 15 + 1;
+        for (int dy = -15; dy <= 15; dy++)
+            for (int dx = -15; dx <= 15; dx++) {
+                const int nx = x + dx, ny = y + dy, d = dx * dx + dy * dy;
+                if (nx < 0 || ny < 0 || nx >= kBoxW || ny >= kBoxH || d >= bd)
+                    continue;
+                const size_t n = static_cast<size_t>(ny) * kBoxW + nx;
+                if (row_of[n] >= 0 && all[piece[n]].size() >= kDot) {
+                    bd = d;
+                    best = row_of[n];
+                }
+            }
+        if (best < 0) {  // a fleck by itself: the row whose baseline - 8 is nearest
+            dots_alone++;
+            best = 0;
+            for (int r = 1; r < kGameRows; r++)
+                if (std::abs(kBoxY0 + y - (kRowY[r] - 8)) < std::abs(kBoxY0 + y - (kRowY[best] - 8)))
+                    best = r;
+        }
+        for (int i : cells)
+            row_of[i] = static_cast<int8_t>(best);
+    }
+    // Grown 3 pixels (the letters' soft edges), the nearer row winning.
+    std::vector<int8_t> grown(ink.size(), -1);
+    std::vector<int> dist(ink.size(), 1 << 20);
+    for (int y = 0; y < kBoxH; y++)
+        for (int x = 0; x < kBoxW; x++) {
+            const int8_t r = row_of[static_cast<size_t>(y) * kBoxW + x];
+            if (r < 0)
+                continue;
+            for (int dy = -3; dy <= 3; dy++)
+                for (int dx = -3; dx <= 3; dx++) {
+                    const int nx = x + dx, ny = y + dy, d = dx * dx + dy * dy;
+                    if (nx < 0 || ny < 0 || nx >= kBoxW || ny >= kBoxH || d > 10)
+                        continue;
+                    const size_t n = static_cast<size_t>(ny) * kBoxW + nx;
+                    if (d < dist[n]) {
+                        dist[n] = d;
+                        grown[n] = r;
+                    }
+                }
+        }
+    bool ok = pieces >= 30 && pieces <= 90 && closest >= 4;
+    for (int r = 0; r < kGameRows; r++)
+        ok = ok && per_row[r] >= 200;
+    std::fprintf(stderr, "[titlevideo] the Options picture's words: %d pieces (%d dots, %d of them far from a letter), "
+                 "rows of %d %d %d %d %d %d %d %d points, the closest second row %d px off: %s\n", pieces, dots, dots_alone,
+                 per_row[0], per_row[1], per_row[2], per_row[3], per_row[4], per_row[5], per_row[6], per_row[7], closest,
+                 ok ? "the list is painted" : "NOT as measured, left alone");
+    if (ok)
+        g_row_of = std::move(grown);
+    return ok;
+}
+
+// The picture for one (lit row, scroll): from the stored original, upside down as it is.
+std::vector<uint8_t> paint_options(const uint8_t* rgba, uint32_t w, uint32_t h, int lit, int s, int values) {
     std::vector<uint8_t> out(rgba, rgba + static_cast<size_t>(w) * h * 4);
-    std::vector<uint8_t> cover;
-    int cw = 0, ch = 0, base = 0;
-    constexpr float kPx = 44.f;
-    if (!tome_hand_cover("More Options", kPx, 0.7f, &cover, &cw, &ch, &base))
-        return out;
-    const int left = 174 - static_cast<int>(kPx / 4.f), baseline = 452;
-    const float ink[3] = {72.f, 97.f, 104.f}, light[3] = {0xA0, 0xE3, 0xF1};
+    auto at = [&](int x, int y) { return &out[(static_cast<size_t>(h - 1 - y) * w + x) * 4]; };
+    auto src = [&](int x, int y) { return &rgba[(static_cast<size_t>(h - 1 - y) * w + x) * 4]; };
+    // 1. The painted words erased.
+    for (int y = 0; y < kBoxH; y++)
+        for (int x = 0; x < kBoxW; x++)
+            if (g_row_of[static_cast<size_t>(y) * kBoxW + x] >= 0) {
+                uint8_t* d = at(kBoxX0 + x, kBoxY0 + y);
+                d[0] = d[1] = d[2] = 0;
+            }
+    // 1b. A row moved up into the logo (Rumble's On / Off, Audio Mode's Stereo Surround, Brightness Adjustment's end)
+    // would cross its letters: the logo is darkened softly round the row's words and the game's value words there.
+    {
+        // The value words' quads, the one the game draws (menu x0, x1, y0, y1; the picture is menu x + 106): 09
+        // section 1.2. values: bit 0 Subtitles on, 1 Widescreen 16:9, 2 Rumble off, 3-4 Audio Mode.
+        struct Rect {
+            int row, x0, x1, y0, y1;
+        };
+        const int audio = std::min((values >> 3) & 3, 2);
+        constexpr Rect kAudio[3] = {{6, 221, 292, 342, 382}, {6, 217, 295, 338, 385}, {6, 217, 413, 335, 386}};
+        const Rect kValues[] = {(values & 1) ? Rect{1, 187, 228, 124, 159} : Rect{1, 189, 245, 106, 164},
+                                (values & 2) ? Rect{2, 208, 255, 159, 198} : Rect{2, 208, 328, 160, 197},
+                                (values & 4) ? Rect{3, 274, 330, 190, 248} : Rect{3, 273, 314, 209, 244}, kAudio[audio]};
+        constexpr int kX0 = 360, kX1 = 640, kY0 = 30, kY1 = 240, kW = kX1 - kX0, kH = kY1 - kY0;
+        std::vector<float> shade(static_cast<size_t>(kW) * kH, 0.f);
+        bool any = false;
+        auto mark = [&](int x, int y) {
+            if (x >= kX0 && x < kX1 && y >= kY0 && y < kY1) {
+                shade[static_cast<size_t>(y - kY0) * kW + x - kX0] = 1.f;
+                any = true;
+            }
+        };
+        for (int y = 0; y < kBoxH; y++)
+            for (int x = 0; x < kBoxW; x++) {
+                const int r = g_row_of[static_cast<size_t>(y) * kBoxW + x];
+                if (r >= s && s > 0)  // (at the top, as the game painted it: nothing moved into the logo)
+                    mark(kBoxX0 + x, kBoxY0 + y + kSlotY[r - s] - kRowY[r]);
+            }
+        for (const Rect& v : kValues) {
+            if (v.row < s || s == 0)
+                continue;
+            const int dy = kSlotY[v.row - s] - kRowY[v.row];
+            for (int y = v.y0 + 4; y < v.y1 - 4; y++)
+                for (int x = v.x0 + 106 + 2; x < v.x1 + 106 - 2; x++)
+                    mark(x, y + dy);
+        }
+        if (any) {
+            blur(shade, kW, kH, 5);
+            blur(shade, kW, kH, 5);
+            for (int y = 0; y < kH; y++)
+                for (int x = 0; x < kW; x++) {
+                    const float k = 1.f - 0.85f * clamp01(shade[static_cast<size_t>(y) * kW + x] * 2.5f);
+                    uint8_t* d = at(kX0 + x, kY0 + y);
+                    for (int c = 0; c < 3; c++)
+                        d[c] = static_cast<uint8_t>(d[c] * k);
+                }
+        }
+    }
+    // 2. The game's rows still shown, each at its slot (the brighter wins: the ground is black).
+    for (int y = 0; y < kBoxH; y++)
+        for (int x = 0; x < kBoxW; x++) {
+            const int r = g_row_of[static_cast<size_t>(y) * kBoxW + x];
+            if (r < s)
+                continue;
+            const int ty = kBoxY0 + y + kSlotY[r - s] - kRowY[r];
+            if (ty < 0 || ty >= static_cast<int>(h))
+                continue;
+            const uint8_t* p = src(kBoxX0 + x, kBoxY0 + y);
+            uint8_t* d = at(kBoxX0 + x, ty);
+            for (int c = 0; c < 3; c++)
+                d[c] = std::max(d[c], p[c]);
+        }
     auto put = [&](int x, int y, const float rgb[3], float a) {
         if (x < 0 || y < 0 || x >= static_cast<int>(w) || y >= static_cast<int>(h) || a <= 0.f)
             return;
-        uint8_t* p = &out[(static_cast<size_t>(h - 1 - y) * w + x) * 4];  // stored upside down
+        uint8_t* p = at(x, y);
         for (int c = 0; c < 3; c++)
             p[c] = static_cast<uint8_t>(std::clamp(p[c] + (rgb[c] - p[c]) * std::min(a, 1.f), 0.f, 255.f));
     };
-    if (lit) {  // the glow: the letters spread 6 pixels, faint
-        constexpr int kR = 6;
-        for (int y = -kR; y < ch + kR; y++)
-            for (int x = -kR; x < cw + kR; x++) {
-                float m = 0.f;
-                for (int dy = -kR; dy <= kR; dy += 2)
-                    for (int dx = -kR; dx <= kR; dx += 2) {
-                        const int sx = x + dx, sy = y + dy;
-                        if (sx < 0 || sy < 0 || sx >= cw || sy >= ch)
-                            continue;
-                        const float d = std::sqrt(static_cast<float>(dx * dx + dy * dy));
-                        if (d <= kR)
-                            m = std::max(m, cover[static_cast<size_t>(sy) * cw + sx] / 255.f * (1.f - d / (kR + 1)));
-                    }
-                put(left + x, baseline - base + y, light, m * 0.35f);
-            }
+    const float ink[3] = {68.f, 92.f, 98.f}, light[3] = {0xA0, 0xE3, 0xF1};
+    // 3. Ours in their slots, as large as the game's (09 section 6: 52 px matches its width and x-height).
+    constexpr float kPx = 52.f;
+    for (int j = 0; j < kOptionRows - kGameRows; j++) {
+        const int slot = kGameRows + j - s;
+        if (slot < 0 || slot >= kSlots)
+            continue;
+        std::vector<uint8_t> cover;
+        int cw = 0, ch = 0, base = 0;
+        if (!tome_hand_cover(kOurRows[j], kPx, 0.8f, &cover, &cw, &ch, &base))
+            continue;
+        const bool on = lit == kGameRows + j;
+        const int left = 174 - static_cast<int>(kPx / 4.f), top = kSlotY[slot] - base;
+        if (on) {  // the glow: the letters spread 6 pixels, faint
+            constexpr int kR = 6;
+            for (int y = -kR; y < ch + kR; y++)
+                for (int x = -kR; x < cw + kR; x++) {
+                    float m = 0.f;
+                    for (int dy = -kR; dy <= kR; dy += 2)
+                        for (int dx = -kR; dx <= kR; dx += 2) {
+                            const int sx = x + dx, sy = y + dy;
+                            if (sx < 0 || sy < 0 || sx >= cw || sy >= ch)
+                                continue;
+                            const float d = std::sqrt(static_cast<float>(dx * dx + dy * dy));
+                            if (d <= kR)
+                                m = std::max(m, cover[static_cast<size_t>(sy) * cw + sx] / 255.f * (1.f - d / (kR + 1)));
+                        }
+                    put(left + x, top + y, light, m * 0.35f);
+                }
+        }
+        for (int y = 0; y < ch; y++)
+            for (int x = 0; x < cw; x++)
+                if (const uint8_t v = cover[static_cast<size_t>(y) * cw + x])
+                    put(left + x, top + y, on ? light : ink, v / 255.f * (on ? 1.f : 0.9f));
     }
-    for (int y = 0; y < ch; y++)
-        for (int x = 0; x < cw; x++)
-            if (const uint8_t v = cover[static_cast<size_t>(y) * cw + x])
-                put(left + x, baseline - base + y, lit ? light : ink, v / 255.f * (lit ? 1.f : 0.9f));
+    // 4. The marks: a small pen stroke chevron left of the top slot while rows are hidden above, of the bottom slot
+    // while rows are hidden below (soft edges, the rows' ink a little brighter).
+    auto chevron = [&](int cx, int cy, int dir) {  // dir -1 points up, +1 down
+        constexpr float kHalf = 7.f, kTall = 5.f, kWidth = 1.6f;
+        const float tip[2] = {static_cast<float>(cx), cy + dir * kTall};
+        const float ends[2][2] = {{cx - kHalf, cy - dir * kTall}, {cx + kHalf, cy - dir * kTall}};
+        const float mark[3] = {88.f, 118.f, 126.f};
+        for (int y = cy - 10; y <= cy + 10; y++)
+            for (int x = cx - 11; x <= cx + 11; x++) {
+                float best = 1e9f;
+                for (const auto& e : ends) {  // distance to the stroke from the end to the tip
+                    const float vx = tip[0] - e[0], vy = tip[1] - e[1];
+                    const float t = std::clamp(((x - e[0]) * vx + (y - e[1]) * vy) / (vx * vx + vy * vy), 0.f, 1.f);
+                    const float dx = x - (e[0] + vx * t), dy = y - (e[1] + vy * t);
+                    best = std::min(best, std::sqrt(dx * dx + dy * dy));
+                }
+                put(x, y, mark, clamp01(kWidth + 0.5f - best));
+            }
+    };
+    if (s > 0)
+        chevron(156, kSlotY[0] - 12, -1);
+    if (s < kScrollMax)
+        chevron(156, kSlotY[kSlots - 1] - 10, 1);
     return out;
+}
+
+// The Options picture for the row and scroll the renderer asked the generation for, kept for a few; false if not painted.
+bool options_list(const uint8_t* rgba, uint32_t w, uint32_t h, std::vector<uint8_t>* out) {
+    std::lock_guard<std::mutex> lock(g_more_mutex);
+    if (!is_picture(w, h) || !find_rows(rgba, w, h))
+        return false;
+    g_options_ready = true;
+    const int asked = g_options_asked.load();
+    const int row = asked < 0 ? 0 : asked & 0xFF, s = asked < 0 ? 0 : std::clamp((asked >> 8) & 0xFF, 0, kScrollMax);
+    const int values = asked < 0 ? 0 : (asked >> 16) & 0x1F;
+    const int key = values * 256 + row * 16 + s;
+    for (size_t i = 0; i < g_options_paints.size(); i++)
+        if (g_options_paints[i].key == key) {
+            *out = g_options_paints[i].rgba;
+            return true;
+        }
+    if (g_options_paints.size() >= 8)
+        g_options_paints.erase(g_options_paints.begin());
+    g_options_paints.push_back({key, paint_options(rgba, w, h, row, s, values)});
+    *out = g_options_paints.back().rgba;
+    if (const char* dump = std::getenv("ED_TITLE_PAINT_DUMP"); dump != nullptr && *dump != 0) {
+        // (testing) each repainted list, upright, as PATH-options-ROW-SCROLL.png
+        std::vector<uint8_t> up(out->size());
+        for (uint32_t y = 0; y < h; y++)
+            std::memcpy(&up[static_cast<size_t>(y) * w * 4], &(*out)[static_cast<size_t>(h - 1 - y) * w * 4], w * 4);
+        png_image png{};
+        png.version = PNG_IMAGE_VERSION;
+        png.width = w;
+        png.height = h;
+        png.format = PNG_FORMAT_RGBA;
+        const std::string path = std::string(dump) + "-options-" + std::to_string(row) + "-" + std::to_string(s) + ".png";
+        png_image_write_to_file(&png, path.c_str(), 0, up.data(), 0, nullptr);
+    }
+    return true;
 }
 
 // The title's main menu (hle.c title_main_*): "Choose Character" between Load Game and Options, the game's spare row 5.
@@ -536,15 +829,10 @@ bool menu_picture(const uint8_t* rgba, uint32_t w, uint32_t h, std::vector<uint8
 
 int options_picture(const uint8_t* rgba, uint32_t w, uint32_t h, uint8_t** out_rgba, uint32_t* out_width,
                     uint32_t* out_height) {
-    const bool lit = g_options_row.load() == 8;
-    std::lock_guard<std::mutex> lock(g_more_mutex);
-    Painted& p = g_more[lit ? 1 : 0];
-    if (!p.ready || p.rgba.size() != static_cast<size_t>(w) * h * 4) {
-        p.rgba = paint_more(rgba, w, h, lit);
-        p.lit = lit;
-        p.ready = true;
-    }
-    return give(p.rgba, w, h, out_rgba, out_width, out_height);
+    std::vector<uint8_t> list;
+    if (!options_list(rgba, w, h, &list))
+        return 0;  // the game's own 8 rows
+    return give(list, w, h, out_rgba, out_width, out_height);
 }
 
 int load_screen(const uint8_t* rgba, uint32_t width, uint32_t height, uint8_t** out_rgba, uint32_t* out_width,
@@ -707,12 +995,18 @@ bool titlevideo_claims_hash(uint32_t width, uint32_t height, uint64_t hash) {
 uint64_t titlevideo_generation(uint32_t width, uint32_t height) {
     if (!is_picture(width, height))
         return 1u;
-    // One word for every 850x480 picture: the Options picture is redrawn when its ninth row is lit or not, the main
+    // One word for every 850x480 picture: the Options picture is redrawn for each (scroll, lit row of ours), the main
     // menu's when its Choose Character row comes into use and when it is lit or not (and the video's frames change the
-    // title's).
+    // title's). The Options paint uses the very (row, scroll, values) read here, so the two can't disagree.
     const int row = g_menu_row.load();
-    const uint64_t key = (g_options_row.load() == 8 ? 2u : 0u) + (row >= 0 ? 4u : 0u) + (row == 5 ? 1u : 0u);
-    return video_on() ? g.serial.load() * 256u + key : kOptionsMoreSerial | key;
+    const int options = g_options_key.load();
+    g_options_asked = options;
+    const int lit = options >= 0 && (options & 0xFF) >= kGameRows ? (options & 0xFF) - kGameRows + 1 : 0;
+    const uint64_t list = options < 0 ? 0u
+                                      : 1u + static_cast<uint64_t>(lit) + 7u * static_cast<uint64_t>((options >> 8) & 0xFF) +
+                                            42u * static_cast<uint64_t>((options >> 16) & 0x1F);
+    const uint64_t key = list * 8u + (row >= 0 ? 4u : 0u) + (row == 5 ? 1u : 0u);
+    return video_on() ? g.serial.load() * 16384u + key : kOptionsMoreSerial | key;
 }
 
 int titlevideo_apply(const uint8_t* rgba, uint32_t width, uint32_t height, uint64_t hash, uint8_t** out_rgba,
@@ -796,8 +1090,13 @@ int title_picture(const uint8_t* rgba, uint32_t width, uint32_t height, uint8_t*
 
 }  // namespace
 
-// The title Options' cursor row as its frame draws (hle.c, the game thread): row 8 lights "More Options".
-extern "C" void titlevideo_options_row(int row) { g_options_row = row; }
+// The title Options' cursor and scroll as its frame draws (hle.c, the game thread), row -1 not in use: rows 8-13 are ours.
+extern "C" void titlevideo_options_row(int row, int scroll, int values) {
+    // (At the top nothing is moved into the logo: the values change nothing there.)
+    g_options_key = row < 0 ? -1 : (row & 0xFF) | ((scroll & 0xFF) << 8) | ((scroll > 0 ? values & 0x1F : 0) << 16);
+}
+// The Options picture has been found as measured and is painted as the list (hle.c turns the 14 rows on only then).
+extern "C" int titlevideo_options_painted(void) { return g_options_ready.load() ? 1 : 0; }
 // The main menu's cursor as its frame draws (hle.c, the game thread), -1 not English: row 5 lights "Choose Character".
 extern "C" void titlevideo_menu_row(int row) { g_menu_row = row; }
 // The main menu's picture has been repainted with Choose Character (hle.c adds the row only then).
