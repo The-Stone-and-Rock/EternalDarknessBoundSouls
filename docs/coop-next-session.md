@@ -1,4 +1,31 @@
-# HANDOFF 2026-11-16: START HERE (committed through f5db56f on tools/game-kit; to-do items 1 to 3, the kit, done 2026-11-16; controls.cpp's test edits stay uncommitted by rule)
+# HANDOFF 2026-11-17: START HERE (the kit and docs committed on tools/game-kit; FIVE GAME FIXES UNCOMMITTED IN runtime/host/hle.c FOR THE USER'S REVIEW; controls.cpp's test edits stay uncommitted by rule)
+
+## Overnight 2026-11-17: the kit's likely co-op bugs, fixed and shown in runs (read docs/research/kit-bugs/results.md)
+The kit (items 1 to 3 below) named five likely bugs; plans in docs/research/kit-bugs/plans.md, a run script per bug
+beside it (build-run-*.sh, from fresh Jump-to-Game states, both players recorded, shots every 250 ms). In
+runtime/host/hle.c, **uncommitted, for the user to review and play** (`git diff runtime/host/hle.c`):
+1. **The duck (fn151)**: coop_sound_change_act tested the call's address 0x80164DD4, not its return 0x80164DD8. Fixed:
+   player 2's lever scene apart passes over the duck once, player 1's music stays.
+2. **Arrival scripts (ed113 / ed248)**: player 2's own room's queued arrival script now runs as player 2's
+   (coop_be_player2 around it) when they stand in that room: ed113 reads their node.
+3. **The L06 traps and the L04 elevators**: the game's step scanned player 2's body as "anyone else" and ran other_*
+   zone scripts as player 1. coop_scan_player1 passes over player 2's object for that scan (lr 0x801335C8): trap runs as
+   player 1 went 273/190/201 -> 1/0/1. ED_COOP_P2_OTHER_ZONES=1 keeps the old route. Elevator run not done (needs thing
+   733 or 831 carried; ED_ITEM_SPAWN makes item types 0-243, and which type is thing 733/831 isn't known yet).
+4. **ed177 play-start scripts**: who stored the script is kept (notify on 0x8000F9C4); the play-start run goes as player
+   2's when they stored it.
+5. **Hero gates (new; testing switch ED_COOP_HERO_ID=1, off by default)**: 31 scripts turn away anyone whose handle isn't
+   1 (`L0 = fn78(1, 0)`, `if L0 ~= 1`), so player 2 could never pull Edward's lever (L09/1951) and the like.
+   coop_hero_chunk on lua_dobuffer (0x80159D38) rewrites that one PUSHINT in the loaded chunk to player 2's id for their
+   runs and back to 1 for anyone else's (the game keeps loaded chunks, so the way back is needed and was seen working).
+   Shown: player 2's lever apart and together, player 1's lever after player 2's, solo (no change). `ed herogates` lists
+   them; the 21 two-path compares (a branch for each character) are left for the user to decide.
+Kit added overnight: `ed stops RUN [SCRIPT] [--p2] [--level N]` (each script run: who ran it, its calls, where it
+stopped, hero gates flagged), `ed herogates [--all|--c]`. No hang report in any run.
+**Next:** the user plays the five fixes (with ED_COOP_HERO_ID=1 for the gates) and decides the two-path gates; then
+commit hle.c. Then the to-do list below from item 4.
+
+# HANDOFF 2026-11-16 (committed through f5db56f on tools/game-kit; to-do items 1 to 3, the kit, done 2026-11-16)
 
 ## THE TO-DO LIST, in order (the user, 2026-11-16)
 The kit first, so later work finds each co-op rule before play instead of during it (the user will run a session
@@ -169,7 +196,8 @@ Waiting on the user beside this list: the play test (the Open list below, item 1
    address is 0x80164DD8, so the test never matches.** The other return addresses in that function (0x801668FC,
    0x80166970, 0x80152354, 0x8015206C, 0x8015207C) are right. What it means, by reading: player 2's duck while apart
    (fn151(1) at a look's start, e.g. the clock's L00/1551) is not passed over, so player 1's music ducks with it.
-   Likely one character (0x80164DD8u); confirm in play before and after. `python -I tools/ed/facts/hooks.py` prints
+   Likely one character (0x80164DD8u); confirm in play before and after. **(Fixed 2026-11-17, uncommitted, shown in
+   runs: see "Overnight 2026-11-17" at the top.)** `python -I tools/ed/facts/hooks.py` prints
    every such test that can't match (only this one today).
 10. Later: reflections and the cheap visual upgrades (automatic surface detail, rounder models, a cinematic finish);
     online co-op (stream player 2's view first); sharing the PAL names with the decompilation.

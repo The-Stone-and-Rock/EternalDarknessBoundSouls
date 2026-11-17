@@ -5,7 +5,7 @@ that runs for player 2 and stops early at a test (a gate) is the first thing to 
 Reads a run folder's page-*.log: the "[trace] script run r3 S r4 Z lr L who W ctl C" lines (coop_run_script's
 trace_look, ED_COOP_TRACE: jtg.sh and run.sh set it) and the "[script] calls 0xADDR (N args)" lines after each (up to
 40 per traced run, hle.c g_script_watch). who is r13-21496 (the player then), ctl r13-21488 (the main character).
-Player 1's id is the main character (ctl) most traces show; any other who is "player 2 (id W)" or another character.
+Player 1's id is 1 (the chapter's character); any other who is "player 2 (id W)" or another character.
 
 The match walks the script's lines in file order, taking each logged call where it next appears: right for the guard
 at the top of a script (the usual stop), approximate after a jump. It says so when a call isn't found."""
@@ -33,10 +33,9 @@ def natives_by_addr():
 
 
 def player1_id(runs):
-    """Player 1's id: the main character (ctl, r13-21488) most traces show; player 2's runs swap the player (who) and,
-    inside coop_be_player2, the main character too, so the common value is player 1's."""
-    c = collections.Counter(r['ctl'] for r in runs)
-    return c.most_common(1)[0][0] if c else None
+    """Player 1's id: 1, the chapter's character (proved in all 10 saves, docs/game/research/verbs.md:15). (Guessing it
+    from the runs fails when player 2's chain makes most of them: their main character is theirs then.)"""
+    return 1
 
 
 def runs_of(run):
@@ -98,9 +97,8 @@ def cmd_stops(argv):
     want = int(argv[1]) if len(argv) > 1 else None
     runs = runs_of(run)
     p1 = player1_id(runs)
-    print('%s: %d traced script runs; player 1 is id %s (the main character most runs show), any other who is player 2 or '
-          'another character' % (
-        os.path.basename(run), len(runs), p1 if p1 is not None else '?'))
+    print('%s: %d traced script runs; player 1 is id %s (the chapter\'s character), any other who is player 2 or '
+          'another character' % (os.path.basename(run), len(runs), p1))
     shown = 0
     for r in runs:
         if want is not None and r['script'] != want:

@@ -21,8 +21,9 @@ runtime/host/hle.c, **uncommitted, for the user to review**. Plans: plans.md.
    (logs/run-20261117-01*-trap-*; traps-before in the session's scratch). Every run plays the trap and writes the record
    of the room in play.
 4. **The L04 elevators**: not reached; the test's route was wrong, not the game. Door 132 sends the chapter's character
-   (model 150, what hle_object_model tells scripts) to room 5 unless thing 733 or 831 is carried, and the Tome trip took
-   both there (logs/run-20261117-011659-elev-apart). The test needs 733 or 831 carried first. The traps show the same
+   (model 150, what hle_object_model tells scripts) to room 5 unless thing 733 or 831 is carried (fn78(5, id), the carry
+   test, hle.c:25332), and the Tome trip took both there (logs/run-20261117-011659-elev-apart). The test needs 733 or 831
+   carried first. The traps show the same
    mechanism (the game's zone look running other_* fields for player 2's body), and the fix is one for both.
 5. **ed177's play-start scripts**: shown. Player 2 in MuffledVoicesRgn01 (L03/933, room 150), then the Tome: the stored
    script ran from play mode's start (lr 0x80008280) twice, as the game's, though player 2 left it
@@ -51,8 +52,38 @@ runtime/host/hle.c, **uncommitted, for the user to review**. Plans: plans.md.
    frames after the crossing: likely a monster of room 168 crossing the trap (monsters keep the game's zone look and run
    as the game's, who 1), not proven (the trace doesn't name the object). Solo unchanged: 2 zone runs and 2 timer runs,
    as before the fix (logs/run-20261117-01*-trap-*). No hang report in any.
-4. **Elevators**: not run (the route needs thing 733 or 831 carried); the same fix as the traps.
+4. **Elevators**: not run (the route needs thing 733 or 831 carried: fn78(5, id) is the carry test, hle.c:25332;
+   ED_ITEM_SPAWN makes item TYPES 0-243 to pick up, and which type is thing 733 or 831 isn't known yet); the same fix as
+   the traps.
 5. **ed177: fixed.** "[coop] on_play_script left by player 2" for player 2's zone entry and "left by player 1" for
    player 1's (and solo's run unchanged); the play-start runs of 933 then go through as player 2's (guest calls, lr
    0x0BADF010, 4 in p2in). No hang report (logs/run-20261117-01*-onplay-*).
-1. **The duck: not shown yet** (the lever's hero gate stops player 2 before fn151); waits for the hero-gate fix.
+1. **The duck: fixed, shown with the hero-gate patch on** (build 2026-11-17 01:50; ED_COOP_HERO_ID=1). Apart
+   (logs/run-20261117-015206-duck-apart): "[hero] script 1951: gate +0x29F opens for player 2 (id 161; frame 3295)", every
+   1951 run player 2's (`ed stops 015206-duck-apart 1951 --level 09`), the lever scene in player 2's view alone
+   (ForceFieldCam, ScareCam01, Camera04; player 1 stays on Camera01 in room 279: sheet-3290-4230.jpg in that run), and
+   "[sound] a duck (fn151) by player 2 apart: passed over, player 1's music stays (frame 3814)" once. Together
+   (logs/run-20261117-015251-duck-together): the scene runs for player 2, no pass-over line (not apart). No hang report.
+
+## The hero gates (ED_COOP_HERO_ID=1, testing, off by default; uncommitted in hle.c)
+
+A hero gate is `L0 = fn78(1, 0)` (the player's handle, r13-21496) then `if L0 ~= 1` (or `== 1`): only the chapter's
+character. Player 2's handle is theirs (161, 239...), so these scripts turn player 2 away. `ed herogates` finds them in
+the disc's packs: 52 compares in 47 files, 31 that turn the player away (`ed herogates --c` prints hle.c's kHeroGates).
+The patch, coop_hero_chunk on lua_dobuffer 0x80159D38, rewrites the gate's PUSHINT in the chunk being loaded: player 2's id
+when the run is player 2's (r13-21496 == their id), 1 otherwise; it checks the GETLOCAL / PUSHINT / JMP words first, so a
+level whose copy differs is left alone. Logged under ED_COOP_LOG: "[hero] script S: gate +0xO opens for player 2 (id N;
+frame F)" / "... back to the chapter's character (id 1; ...)". The 21 two-path compares (a branch for each) are left for
+the user: opening them picks Edward's path for player 2, which may or may not be wanted.
+- Solo with the patch on (co-op off, ED_COOP_HERO_ID=1; docs/research/kit-bugs/build-run-hero.sh solo,
+  logs/run-20261117-015801-jtg-hero-solo): no [hero] line; player 1 into the sphere, B, and 1951 went through states 3 to
+  9 for player 1, fn151(1) at frame 2913 included (`ed stops 015801-jtg-hero-solo 1951 --level 09`). No hang report.
+  (jtg's "control never came" there is its two-player check.)
+- Player 2 then player 1, together (build-run-hero.sh p1after, logs/run-20261117-015931-hero-p1after): "[hero] script
+  1951: gate +0x29F opens for player 2 (id 161; frame 2795)" at player 2's entry, then at player 1's entry "[hero] script
+  1951: gate +0x29F back to the chapter's character (id 1; frame 2994)": **the game keeps the loaded chunk between runs**,
+  so the patch back to 1 is needed, and it works. "[coop] scene 1951 begins as player 1's (... who 1 ...)" at the press,
+  and 1951 went through states 3 to 8 for player 1. No hang report. (The FELL finding at 2915-2945 is the put moving
+  player 2 out, 555 units lower.)
+- `ed stops` named player 1 from the most common main id; player 2's chain made most of the runs in the duck runs, so
+  it called player 2 "player 1". It now takes id 1 (the chapter's character in all 10 saves).
