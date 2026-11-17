@@ -956,9 +956,13 @@ body.cards .row {
 }
 
 /* The looks the caller chooses (frontend_open_page_skin): body.skin-title over the title screen, body.skin-tome on a
-   Tome page. Each gets its block here, after every rule above, so it wins. The Tome's: none yet (the launcher's). */
+   Tome page. Each gets its block here, after every rule above, so it wins (the Tome's is at the end of the file). */
 
 #backdrop {
+	display: none;
+}
+
+#rule {
 	display: none;
 }
 
@@ -1448,4 +1452,613 @@ body.skin-title .roster-track {
 body.skin-title .roster-thumb {
 	border-color: #a0e3f1;
 	decorator: vertical-gradient(#5f98a5 #2f5a64);
+}
+
+/* ---- The Tome look: every page opened from a Tome plaque (body.skin-tome). ----
+   The page lies on the Tome itself: no veil, so the Tome's frame (the medallion, the bones, the hints) shows round it.
+   It is a leaf of parchment (res/ui/tome/parchment.png) laid on the Tome's page, placed and sized by frontend.cpp render
+   (tome_units_box, kTomeLeaf), its letters a part of the page's height: every size here is in em of them, so the page
+   keeps its shape at any window size. The Tome's ink (38, 27, 17, as tome.cpp kInk), the names in the Tome's hand (La
+   Belle Aurore, as the plaques), the values and help in IM Fell (as the Tome's own words); the chosen row in red ink with
+   a thin gold ring, as the Tome's own ring round a plaque. One column, scrolling (frontend.cpp kTomeLines).
+   No veil only with the Tome under the page (body.tome-under, frontend.cpp tome_under_page): co-op player 1's page is
+   over the world's picture, and keeps body.overlay's dim. */
+body.skin-tome {
+	color: rgb(38, 27, 17);
+}
+
+body.skin-tome.tome-under {
+	background-color: transparent;
+	decorator: none;
+}
+
+body.skin-tome #book {
+	position: absolute;
+	max-width: none;
+	margin: 0;
+	padding: 0.9em 1.1em 0.7em 1.1em;
+	align-items: stretch;
+	justify-content: flex-start;
+	decorator: image(tome/parchment.png fill);
+	image-color: #d2c8bc;
+	border: 1px #3a2412b0;
+	border-radius: 0.25em;
+	box-shadow: #000000b0 0 0.25em 1.1em 0.1em, #5a3a2070 0 0 1.4em 0.35em inset;
+}
+
+body.skin-tome #heading {
+	height: 1.45em;
+	line-height: 1.45em;
+	margin: 0;
+	font-family: "La Belle Aurore";
+	font-size: 1.4em;
+	text-align: center;
+	color: rgb(38, 27, 17);
+}
+
+body.skin-tome #rule {
+	display: block;
+	flex-shrink: 0;
+	height: 0.75em;
+	margin: 0.1em 3em 0.35em 3em;
+	decorator: image(tome/divider.png fill);
+	opacity: 0.85;
+}
+
+body.skin-tome .page,
+body.skin-tome.roster .page,
+body.skin-tome.cards .page {
+	position: relative;
+	padding: 0;
+}
+
+body.skin-tome .menu {
+	justify-content: flex-start;
+	margin: 0;
+}
+
+body.skin-tome .row,
+body.skin-tome.dense .row,
+body.skin-tome.centered .row,
+body.skin-tome.roster .row,
+body.skin-tome.cards .row,
+body.skin-tome .row.back {
+	width: auto;
+	min-height: 1.45em;
+	height: 1.45em;
+	line-height: 1.45em;
+	margin: 0;
+	padding: 0 0.45em;
+	font-family: "La Belle Aurore";
+	font-size: 0.92em;
+	border: 2px transparent;
+	border-radius: 0.15em;
+	background-color: transparent;
+	box-shadow: none;
+	color: rgb(38, 27, 17);
+	justify-content: flex-start;
+}
+
+body.skin-tome.dense .row {
+	font-size: 0.84em;
+}
+
+/* A list of slots: ten and Back, a little closer, so the page's help stays clear under them. */
+body.skin-tome.slots .row {
+	min-height: 1.3em;
+	height: 1.3em;
+	line-height: 1.3em;
+}
+
+body.skin-tome .row .label {
+	white-space: nowrap;
+}
+
+/* Back, and the plain lists of actions (a save slot's page): centred, as on the launcher. */
+body.skin-tome .row.back,
+body.skin-tome.centered .row,
+body.skin-tome.roster .row,
+body.skin-tome.cards .row {
+	justify-content: center;
+}
+
+body.skin-tome .row.back {
+	width: 7em;
+	margin: 0 auto;
+}
+
+body.skin-tome.centered .row {
+	width: 72%;
+	margin: 0 auto;
+}
+
+body.skin-tome.roster .row,
+body.skin-tome.cards .row {
+	width: 12em;
+	margin: 0 auto;
+}
+
+body.skin-tome.centered .row .leader,
+body.skin-tome.roster .row .leader {
+	flex: 0;
+	min-width: 0.5em;
+	width: 0.5em;
+}
+
+/* The chosen row: red ink inside a thin gold ring with a soft glow (the Tome's own ring round a plaque is gold). */
+body.skin-tome .row.selected {
+	border-width: 2px;
+	color: #7a1616;
+	border-color: #a8820f;
+	background-color: #f0cc4a30;
+	box-shadow: #ffd84ac0 0 0 0.55em 0.1em;
+}
+
+body.skin-tome .row.selected .value {
+	color: #7a1616;
+}
+
+body.skin-tome .row.disabled,
+body.skin-tome .row.disabled .value {
+	color: #8a7a62;
+}
+
+body.skin-tome .row.selected.disabled {
+	color: #6a5a4a;
+}
+
+body.skin-tome .row.chosen .label {
+	color: #8e1b12;
+}
+
+body.skin-tome .leader {
+	min-width: 0.6em;
+}
+
+body.skin-tome .value {
+	font-family: "IM FELL English";
+	font-size: 0.8em;
+	line-height: 1.6em;
+	color: #3a2a1a;
+}
+
+body.skin-tome.dense .value {
+	font-size: 0.72em;
+}
+
+body.skin-tome.settings .value {
+	min-width: 7.5em;
+}
+
+body.skin-tome .chev {
+	width: 1em;
+	height: 1.6em;
+	line-height: 1.6em;
+	font-size: 1.3em;
+	color: #7a2012;
+}
+
+body.skin-tome .pick {
+	min-width: 5em;
+}
+
+body.skin-tome .switch {
+	width: 2.2em;
+	height: 1.1em;
+	border-width: 1px;
+	border-radius: 0.55em;
+}
+
+body.skin-tome .knob {
+	width: 0.7em;
+	height: 0.7em;
+	margin: 0.15em 0 0 0.15em;
+	border-radius: 0.35em;
+}
+
+body.skin-tome .switch.on .knob {
+	margin-left: 1.25em;
+}
+
+body.skin-tome .slider {
+	width: 4.6em;
+	height: 0.4em;
+	border-radius: 0.2em;
+}
+
+body.skin-tome .slider-fill {
+	border-radius: 0.2em;
+}
+
+body.skin-tome .slider-value {
+	width: 2.6em;
+}
+
+/* No room on the leaf for a row's experimental tag: its help says it instead (frontend.cpp render). */
+body.skin-tome .tag {
+	display: none;
+}
+
+body.skin-tome .section {
+	height: 1.2em;
+	line-height: 1.2em;
+	margin: 0.35em 0 0.05em 0;
+	padding: 0 0 0 0.8em;
+	font-family: "IM FELL English SC";
+	font-size: 0.66em;
+	color: #6a4a28;
+}
+
+/* A break between groups: one of the Tome's small rules. */
+body.skin-tome .gap {
+	height: 0.6em;
+	decorator: image(tome/rule.png contain center center);
+	opacity: 0.6;
+}
+
+body.skin-tome img.glyph {
+	width: 1.35em;
+	height: 1.35em;
+	margin-left: 0.2em;
+}
+
+body.skin-tome .sep {
+	width: 0.6em;
+}
+
+body.skin-tome .keycap {
+	padding: 0 0.35em;
+	margin-left: 0.2em;
+	border-width: 1px;
+	border-radius: 0.15em;
+	font-size: 0.85em;
+}
+
+/* The chosen row's help at the leaf's foot, two lines at most. */
+body.skin-tome .note {
+	flex-shrink: 0;
+	height: 2.5em;
+	margin: 0.3em 0.6em 0 0.6em;
+	font-size: 0.64em;
+	line-height: 1.25em;
+	color: #4a3018;
+	text-align: center;
+}
+
+/* The directions line would cross the Tome's frame: the Tome's own pages have none either. */
+body.skin-tome #hint {
+	display: none;
+}
+
+/* The list's marks: the Tome's diamond above and under the rows when rows are hidden. */
+body.skin-tome .list-more {
+	height: 0.8em;
+	margin: 0.05em 0;
+}
+
+body.skin-tome .list-more img {
+	width: 0.7em;
+	height: 0.7em;
+}
+
+/* Choose a character on a Tome page: the frames three to a line, three lines in view, the scroll bar beside them, and
+   under them one strip for the highlighted (or chosen) one: the name, the form, the year and the meters. */
+body.skin-tome.roster #heading {
+	font-size: 1.15em;
+}
+
+body.skin-tome.roster #rule {
+	display: none;
+}
+
+body.skin-tome.roster #pages {
+	font-size: 0.87em;
+}
+
+body.skin-tome .roster-wrap {
+	flex-direction: column;
+	align-items: center;
+}
+
+body.skin-tome .roster-scroll {
+	height: auto;
+}
+
+body.skin-tome .roster-wrap .roster {
+	width: 19.2em;
+	padding: 0;
+}
+
+body.skin-tome .tile {
+	box-sizing: border-box;
+	width: 6.1em;
+	margin: 0.08em 0.12em;
+	padding: 0.18em 0.15em 0.05em 0.15em;
+	border-width: 2px;
+	border-radius: 0.2em;
+}
+
+body.skin-tome .portrait {
+	width: 4.15em;
+	height: 2.93em;
+	margin: 0 auto;
+	border-width: 1px;
+	box-shadow: #00000059 0 0.12em 0.3em 0;
+}
+
+body.skin-tome .name {
+	height: 1.25em;
+	line-height: 1.25em;
+	margin-top: 0.1em;
+	font-size: 0.6em;
+}
+
+body.skin-tome .tile-form {
+	height: 1.2em;
+	line-height: 1.2em;
+	font-size: 0.52em;
+}
+
+body.skin-tome .tile.selected {
+	color: #7a1616;
+	border-color: #a8820f;
+	background-color: #f0cc4a30;
+	box-shadow: #ffd84ac0 0 0 0.55em 0.1em;
+}
+
+body.skin-tome .tile.chosen {
+	border-color: #8e1b12b0;
+	background-color: #8e1b1214;
+	box-shadow: none;
+}
+
+body.skin-tome .tile.chosen.selected {
+	border-color: #a8820f;
+	background-color: #f0cc4a30;
+	box-shadow: #ffd84ac0 0 0 0.55em 0.1em, #8e1b1260 0 0 0.25em 0.05em inset;
+}
+
+body.skin-tome .roster-bar {
+	width: 0.7em;
+	margin: 0 0 0 0.3em;
+}
+
+body.skin-tome .roster-cap {
+	left: 0.05em;
+	width: 0.6em;
+	height: 0.6em;
+}
+
+body.skin-tome .roster-rail {
+	top: 0.75em;
+	bottom: 0.75em;
+}
+
+body.skin-tome .roster-track {
+	left: 0.28em;
+	width: 0.14em;
+	border-radius: 0.07em;
+}
+
+body.skin-tome .roster-thumb {
+	left: 0.12em;
+	width: 0.46em;
+	border-width: 1px;
+	border-radius: 0.23em;
+	box-shadow: none;
+}
+
+body.skin-tome .roster-details {
+	flex: 0 0 auto;
+	width: 19.6em;
+	margin: 0.15em 0 0 0;
+	border-width: 0;
+	border-radius: 0;
+	box-shadow: none;
+	decorator: none;
+}
+
+.strip-rule {
+	height: 0.75em;
+	margin: 0 3.2em 0.1em 3.2em;
+	decorator: image(tome/divider.png fill);
+	opacity: 0.85;
+}
+
+.strip-line {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	height: 1.4em;
+	white-space: nowrap;
+}
+
+.strip-name {
+	font-family: "La Belle Aurore";
+	font-size: 0.98em;
+}
+
+.strip-form {
+	margin-left: 0.7em;
+	font-size: 0.72em;
+	color: #7a1616;
+}
+
+.strip-year {
+	margin-left: 0.7em;
+	font-size: 0.68em;
+	color: #5a3a20;
+}
+
+.strip-about {
+	height: 1.5em;
+	font-size: 0.66em;
+	text-align: center;
+	color: #4a3018;
+}
+
+.strip-meters {
+	display: flex;
+	margin: 0.1em 0.4em 0.1em 0.4em;
+}
+
+.smeter {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	margin: 0 0.35em;
+}
+
+.smeter-name {
+	margin-right: 0.35em;
+	font-size: 0.58em;
+}
+
+.smeter .meter-bar {
+	flex: 1;
+	height: 0.32em;
+	border-width: 1px;
+	border-radius: 0.15em;
+}
+
+.smeter .meter-fill {
+	border-radius: 0.15em;
+}
+
+.smeter-value {
+	margin-left: 0.35em;
+	font-size: 0.56em;
+}
+
+body.skin-tome.roster .gap {
+	height: 0.25em;
+	decorator: none;
+}
+
+/* The two players' cards (Mods > Characters on a Tome page): side by side on the leaf, every size in em. */
+body.skin-tome .pcards {
+	margin: 0.4em 0 0.3em 0;
+}
+
+body.skin-tome .pcard {
+	width: 9.2em;
+	padding: 0.45em 0.6em 0.4em 0.6em;
+	border-width: 1px;
+	border-radius: 0.3em;
+	box-shadow: #00000070 0 0.2em 0.6em 0;
+}
+
+body.skin-tome .pcard.p1.selected,
+body.skin-tome .pcard.p2.selected {
+	border-width: 2px;
+}
+
+body.skin-tome .pcard.p1.selected {
+	border-color: #c9a227;
+	box-shadow: #e2b84a 0 0 0.8em 0.12em;
+}
+
+body.skin-tome .pcard.p2.selected {
+	box-shadow: #3aa8ff 0 0 0.8em 0.12em;
+}
+
+body.skin-tome .pcard-rule {
+	height: 0.6em;
+}
+
+body.skin-tome .pcard-who {
+	margin: 0 0.4em;
+	font-size: 0.8em;
+	font-effect: none;
+}
+
+body.skin-tome .pcard-frame {
+	width: 7.4em;
+	height: 5.22em;
+	margin: 0.35em auto 0.25em auto;
+	padding: 0.22em;
+	border-width: 1px;
+	border-radius: 0.2em;
+	box-shadow: #ffb43a90 0 0 0.5em 0.08em, #000000b0 0 0 0.3em 0.05em inset;
+}
+
+body.skin-tome .pcard.p2 .pcard-frame {
+	box-shadow: #4fb4ff90 0 0 0.5em 0.08em, #000000b0 0 0 0.3em 0.05em inset;
+}
+
+body.skin-tome .pcard-portrait {
+	border-width: 1px;
+}
+
+body.skin-tome .pcard-name {
+	font-family: "La Belle Aurore";
+	font-size: 1em;
+	white-space: nowrap;
+}
+
+body.skin-tome .pcard-form {
+	height: 1.2em;
+	font-size: 0.66em;
+}
+
+body.skin-tome .pcard-meters {
+	margin: 0.2em 0.1em 0 0.1em;
+}
+
+body.skin-tome .pcard-default {
+	height: 3.6em;
+	margin: 0.2em 0.3em 0 0.3em;
+	font-size: 0.62em;
+}
+
+body.skin-tome .pcard-foot {
+	margin-top: 0.25em;
+	font-size: 0.58em;
+}
+
+body.skin-tome .pcard-press {
+	height: 1.3em;
+	margin-top: 0.1em;
+	font-size: 0.58em;
+}
+
+body.skin-tome .pcards-mid {
+	width: 1.3em;
+	margin-top: 4em;
+}
+
+body.skin-tome .pcards-line {
+	width: 1px;
+	height: 3em;
+}
+
+body.skin-tome .pcards-mark {
+	width: 0.75em;
+	height: 0.75em;
+	margin: 0.25em 0;
+}
+
+body.skin-tome .meter {
+	margin: 0.12em 0;
+}
+
+body.skin-tome .meter-name {
+	width: 4.6em;
+	font-size: 0.6em;
+}
+
+body.skin-tome .meter-bar {
+	height: 0.35em;
+	border-width: 1px;
+	border-radius: 0.15em;
+}
+
+body.skin-tome .meter-fill {
+	border-radius: 0.15em;
+}
+
+body.skin-tome .meter-value {
+	width: 2.6em;
+	margin-left: 0.5em;
+	font-size: 0.58em;
 }

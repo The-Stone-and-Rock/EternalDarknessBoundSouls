@@ -932,3 +932,18 @@ body.skin-title #backdrop { display: block; position: absolute; decorator: image
    RmlUi clips only when it counts content as overflowing, and a positioned child is not counted.
 What worked: `z-index: -1` on `#backdrop` (it paints first), and `clip: always` with the overflow (it always cuts).
 Seen in -083544-jtg-s4-title-b (wide pages back) and -084259-jtg-s4-title-43b (sides cut as the game's).
+
+## The Tome look's roster and slot list: too big for the leaf (2026-11-17, native menus step 5)
+1. The roster's first sizes put two frames to a line, not three, so the nine frames in view made five lines and ran
+   off the leaf (logs/run-20261117-092224-jtg-s5-tome-chars):
+```css
+body.skin-tome.roster #pages { font-size: 0.94em; }
+body.skin-tome .roster-wrap .roster { width: 18.9em; padding: 0; }
+body.skin-tome .tile { width: 5.9em; margin: 0.08em 0.17em; padding: 0.18em 0.15em 0.05em 0.15em; border-width: 2px; }
+```
+   The width leaves out the padding and border (RmlUi sizes the content box), so three tiles were wider than the grid.
+2. Ten slots and Back at the plain row height ran over the page's help line ("Page 1 of 10 ...") under Back
+   (logs/run-20261117-092701-jtg-s5-tome-states).
+What worked: `box-sizing: border-box` on the tile, width 6.1em in a 19.2em grid, the roster's letters 0.87em and no
+rule under its heading; a `slots` body class with rows 1.3em tall on the slot lists. Seen in -094050-jtg-s5-tome-chars4
+and -093608-jtg-s5-tome-states2.

@@ -634,7 +634,11 @@ Row mods_row(Screen from) {
 const char* const kCharacters[] = {"Default", "Pius", "Ellia", "Anthony", "Karim",
                                    "Max", "Lindsey", "Paul", "Roberto", "Peter",
                                    "Edward", "Michael", "Alex"};
-constexpr int kRosterColumns = 4;  // portrait frames four to a line; beside them, the details panel
+// Portrait frames four to a line, the details panel beside them; on a Tome page three to a line, the details in a strip
+// under them (the page is narrow).
+int roster_columns() {
+    return g_skin == Skin::Tome ? 3 : 4;
+}
 constexpr int kRosterLines = 3;    // lines of frames in view; the rest scroll, a line at a time
 int g_roster_top = 0;              // the first line in view
 int g_characters_return_row = 0;    // the Mods row to come back to
@@ -864,6 +868,35 @@ std::string character_details_rml(const RosterTile& t) {
                (m.value < 0 ? std::string("?") : std::to_string(m.value)) + "</span></div>";
     }
     return out + "</div></div></div>";
+}
+
+// The same on a Tome page, as one strip under the frames: the Tome's rule, the name, the form in red and the year on
+// one line, then the three meters side by side (who they are is left out: the page has no room for it).
+std::string character_strip_rml(const RosterTile& t) {
+    std::string out = "<div class=\"strip\"><div class=\"strip-rule\"></div><div class=\"strip-line\"><span class=\"strip-name\">" +
+                      escape(t.character == 0 ? std::string("Default") : tile_title(t)) + "</span>";
+    if (t.character == 0)
+        return out + "</div><div class=\"strip-about\">Every chapter with its own character, as the game intended.</div></div>";
+    const CharacterInfo& c = kCharacterInfo[t.character];
+    const CharacterForm* f = t.form != 0 ? form_row(t.character, t.form) : nullptr;
+    const std::string form = tile_form_name(t);
+    const std::string year = f != nullptr && f->year != nullptr ? f->year : c.year;
+    if (!form.empty())
+        out += "<span class=\"strip-form\">" + escape(form) + "</span>";
+    out += "<span class=\"strip-year\">" + escape(year) + "</span></div><div class=\"strip-meters\">";
+    const struct {
+        const char* name;
+        const char* kind;
+        int value;
+    } meters[] = {{"Health", "health", c.health}, {"Magick", "magick", c.magick}, {"Sanity", "sanity", c.sanity}};
+    for (const auto& m : meters) {
+        const int width = m.value < 0 ? 0 : std::min(100, m.value * 100 / 150);
+        out += std::string("<div class=\"smeter\"><span class=\"smeter-name\">") + m.name +
+               "</span><div class=\"meter-bar\"><div class=\"meter-fill " + m.kind + "\" style=\"width: " +
+               std::to_string(width) + "%;\"></div></div><span class=\"smeter-value\">" +
+               (m.value < 0 ? std::string("?") : std::to_string(m.value)) + "</span></div>";
+    }
+    return out + "</div></div>";
 }
 
 // The page's rows under the frames: Stats, Back.
@@ -1147,7 +1180,7 @@ void move_in_roster(int dx, int dy) {
         return;
     }
     if (at < count) {
-        at += dy * kRosterColumns;
+        at += dy * roster_columns();
         if (at >= count)
             at = count;
         else if (at < 0)
@@ -1155,7 +1188,7 @@ void move_in_roster(int dx, int dy) {
     } else {
         at += dy;
         if (at < count)
-            at = count - 1 - (count - 1) % kRosterColumns;  // the last line's first frame
+            at = count - 1 - (count - 1) % roster_columns();  // the last line's first frame
         else if (at >= n)
             at = 0;
     }
@@ -2047,6 +2080,22 @@ void build_options_rows() {
         g_settings.aspect = kChoices[at];
         changed();
     };
+    // On a Tome page only the wide shapes: going to or from 4:3 makes hle.c sync_widescreen_option flip the game's
+    // widescreen word with the Tome open, with no reload of the Tome's art. The game's own Widescreen in the Tome fades
+    // out and reloads it first: that is the Tome's way in and out of 4:3. 16:9 and 21:9 are both "wide" to the game
+    // (launcher_widescreen), so moving between them leaves its word alone and only the picture's width changes.
+    if (g_skin == Skin::Tome) {
+        if (g_settings.aspect == 1) {
+            aspect.enabled = false;
+            aspect.note = "Turn Widescreen on in the Tome's own Options first, then choose 16:9 or 21:9 here.";
+            aspect.change = [](int) {};
+        } else {
+            aspect.change = [](int) {
+                g_settings.aspect = g_settings.aspect == 4 ? 2 : 4;
+                changed();
+            };
+        }
+    }
     g_rows.push_back(aspect);
 
 
@@ -2621,11 +2670,11 @@ void build_problem() {
 // chosen one's while a row under the frames is).
 // The lines in view: the highlighted frame's line among them (when a frame is), and no blank line at the end.
 int roster_lines() {
-    return (roster_count() + kRosterColumns - 1) / kRosterColumns;
+    return (roster_count() + roster_columns() - 1) / roster_columns();
 }
 void roster_keep_in_view() {
     if (g_selected < roster_count()) {
-        const int line = g_selected / kRosterColumns;
+        const int line = g_selected / roster_columns();
         if (line < g_roster_top)
             g_roster_top = line;
         else if (line >= g_roster_top + kRosterLines)
@@ -2638,9 +2687,9 @@ void roster_keep_in_view() {
 void roster_wheel(int dy) {
     g_roster_top = std::clamp(g_roster_top + dy, 0, std::max(roster_lines() - kRosterLines, 0));
     if (g_selected < roster_count()) {
-        const int line = g_selected / kRosterColumns;
+        const int line = g_selected / roster_columns();
         const int to = std::clamp(line, g_roster_top, g_roster_top + kRosterLines - 1);
-        g_selected = std::min(g_selected + (to - line) * kRosterColumns, roster_count() - 1);
+        g_selected = std::min(g_selected + (to - line) * roster_columns(), roster_count() - 1);
     }
 }
 
@@ -2724,6 +2773,60 @@ WinRect title_box(float x0, float y0, float x1, float y1) {
     const WinRect p = title_picture_rect();
     return {p.x + x0 / 850.f * p.w, p.y + y0 / 480.f * p.h, (x1 - x0) / 850.f * p.w, (y1 - y0) / 480.f * p.h};
 }
+// The Tome look (Skin::Tome): the page laid on the Tome's own page. The Tome draws in 640x480 units, its page picture
+// at x 144..576, y 0..480 in both layouts; its 2D is -80..720 across in the wide layout (r13-24660 1, which follows
+// the launcher's aspect), 0..640 in 4:3 (docs/research/in-game-menu/11-tome-pages.md 2.2, 12 1). At 21:9 the 800 units
+// span a 16:9 box in the middle, as the title's. half -1: the whole picture; 0 or 1: that player's co-op half, the
+// picture fitted in it (aurora.cpp half_of and the menu's fit; co-op is not placed yet, see step 6).
+WinRect tome_units_box(int half, float u0, float v0, float u1, float v1) {
+    bool wide = true;
+    WinRect v = game_viewport(&wide);
+    if (half >= 0) {
+        float aspect = 16.f / 9.f;
+        uint32_t W = 0, H = 0;
+        dol_aurora_get_display_info(&aspect, &W, &H);
+        if (W == 0 || H == 0) {
+            W = 1280;
+            H = 720;
+        }
+        const bool side = g_settings.mod_split != 1;
+        const float hx = side ? W * 0.5f * half : 0.f, hy = side ? 0.f : H * 0.5f * half;
+        const float hw = side ? W * 0.5f : static_cast<float>(W), hh = side ? static_cast<float>(H) : H * 0.5f;
+        const float s = std::min(hw / v.w, hh / v.h);
+        v.w *= s;
+        v.h *= s;
+        v.x = hx + (hw - v.w) / 2.f;
+        v.y = hy + (hh - v.h) / 2.f;
+    }
+    const float left = wide ? -80.f : 0.f, units = wide ? 800.f : 640.f;
+    const float span = wide && g_settings.aspect == 4 ? std::min(v.w, std::round(v.h * 16.f / 9.f)) : v.w;
+    const float k = span / units, x0 = v.x + (v.w - span) / 2.f;
+    return {x0 + (u0 - left) * k, v.y + v0 / 480.f * v.h, (u1 - u0) * k, (v1 - v0) / 480.f * v.h};
+}
+// The Tome's page in the window.
+WinRect tome_page_rect(int half) {
+    return tome_units_box(half, 144.f, 0.f, 576.f, 480.f);
+}
+// Our leaf on that page, in the Tome's units: clear of the medallion on the left (it reaches about x 160) and of the
+// "RB Inventory" hint at the foot of the right side (from about y 390), with the page's art showing round it, as the
+// game lays its own Load/Save panel on the page. Its letters a part of the page's height: every size in the Tome
+// look's rcss is in em of it. kTomeLines rows show at a time; the rest scroll.
+constexpr float kTomeLeaf[4] = {166.f, 10.f, 554.f, 384.f};
+constexpr float kTomeFont = 0.036f;
+constexpr int kTomeLines = 9;
+// Whether a co-op Tome page goes in its owner's half (g_skin_half). Off until the split is kept under the page (step 6
+// of docs/research/in-game-menu/12-critic-and-plan.md): today the window behind it is one whole picture.
+constexpr bool kTomeInHalves = false;
+// Whether the Tome is the picture under a Tome page, so the page lies on it with no veil (body.tome-under). Seen in
+// pictures (s5): solo, yes; co-op player 2's copy Tome, yes (run -094421); co-op player 1's Tome, no: the last frame
+// kept is the world's, so the page there keeps the dim veil and its leaf in the middle (run -094534). Step 6 replaces
+// this with the split kept under the page.
+bool tome_under_page() {
+    return g_skin == Skin::Tome && (g_skin_half < 0 || g_skin_half == 1);
+}
+// The leaf's shift with no Tome under it: to the middle of the -80..720 picture (the leaf's middle is at 360).
+constexpr float kTomeLeafCentre = -40.f;
+
 // The list page's box: the column where the game paints its Options rows (x 170..440, y 85..470), a little wider to
 // the left for the scroll marks and to the right for the values (the skull's face starts near x 490), and its letters'
 // size, a part of the picture's height (every size in the title look's list rcss is in em of it). kTitleLines rows show
@@ -2776,8 +2879,8 @@ std::string roster_panel_end() {
                             "<div class=\"roster-track\"></div><div class=\"roster-thumb\" style=\"top: " +
                             std::to_string(g_roster_top * 100 / lines) + "%; height: " + std::to_string(std::min(kRosterLines, lines) * 100 / lines) +
                             "%;\"></div></div><img class=\"roster-cap bottom\" src=\"tome/mark.png\"/></div>";
-    return "</div>" + bar + "</div><div class=\"roster-details\">" + character_details_rml(shown) +
-           "</div></div>";
+    return "</div>" + bar + "</div><div class=\"roster-details\">" +
+           (g_skin == Skin::Tome ? character_strip_rml(shown) : character_details_rml(shown)) + "</div></div>";
 }
 
 // A row's control, right of its name: a switch, a bar or a value with arrows
@@ -2878,7 +2981,7 @@ void render() {
             // A portrait frame and the name and form under it, four to a line, kRosterLines of them in view.
             if (!in_roster)
                 roster_keep_in_view();
-            const int line = static_cast<int>(i) / kRosterColumns;
+            const int line = static_cast<int>(i) / roster_columns();
             if (line < g_roster_top || line >= g_roster_top + kRosterLines) {
                 if (!in_roster)
                     rml[0] += "<div class=\"roster-wrap\"><div class=\"roster-scroll\"><div class=\"roster\">";
@@ -2953,7 +3056,7 @@ void render() {
     const bool have = g_selected < static_cast<int>(g_rows.size());
     // (The title look's list has no room for a row's experimental tag: its help says it instead.)
     std::string note = have ? g_rows[g_selected].note : "";
-    if (have && g_skin == Skin::Title && g_rows[g_selected].experimental)
+    if (have && g_skin != Skin::Launcher && g_rows[g_selected].experimental)
         note = "Experimental, expect glitches. " + note;
     g_doc->GetElementById("note")->SetInnerRML(escape(note));
     g_doc->GetElementById("hint")->SetInnerRML(
@@ -2971,6 +3074,7 @@ void render() {
     // The pause menu: the launcher's parchment over the dimmed game.
     g_doc->SetClass("pause", g_screen == Screen::InGame);
     g_doc->SetClass("centered", centered);
+    g_doc->SetClass("slots", slot_list);  // (the Tome look sets its ten slots a little closer)
     g_doc->SetClass("dense", g_screen == Screen::Controls || g_screen == Screen::Mapping);
     // The settings pages (not Button Mapping's, which shows buttons): one column for every row's value.
     g_doc->SetClass("settings", settings_page && g_screen != Screen::Mapping &&
@@ -2993,6 +3097,7 @@ void render() {
     // The look the caller chose (frontend_open_page_skin); the launcher's has no class of its own.
     g_doc->SetClass("skin-title", g_skin == Skin::Title);
     g_doc->SetClass("skin-tome", g_skin == Skin::Tome);
+    g_doc->SetClass("tome-under", tome_under_page());
     // The title look: the Options picture behind, where the game lays it; a list page in its word column, its letters
     // sized by the picture; the wide pages (the roster, the two cards, Button Mapping's two columns) keep their own
     // places, on a dark panel over the picture.
@@ -3034,6 +3139,15 @@ void render() {
     if (title && !wide_page) {
         place(book, title_box(kTitleBox[0], kTitleBox[1], kTitleBox[2], kTitleBox[3]));
         book->SetProperty("font-size", px(title_picture_rect().h * kTitleFont));
+    } else if (g_skin == Skin::Tome) {
+        // The Tome look: every page (the roster and the cards too) on the leaf laid on the Tome's page.
+        // (In co-op the picture under the page is still the whole window: hle_coop_ui_over turns the split off. Until
+        // it keeps the halves (plan step 6), the page goes on the whole picture, not in its owner's half.)
+        // With no Tome under it (co-op player 1, tome_under_page) the leaf goes in the middle of the dimmed picture.
+        const int half = kTomeInHalves ? g_skin_half : -1;
+        const float shift = tome_under_page() ? 0.f : kTomeLeafCentre;
+        place(book, tome_units_box(half, kTomeLeaf[0] + shift, kTomeLeaf[1], kTomeLeaf[2] + shift, kTomeLeaf[3]));
+        book->SetProperty("font-size", px(tome_page_rect(half).h * kTomeFont));
     } else {
         unplace(book);
     }
@@ -3083,6 +3197,10 @@ void build_rows() {
     case Screen::Characters: build_characters(); break;
     case Screen::QuitAsk: build_quit_ask(); break;
     }
+    // A Tome page is one narrow leaf: one column (Button Mapping's keys, the Mods rows), so it scrolls as one list.
+    if (g_skin == Skin::Tome)
+        for (Row& r : g_rows)
+            r.page = 0;
     // Back on the launcher from a page it opened: at the row that opened it.
     static Screen built = Screen::Launcher;
     if (g_screen == Screen::Launcher && built != Screen::Launcher && g_launcher_row >= 0 &&
@@ -3389,10 +3507,10 @@ bool run_menu() {
     while (!g_close) {
         g_launcher_music.tick();
         update_cursor();
-        // The title look is placed in window pixels (render). The renderer takes a new aspect at its next present, after
-        // the row that changed it rebuilt the page, and a window takes its new size later still (Fullscreen, a resize):
-        // when the window's size, the shown aspect or the aspect setting changes, it is placed again.
-        if (g_skin == Skin::Title) {
+        // The title and Tome looks are placed in window pixels (render). The renderer takes a new aspect at its next
+        // present, after the row that changed it rebuilt the page, and a window takes its new size later still
+        // (Fullscreen, a resize): when the window's size, the shown aspect or the aspect setting changes, it is placed again.
+        if (g_skin != Skin::Launcher) {
             static float placed_aspect = 0.f;
             static uint32_t placed_w = 0, placed_h = 0;
             static int placed_setting = -1;
@@ -4823,6 +4941,8 @@ extern "C" void frontend_frame(void) {
             if (g_list_lines == 0)
                 g_list_lines = kTitleLines;
         }
+        if (g_skin == Skin::Tome && g_list_lines == 0)
+            g_list_lines = kTomeLines;
         std::fprintf(stderr, "[frontend] page %d opened from the game's menu for player %d (skin %d, half %d)\n", page,
                      player + 1, skin, g_skin_half);
         // ED_PAGE_TEST_KEYS (testing): presses in the page, "|" between the pages opened in turn (see run_menu).

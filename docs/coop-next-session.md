@@ -1,7 +1,60 @@
-# HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit, through native menus step 4, the title look; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
+# HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit, through native menus step 5, the Tome look solo; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
 
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
+
+## 2026-11-17 (morning): native menus, step 5 review fixes (committed with step 5)
+A review found two real problems. Both are fixed and seen in pictures (`Screenshots for Claude/s5-tome-skin/` 24-29).
+- Co-op player 1's page lay with no veil on the bright world, with the HUD's "B Examine" showing, placed for a Tome
+  that is not drawn. Before step 5 that page was dimmed. Now the no-veil rule needs the body class `tome-under`
+  (frontend.cpp `tome_under_page`): solo, or player 2's copy Tome (half 1), where the pictures show the Tome under the
+  page. Player 1 in co-op keeps `body.overlay`'s dim, and the leaf moves to the middle (`kTomeLeafCentre`, -40 units).
+  Seen: co-op player 1's Settings and Display dimmed, leaf in the middle, plaques back after (pictures 24, 25, 27; run
+  logs/run-20261117-095733-jtg-s5-fix-coop-p1). Player 2's Characters still on their Tome with no veil (picture 29,
+  run -100102-jtg-s5-fix-p2). Solo still has no veil (picture 28, run -095924-jtg-s5-fix-solo-43).
+- Aspect ratio was left out of Tome pages, so 16:9 to 21:9 could not be changed in play. The game's Widescreen only
+  goes to 4:3 and back to the shape it remembers. Now the row is there: in a wide shape it moves only between 16:9 and
+  21:9 (both are "wide" to the game, so `sync_widescreen_option` leaves its word alone). In 4:3 it is greyed, with a
+  line saying to turn the game's Widescreen on first. Seen: co-op 16:9 > 21:9 > 16:9, the leaf follows, no
+  "[widescreen] the game's option set" line after the menu opened (pictures 25, 26; run -095733). Solo 4:3: greyed
+  with its line; Right did nothing, settings stayed 4:3 (picture 28; run -095924).
+- Not seen: a solo 16:9 page after these fixes (solo was seen at 4:3 only; the no-veil rule is the same); 21:9 on a
+  real 21:9 window (the shots are 16:9, so 21:9 shows letterboxed); player 1 with a copy Tome (`g_tome_copy_p1`), which
+  keeps the veil by this rule.
+
+## 2026-11-17 (morning): native menus, step 5: the Tome look, solo (committed)
+Every page opened from player 1's Tome plaques (Characters, Save States, Settings and all its pages, Mods and all its
+pages, the two cards) is drawn in the Tome look, not the launcher's parchment.
+- frontend.cpp `tome_units_box(half, u0, v0, u1, v1)`: a box in the Tome's 640x480 units in the window (the 2D is
+  -80..720 wide, 0..640 in 4:3, the middle 16:9 box at 21:9, a co-op half fitted as aurora.cpp does). `tome_page_rect`
+  is the page (x 144..576). The page is a leaf laid on it, `kTomeLeaf` = x 166..554, y 10..384: clear of the medallion
+  and of the "RB Inventory" hint at the foot. Its letters are 0.036 of the page's height (`kTomeFont`); every size in
+  the rcss block is em of that. 9 rows show at a time (`kTomeLines`); the rest scroll with the Tome's diamond marks.
+- A Tome page is one column (`build_rows` sets every row's page to 0): Button Mapping's keys and the Mods rows scroll as
+  one list. Aspect ratio in the Tome look: 16:9 and 21:9 only (see the review fixes above). The "Experimental" tag goes into the help line, as on the title. The directions line is hidden.
+- The roster: `roster_columns()` (3 in the Tome, 4 elsewhere) replaces `kRosterColumns`. `character_strip_rml`: under
+  the frames, the Tome's rule, name, form, year on one line, the three bars side by side.
+- `slots` body class on the slot lists (the Tome look sets ten slots a little closer). `run_menu` re-places a Tome page
+  when the window or aspect changes, as for the title.
+- `kTomeInHalves = false`: in co-op the page is placed on the whole window for now. The picture behind is one whole
+  picture (`hle_coop_ui_over` turns the split off), so a page in one half looked small and lost (seen, run
+  -094229-jtg-s5-tome-coop). Step 6 keeps the split and turns this on.
+- menu.rml: `#rule` (the ornament under the heading, Tome look only). menu.rcss: the `body.skin-tome` block at the end.
+- Seen in pictures (`Screenshots for Claude/s5-tome-skin/`), solo, 16:9, co-op off (`JTG_SET=mod_coop=0`): Settings,
+  Display (no Aspect ratio, HDR's note), Sound, Graphics > Image and Effects (a two-line note), Controls scrolled to
+  Back with the mark above, Button Mapping as one list at the top and scrolled, Characters (top, a frame lit, Back lit,
+  scrolled to the end), Save States, a slot's page, Mods, Mods > Co-op, Mods > Characters (the two cards); 4:3:
+  Settings and Display. Runs logs/run-20261117-0925..0941 (`-jtg-s5-tome-*`). Co-op: player 2's Characters from their
+  copy Tome (over their Tome, -094421-jtg-s5-tome-p2) and player 1's Display (over the world, -094534-jtg-s5-tome-coop2),
+  plaques back after. The title look (-094658-jtg-s5-title-check, Aspect ratio still there) and the launcher
+  (-094801-s5-launcher-after) look as before.
+- Careful in tests: in Save States, A on an empty slot saves at once. My first States run did that (slot 5, a new
+  file); I deleted saves/slot5.state after. And jtg.sh closes the game when the recording stops for 20 s, which a menu
+  does: keep a page's ED_PAGE_TEST_KEYS under about 18 s in all.
+- Not seen: a real B, Esc, mouse or wheel press (only the test keys); 21:9; a window resize or Fullscreen change with a
+  Tome page open; Cheats, Challenge and Sanity Effects pages in the Tome (same rows as Co-op's page); key capture on
+  Mapping; a roster frame chosen with A; the Default frame's strip.
+- Next: commit when told; then step 6 (the Tome look in co-op: keep the split under the page, then `kTomeInHalves`).
 
 ## 2026-11-17 (morning): native menus, step 4 review fixes (committed with step 4)
 A review found four real problems. All four are fixed and seen in pictures (`Screenshots for Claude/s4-review-fixes/`).

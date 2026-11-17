@@ -122,6 +122,29 @@ Try:
 - Controls > Plays with: Controller, then Button mapping: the same dark panel as with a keyboard, 9 rows at a time,
   with a small red mark under the list while rows are hidden.
 
+**Native menus, step 5 (2026-11-17 morning):** every page opened from player 1's Tome plaques now has
+**the Tome look**, played alone (co-op off). The page is a leaf of parchment laid on the Tome's own page, with the
+medallion, the bones and the "LB Journal / RB Inventory" hints still showing round it. Names in the Tome's hand, values
+in small print, the chosen row in red ink inside a thin gold ring. Pictures: `Screenshots for Claude/s5-tome-skin/`.
+Try, with co-op off:
+- Tome > Options > Settings: Display, Sound, Graphics (and its four pages), Controls, Button mapping. Each has its name
+  at the top, the Tome's ornament under it, and a Back row. B, Esc or Back goes back one page; Back from Settings
+  closes it and the plaques are back.
+- Display's Aspect ratio in the Tome moves only between 16:9 and 21:9. In 4:3 it is greyed, and its line says to turn
+  the game's own Widescreen on first (in the Tome's own Options). That way the Tome's art is always reloaded when the
+  game goes in or out of 4:3. Try 16:9 to 21:9 and back: the leaf should follow at once.
+- Characters: three portraits to a line, three lines at a time, a scroll bar on the right. Under them, one strip: the
+  name, the form, the year, and the three bars. Then Stats and Back.
+- Save States: ten slots and Back, the page's line under them. Careful: A on an empty slot saves there at once.
+- Mods: Co-op, Challenge, Characters (the two cards fit on the leaf), Cheats, Sanity Effects.
+- Button mapping is one list here (the keyboard keys are in the same row). Down scrolls it; a small diamond above or
+  below says rows are hidden.
+- In 4:3 the leaf sits on the narrower page, clear of the medallion.
+- Say if the leaf should be darker, to match the Tome's page, or cover the whole page.
+- In co-op the page is still on the whole window. Player 2's page lies on their copy Tome, as solo. Player 1's page is
+  over the world's picture (no Tome is under it yet), so that picture is dimmed and the leaf sits in the middle. Putting
+  the page in the player's half, with the Tome under it, is the next step.
+
 ## 7. Karim's skeletal pedestal (chapter 4), for Claude to trace
 The gate you meant is **room 193** in Karim's chapter (the room numbers are the game's; "room 93" is a different room,
 the mansion's teleporter hub in Alex's last chapter, where the game's ending starts). In room 193 the portcullis
