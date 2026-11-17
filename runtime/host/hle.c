@@ -17392,6 +17392,28 @@ static void title_main_draw(CPUState* cpu) {
     if (cpu->gpr[3] != TITLE_MAIN || !sda_ready(cpu))
         return;
     title_options_from_bank(cpu);
+    // ED_TITLE_PAGE_TEST=FRAME:PAGE[:PLAYER] (testing): once, at the first main-menu draw from guest frame FRAME, the
+    // page opens in the title look as Choose Character's does (the idle clock held, the pad the page's). For the
+    // Solo / Co-op page (12) before Start Game and Load Game ask for it (docs/research/solo-coop-picker/plan.md, step 3).
+    static long long test_page_at = -2;
+    static int test_page = -1, test_page_player = 0;
+    if (test_page_at == -2) {
+        test_page_at = -1;
+        const char* t = getenv("ED_TITLE_PAGE_TEST");
+        long long at = 0;
+        if (t != NULL && sscanf(t, "%lld:%d:%d", &at, &test_page, &test_page_player) >= 2)
+            test_page_at = at;
+    }
+    if (test_page_at >= 0 && (long long)(cpu->timebase / 675000ull) >= test_page_at && cpu->gpr[4] < 8u &&
+        mem_read8(cpu, TITLE_STATE) == TITLE_MAIN) {
+        test_page_at = -1;
+        fprintf(stderr, "[title] test: page %d opened (frame %llu)\n", test_page,
+                (unsigned long long)(cpu->timebase / 675000ull));
+        g_title_idle_closed = frontend_menu_closed_count();
+        g_title_idle_reset = true;
+        title_page_hold_start(cpu);
+        frontend_open_page_skin(test_page, test_page_player, FRONTEND_SKIN_TITLE, -1);
+    }
     const bool english = mem_read32(cpu, cpu->gpr[13] - TITLE_LANGUAGE) == 0u;
     titlevideo_menu_row(english ? (int)cpu->gpr[4] : -1);
     title_quads_put(cpu, english && titlevideo_menu_painted());

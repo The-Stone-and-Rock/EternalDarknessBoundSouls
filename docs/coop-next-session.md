@@ -3,6 +3,27 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: the Solo/Co-op picker, step P2: the two-card page, and Controls through Player I / Player II (checkpoint commit)
+docs/research/solo-coop-picker/plan.md, "Built: step P2".
+- **Controls now asks whose first**, everywhere: the title's Options > Controls, the Tome's Settings > Controls and the
+  launcher's Options > Controls show two cards, "Player I" and "Player II", each with that player's Choose Character
+  picture and name (Default's Tome and skull, Random's silhouettes, player 2 on Default "The same as player 1"). A card
+  opens that player's Controls; Back comes back to the cards, then to where it was.
+- **The Solo / Co-op page is built but not hooked:** page 12 (`FRONTEND_PAGE_TITLE_PICK`), Solo (player 1's picture)
+  and Co-op (both, player 1 gold in front, player 2 blue behind), under "Start Game" or "Load Game". A on it only logs.
+  Start Game and Load Game still go straight on: plan step 3 (P3) hooks them. Test it with
+  `ED_TITLE_PAGE_TEST=700:12:0` (title) or `ED_MENU_OPEN=pick-mode` (launcher).
+- Seen in pictures: Screenshots for Claude/solo-coop-picker/P2-pick-page/ (title 16:9 and 4:3, Tome solo and co-op,
+  launcher). Not seen: other languages, the user's play.
+- **The user said (2026-11-17): "when selecting start game and load, solo and co-op screen does not appear."** That is
+  right for this step: P2 only builds the page. Hooking Start Game and Load Game to it is step P3, next.
+- **Review fix:** the HD portraits are no longer made over a live title page (it held the title about 300 ms, a gap in
+  its music, the first time Controls or Choose Character opened on the title without `portraits/hd`). The disc's show
+  there; the next Tome or launcher page, or the next start's preparing page, makes them. Run
+  logs/run-20261117-173951-jtg-p2fix-mode-form-hdwait: page 12 set up in 18 ms (page 9 was 314.6 ms in -172624).
+  Pictures 17 and 18 in P2-pick-page/ also show player 1's form (Karim's Spirit) on Solo and Co-op for the first time.
+  Not run: the later making on a Tome page; not listened to: the music.
+
 ## 2026-11-17: the Solo/Co-op picker, step P1: Default's and Random's pictures, and Random (checkpoint commit)
 docs/research/solo-coop-picker/plan.md (step P1 of the picker; the Solo/Co-op page itself is a later step: Start Game
 and Load Game do not ask yet).

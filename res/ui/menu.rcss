@@ -1003,6 +1003,51 @@ body.cards .row {
 	margin: 1vh 0;
 }
 
+/* The two-card page (Solo / Co-op, Player I / Player II): Choose Character's cards, larger, with no meters. Co-op's
+   card holds two mounts: player 1's in front in gold, player 2's behind and up to the right in blue. */
+.pcard.pickcard {
+	width: 52vh;
+}
+
+.pcard.pickcard .pcard-frame {
+	box-sizing: border-box;
+	width: 46vh;
+	height: 32.5vh;
+}
+
+.pcard-pair {
+	position: relative;
+	width: 46vh;
+	height: 32.5vh;
+	margin: 1.2vh auto 0.8vh auto;
+}
+
+.pcard.pickcard .pcard-pair .pcard-frame {
+	position: absolute;
+	width: 38vh;
+	height: 26.8vh;
+	margin: 0;
+}
+
+.pcard-pair .pcard-frame.behind {
+	left: 8vh;
+	top: 0;
+}
+
+.pcard-pair .pcard-frame.front {
+	left: 0;
+	top: 5.7vh;
+}
+
+.pcard-frame.p2-frame {
+	border-color: #8fc8f0;
+	box-shadow: #4fb4ff 0 0 26dp 6dp, #000000b0 0 0 12dp 3dp inset;
+}
+
+body.pickpage .pcards-mid {
+	margin-top: 20vh;
+}
+
 /* A list that scrolls (frontend.cpp g_list_lines): the Tome's diamond above it when rows are hidden above, and under
    it when rows are hidden below. The launcher's look never scrolls its lists. */
 .list-more {
@@ -1441,6 +1486,21 @@ body.skin-title .pcard-press {
 
 body.skin-title .pcards-line {
 	background-color: #48616890;
+}
+
+body.skin-title .pcard-frame.p2-frame {
+	border-color: #486168;
+	box-shadow: #8fc8f030 0 0 18dp 4dp;
+}
+
+/* Co-op's two mounts: player 1's edged in the gold of "Player I", player 2's in the blue of "Player II". */
+body.skin-title .pcard-pair .pcard-frame.front {
+	border-color: #c9ab6890;
+	box-shadow: #c9ab6840 0 0 18dp 4dp, #000000c0 0 0 10dp 2dp;
+}
+
+body.skin-title .pcard-pair .pcard-frame.behind {
+	border-color: #8fc8f090;
 }
 
 body.skin-title .meter-bar {
@@ -2110,6 +2170,44 @@ body.skin-tome .pcards-mark {
 	width: 0.75em;
 	height: 0.75em;
 	margin: 0.25em 0;
+}
+
+/* The two-card page on the leaf: the cards as Choose Character's, the pictures a little larger. */
+body.skin-tome .pcard.pickcard {
+	width: 9.2em;
+}
+
+body.skin-tome .pcard.pickcard .pcard-frame {
+	width: 7.9em;
+	height: 5.6em;
+}
+
+body.skin-tome .pcard-pair {
+	width: 7.9em;
+	height: 5.6em;
+	margin: 0.35em auto 0.25em auto;
+}
+
+body.skin-tome .pcard.pickcard .pcard-pair .pcard-frame {
+	width: 6.5em;
+	height: 4.6em;
+	margin: 0;
+}
+
+body.skin-tome .pcard-pair .pcard-frame.behind {
+	left: 1.4em;
+}
+
+body.skin-tome .pcard-pair .pcard-frame.front {
+	top: 1em;
+}
+
+body.skin-tome .pcard-frame.p2-frame {
+	box-shadow: #4fb4ff90 0 0 0.5em 0.08em, #000000b0 0 0 0.3em 0.05em inset;
+}
+
+body.skin-tome.pickpage .pcards-mid {
+	margin-top: 4.4em;
 }
 
 body.skin-tome .meter {

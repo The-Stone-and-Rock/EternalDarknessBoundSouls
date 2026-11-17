@@ -263,8 +263,16 @@ Play with the sound on. Start from the launcher as usual.
   example the Options song).
 
 ## 13. Solo / Co-op picker (2026-11-17)
-**Step P1 only: the Solo/Co-op page is not built yet.** Start Game and Load Game still go straight on. That page
-comes in a later step. What P1 adds, to try now:
+**Steps P1 and P2: the Solo/Co-op page is built but Start Game and Load Game do not ask yet** (step P3; you saw this
+on 2026-11-17, and it is expected until P3). To try now:
+- With HD textures on, open the title's Options > Controls or Choose Character the first time after a start. The title
+  music should not skip as the page opens. (If the "Preparing the game" page was skipped, the cards may show the
+  smaller disc pictures there until you open a page in the Tome or start again: say if you see that.)
+- Controls (the title's Options, the Tome's Settings, the launcher's Options) first shows two cards, Player I and
+  Player II, with each player's picture and name. Left/Right moves, A opens that player's controls, B goes back to the
+  cards, B again to where you were. Say if it looks right next to Choose Character, and if the cards feel too big or
+  too small.
+What P1 adds:
 - Start from play.bat or the launcher. The "Preparing the game" page may show once, briefly (it makes the new
   pictures). Start again: it should not show.
 - Open Choose Character (launcher, title, or the Tome's Options). The **Default** card should show the game's own

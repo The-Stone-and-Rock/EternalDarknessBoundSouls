@@ -486,3 +486,59 @@ mode belong in step 3). Then the six card tests (missed 1) and player 2's Defaul
   pack with a 640x480 Default) wrote the `failed` stamp; run D said "everything prepared already"; run E showed the
   disc's Default card with no new try; run F (the real pack, ED_PREPARE=1) made everything. Pictures and logs:
   Screenshots for Claude/solo-coop-picker/P1-review-fixes/. Not run: the no-disc case (code only).
+
+## Built: step P2, the two-card page and Controls through it (plan steps 1 and 2; 2026-11-17)
+
+- `Screen::Pick` (frontend.cpp) with `PickKind::Mode` (Solo / Co-op) and `PickKind::Controls` (Player I / Player II),
+  its own `g_pick_return` / `g_pick_return_row` (skeptic's wrong 11), `open_pick()`, `pick_back()`, `build_pick()`: the
+  two cards (rows card 1 and 2) and Back under them, as Choose Character's page (Back is there for the mouse).
+  `card_screen()` (Choose Character's or Pick) is used in the six card tests (missed 1).
+- `pick_card_rml`: Choose Character's `.pcard` mount, larger (`.pcard.pickcard`), no meters. The picture is
+  `portrait_rml` of each player's choice, so Default's Tome and skull, Random's silhouettes (never the roll) and a form's
+  own come from P1. Player 2 on Default shows player 1's frame with no form (hle.c `coop_p2_choice` -1 and `costume_on`
+  NULL: player 1's character in its own body) and says "The same as player 1" (wrong 10). Co-op: player 1's mount in
+  front, player 2's behind and up to the right (`.pcard-pair`, `.behind` `.p2-frame` blue, `.front` gold), the names
+  "A and B" (one name and "For both players" when player 2 is on Default).
+- The first card lit: Solo / Co-op on `mod_coop`; Player I / II on `g_menu_player` (missed 3; player 2's Tome has no
+  Settings plaque today, so it is always Player I in practice).
+- `FRONTEND_PAGE_TITLE_PICK = 12` (frontend.h; `player` is the title row, 0 Start Game, 1 Load Game: the heading), a
+  root that closes on Back. `g_on_title` takes 4..12. A on Solo / Co-op only logs `[frontend] pick: solo|co-op`: nothing
+  opens the page from the game yet (step 3).
+- Controls: the title's page 9 (Options > Controls), `build_options`' Controls row (the Tome's Settings > Controls and
+  the launcher's Options > Controls) open the Player I / Player II page first. A card: that player's Controls
+  (`[frontend] pick: player N's controls`); Back from it (button or row) comes back to the page on that card; Back again
+  goes where Controls went before (Options' Controls row, or closes the title page). `past_root`: a Pick root closes at
+  Options.
+- menu.rcss: `.pcard.pickcard`, `.pcard-pair`, `.p2-frame` in the launcher look, the title look (`border` gold and blue on
+  the pair) and the Tome look (em sizes on the leaf). Body class `pickpage` (not `pick`: docs/coop-failed-attempts.md).
+- Test doors: `ED_MENU_OPEN=pick-mode`, `pick-load`, `pick-controls` (the launcher); `ED_TITLE_PAGE_TEST=FRAME:PAGE[:PLAYER]`
+  (hle.c `title_main_draw`: once, on the main menu from guest frame FRAME, the page opens in the title look as Choose
+  Character's does, with the idle clock and the pad held).
+- Seen (Screenshots for Claude/solo-coop-picker/P2-pick-page/, runs logs/run-20261117-1713*..1726*-jtg-p2-*): the title
+  Controls page with each card lit, Player 2 Controls, Player 2 Mapping, Back to the page on Player II, Back to the
+  title Options list on Controls (-172624); Start Game and Load Game's Solo / Co-op over the title with player 1 on
+  Random, Default and Paul (no form) and player 2 on Ellia's second form (only as the picture behind: the pair's line
+  has no form names) and Lindsey (-171306, -171541, -172100); player 1's form on this page only in -173951 (below);
+  4:3 (-172100); the Tome's Settings > Controls in solo
+  (-171913) and in co-op in player 1's half, through Player 2 Controls and back to Settings (-171709), co-op 4:3 with
+  Random and player 2 on Default (-172226); the launcher's pages (ED_MENU_OPEN, scratch settings). The title music runs
+  under the pages as for the other title pages (live page lines in each run; not listened to).
+- Not seen: the Solo / Co-op page in the Tome look (nothing opens it there), another language, the user's play, a mouse.
+  The first title page of a run with no `res/ui/portraits/hd` yet made the HD portraits while it opened (about 300 ms,
+  "set up in 314.6 ms" in -172624): fixed in the review below.
+
+## Built: step P2's review fixes (2026-11-17, the P2 checkpoint commit)
+
+- **No HD pictures made over a live title page.** `hd_pictures_wait()` (frontend.cpp): on a title-look page that the
+  title runs under (not with ED_TITLE_PAGE_PAUSE=1), `make_portraits_hd` and `make_default_hd` do not write; the disc's
+  portraits (and Default's disc picture) show, and the answer is not kept (`g_hd_pictures_waited`), so the next page
+  that stops the game (the Tome's, the launcher's) or the next start's preparing page makes them. One log line:
+  "HD portraits not made over a live title page". This also covers the title's Choose Character, which had the same
+  cost before P2. The disc portraits are still written on a page when missing (12 small PNGs, as before P2).
+  Seen: logs/run-20261117-173951-jtg-p2fix-mode-form-hdwait, no `portraits/hd`, HD textures on: page 12 "set up in
+  18.0 ms" (was 314.6 ms for page 9 in -172624), slowest live step 1.6 ms; Lindsey's disc picture behind; no files
+  written to res/ui/portraits. The later making on a Tome page was not run (read in the code only).
+- **Player 1's form on Solo / Co-op** seen in the same run: Karim's Spirit form (from the costume bits) on Solo with
+  the line "Spirit", and in front on Co-op with "Karim and Lindsey" (pictures 17 and 18 in P2-pick-page/).
+- Review finding rejected in part: the Mode runs did have a form (player 2's Ellia, form 2, from the costume bits), and
+  Ellia-2's picture is behind on Co-op in pictures 07 and 08. Only player 1's form had not been seen there.

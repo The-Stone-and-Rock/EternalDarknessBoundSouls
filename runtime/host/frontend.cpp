@@ -323,7 +323,7 @@ std::string region_name(const std::string& id) {
 // --- Menu model -------------------------------------------------------------
 
 enum class Screen { Launcher, Play, States, Slot, SlotDelete, SlotOverwrite, Options, OptionsPage, Graphics, Controls, Mapping, InGame,
-                    Problem, Mods, ModsPage, Characters, QuitAsk };
+                    Problem, Mods, ModsPage, Characters, QuitAsk, Pick };
 
 struct Row {
     std::string label;
@@ -600,9 +600,19 @@ int g_mods_page_return_row = 0;
 void mods_page_back();
 int section_number(const std::string& heading);
 int g_options_row = 0;  // the Options row to come back to (its pages, Controls, Mods)
-// Controls: player 1's from Options, player 2's from Mods (co-op), and back.
+// Controls: player 1's or player 2's from the Player I / Player II page (Screen::Pick), player 2's from Mods (co-op), and
+// back.
 Screen g_controls_return = Screen::Options;
 int g_controls_return_row = 0;
+// The two-card page (docs/research/solo-coop-picker/plan.md): Solo / Co-op before a game (the title's Start Game or
+// Load Game, g_pick_title_row 0 or 1), or Player I / Player II before Controls. It goes back to its own screen and row,
+// apart from Controls' (which comes back to it, on the card that opened it).
+enum class PickKind { Mode, Controls };
+PickKind g_pick_kind = PickKind::Controls;
+int g_pick_title_row = 0;
+Screen g_pick_return = Screen::Options;
+int g_pick_return_row = 0;
+void open_pick(PickKind kind, Screen back, int back_row);
 
 // A page opened by the game's own menus (the Tome's Options, the title's Options: frontend_open_page): Back from it,
 // or any way up past it, closes the menu and the game's menu is there again as it was.
@@ -1116,6 +1126,25 @@ std::vector<uint8_t> default_crop(const std::vector<uint8_t>& rgba, int k, bool 
 std::string read_text(const std::string& path);
 bool write_text(const std::string& path, const std::string& text);
 
+// Over a live title page (the title and its music run under it) the HD pictures are not made: writing them holds the
+// game thread about 300 ms, a gap in the title's music. The disc's pictures show there instead, and the HD ones are made
+// at the next page that stops the game (the Tome's, the launcher's) or by the next start's preparing page.
+bool g_hd_pictures_waited = false;  // (set when a make was put off: the answer is not kept, so it is asked again)
+bool hd_pictures_wait() {
+    // (ED_TITLE_PAGE_PAUSE=1: title pages block the game, as title_page_pause reads it, so they are made there.)
+    static const bool pause = std::getenv("ED_TITLE_PAGE_PAUSE") != nullptr && std::atoi(std::getenv("ED_TITLE_PAGE_PAUSE")) != 0;
+    if (g_skin != Skin::Title || pause)
+        return false;
+    static bool said = false;
+    if (!said) {
+        said = true;
+        std::fprintf(stderr, "[frontend] HD portraits not made over a live title page (the disc's are shown): made at "
+                             "the next page that stops the game, or the next start\n");
+    }
+    g_hd_pictures_waited = true;
+    return true;
+}
+
 // The pack's Default picture's stamp: this way of making it, and the pack file's size and time ("" with HD textures
 // off or the pack without it).
 std::string default_hd_id() {
@@ -1146,7 +1175,7 @@ bool make_default_hd() {
     if (had == "failed " + id + "\n")
         return false;
     static std::string tried;
-    if (tried == id)
+    if (tried == id || hd_pictures_wait())
         return false;
     tried = id;
     const Uint64 t0 = SDL_GetTicks();
@@ -1183,8 +1212,10 @@ int g_default_hd_for = -1;
 bool ensure_default_hd() {
     static bool ok = false;
     if (g_default_hd_for != (g_settings.hd_textures ? 1 : 0)) {
+        g_hd_pictures_waited = false;
         ok = make_default_hd();
-        g_default_hd_for = g_settings.hd_textures ? 1 : 0;
+        if (!g_hd_pictures_waited)
+            g_default_hd_for = g_settings.hd_textures ? 1 : 0;
     }
     return ok;
 }
@@ -1270,7 +1301,7 @@ bool make_portraits_hd() {
     if (had == "failed " + id + "\n")
         return false;  // (tried for these pack files already: see make_default_hd)
     static std::string tried;
-    if (tried == id)
+    if (tried == id || hd_pictures_wait())
         return false;
     tried = id;
     const Uint64 t0 = SDL_GetTicks();
@@ -1313,8 +1344,9 @@ int g_portraits_hd_for = -1;
 bool ensure_portraits_hd() {
     static bool ok = false;
     if (g_portraits_hd_for != (g_settings.hd_textures ? 1 : 0)) {
+        g_hd_pictures_waited = false;
         ok = make_portraits_hd();
-        if (!picture_disc().empty())
+        if (!picture_disc().empty() && !g_hd_pictures_waited)
             g_portraits_hd_for = g_settings.hd_textures ? 1 : 0;
     }
     return ok;
@@ -1447,6 +1479,113 @@ std::string player_card_rml(int player, bool selected, size_t index) {
            (off ? "Co-op is off" : chosen == 0 ? "The chapter's own stats" : stats == 1 ? "Their own stats" : "The chapter's stats") +
            "</div><div class=\"pcard-press\">" + (selected ? "A &#8212; choose character" : "&nbsp;") + "</div></div>";
     return out;
+}
+
+// The two-card page's picture of a player: their Choose Character frame (Default's Tome and skull, Random's silhouettes
+// and never who was rolled, a form's own). Player 2 on Default plays player 1's character in its own body (hle.c
+// coop_p2_choice gives -1, costume_on no form), so theirs is player 1's frame with no form.
+RosterTile pick_tile(int player) {
+    const int p1 = g_settings.mod_p1_character;
+    if (player == 1 && g_settings.mod_p2_character != 0)
+        return {g_settings.mod_p2_character, form_on(1, g_settings.mod_p2_character)};
+    return {p1, player == 1 ? 0 : form_on(0, p1)};
+}
+// The line under a picture's name: the form, or what Default and Random mean (never the rolled character).
+std::string pick_line(int player) {
+    const RosterTile t = pick_tile(player);
+    if (player == 1 && g_settings.mod_p2_character == 0 && t.character != 0)
+        return "The same as player 1";
+    if (t.character == 0)
+        return "Each chapter's own character";
+    if (t.character == SETTINGS_RANDOM)
+        return "Who it is stays a surprise";
+    return tile_form_name(t);
+}
+std::string pick_frame_rml(int player, const char* where) {
+    const RosterTile t = pick_tile(player);
+    return std::string("<div class=\"pcard-frame") + where + (player == 1 ? " p2-frame" : "") +
+           (t.character == 0 ? " default" : t.character == SETTINGS_RANDOM ? " random" : "") +
+           "\"><div class=\"pcard-portrait\">" + portrait_rml(t) + "</div></div>";
+}
+
+// The two-card page: one card. Its label between the Tome's rules (Solo / Co-op, or Player I / Player II), one picture
+// (Solo, a player) or two (Co-op: player 1's in front in gold, player 2's behind and up to the right in blue), the name
+// line, the line under it and what A does. No meters: the players' details are on Choose Character.
+std::string pick_card_rml(int which, bool selected, size_t index) {
+    const bool controls = g_pick_kind == PickKind::Controls;
+    const bool pair = !controls && which == 1;
+    const int player = controls ? which : 0;  // whose picture is in front
+    std::string name = tile_title(pick_tile(player)), line = pick_line(player);
+    if (pair) {
+        // Co-op: both names, or one when player 2 is on Default (they play player 1's).
+        if (g_settings.mod_p2_character != 0) {
+            name += std::string(" and ") + tile_title(pick_tile(1));
+            line = "Two players, the screen split";
+        } else {
+            line = pick_tile(0).character == 0 ? "Each chapter's own character, for both" : "For both players";
+        }
+    }
+    const char* label = controls ? (which == 1 ? "Player II" : "Player I") : (which == 1 ? "Co-op" : "Solo");
+    const char* press = controls ? "A &#8212; their controls" : which == 1 ? "A &#8212; play together" : "A &#8212; play alone";
+    // The card's own glow: Player II's blue, the rest gold (Co-op's two mounts keep each player's colour).
+    std::string out = std::string("<div class=\"pcard pickcard ") + (controls && which == 1 ? "p2" : "p1") +
+                      (selected ? " selected" : "") + "\" id=\"row" + std::to_string(index) +
+                      "\"><div class=\"pcard-head\"><div class=\"pcard-rule\"></div><div class=\"pcard-who\">" + label +
+                      "</div><div class=\"pcard-rule\"></div></div>";
+    if (pair)
+        out += "<div class=\"pcard-pair\">" + pick_frame_rml(1, " behind") + pick_frame_rml(0, " front") + "</div>";
+    else
+        out += pick_frame_rml(controls ? which : 0, "");
+    if (controls && which == 1) {
+        static const char* const kInput[] = {"Plays with a controller", "Plays with the keyboard"};
+        line = line.empty() ? kInput[g_settings.mod_p2_input & 1] : line;
+    }
+    out += "<div class=\"pcard-name\">" + escape(name) + "</div><div class=\"pcard-form\">" +
+           (line.empty() ? std::string("&nbsp;") : escape(line)) + "</div><div class=\"pcard-press\">" +
+           (selected ? press : "&nbsp;") + "</div></div>";
+    return out;
+}
+
+// Open the two-card page, its card lit: Solo / Co-op on the mode played last (A A goes on as before), Player I / II on
+// the player whose menu it is (player 2's own Tome page lights Player II).
+void open_pick(PickKind kind, Screen back, int back_row) {
+    g_pick_kind = kind;
+    g_pick_return = back;
+    g_pick_return_row = back_row;
+    g_screen = Screen::Pick;
+    g_selected = kind == PickKind::Mode ? (g_settings.mod_coop ? 1 : 0) : (g_menu_player == 1 ? 1 : 0);
+}
+
+void pick_back() {
+    controls::set_menu_player(0);
+    g_screen = g_pick_return;
+    g_selected = g_pick_return_row;
+}
+
+// The two cards (rows with card 1 and 2) and Back under them, as Choose Character's page.
+void build_pick() {
+    for (int which = 0; which < 2; which++) {
+        Row r{g_pick_kind == PickKind::Controls ? (which == 1 ? "Player II" : "Player I") : (which == 1 ? "Co-op" : "Solo")};
+        r.card = which + 1;
+        if (g_pick_kind == PickKind::Controls) {
+            r.activate = [which] {
+                std::fprintf(stderr, "[frontend] pick: player %d's controls\n", which + 1);
+                controls::set_menu_player(which);
+                g_controls_return = Screen::Pick;
+                g_controls_return_row = which;
+                g_screen = Screen::Controls;
+                g_selected = 0;
+            };
+        } else {
+            // (Nothing starts from here yet: plan step 3 gives the title's Start Game and Load Game this page.)
+            r.activate = [which] { std::fprintf(stderr, "[frontend] pick: %s\n", which == 1 ? "co-op" : "solo"); };
+        }
+        g_rows.push_back(r);
+    }
+    Row back{"Back"};
+    back.gap = true;
+    back.activate = [] { pick_back(); };
+    g_rows.push_back(back);
 }
 
 // Character select: every character and form, their portrait (from the disc, ensure_portraits; a form's
@@ -2701,10 +2840,7 @@ void build_options() {
     controls.activate = [] {
         g_options_row = g_selected;
         controls::set_menu_player(0);
-        g_controls_return = Screen::Options;
-        g_controls_return_row = g_selected;
-        g_screen = Screen::Controls;
-        g_selected = 0;
+        open_pick(PickKind::Controls, Screen::Options, g_selected);  // Player I / Player II first
     };
     g_rows.push_back(controls);
     // Camera, Game text and FPS counter are on Display (their rows come under its heading in build_options_rows), and
@@ -3016,12 +3152,17 @@ void roster_wheel(int dy) {
     }
 }
 
+// A page of two cards (rows with card 1 and 2): Choose Character's, and the two-card page (Solo / Co-op, Player I / II).
+bool card_screen() {
+    return (g_screen == Screen::ModsPage && g_mods_section == 3) || g_screen == Screen::Pick;
+}
+
 // The hand-made list scroll (g_list_top, g_list_lines): on this screen, now?
 // Not on a two-column spread (a row with page 1: Button Mapping's keys, the Mods rows): the window is one range of
 // rows across both columns and the marks go in the left one, so the right column would empty with no mark.
 bool list_scrolls() {
     if (g_list_lines <= 0 || g_screen == Screen::Characters || g_screen == Screen::States || g_screen == Screen::Play ||
-        (g_screen == Screen::ModsPage && g_mods_section == 3))
+        card_screen())
         return false;
     for (const Row& r : g_rows)
         if (r.page == 1)
@@ -3189,7 +3330,7 @@ void ensure_title_art() {
 // The title look's wide pages keep their own places on a dark panel: the roster, the two cards, Button Mapping (with or
 // without its right-hand keys) and any page with a right-hand column. The rest are lists in the picture's word column.
 bool title_wide_page() {
-    if (g_screen == Screen::Characters || (g_screen == Screen::ModsPage && g_mods_section == 3) || g_screen == Screen::Mapping)
+    if (g_screen == Screen::Characters || card_screen() || g_screen == Screen::Mapping)
         return true;
     for (const Row& r : g_rows)
         if (r.page == 1 && r.card == 0 && !r.tile)
@@ -3320,6 +3461,9 @@ void render() {
                                                                                        : "Player 1 Character")
                           : g_screen == Screen::Problem  ? g_problem_heading.c_str()
                           : g_screen == Screen::QuitAsk  ? "Quit the game?"
+                          : g_screen == Screen::Pick     ? (g_pick_kind == PickKind::Controls ? "Controls"
+                                                            : g_pick_title_row == 1           ? "Load Game"
+                                                                                              : "Start Game")
                                                          : "Paused";
     g_doc->GetElementById("heading")->SetInnerRML(heading);
     std::string rml[2];
@@ -3359,7 +3503,8 @@ void render() {
         if (r.card != 0) {
             if (r.card == 1)
                 rml[0] += "<div class=\"pcards\">";
-            rml[0] += player_card_rml(r.card - 1, static_cast<int>(i) == g_selected, i);
+            rml[0] += g_screen == Screen::Pick ? pick_card_rml(r.card - 1, static_cast<int>(i) == g_selected, i)
+                                               : player_card_rml(r.card - 1, static_cast<int>(i) == g_selected, i);
             rml[0] += r.card == 1 ? "<div class=\"pcards-mid\"><div class=\"pcards-line\"></div><img class=\"pcards-mark\" "
                                     "src=\"tome/mark.png\"/><div class=\"pcards-line\"></div></div>"
                                   : "</div>";
@@ -3453,6 +3598,8 @@ void render() {
         : g_screen == Screen::QuitAsk ? "Up/Down choose &#183; A select &#183; B back"
         : g_screen == Screen::Characters ? "Arrows choose &#183; Right stick scrolls &#183; A select &#183; B back"
         : g_screen == Screen::ModsPage && g_mods_section == 3 ? "Left/Right choose the player &#183; A choose their character &#183; B back"
+        : g_screen == Screen::Pick && g_pick_kind == PickKind::Controls ? "Left/Right choose the player &#183; A their controls &#183; B back"
+        : g_screen == Screen::Pick    ? "Left/Right choose &#183; A start &#183; B back"
         : slot_list                   ? "Up/Down choose &#183; LB/RB page &#183; A select &#183; B back"
                                       : "Up/Down choose &#183; Left/Right change &#183; A select &#183; B back");
     g_doc->SetClass("spread", spread);
@@ -3465,12 +3612,12 @@ void render() {
     g_doc->SetClass("slots", slot_list);  // (the Tome look sets its ten slots a little closer)
     g_doc->SetClass("dense", g_screen == Screen::Controls || g_screen == Screen::Mapping);
     // The settings pages (not Button Mapping's, which shows buttons): one column for every row's value.
-    g_doc->SetClass("settings", settings_page && g_screen != Screen::Mapping &&
-                                    !(g_screen == Screen::ModsPage && g_mods_section == 3));
+    g_doc->SetClass("settings", settings_page && g_screen != Screen::Mapping && !card_screen());
     // Character select: one wide page, every frame at once.
     g_doc->SetClass("roster", g_screen == Screen::Characters);
     // Choose Character: the two players' cards on one wide page.
-    g_doc->SetClass("cards", g_screen == Screen::ModsPage && g_mods_section == 3);
+    g_doc->SetClass("cards", card_screen());
+    g_doc->SetClass("pickpage", g_screen == Screen::Pick);
     // Over the game the page lies on the dimmed, paused frame.
     g_doc->SetClass("overlay", g_screen == Screen::InGame || g_screen == Screen::Problem || g_screen == Screen::QuitAsk ||
                                    g_screen == Screen::States ||
@@ -3479,7 +3626,7 @@ void render() {
                                    ((g_screen == Screen::Options || g_screen == Screen::OptionsPage ||
                                      g_screen == Screen::Graphics || g_screen == Screen::Mods || g_screen == Screen::ModsPage ||
                                      g_screen == Screen::Characters ||
-                                     g_screen == Screen::Controls ||
+                                     g_screen == Screen::Controls || g_screen == Screen::Pick ||
                                      g_screen == Screen::Mapping) &&
                                     g_options_return == Screen::InGame));
     // The look the caller chose (frontend_open_page_skin); the launcher's has no class of its own.
@@ -3577,6 +3724,7 @@ bool past_root(Screen s) {
     case Screen::ModsPage: return s == Screen::Mods || s == Screen::Options;
     case Screen::Characters: return s == Screen::ModsPage || s == Screen::Mods || s == Screen::Options;
     case Screen::Mapping: return s == Screen::Controls || s == Screen::Options || s == Screen::ModsPage;
+    case Screen::Pick: return s == Screen::Options;  // (Controls and Mapping under it come back to it)
     default: return false;
     }
 }
@@ -3606,6 +3754,7 @@ void build_rows() {
     case Screen::ModsPage: build_mods_page(); break;
     case Screen::Characters: build_characters(); break;
     case Screen::QuitAsk: build_quit_ask(); break;
+    case Screen::Pick: build_pick(); break;
     }
     // A Tome page is one narrow leaf: one column (Button Mapping's keys, the Mods rows), so it scrolls as one list.
     if (g_skin == Skin::Tome)
@@ -3702,6 +3851,9 @@ void go_back() {
         break;
     case Screen::ModsPage:
         mods_page_back();
+        break;
+    case Screen::Pick:
+        pick_back();
         break;
     case Screen::InGame:
         g_close = true;
@@ -4004,7 +4156,7 @@ MenuStep menu_step() {
             }
         }
         // Choose Character: left and right go between the two players' cards.
-        if (g_screen == Screen::ModsPage && (pressed[kLeft] || pressed[kRight]) && g_selected < static_cast<int>(g_rows.size()) &&
+        if (card_screen() && (pressed[kLeft] || pressed[kRight]) && g_selected < static_cast<int>(g_rows.size()) &&
             g_rows[g_selected].card != 0) {
             for (size_t i = 0; i < g_rows.size(); i++)
                 if (g_rows[i].card != 0 && g_rows[i].card != g_rows[g_selected].card) {
@@ -4472,7 +4624,7 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
     g_screen = Screen::Launcher;
     g_selected = launcher_main_row();
     // ED_MENU_OPEN=options, graphics, display, sound, image, shadows, lighting, effects, game,
-    // controls, mapping, mods, coop, challenge, characters-page, cheats, characters, load,
+    // controls, mapping, mods, coop, challenge, characters-page, cheats, characters, load, pick-mode, pick-load, pick-controls,
     // states, slotN, deleteN or overwriteN[,row] (testing): the launcher opens on that page, at that
     // row; controls2 and mapping2 show player 2's, slotN and deleteN slot N's.
     if (const char* page = std::getenv("ED_MENU_OPEN"); page != nullptr) {
@@ -4503,6 +4655,11 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
                 g_screen = p.screen;
                 (p.screen == Screen::ModsPage ? g_mods_section : g_options_section) = p.section;
             }
+        // pick-mode / pick-load (Solo / Co-op under Start Game or Load Game's heading) and pick-controls (Player I / II).
+        if (std::strncmp(page, "pick-", 5) == 0) {
+            g_pick_title_row = std::strncmp(page, "pick-load", 9) == 0 ? 1 : 0;
+            open_pick(std::strncmp(page, "pick-controls", 13) == 0 ? PickKind::Controls : PickKind::Mode, Screen::Launcher, 0);
+        }
         if (g_screen == Screen::SlotOverwrite)
             g_slot_from_states = true;
         if (g_screen == Screen::Slot || g_screen == Screen::SlotDelete || g_screen == Screen::SlotOverwrite)
@@ -5760,7 +5917,7 @@ extern "C" void frontend_frame(void) {
     g_mods_return = Screen::InGame;
     g_selected = 0;
     g_root_closes = page >= 0;
-    g_on_title = page >= FRONTEND_PAGE_TITLE_SETTINGS && page <= FRONTEND_PAGE_TITLE_QUIT;
+    g_on_title = page >= FRONTEND_PAGE_TITLE_SETTINGS && page <= FRONTEND_PAGE_TITLE_PICK;
     g_menu_player = 0;
     g_skin = Skin::Launcher;
     g_skin_half = -1;
@@ -5867,11 +6024,16 @@ extern "C" void frontend_frame(void) {
             g_graphics_row = 0;
             g_screen = g_root = Screen::Graphics;
             break;
-        case FRONTEND_PAGE_TITLE_CONTROLS:
+        case FRONTEND_PAGE_TITLE_CONTROLS:  // Player I / Player II first, then that player's Controls
             controls::set_menu_player(0);
-            g_controls_return = Screen::InGame;
-            g_controls_return_row = 0;
-            g_screen = g_root = Screen::Controls;
+            open_pick(PickKind::Controls, Screen::InGame, 0);
+            g_root = Screen::Pick;
+            break;
+        case FRONTEND_PAGE_TITLE_PICK:  // Solo / Co-op, for the title's Start Game (player 0) or Load Game (1)
+            g_pick_title_row = player == 1 ? 1 : 0;
+            g_menu_player = 0;
+            open_pick(PickKind::Mode, Screen::InGame, 0);
+            g_root = Screen::Pick;
             break;
         case FRONTEND_PAGE_TITLE_QUIT:  // asked first (Yes/No), "No" the first choice
             g_screen = g_root = Screen::QuitAsk;

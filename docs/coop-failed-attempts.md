@@ -1036,3 +1036,16 @@ the Options picture is kept (`warm_title_look`, frontend.cpp). Runs -150729-jtg-
 the first Choose Character. Its cause was the menu document's first `Show` (about 38 ms when no launcher had shown it).
 `warm_title_look` now also shows and hides the document once, in one call, at the start (about 8 ms, nothing drawn).
 After that the first Show took about 17 ms. Runs -152019 and -152222 had no "ran dry".
+
+## The two-card page's body class `pick`: the whole page pushed to the top left (2026-11-17, picker step P2)
+The Solo / Co-op and Player I / Player II page (frontend.cpp `Screen::Pick`) first set a body class `pick`, and its
+cards a class `pick` (logs/run-20261117-170913-jtg-p2-title-controls2: the title look's panel at the window's top left,
+not centred as Choose Character's):
+```cpp
+    g_doc->SetClass("pick", g_screen == Screen::Pick);
+    std::string out = std::string("<div class=\"pcard pick ") + ...
+```
+menu.rcss already has `.pick { display: block; min-width: 16vh; text-align: center; }` (a settings row's choice). It
+matched `<body class="pick">` too, so the body was no longer the flex box that centres `#book`.
+What worked: names no rule uses, `pickpage` on the body and `pickcard` on the cards (grep menu.rcss for a class before
+using it). Seen centred in -171306-jtg-p2-title-mode and after.
