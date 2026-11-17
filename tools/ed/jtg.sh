@@ -29,6 +29,10 @@
 #         1300 (the others). JTG_ETERNAL=0 leaves that press out, for a card where it is not asked.
 #   then hle.c skip_card_inserted presses A through the memory card screen itself, and the chapter loads.
 #   JTG_TITLE_AT=N moves the whole schedule (default 700; everything above is relative to it).
+#   A title-look page (Choose Character, a title Options row) is live since 2026-11-17: the title runs under it, about 60
+#   guest frames a second, and the guest's pad is held from its open to its close (hle.c title_page_held). Script presses
+#   that fall inside a page are lost; space the presses after one by its open time and raise ED_RUN_FRAMES to match
+#   (docs/research/firstrun-hd-flash/title-music.md, step 6). ED_TITLE_PAGE_PAUSE=1 makes title pages block as before.
 #
 # MEASURED 2026-11-05 with this schedule, the user's settings (P1 mod_p1_character 4 -> model 9 wearing "Chandra's
 # ghost's other body", P2 mod_p2_character 2 -> model 70 wearing "Ellia's other body"; health 100 / 75):

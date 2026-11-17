@@ -376,3 +376,103 @@ if native". The pad hold and the idle-clock reset are correct and needed. Fix be
 `page_closed()` (Wrong 1: a false hang after any later Tome or debug page), make `menu_was_held` reachable (Wrong 2),
 and widen step 5 to every quick-state key (Wrong 3). Change the PCM check to compare against the main menu's own level
 first (Missed 1), and add the `frontend_problem` re-entry guard (Missed 2).
+
+## Built: step F5 (2026-11-17, not committed)
+
+The plan above, with the Skeptic's corrections. The title runs under its title-look pages (Choose Character from the
+main menu; Display, Sound, Graphics, Controls, Mods and Quit from the title's Options list). The Tome pages, the Esc
+debug menu, the launcher, the problem page and the HDR calibration still hold the game, as before.
+
+What was built:
+- **frontend.cpp.** `run_menu` is split into `menu_begin` and `menu_step` (no change for the blocking pages).
+  `frontend_frame` opens a title-look page live (`Live::Open`): one `menu_step` a game frame, before the Back / Esc /
+  photo reads. The game's own presents draw it. After the close (`Live::Release`) it waits for every button to be let
+  go, then `page_closed()` moves the close count on. `report_pause` stays with the blocking way only (Wrong 1).
+  `menu_was_held` is now `g_menu_was_held` (Wrong 2). `frontend_problem` over a live page puts the page back (Missed 2).
+  An HDR calibration opened from a live Graphics page tells the watchdog it holds the game.
+  `ED_TITLE_PAGE_PAUSE=1` makes title pages block as before (A/B).
+- **hle.c.** `title_page_hold_start` (in `title_main_choose` and `title_more_choose`) and `title_page_held` in
+  `hle_PADRead`: every pad's buttons, sticks, triggers and analog values are zeroed (each `error` kept) until the close
+  count moves on. Fast-forward does not apply under a title page. `title_main_draw` clears TM+48 bit 0x2 on every
+  draw while Choose Character is up, so the game's own idle clock stays at zero. both.tsv and coop_watch still see the
+  real pad (Missed 4: they read it before the hold).
+- **quickstate.c.** No quick-state key (1, 2, F1-F11, F12) acts while a live page is up; the key states are kept.
+- **Found in the runs, and fixed: two stalls at a page's open, which the blocking pages had hidden.**
+  - The title Options pages asked the renderer to measure the screen's rate again (`dol_aurora_measure_screen`). That
+    holds one frame for about 190 ms: "[audio] ran dry after a 186 ms pause" at every open of Display, Sound and
+    Graphics. Over a live title page this is no longer asked. The measure from the start is kept, and the renderer
+    measures again by itself when the window moves to another screen.
+  - The first page of a run wrote the clean picture (about 25 ms), loaded the HD backdrop into RmlUi (about 30 ms), and
+    laid the menu out for the first time (about 38 ms with no launcher). `warm_title_look` does each of these ahead,
+    one per frame: the layout at the start (shown and hidden in one call, so nothing is drawn), the pictures once the
+    title's Options picture is kept. RmlUi is only asked for a picture that is already there.
+  - Log lines: "[frontend] page N live: the title runs under it (... set up in X ms)", "[frontend] the live page's
+    first 60 frames: slowest step ..., longest frame ...", "[frontend] the live page closed",
+    "[title] the pad is the page's / the game's again", "[frontend] the title look ahead of its first page: ...".
+- tools/ed/jtg.sh has a note: script presses that fall inside a title page are now lost (step 6).
+
+What the game itself plays (Missed 1, now measured):
+- **The main menu has no song.** A PCM of the main menu left alone for 200 s (run -152346-jtg-f5-idle-nopage) is
+  silent after the title's opening sound, apart from the whisper of each row moved to and the sound of A. Only 10 of
+  1,800 windows of 100 ms were above the floor, all in the first 12 s. So behind Choose Character the player hears
+  the A's sound fade, then silence, as on the game's own main menu.
+- **Options has its song** (sound 723). It plays on under the Sound page: no hole and no restart across the 12 s page
+  (run -151023-jtg-f5-main, PCM 35.8-47.8 s; its phrase accent every 2.6 s goes on through the open and the close).
+
+Seen in runs (all fresh title runs, `ED_RUN_AWAY=1`, the user's settings copied):
+- -151023-jtg-f5-main: Choose Character up 12 s, then the Sound page 12 s. No "ran dry" from the open of the first page
+  to the end of the second. A Down at frame 900 (on Choose Character) and at 2400 (on Sound) were held: the shots after
+  the closes show the main menu still on Choose Character and the Options list still on Sound. Then the Esc debug menu
+  (ED_MENU_TEST) held the game for 8 s: no hang report (saves/reports stayed at 349 files).
+- -151307-jtg-f5-pages: Quit ("No" closed it), Mods, Controls, Graphics and Display, each opened live. Each A landed on
+  the expected Options row (13, 12, 11, 10, 8), so no press on a page reached the list. The test keys moved the pages'
+  own rows. No "ran dry". Pictures look as before.
+- -151443-jtg-f5-idle: Choose Character up 200 s (frames 821 to 12823). No attract movie ("Before CleanHVQ" or
+  "[controls] cutscene") while it was up, and the main menu after. The control run with no page,
+  -152346-jtg-f5-idle-nopage, started the movie at frame 11562, 180 s after the last press. So the check can fail.
+- -152753-jtg-f5-pause-ab: with `ED_TITLE_PAGE_PAUSE=1` the page blocked as before ("ran dry after a 3011 ms pause").
+- Pictures: `Screenshots for Claude/f5-title-music/` (01 the main run, 02 the five other pages, 04 the idle run;
+  03 is the main run's PCM loudness, 100 ms windows, with the log's marks).
+
+Not seen, or still open:
+- The first open of a title page still costs a little more than later ones (the first Show of the title look about
+  17 ms; the Sound page's first draw about 55 ms, its fonts and glows). In these runs it stayed inside the sound's
+  reserve (no "ran dry"), but it is close. A slower PC could still hear one short click the first time.
+- The user's launcher path (the launcher shows the menu first) was not run: `jtg.sh` passes the launcher over.
+- A fresh install (the warm-up then waits for the title's first frame for the pictures) was not run.
+- A real hang under a live page (the problem page over it) and HDR calibration from a live Graphics page: from the
+  code only.
+- The Music slider still does not move the title's song: MusyX follows "Effects & voices" (risk 7). Not changed.
+- The intro skip of `jtg.sh` missed three times in a row once (-152058/-152113/-152128-introfail, room 96 at frame
+  545); the next run was fine. The warm-up runs before frame 68 in all of them, as in the good runs.
+
+## Built: step F5 review fixes (2026-11-17)
+
+Three review findings, checked against the code.
+- **Fixed: a quick-state key in the frame before the page opens.** `title_page_hold_start` runs on the game thread,
+  but `frontend_page_live()` turns on only when the frame hook (render thread, after the next present) takes the page.
+  A load key pressed in that gap still loaded, and the page then opened live over the loaded game. Now hle.c has
+  `hle_title_page_hold()` (true from the game's ask until the close count moves on, read on the game thread), and
+  `quickstate_poll` blocks on `frontend_page_live() || hle_title_page_hold()`. Not reproduced in a run: scripts cannot
+  press keyboard keys. Checked from the code.
+- **Rejected: two threads in the page at once under the problem page.** With the GX thread on, the frame hook
+  (`hle_frame_boundary`, so `live_page_frame`) and the idle hook (`report_idle`, so `frontend_problem`) both run on the
+  render thread (aurora_backend.cpp: `ring_next` calls the idle hook; the `Present` item calls the frame hook). While
+  the problem page's `run_menu` loops, that thread drains no ring items, so no game present reaches the frame hook
+  until it returns. Without the GX thread there is no idle hook. `g_live` is read and written only on that one thread.
+  The restore after `frontend_problem` stays as it is.
+- **Accepted, as words: Choose Character is still quiet.** The game's main menu has no song (PCM of run -152346, and
+  again in the run below: all zero while Choose Character was up). So F5 gives music under the Options pages only.
+  Under Choose Character the player hears the A's sound fade, then silence, as on the game's own main menu. If the user
+  wants music there, it has to be a song we choose (for example the Options song 723): ask them first, then build it as
+  its own step. F5 does not close that part of the user's request.
+
+Seen (final build, run -154055-jtg-f5-final-main, ED_RUN_AWAY=1, the same presses as -151023):
+- Choose Character live 12 s, then the Sound page live 12 s. No "ran dry" while either was up; the only one came after
+  the Esc debug menu's 8 s block, as before. No hang report (saves/reports stayed at 349).
+- The page's test keys moved its own rows (Player II, then Player I; Sound's rows). The Downs sent while each page was
+  up were held: the main menu stayed on Choose Character and the Options list on Sound after the closes.
+- The PCM: silence over Choose Character (the main menu's own quiet), then the Options song without a zero window from
+  the A on Options to the end, across the Sound page's open and close.
+- Pictures: `Screenshots for Claude/f5-title-music/05-final-build-cc-and-sound-pages.jpg`, and
+  `06-final-build-pcm-loudness.txt`.

@@ -86,6 +86,10 @@ void hle_coop_spells_load(const void* in);
 // True while a save would catch co-op half-way (player 2's Tome open): the
 // save waits.
 bool hle_save_held(void);
+// True from the game's ask for a title-look page (Choose Character, a title Options row) until the menu's close count
+// moves on (game thread): the guest's pad is the page's. Covers the frame or two before the frame hook takes the page,
+// which frontend_page_live does not (quickstate.c).
+bool hle_title_page_hold(void);
 
 // Mods' Cheats, on or off from the in-game menu: kept at the player's frames in
 // play.

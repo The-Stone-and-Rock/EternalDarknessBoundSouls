@@ -1016,3 +1016,23 @@ fresh3-warm-again), against 3-5 s when the game ran instead. A cold cache took 1
 -140943).
 What worked: a 33 ms wait after each frame (`SDL_Delay`, `ED_PREPARE_FRAME_MS`): warm 3.1 s (run -141808), cold 132 s
 (run -141833). 100 ms gave the same cold time (run -142146), so 132 s is the compile itself.
+
+## The live title page alone: the music still broke at each page's open (2026-11-17, step F5)
+Step F5 lets the title run under its title-look pages (Choose Character, the title Options rows), so its music goes on
+(docs/research/firstrun-hd-flash/title-music.md, "Built: step F5"). With only the live page, each title Options page's
+open still cut the sound: "[audio] ran dry after a 186 ms pause" at Display, Sound and Graphics, every time, and about
+100 ms at the first Choose Character of a run (logs/run-20261117-145801-jtg-f5-twice). The cause was the page's own
+set-up, kept from the blocking pages, which asks the renderer to measure the screen's rate again:
+```cpp
+        auto options_section = [](int section) {
+            dol_aurora_measure_screen();   // holds one frame for a dozen refreshes, about 190 ms
+```
+and, at the first page of a run, writing the clean picture (about 25 ms) and RmlUi loading the HD backdrop (about
+30 ms) in the same two frames. A blocking page hid both (the game was held anyway).
+What worked: no new measure over a live title page (the measure from the start is kept, and taken again when the
+window moves to another screen), and the clean picture and both backdrops made ready ahead, one per frame, as soon as
+the Options picture is kept (`warm_title_look`, frontend.cpp). Runs -150729-jtg-f5-warm and -151023-jtg-f5-main: no
+"ran dry" at any page's open. That was still not quite enough: the idle run -151443 had "ran dry after a 47 ms pause" at
+the first Choose Character. Its cause was the menu document's first `Show` (about 38 ms when no launcher had shown it).
+`warm_title_look` now also shows and hides the document once, in one call, at the start (about 8 ms, nothing drawn).
+After that the first Show took about 17 ms. Runs -152019 and -152222 had no "ran dry".

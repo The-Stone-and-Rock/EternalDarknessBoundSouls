@@ -245,3 +245,19 @@ Turn the title video off (Mods) with HD textures on (Graphics), and restart.
 - (Added after the review, 2026-11-17.) The page builds only the shaders for your anti-aliasing setting. On a new PC
   with anti-aliasing off it took about 45 s here. Turn 4x MSAA on in the launcher's Options and start again: the page
   should come once more, longer (about 2 minutes here), then not again. Turn it off again: no page, or a very short one.
+
+## 12. The title's sound behind Choose Character and the title Options pages (2026-11-17)
+Play with the sound on. Start from the launcher as usual.
+- On the title, go to Options, then open Sound. The Options song should keep playing under the page with no break,
+  and go on when you press B. Do the same with Display, Graphics, Controls, Mods and Quit ("No").
+- On the Sound page, move "Effects & voices": the song's volume should follow it as you move it. "Music" does not
+  change the title's song (it is the game's own sound, not disc music). Say if you want that changed.
+- Open Choose Character from the main menu. You should hear the A's sound fade, then quiet: the game's own main menu
+  has no song (measured). Say if you remember music there, or want one.
+- The first page you open after starting may click once. Say if you hear a click or gap, and on which page.
+- Press buttons on a page, then close it with B: the title's cursor should not have moved, and nothing should start.
+- Leave Choose Character open for more than 3 minutes: the opening movie should not start behind it.
+- Keys 1, 2 and F1-F12 on a title page should do nothing (no quick save or load). Also try pressing A on Choose
+  Character and F1 at the same moment: the page should open and no save should load.
+- Tell us: do you want a song under Choose Character? The game has none there, so it would be one we pick (for
+  example the Options song).

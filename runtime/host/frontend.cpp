@@ -2901,6 +2901,54 @@ bool title_art_ready() {
     return ready;
 }
 
+// The title look made ready ahead, a piece a frame, on the title once its Options picture is kept: a title page is live
+// (the title's music goes on under it), and its first open did all this in one frame, a gap of about 100 ms in the music
+// ("[audio] ran dry"). Writing the clean picture (about 25 ms) and RmlUi's load of the backdrop it will show (the HD one
+// about 30 ms) each fit in a frame's sound reserve. A picture is only asked for once it is there: RmlUi never tries one
+// again after a failed load (title_art_ready). The key is the stylesheet's own path, so the decorator finds it loaded.
+void warm_title_look() {
+    static int stage = -1;
+    if (stage > 2 || g_doc == nullptr || (stage >= 0 && !titlevideo_options_kept()))
+        return;  // (the layout at once, at the start; the pictures once the title's Options picture is kept)
+    const Uint64 t0 = SDL_GetTicksNS();
+    auto load = [](const char* file) {
+        Rml::Context* context = aurora::rmlui::get_context();
+        if (context == nullptr)
+            return;
+        const Rml::Texture texture = context->GetRenderManager().LoadTexture(std::string("../video/") + file, res_dir() + "/ui/menu.rcss");
+        (void)texture.GetDimensions();  // (loads it)
+    };
+    const char* did = nullptr;
+    if (stage == -1) {
+        // The menu's first Show lays it all out (about 40 ms, when no launcher has shown it): shown and hidden at once,
+        // in this one call, so nothing is drawn.
+        if (!g_doc->IsVisible()) {
+            g_doc->Show(Rml::ModalFlag::None, Rml::FocusFlag::None);
+            g_doc->Hide();
+            did = "the menu laid out";
+        }
+        stage = 0;
+    } else if (stage == 0) {
+        ensure_title_art();
+        did = "the clean picture written";
+        stage = 1;
+    } else if (stage == 1) {
+        if (title_art_ready()) {
+            load("options-clean.png");
+            did = "the clean picture loaded";
+        }
+        stage = 2;
+    } else if (!g_settings.hd_textures) {
+        stage = 3;  // (turned on later: the page loads it itself, as before)
+    } else if (titlevideo_title_art_hd()) {
+        load("options-clean-hd.png");
+        did = "the HD backdrop loaded";
+        stage = 3;
+    }
+    if (did != nullptr)
+        std::fprintf(stderr, "[frontend] the title look ahead of its first page: %s (%.1f ms)\n", did, (SDL_GetTicksNS() - t0) / 1e6);
+}
+
 std::string roster_panel_end() {
     const RosterTile shown = g_selected < roster_count() ? roster_tiles()[g_selected]
                                                           : RosterTile{chosen_character(), form_on(g_characters_player, chosen_character())};
@@ -3493,7 +3541,6 @@ void update_cursor() {
     }
 }
 
-// Run the current screen until g_close; false when the window was closed.
 // ED_MENU_TEST=after_s,hold_ms[,every_s]: open the in-game menu by itself
 // after_s seconds in, close it hold_ms later, and again every every_s seconds
 // (test runs without a controller).
@@ -3549,15 +3596,31 @@ struct LauncherMusic {
 };
 LauncherMusic g_launcher_music;
 
-bool run_menu() {
+// A title-look page (Choose Character, the title Options rows) is live: it takes one step per game frame from the frame
+// hook, and the title runs under it, so the title's own music goes on as on the game's own menus
+// (docs/research/firstrun-hd-flash/title-music.md). Open: the page is up. Release: it closed, and the menu waits for every
+// button to be let go before the game has its pad again (hle.c holds it). Every other menu blocks the game (run_menu).
+enum class Live { Off, Open, Release };
+Live g_live = Live::Off;
+std::atomic<bool> g_live_flag{false};  // (any thread: frontend_page_live)
+
+// One turn of the menu (run_menu's loop, and a live page's frame), without its present.
+enum class MenuStep { Open, Closed };
+bool g_menu_pressed[kButtonCount];
+
+void menu_begin() {
     g_close = false;
     build_rows();
     g_doc->Show(Rml::ModalFlag::None, Rml::FocusFlag::Document);
     // Ignore whatever is still held from before the menu opened.
-    bool pressed[kButtonCount];
-    g_input.poll(pressed);
-    bool open = true;
-    while (!g_close) {
+    g_input.poll(g_menu_pressed);
+}
+
+MenuStep menu_step() {
+    bool* const pressed = g_menu_pressed;
+    if (g_close)
+        return MenuStep::Closed;
+    {
         g_launcher_music.tick();
         update_cursor();
         // The title and Tome looks are placed in window pixels (render). The renderer takes a new aspect at its next
@@ -3586,11 +3649,7 @@ bool run_menu() {
                 std::fill(std::begin(g_key_pressed), std::end(g_key_pressed), false);
                 build_rows();
             }
-            if (!dol_aurora_ui_frame()) {
-                open = false;
-                break;
-            }
-            continue;
+            return MenuStep::Open;
         }
         g_input.poll(pressed);
         if (g_test_key_next != 0 && SDL_GetTicks() >= g_test_key_next) {
@@ -3684,7 +3743,7 @@ bool run_menu() {
                          pressed[kAccept], pressed[kBack], static_cast<int>(g_screen),
                          g_selected, g_close);
         if (g_close)
-            break;
+            return MenuStep::Closed;
         static Uint64 refresh = 0;
         if ((g_screen == Screen::Controls || g_screen == Screen::Mapping) &&
             SDL_GetTicks() > refresh) {
@@ -3695,6 +3754,15 @@ bool run_menu() {
             dirty = true;  // (the HD backdrop just written: shown without waiting for a key)
         if (dirty)
             build_rows();
+    }
+    return MenuStep::Open;
+}
+
+// Run the current screen until g_close, the game held behind it; false when the window was closed.
+bool run_menu() {
+    menu_begin();
+    bool open = true;
+    while (menu_step() == MenuStep::Open) {
         if (!dol_aurora_ui_frame()) {
             open = false;
             break;
@@ -3704,7 +3772,7 @@ bool run_menu() {
     // Wait for every button to be let go so the game does not see the press
     // that closed the menu.
     while (open && g_input.any_held()) {
-        g_input.poll(pressed);
+        g_input.poll(g_menu_pressed);
         if (!dol_aurora_ui_frame())
             open = false;
     }
@@ -4455,6 +4523,11 @@ void run_hdr_calibration(int first_step = 0) {
     // grey steps, 4 grey steps black to white.
     static const int kPatterns[3] = {1, 2, 2};
     static const int kPatternsBeforeGame[3] = {1, 4, 3};
+    // From a live title page (Graphics): this loop holds the game, which the watchdog must be told of (a blocking page
+    // already has).
+    const bool from_live = g_live == Live::Open;
+    if (from_live)
+        report_pause(true);
     g_doc->Hide();
     bool pressed[kButtonCount];
     g_input.poll(pressed);
@@ -4488,6 +4561,8 @@ void run_hdr_calibration(int first_step = 0) {
     settings_save();
     if (open)
         g_doc->Show(Rml::ModalFlag::None, Rml::FocusFlag::Document);
+    if (from_live)
+        report_pause(false);
 }
 
 }  // namespace
@@ -5185,7 +5260,67 @@ void update_start_up_cover() {
 
 extern "C" bool hle_coop_ui_over(bool on, int half);
 
+extern "C" bool frontend_page_live(void) { return g_live_flag.load(); }
+
+static bool g_menu_was_held = false;  // (Escape held at the last frame: frontend_frame)
+
+// ED_TITLE_PAGE_PAUSE=1 (testing, A/B): title pages block the game as every other page does, as before 2026-11-17.
+static bool title_page_pause() {
+    static const bool on = std::getenv("ED_TITLE_PAGE_PAUSE") != nullptr && std::atoi(std::getenv("ED_TITLE_PAGE_PAUSE")) != 0;
+    return on;
+}
+
+// After any game-asked page or debug menu closes, blocking or live: the menu's state as before it opened, and the count
+// a caller waits on moved on. (The watchdog's report_pause stays with the blocking way only: a live page never calls it.)
+static void page_closed() {
+    hle_coop_ui_over(false, -1);
+    g_test_close_at = 0;  // (ED_PAGE_TEST_MS: a page closed sooner leaves no deadline for the next menu)
+    g_test_key_next = 0;
+    g_root_closes = false;
+    g_on_title = false;
+    g_skin = Skin::Launcher;  // the Esc debug menu and the launcher keep the launcher's look
+    g_skin_half = -1;
+    g_list_lines = 0;
+    g_list_top = 0;
+    g_menu_player = 0;
+    g_menu_was_held = false;
+    g_menu_closed++;
+}
+
+// A live title page's frame (frontend_frame, before it reads any button): one step of the page, drawn by the game's own
+// present; after the close, the wait for every button to be let go.
+// (The page's first frames: its slowest step and the longest wait between two of the game's frames, logged once.)
+static unsigned g_live_frames;
+static Uint64 g_live_slow_step_ns, g_live_slow_gap_ns, g_live_last_ns;
+static void live_page_frame() {
+    if (g_live == Live::Open) {
+        const Uint64 t0 = SDL_GetTicksNS();
+        const MenuStep step = menu_step();
+        if (g_live_frames < 60) {
+            g_live_slow_step_ns = std::max(g_live_slow_step_ns, SDL_GetTicksNS() - t0);
+            g_live_slow_gap_ns = std::max(g_live_slow_gap_ns, t0 - g_live_last_ns);
+            g_live_last_ns = t0;
+            if (++g_live_frames == 60)
+                std::fprintf(stderr, "[frontend] the live page's first 60 frames: slowest step %.1f ms, longest frame %.1f ms\n",
+                             g_live_slow_step_ns / 1e6, g_live_slow_gap_ns / 1e6);
+        }
+        if (step == MenuStep::Open)
+            return;
+        g_doc->Hide();
+        g_live = Live::Release;
+    }
+    if (g_input.any_held()) {
+        g_input.poll(g_menu_pressed);
+        return;
+    }
+    page_closed();
+    g_live = Live::Off;
+    g_live_flag = false;
+    std::fprintf(stderr, "[frontend] the live page closed (%llu ms)\n", static_cast<unsigned long long>(SDL_GetTicks()));
+}
+
 extern "C" void frontend_frame(void) {
+    const Uint64 entry_ns = SDL_GetTicksNS();
     update_start_up_cover();
     static Uint64 calibration_test_at = 0;
     static int calibration_test_step = 0;
@@ -5207,7 +5342,12 @@ extern "C" void frontend_frame(void) {
     update_fps_counter();
     update_skip_prompt();
     update_cursor();
-    static bool menu_was_held = false;
+    if (g_live != Live::Off) {
+        live_page_frame();  // (before the Back / Esc / photo reads: a Back on the page is the page's)
+        return;
+    }
+    warm_title_look();
+    bool& menu_was_held = g_menu_was_held;
     bool held[kButtonCount];
     read_buttons(held);
     // Back: a tap opens the menu (on its release), held half a second photo
@@ -5326,9 +5466,17 @@ extern "C" void frontend_frame(void) {
         if (const char* t = std::getenv("ED_PAGE_TEST_MS"); t != nullptr && std::atoi(t) > 0)
             g_test_close_at = SDL_GetTicks() + static_cast<Uint64>(std::atoi(t));
         g_menu_player = player;
+        // The screen's rate is measured again for the frame rate's choices (the launcher's Options do it too), which holds
+        // one frame for a dozen refreshes (about 190 ms): over a live title page that is a gap in the title's music, so
+        // there the measure from the start (taken again when the window moves to another screen) is kept.
+        const bool live_title = g_skin == Skin::Title && !title_page_pause();
+        auto measure_screen = [live_title] {
+            if (!live_title)
+                dol_aurora_measure_screen();
+        };
         // Each page opens alone, as the root: Back from it (to a screen it is opened from) closes the menu (past_root).
-        auto options_section = [](int section) {
-            dol_aurora_measure_screen();
+        auto options_section = [&measure_screen](int section) {
+            measure_screen();
             g_options_section = section;
             g_options_row = 0;
             g_screen = g_root = Screen::OptionsPage;
@@ -5352,7 +5500,7 @@ extern "C" void frontend_frame(void) {
             break;
         case FRONTEND_PAGE_SETTINGS:
         case FRONTEND_PAGE_TITLE_SETTINGS:
-            dol_aurora_measure_screen();
+            measure_screen();
             g_screen = g_root = Screen::Options;
             break;
         case FRONTEND_PAGE_MODS:
@@ -5376,7 +5524,7 @@ extern "C" void frontend_frame(void) {
             options_section(2);
             break;
         case FRONTEND_PAGE_TITLE_GRAPHICS:
-            dol_aurora_measure_screen();
+            measure_screen();
             g_options_row = 0;
             g_graphics_row = 0;
             g_screen = g_root = Screen::Graphics;
@@ -5398,6 +5546,22 @@ extern "C" void frontend_frame(void) {
             return;
         }
     }
+    // A title-look page is live: the title runs under it (its music goes on), the page steps once a game frame and the
+    // game's own presents draw it (opaque: the moving title is hidden). hle.c holds the guest's pad till it closes.
+    // ED_TITLE_PAGE_PAUSE=1 (testing, A/B): title pages block the game as every other page does.
+    if (page >= 0 && g_skin == Skin::Title && !title_page_pause()) {
+        g_skin_split = g_settings.mod_split;
+        hle_coop_ui_over(true, -1);  // (on the title it does nothing: it needs a co-op Tome)
+        menu_begin();
+        g_live = Live::Open;
+        g_live_flag = true;
+        g_live_frames = 0;
+        g_live_slow_step_ns = g_live_slow_gap_ns = 0;
+        g_live_last_ns = SDL_GetTicksNS();
+        std::fprintf(stderr, "[frontend] page %d live: the title runs under it (%llu ms; set up in %.1f ms)\n", page,
+                     static_cast<unsigned long long>(SDL_GetTicks()), (g_live_last_ns - entry_ns) / 1e6);
+        return;  // no report_pause: the game's frames keep coming
+    }
     report_pause(true);
     // A Tome page in co-op: in its owner's half, with the halves kept under it (hle.c), else on the whole window. The
     // split is read here, just before hle.c gives the same value to the renderer, and held till the page closes.
@@ -5406,19 +5570,8 @@ extern "C" void frontend_frame(void) {
         g_skin_half = -1;
     if (!run_menu())
         dol_aurora_request_quit();  // window closed while paused
-    hle_coop_ui_over(false, -1);
     report_pause(false);
-    g_test_close_at = 0;  // (ED_PAGE_TEST_MS: a page closed sooner leaves no deadline for the next menu)
-    g_test_key_next = 0;
-    g_root_closes = false;
-    g_on_title = false;
-    g_skin = Skin::Launcher;  // the Esc debug menu and the launcher keep the launcher's look
-    g_skin_half = -1;
-    g_list_lines = 0;
-    g_list_top = 0;
-    g_menu_player = 0;
-    menu_was_held = false;
-    g_menu_closed++;
+    page_closed();
 }
 
 extern "C" bool frontend_problem(const char* heading, const char* text, bool can_wait) {
@@ -5435,5 +5588,11 @@ extern "C" bool frontend_problem(const char* heading, const char* text, bool can
     const bool open = run_menu();
     g_screen = screen;
     g_selected = selected;
+    if (open && g_live == Live::Open) {
+        // Over a live title page (a stall of the game under it): the page as it was, its close undone.
+        g_close = false;
+        build_rows();
+        g_doc->Show(Rml::ModalFlag::None, Rml::FocusFlag::Document);
+    }
     return open && g_problem_wait;
 }

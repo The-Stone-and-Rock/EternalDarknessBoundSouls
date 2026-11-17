@@ -77,6 +77,9 @@ void frontend_open_page(int page, int player);
 void frontend_open_page_skin(int page, int player, int skin, int half);
 // Counts each time the menu closes (any thread): a caller sees a page it opened has closed when this moves on.
 unsigned frontend_menu_closed_count(void);
+// A title-look page is up with the title running under it (any thread), to the moment the game has its pad again
+// (docs/research/firstrun-hd-flash/title-music.md). The game's frames go on: quick-state keys wait (quickstate.c).
+bool frontend_page_live(void);
 // Player 1's roster (frontend_open_page(FRONTEND_PAGE_CHARACTERS, 0)).
 void frontend_open_characters(void);
 // A button drawn as part of a Tome page, for this frame (asked each frame while the page is up): its text, the co-op half

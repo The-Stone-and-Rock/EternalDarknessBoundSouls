@@ -4297,6 +4297,38 @@ static bool pad_read_by_monitor(CPUState* cpu) {
     return true;
 }
 
+// A title-look page (Choose Character, a title Options row) is live: the title runs under it, so its music goes on
+// (docs/research/firstrun-hd-flash/title-music.md, step 3). The guest's pad is the page's, from the game's own ask (this
+// thread, so the very next read is held) until the menu's close count moves on, which is after every button is let go:
+// the A that opened it, the presses on it and the Back that closed it never reach the title. Each controller's error is
+// kept, so no controller notice comes up. (both.tsv and coop_watch still see the real pad: they read it before this.)
+static bool g_title_page_hold;
+static unsigned g_title_page_hold_count;
+static void title_page_hold_start(CPUState* cpu) {
+    g_title_page_hold = true;
+    g_title_page_hold_count = frontend_menu_closed_count();
+    fprintf(stderr, "[title] the pad is the page's (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+}
+static bool title_page_held(CPUState* cpu) {
+    if (!g_title_page_hold)
+        return false;
+    if (frontend_menu_closed_count() == g_title_page_hold_count)
+        return true;
+    g_title_page_hold = false;
+    fprintf(stderr, "[title] the pad is the game's again (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
+    return false;
+}
+bool hle_title_page_hold(void) {
+    return g_title_page_hold && frontend_menu_closed_count() == g_title_page_hold_count;
+}
+static void title_page_hold_pads(DolPadState* state, u32 n) {
+    for (u32 i = 0u; i < n; i++) {
+        const s32 error = state[i].error;
+        memset(&state[i], 0, sizeof state[i]);
+        state[i].error = error;
+    }
+}
+
 void sanity_door_run(CPUState* cpu);
 static void hle_PADRead(CPUState* cpu) {
 #ifdef ED_AURORA
@@ -4350,6 +4382,8 @@ static void hle_PADRead(CPUState* cpu) {
             memset(&state[0], 0, sizeof state[0]);  // their pad runs the close-up instead
         for (u32 i = 1; i < 4; i++)
             state[i].error = -1;  // PAD_ERR_NO_CONTROLLER
+        if (title_page_held(cpu))
+            title_page_hold_pads(state, 4u);
         for (u32 i = 0; i < 4; i++) {
             const u32 p = out + i * 12u;
             mem_write16(cpu, p, state[i].button);
@@ -4420,7 +4454,7 @@ static void hle_PADRead(CPUState* cpu) {
 #endif
     if (camera_pad_buttons(cpu, state[0].button))
         state[0].stick_x = state[0].stick_y = 0;
-    interrupt_set_speed(controls_fast_forward() ? 4u : 1u);
+    interrupt_set_speed(controls_fast_forward() && !title_page_held(cpu) ? 4u : 1u);  // (not under a title page)
     if (g_auto_input) {
         const u64 frame = cpu->timebase / 675000ull;
         if (frame >= 135u && ((frame - 135u) % 90u) < 12u) {
@@ -4531,6 +4565,8 @@ static void hle_PADRead(CPUState* cpu) {
     skip_card_select(cpu, &state[0]);
     if (g_mash_to_gameplay)
         state[0].error = 0;
+    if (title_page_held(cpu))
+        title_page_hold_pads(state, 4u);
     for (u32 i = 0; i < 4; i++) {
         u32 p = out + i * 12u;
         mem_write16(cpu, p, state[i].button);
@@ -17257,7 +17293,8 @@ static void title_quads_put(CPUState* cpu, bool moved) {
             mem_write16(cpu, at + 2u * i, (u16)c[i]);
     }
 }
-// The idle clock: the page can stay open for minutes of guest time, so the clock restarts once the page has closed.
+// The idle clock (the attract movie after 180 s on the main menu): the title runs under a live Choose Character page, so
+// the clock is held at zero on every main-menu draw while it is up, and starts again once it has closed.
 static bool g_title_idle_reset;
 static unsigned g_title_idle_closed;
 static void title_main_updown(CPUState* cpu) {
@@ -17286,6 +17323,7 @@ static void title_main_choose(CPUState* cpu) {
     fprintf(stderr, "[title] Choose Character (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
     g_title_idle_closed = frontend_menu_closed_count();
     g_title_idle_reset = true;
+    title_page_hold_start(cpu);
     frontend_open_page_skin(FRONTEND_PAGE_TITLE_CHARACTERS, 0, FRONTEND_SKIN_TITLE, -1);
 }
 // The first-run step (docs/research/firstrun-hd-flash/firstrun.md, step 2): the title Options picture taken from the
@@ -17353,11 +17391,14 @@ static void title_main_draw(CPUState* cpu) {
     const bool english = mem_read32(cpu, cpu->gpr[13] - TITLE_LANGUAGE) == 0u;
     titlevideo_menu_row(english ? (int)cpu->gpr[4] : -1);
     title_quads_put(cpu, english && titlevideo_menu_painted());
-    if (g_title_idle_reset && frontend_menu_closed_count() != g_title_idle_closed) {
-        g_title_idle_reset = false;
+    if (g_title_idle_reset) {
+        // Bit 0x2 clear: the game's own code (0x8001C568) starts its stopwatch and resets it to 0 on this frame.
         mem_write32(cpu, TITLE_FLAGS, mem_read32(cpu, TITLE_FLAGS) & ~0x2u);
-        fprintf(stderr, "[title] the page closed: the idle clock starts again (frame %llu)\n",
-                (unsigned long long)(cpu->timebase / 675000ull));
+        if (frontend_menu_closed_count() != g_title_idle_closed) {
+            g_title_idle_reset = false;
+            fprintf(stderr, "[title] the page closed: the idle clock starts again (frame %llu)\n",
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        }
     }
 }
 // The game's glow for row 5 is texture 11 (a near-black 2x2) at quad 5, a dark box on the left: that one draw is passed over.
@@ -17393,6 +17434,7 @@ static void title_more_choose(CPUState* cpu) {
         fprintf(stderr, "[title] Options row %u, %s (frame %llu)\n", at, kTitleOurRows[at - TITLE_OUR_ROW],
                 (unsigned long long)(cpu->timebase / 675000ull));
         // Rows 8-13 are page ids 6-11 (Display, Sound, Graphics, Controls, Mods, Quit), each opened alone.
+        title_page_hold_start(cpu);
         frontend_open_page_skin(FRONTEND_PAGE_TITLE_DISPLAY + (int)(at - TITLE_OUR_ROW), 0, FRONTEND_SKIN_TITLE, -1);
     } else {
         title_main_choose(cpu);

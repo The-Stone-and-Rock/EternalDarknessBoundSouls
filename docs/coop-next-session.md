@@ -3,6 +3,28 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: the title's music under the title-look pages, step F5 (checkpoint commit)
+docs/research/firstrun-hd-flash/title-music.md ("Built: step F5" and "Built: step F5 review fixes").
+- **ASK THE USER FIRST:** the game's main menu has no song, so Choose Character is still quiet after the A's sound.
+  F5 does not give music there. Should it play a song we choose (for example the Options song)? Build that only on a yes.
+- **Review fix:** quick-state keys are also blocked in the frame or two between the game's ask for a title page and
+  the page opening (`hle_title_page_hold`, quickstate.c). From the code only: scripts cannot press keyboard keys.
+  The finding about the problem page and the live page on two threads was rejected: both run on the render thread.
+- Final build seen in run -154055-jtg-f5-final-main: Choose Character and the Sound page live, presses held, no
+  "ran dry", no hang report, the Options song unbroken under Sound (pictures 05 and 06 in f5-title-music).
+- **The title now runs under Choose Character and the title Options pages** (Display, Sound, Graphics, Controls,
+  Mods, Quit), so the game's own sound goes on as on its own menus. The page steps once a game frame; the guest's pad
+  is held from the A that opens it until every button is let go after it closes. Tome pages still pause (Way B).
+- **What the game plays there:** the Options song goes on under the Options pages, with no hole and no restart (PCM
+  of run -151023-jtg-f5-main). The main menu itself has no song: left alone 200 s it is silent after the title's
+  opening sound (run -152346). So Choose Character is quiet after the A's sound, as the game's main menu is. Tell the
+  user; if they want a song there, it would have to be chosen by us (ask first).
+- **The attract movie does not start under Choose Character** (200 s, run -151443); with no page it starts at 180 s.
+- Two stalls at a page's open were found and fixed (the screen-rate measure, about 190 ms; the first page's pictures
+  and layout). No "ran dry" at any open in the final runs. Failed first try in coop-failed-attempts.md.
+- Pictures: `Screenshots for Claude/f5-title-music/`. For the user: docs/coop-play-test.md section 12.
+- Not seen: the launcher path, a fresh install, a real hang under a page, HDR calibration from the title's Graphics.
+
 ## 2026-11-17: step F4 review fixes (checkpoint commit with F4)
 docs/research/firstrun-hd-flash/firstrun.md ("Built: step F4 review fixes").
 - **The first start now builds only the shaders for the player's anti-aliasing setting.** The shipped list has 4,568

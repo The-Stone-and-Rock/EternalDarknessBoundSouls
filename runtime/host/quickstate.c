@@ -292,24 +292,28 @@ static void toggle_recording(void) {
 void quickstate_poll(unsigned long long blocks) {
     g_blocks = blocks;
 #ifdef ED_AURORA
-    // Act once per press, not for as long as the key is held.
+    // Act once per press, not for as long as the key is held. Not while a live title page is up (the game runs under
+    // it, but its keys are the page's, the Controls page's key capture too): the keys' states are still kept, so a key
+    // held as it closes is no new press after.
+    // (hle_title_page_hold: from the game's ask on this thread, before the frame hook has taken the page.)
+    const bool page = frontend_page_live() || hle_title_page_hold();
     const bool save_key = dol_aurora_key_down(QS_KEY_SAVE);
     const bool load_key = dol_aurora_key_down(QS_KEY_LOAD);
-    if (save_key && !g_save_key_down)
+    if (save_key && !g_save_key_down && !page)
         request(QS_SAVE, g_path);
-    if (load_key && !g_load_key_down)
+    if (load_key && !g_load_key_down && !page)
         request(QS_LOAD, g_path);
     g_save_key_down = save_key;
     g_load_key_down = load_key;
     static bool record_key_down;
     const bool record_key = dol_aurora_key_down(QS_KEY_RECORD);
-    if (record_key && !record_key_down)
+    if (record_key && !record_key_down && !page)
         toggle_recording();
     record_key_down = record_key;
     static bool slot_key_down[QS_SLOTS + 1];
     for (int i = 0; i <= QS_SLOTS; i++) {
         const bool down = dol_aurora_key_down(i < QS_SLOTS ? QS_KEY_F1 + i : QS_KEY_LOAD_NEWEST);
-        if (down && !slot_key_down[i]) {
+        if (down && !slot_key_down[i] && !page) {
             char path[64];
             if (i < QS_SLOTS) {
                 snprintf(path, sizeof path, "saves/slot%d.state", i + 1);
