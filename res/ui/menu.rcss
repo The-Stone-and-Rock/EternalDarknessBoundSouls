@@ -938,3 +938,22 @@ body.cards .row {
 	height: 3.2vh;
 	margin: 1vh 0;
 }
+
+/* A list that scrolls (frontend.cpp g_list_lines): the Tome's diamond above it when rows are hidden above, and under
+   it when rows are hidden below. The launcher's look never scrolls its lists. */
+.list-more {
+	display: flex;
+	justify-content: center;
+	height: 1.8vh;
+	flex-shrink: 0;
+	margin: 0.3vh 0;
+}
+
+.list-more img {
+	width: 1.6vh;
+	height: 1.6vh;
+	opacity: 0.7;
+}
+
+/* The looks the caller chooses (frontend_open_page_skin): body.skin-title over the title screen, body.skin-tome on a
+   Tome page. Each gets its block here, after every rule above, so it wins. None yet: both look as the launcher's. */

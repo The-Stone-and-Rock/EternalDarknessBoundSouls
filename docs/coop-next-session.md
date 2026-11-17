@@ -3,6 +3,24 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17 (morning): native menus, step 1 (groundwork) of the plan in docs/research/in-game-menu/12-critic-and-plan.md
+The user's ask: the title's Options lists all our options and scrolls ("More Options" goes); "Choose Character" above
+Options on the title; the Tome's pages in a Tome look. Step 1 is only the groundwork. Nothing new shows yet.
+- frontend.cpp/.h: page looks (`Skin` Launcher / Title / Tome, `frontend_open_page_skin`), new title page ids 5-11
+  (Choose Character = the launcher's two cards, Display, Sound, Graphics, Controls, Mods, Quit), Back from any page
+  root closes the menu, `in_play()` (in a game, not on the title), a hand-made list scroll (`g_list_lines`, off unless
+  ED_LIST_LINES=N), a menu-closed count, and La Belle Aurore loaded. hle.c: the Tome passes the Tome look, the title's
+  More Options passes the title look. menu.rcss: the scroll marks.
+- Review fixes: the scroll stays off on two-column spreads (Button Mapping's keys, Mods), where its marks would only go in
+  the left column. A page id that opens nothing (unknown, or RmlUi not loading) now counts as closed too.
+- Seen in pictures (Screenshots for Claude/step1-frontend-groundwork/): the launcher unchanged
+  (logs/run-20261117-071151-step1-launcher-after vs -070757-step1-launcher-before); the Tome's Characters and Settings
+  plaque pages unchanged, plaques back after (run-20261117-071236-jtg-step1-tome); ED_LIST_LINES=3 shows three rows and
+  the mark below, and again after the review fixes (run-20261117-071437-jtg-step1-listscroll, -072129-jtg-step1-fix-listscroll).
+- Not seen: page ids 5-11 (nothing calls them yet), the title route in its new look, the title's greyed Cheats and
+  Sanity rows, scrolling past the first view, the mark above, wheel and right stick. The skin classes have no rcss yet.
+- Next: step 2 of the plan (section 4 of 12-critic-and-plan.md).
+
 ## Overnight 2026-11-17: the kit's likely co-op bugs, fixed and shown in runs (read docs/research/kit-bugs/results.md)
 The kit (items 1 to 3 below) named five likely bugs; plans in docs/research/kit-bugs/plans.md, a run script per bug
 beside it (build-run-*.sh, from fresh Jump-to-Game states, both players recorded, shots every 250 ms). In

@@ -52,8 +52,27 @@ enum {
     FRONTEND_PAGE_MODS = 2,        // co-op, challenge, cheats
     FRONTEND_PAGE_STATES = 3,      // save states (player 1's)
     FRONTEND_PAGE_TITLE_SETTINGS = 4,  // Options from the title screen: with Mods (co-op, characters) and Quit
+    // The title screen's own rows, each opening its page alone (Back from it closes the menu):
+    FRONTEND_PAGE_TITLE_CHARACTERS = 5,  // Choose Character: the two players' cards (as the launcher's row)
+    FRONTEND_PAGE_TITLE_DISPLAY = 6,
+    FRONTEND_PAGE_TITLE_SOUND = 7,
+    FRONTEND_PAGE_TITLE_GRAPHICS = 8,
+    FRONTEND_PAGE_TITLE_CONTROLS = 9,    // player 1's
+    FRONTEND_PAGE_TITLE_MODS = 10,
+    FRONTEND_PAGE_TITLE_QUIT = 11,       // no page: the game quits (settings saved)
 };
+// How the page is drawn, chosen by whoever opens it: the launcher's parchment, the title's look (over the title
+// screen), or a Tome page (over the Tome: in `half` 0 or 1, that co-op half, -1 the whole picture).
+enum {
+    FRONTEND_SKIN_LAUNCHER = 0,
+    FRONTEND_SKIN_TITLE = 1,
+    FRONTEND_SKIN_TOME = 2,
+};
+// frontend_open_page is frontend_open_page_skin(page, player, FRONTEND_SKIN_LAUNCHER, -1).
 void frontend_open_page(int page, int player);
+void frontend_open_page_skin(int page, int player, int skin, int half);
+// Counts each time the menu closes (any thread): a caller sees a page it opened has closed when this moves on.
+unsigned frontend_menu_closed_count(void);
 // Player 1's roster (frontend_open_page(FRONTEND_PAGE_CHARACTERS, 0)).
 void frontend_open_characters(void);
 // A button drawn as part of a Tome page, for this frame (asked each frame while the page is up): its text, the co-op half

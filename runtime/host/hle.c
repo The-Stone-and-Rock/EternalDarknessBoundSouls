@@ -17097,7 +17097,9 @@ static void tome_stops_choose(CPUState* cpu) {
         tome_stops_sound(cpu, TOME_SOUND_CHOOSE, 100u);
         fprintf(stderr, "[tome] Options: %s for player %d (frame %llu)\n", stops[at - 4].label, player + 1,
                 (unsigned long long)(cpu->timebase / 675000ull));
-        frontend_open_page(stops[at - 4].page, player);
+        // A Tome page: in its owner's half while the Tome is shown in halves (as hle_coop_ui_over tests).
+        const bool halves = g_tw.sharing || g_tome_copy_open || g_coop_tome_owner >= 0;
+        frontend_open_page_skin(stops[at - 4].page, player, FRONTEND_SKIN_TOME, halves ? player : -1);
     } else if (player == 1) {
         tome_stops_sound(cpu, TOME_SOUND_DENIED, 50u);  // (not theirs: the cursor never goes there)
     } else {
@@ -17178,7 +17180,7 @@ static void title_more_updown(CPUState* cpu) {
 static void title_more_choose(CPUState* cpu) {
     if (title_on_options(cpu) && mem_read32(cpu, TITLE_CURSOR) == TITLE_MORE_ROW) {
         fprintf(stderr, "[title] More Options (frame %llu)\n", (unsigned long long)(cpu->timebase / 675000ull));
-        frontend_open_page(FRONTEND_PAGE_TITLE_SETTINGS, 0);
+        frontend_open_page_skin(FRONTEND_PAGE_TITLE_SETTINGS, 0, FRONTEND_SKIN_TITLE, -1);
     }
 }
 // The draw's own cursor (r3, the one 0x8001D934 tests): during the fade out to the main menu it is the old screen's.

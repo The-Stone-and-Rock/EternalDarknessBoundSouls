@@ -67,6 +67,13 @@ Check: that everything you used to reach from Esc is reachable this way; how the
 painted plaque with the word in the Tome's hand); player 2's page on player 2's controller; B always returning to the
 Tome or the title; nothing pressed by accident in the game when a page closes. Tell Claude what to move or rename.
 
+**Native menus, step 1 (2026-11-17 morning):** groundwork for the new title Options list and the Tome look. Nothing
+should look different yet. Try:
+- The launcher, the Tome's four plaques and player 2's Characters plaque: all as before.
+- Title > Options > More Options > Mods: the Cheats and Sanity Effects rows are greyed and say "In a game, from its
+  menu." The two character cards say a change also applies to a save state you load.
+- Tell Claude if anything changed that shouldn't have.
+
 ## 7. Karim's skeletal pedestal (chapter 4), for Claude to trace
 The gate you meant is **room 193** in Karim's chapter (the room numbers are the game's; "room 93" is a different room,
 the mansion's teleporter hub in Alex's last chapter, where the game's ending starts). In room 193 the portcullis

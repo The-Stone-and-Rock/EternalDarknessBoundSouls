@@ -598,7 +598,23 @@ int g_controls_return_row = 0;
 // or any way up past it, closes the menu and the game's menu is there again as it was.
 bool g_root_closes = false;
 Screen g_root = Screen::InGame;
-bool g_from_title = false;  // opened from the title screen's More Options (no game going yet)
+// Opened from the title screen (FRONTEND_PAGE_TITLE_*): no game going yet, so no cheats or sanity effects, and a
+// character chosen is the one a game starts with.
+bool g_on_title = false;
+// In a game (not the launcher, not over the title screen).
+bool in_play() { return g_in_game && !g_on_title; }
+
+// How the page is drawn (frontend_open_page_skin): the caller's choice, back to the launcher's after the menu closes.
+// Each look is a class on <body> (skin-title, skin-tome) and its block in menu.rcss.
+enum class Skin { Launcher, Title, Tome };
+Skin g_skin = Skin::Launcher;
+int g_skin_half = -1;  // the Tome's: its co-op half (0 or 1), -1 the whole picture
+
+// A list longer than its page scrolls by hand (RmlUi's own overflow scroll cut the last line): only rows
+// g_list_top .. g_list_top + g_list_lines - 1 are drawn, each keeping its row<i> id (the mouse). g_list_lines 0: no
+// scroll, every row drawn (the launcher's look). Not the roster (its own lines), the cards or the slot lists (pages).
+int g_list_top = 0;
+int g_list_lines = 0;
 
 Row mods_row(Screen from) {
     Row mods{"Mods"};
@@ -1224,7 +1240,7 @@ void build_mods_rows() {
             r.value += " (own stats)";
         r.page = 1;
         r.card = player + 1;
-        r.note = g_in_game ? "A change reloads the game where you stand once the menu closes."
+        r.note = in_play() ? "A change reloads the game where you stand once the menu closes."
                            : "Also applies to a save state you load: it reloads with them.";
         r.activate = [player] {
             g_characters_player = player;
@@ -1241,11 +1257,11 @@ void build_mods_rows() {
 
     // Cheats (hle.c cheat_apply), in a game: on or off, kept as play goes on.
     auto cheat_row = [](const char* label, const char* note, int which) {
-        Row r{label, on_off(g_in_game && hle_cheat_on(which))};
+        Row r{label, on_off(in_play() && hle_cheat_on(which))};
         r.page = 1;
         r.toggle = true;
-        r.enabled = g_in_game;
-        r.note = g_in_game ? note : "In a game, from its menu.";
+        r.enabled = in_play();
+        r.note = in_play() ? note : "In a game, from its menu.";
         r.change = [which](int) { hle_cheat_set(which, !hle_cheat_on(which)); };
         return r;
     };
@@ -1260,7 +1276,7 @@ void build_mods_rows() {
     // see each one, with a log of how it went.
     static int sanity_effect = 0;
     static bool sanity_ignore = false;
-    const bool sanity_can = g_in_game && !g_settings.mod_coop;
+    const bool sanity_can = in_play() && !g_settings.mod_coop;
     const char* const sanity_not = g_settings.mod_coop ? "Single player for now: turn co-op off." : "In a game, from its menu.";
     Row effect{"Effect", std::to_string(hle_sanity_number(sanity_effect)) + ": " + hle_sanity_name(sanity_effect)};
     effect.section = "V \u00b7 Sanity Effects";
@@ -2310,7 +2326,7 @@ void build_options() {
     // title's More Options, Mods too (co-op and the characters, before a game); from the Tome's Settings, the way back
     // to the title screen. Quit from either.
     if (g_root_closes && g_root == Screen::Options) {
-        if (g_from_title) {
+        if (g_on_title) {
             Row mods = mods_row(Screen::Options);
             mods.gap = true;
             g_rows.push_back(mods);
@@ -2328,8 +2344,8 @@ void build_options() {
             g_rows.push_back(title);
         }
         Row quit{"Quit game"};
-        quit.gap = !g_from_title;
-        quit.note = g_from_title ? "" : "Unsaved progress is lost.";
+        quit.gap = !g_on_title;
+        quit.note = g_on_title ? "" : "Unsaved progress is lost.";
         quit.activate = [] {
             settings_save();
             dol_aurora_request_quit();
@@ -2606,6 +2622,45 @@ void roster_wheel(int dy) {
     }
 }
 
+// The hand-made list scroll (g_list_top, g_list_lines): on this screen, now?
+// Not on a two-column spread (a row with page 1: Button Mapping's keys, the Mods rows): the window is one range of
+// rows across both columns and the marks go in the left one, so the right column would empty with no mark.
+bool list_scrolls() {
+    if (g_list_lines <= 0 || g_screen == Screen::Characters || g_screen == Screen::States || g_screen == Screen::Play ||
+        (g_screen == Screen::ModsPage && g_mods_section == 3))
+        return false;
+    for (const Row& r : g_rows)
+        if (r.page == 1)
+            return false;
+    return true;
+}
+// The rows in view: the highlighted one among them, and no blank lines at the end.
+void list_keep_in_view() {
+    if (!list_scrolls())
+        return;
+    const int n = static_cast<int>(g_rows.size());
+    if (g_selected < g_list_top)
+        g_list_top = g_selected;
+    else if (g_selected >= g_list_top + g_list_lines)
+        g_list_top = g_selected - g_list_lines + 1;
+    g_list_top = std::clamp(g_list_top, 0, std::max(n - g_list_lines, 0));
+}
+// The wheel or the right stick: the rows move one, and the highlight with them if it's left behind (to the nearest
+// row in view that can be chosen).
+void list_wheel(int dy) {
+    const int n = static_cast<int>(g_rows.size());
+    g_list_top = std::clamp(g_list_top + dy, 0, std::max(n - g_list_lines, 0));
+    const int last = std::min(g_list_top + g_list_lines, n) - 1;
+    if (g_selected >= g_list_top && g_selected <= last)
+        return;
+    const int from = g_selected < g_list_top ? g_list_top : last, step = g_selected < g_list_top ? 1 : -1;
+    for (int i = from; i >= g_list_top && i <= last; i += step)
+        if (g_rows[i].enabled || g_rows[i].change) {
+            g_selected = i;
+            return;
+        }
+}
+
 std::string roster_panel_end() {
     const RosterTile shown = g_selected < roster_count() ? roster_tiles()[g_selected]
                                                           : RosterTile{chosen_character(), form_on(g_characters_player, chosen_character())};
@@ -2653,7 +2708,7 @@ void render() {
                           : g_screen == Screen::Slot     ? slot_heading.c_str()
                           : g_screen == Screen::SlotDelete ? "Delete Save?"
                           : g_screen == Screen::SlotOverwrite ? "Do you want to overwrite this save?"
-                          : g_screen == Screen::Options  ? (g_root_closes ? (g_from_title ? "More Options" : "Settings") : "Options")
+                          : g_screen == Screen::Options  ? (g_root_closes ? (g_on_title ? "More Options" : "Settings") : "Options")
                           : g_screen == Screen::OptionsPage ? options_page_name()
                           : g_screen == Screen::Graphics ? "Graphics"
                           : g_screen == Screen::Controls ? (controls::menu_player() == 1
@@ -2684,9 +2739,19 @@ void render() {
         g_slots_page = g_selected / kSlotsShown;
     if (slot_list)
         g_slots_page = std::clamp(g_slots_page, 0, std::max(slot_rows - 1, 0) / kSlotsShown);
+    // A list that scrolls: the rows in view, a mark above and below where rows are hidden.
+    const bool scrolls = list_scrolls();
+    if (scrolls) {
+        list_keep_in_view();
+        if (g_list_top > 0)
+            rml[0] += "<div class=\"list-more up\"><img src=\"tome/mark.png\"/></div>";
+    }
     for (size_t i = 0; i < g_rows.size(); i++) {
         const Row& r = g_rows[i];
         if (slot_list && static_cast<int>(i) < slot_rows && static_cast<int>(i) / kSlotsShown != g_slots_page)
+            continue;
+        if (scrolls && r.card == 0 && !r.tile &&
+            (static_cast<int>(i) < g_list_top || static_cast<int>(i) >= g_list_top + g_list_lines))
             continue;
         if (r.card != 0) {
             if (r.card == 1)
@@ -2762,6 +2827,8 @@ void render() {
     }
     if (in_roster)
         rml[0] += roster_panel_end();
+    if (scrolls && g_list_top + g_list_lines < static_cast<int>(g_rows.size()))
+        rml[0] += "<div class=\"list-more down\"><img src=\"tome/mark.png\"/></div>";
     g_doc->GetElementById("menu0")->SetInnerRML(rml[0]);
     g_doc->GetElementById("menu1")->SetInnerRML(rml[1]);
     const bool have = g_selected < static_cast<int>(g_rows.size());
@@ -2799,12 +2866,27 @@ void render() {
                                      g_screen == Screen::Controls ||
                                      g_screen == Screen::Mapping) &&
                                     g_options_return == Screen::InGame));
+    // The look the caller chose (frontend_open_page_skin); the launcher's has no class of its own.
+    g_doc->SetClass("skin-title", g_skin == Skin::Title);
+    g_doc->SetClass("skin-tome", g_skin == Skin::Tome);
 }
 
+// A screen above the page that was opened: Back (or a Back row) going there leaves the opened page, so the menu closes.
+// The screens each is opened from: a section page from Options or Graphics, Graphics, Controls and Mods from Options,
+// a Mods section from Mods, the roster and player 2's Controls from a Mods section, Mapping from Controls.
 bool past_root(Screen s) {
     if (s == Screen::InGame || s == Screen::Launcher)
         return true;
-    return g_root == Screen::Characters && s == Screen::ModsPage;
+    switch (g_root) {
+    case Screen::OptionsPage: return s == Screen::Options || s == Screen::Graphics;
+    case Screen::Graphics:
+    case Screen::Mods: return s == Screen::Options;
+    case Screen::Controls: return s == Screen::Options || s == Screen::ModsPage || s == Screen::Mods;
+    case Screen::ModsPage: return s == Screen::Mods || s == Screen::Options;
+    case Screen::Characters: return s == Screen::ModsPage || s == Screen::Mods || s == Screen::Options;
+    case Screen::Mapping: return s == Screen::Controls || s == Screen::Options || s == Screen::ModsPage;
+    default: return false;
+    }
 }
 
 void build_rows() {
@@ -2837,6 +2919,8 @@ void build_rows() {
     if (g_screen == Screen::Launcher && built != Screen::Launcher && g_launcher_row >= 0 &&
         g_launcher_row < static_cast<int>(g_rows.size()))
         g_selected = g_launcher_row;
+    if (g_screen != built)
+        g_list_top = 0;  // a new list starts at its top (render keeps the highlight in view)
     built = g_screen;
     if (g_selected >= static_cast<int>(g_rows.size()))
         g_selected = 0;
@@ -2941,6 +3025,10 @@ public:
                 roster_wheel(wheel > 0.f ? 1 : -1);
                 render();
                 event.StopPropagation();
+            } else if (list_scrolls() && wheel != 0.f) {
+                list_wheel(wheel > 0.f ? 1 : -1);
+                render();
+                event.StopPropagation();
             }
             return;
         }
@@ -3018,7 +3106,8 @@ bool ensure_ui() {
     const std::string res = res_dir();
     for (const char* font : {"FiraSans-Regular.ttf", "FiraSans-Bold.ttf",
                              "IMFellEnglish-Regular.ttf", "IMFellEnglish-Italic.ttf",
-                             "IMFellEnglishSC-Regular.ttf"})
+                             "IMFellEnglishSC-Regular.ttf",
+                             "LaBelleAurore.ttf"})  // the title's and the Tome's painted hand (tome.cpp's too)
         if (!Rml::LoadFontFace(res + "/fonts/" + font))
             std::fprintf(stderr, "[frontend] font missing: %s/fonts/%s\n", res.c_str(), font);
     g_doc = context->LoadDocument(res + "/ui/menu.rml");
@@ -3156,6 +3245,11 @@ bool run_menu() {
             }
             if (pressed[kDown]) {
                 move_selection(+1);
+                dirty = true;
+            }
+            // A list that scrolls: the right stick (Page Up/Down) moves it a row, the highlight carried along.
+            if (list_scrolls() && pressed[kScrollUp] != pressed[kScrollDown]) {
+                list_wheel(pressed[kScrollDown] ? 1 : -1);
                 dirty = true;
             }
         }
@@ -4338,10 +4432,19 @@ extern "C" bool frontend_photo_active(void) { return photo::g_state != photo::St
 // Options row. frontend_frame opens it over the paused game, driven by that player's controller; Back closes it.
 static std::atomic<int> g_open_page{-1};
 static std::atomic<int> g_open_page_player{0};
-extern "C" void frontend_open_page(int page, int player) {
+static std::atomic<int> g_open_page_skin{FRONTEND_SKIN_LAUNCHER};
+static std::atomic<int> g_open_page_half{-1};
+static std::atomic<unsigned> g_menu_closed{0};
+extern "C" void frontend_open_page_skin(int page, int player, int skin, int half) {
     g_open_page_player = player == 1 ? 1 : 0;
-    g_open_page = page;
+    g_open_page_skin = skin;
+    g_open_page_half = half == 0 || half == 1 ? half : -1;
+    g_open_page = page;  // last: frontend_frame takes the page, then the rest
 }
+extern "C" void frontend_open_page(int page, int player) {
+    frontend_open_page_skin(page, player, FRONTEND_SKIN_LAUNCHER, -1);
+}
+extern "C" unsigned frontend_menu_closed_count(void) { return g_menu_closed.load(); }
 extern "C" void frontend_open_characters(void) { frontend_open_page(FRONTEND_PAGE_CHARACTERS, 0); }
 // A Tome-looking button for this frame (any thread): text, the half it's in (-1 the whole screen) and its centre.
 extern "C" void frontend_tome_button(const char* text, int half, float x, float y) {
@@ -4470,26 +4573,57 @@ extern "C" void frontend_frame(void) {
     if (debug_env < 0)
         debug_env = std::getenv("ED_DEBUG_MENU") != nullptr && std::atoi(std::getenv("ED_DEBUG_MENU")) != 0;
     const bool debug = g_settings.debug_menu || debug_env == 1;
-    if ((!(press && debug) && !test_press && page < 0) || !ensure_ui())
+    if (!(press && debug) && !test_press && page < 0)
         return;
+    if (!ensure_ui()) {
+        if (page >= 0)
+            g_menu_closed++;  // the asked-for page is used up and can't open: a caller waiting on the count goes on
+        return;
+    }
     g_in_game = true;
     g_screen = Screen::InGame;
     g_options_return = Screen::InGame;
     g_mods_return = Screen::InGame;
     g_selected = 0;
     g_root_closes = page >= 0;
-    g_from_title = page == FRONTEND_PAGE_TITLE_SETTINGS;
+    g_on_title = page >= FRONTEND_PAGE_TITLE_SETTINGS && page <= FRONTEND_PAGE_TITLE_QUIT;
     g_menu_player = 0;
+    g_skin = Skin::Launcher;
+    g_skin_half = -1;
+    g_list_top = 0;
+    g_list_lines = 0;
+    if (const char* t = std::getenv("ED_LIST_LINES"); t != nullptr && std::atoi(t) > 0)
+        g_list_lines = std::atoi(t);  // (testing: the list scroll in any look; the looks will set their own)
     if (page >= 0) {
         const int player = g_open_page_player.load();
-        std::fprintf(stderr, "[frontend] page %d opened from the game's menu for player %d\n", page, player + 1);
+        const int skin = g_open_page_skin.load();
+        g_skin = skin == FRONTEND_SKIN_TITLE ? Skin::Title : skin == FRONTEND_SKIN_TOME ? Skin::Tome : Skin::Launcher;
+        g_skin_half = g_skin == Skin::Tome ? g_open_page_half.load() : -1;
+        std::fprintf(stderr, "[frontend] page %d opened from the game's menu for player %d (skin %d, half %d)\n", page,
+                     player + 1, skin, g_skin_half);
         // ED_PAGE_TEST_MS=N (testing): the page closes by itself after N ms, as Back would (scripted runs can't press in it).
         if (const char* t = std::getenv("ED_PAGE_TEST_MS"); t != nullptr && std::atoi(t) > 0)
             g_test_close_at = SDL_GetTicks() + static_cast<Uint64>(std::atoi(t));
         g_menu_player = player;
+        // Each page opens alone, as the root: Back from it (to a screen it is opened from) closes the menu (past_root).
+        auto options_section = [](int section) {
+            dol_aurora_measure_screen();
+            g_options_section = section;
+            g_options_row = 0;
+            g_screen = g_root = Screen::OptionsPage;
+        };
+        // Nothing opens (Quit, or an id this build doesn't know): the menu's state as after a close.
+        auto none = [] {
+            g_root_closes = false;
+            g_on_title = false;
+            g_skin = Skin::Launcher;
+            g_skin_half = -1;
+            g_list_lines = 0;
+            g_test_close_at = 0;
+            g_menu_player = 0;
+        };
         switch (page) {
         case FRONTEND_PAGE_CHARACTERS:
-        default:
             g_characters_player = player;
             g_characters_return_row = 0;
             g_screen = g_root = Screen::Characters;
@@ -4501,12 +4635,49 @@ extern "C" void frontend_frame(void) {
             g_screen = g_root = Screen::Options;
             break;
         case FRONTEND_PAGE_MODS:
+        case FRONTEND_PAGE_TITLE_MODS:
             g_screen = g_root = Screen::Mods;
             break;
         case FRONTEND_PAGE_STATES:
             g_screen = g_root = Screen::States;
             g_selected = std::max(newest_slot() - 1, 0);  // at the save made last
             break;
+        case FRONTEND_PAGE_TITLE_CHARACTERS:  // the launcher's Choose Character: the two players' cards
+            g_mods_section = 3;
+            g_mods_page_return = Screen::InGame;
+            g_mods_page_return_row = 0;
+            g_screen = g_root = Screen::ModsPage;
+            break;
+        case FRONTEND_PAGE_TITLE_DISPLAY:
+            options_section(1);
+            break;
+        case FRONTEND_PAGE_TITLE_SOUND:
+            options_section(2);
+            break;
+        case FRONTEND_PAGE_TITLE_GRAPHICS:
+            dol_aurora_measure_screen();
+            g_options_row = 0;
+            g_graphics_row = 0;
+            g_screen = g_root = Screen::Graphics;
+            break;
+        case FRONTEND_PAGE_TITLE_CONTROLS:
+            controls::set_menu_player(0);
+            g_controls_return = Screen::InGame;
+            g_controls_return_row = 0;
+            g_screen = g_root = Screen::Controls;
+            break;
+        case FRONTEND_PAGE_TITLE_QUIT:  // no page: as Options' Quit game
+            std::fprintf(stderr, "[frontend] Quit game from the title\n");
+            settings_save();
+            dol_aurora_request_quit();
+            none();
+            g_menu_closed++;
+            return;
+        default:
+            std::fprintf(stderr, "[frontend] page %d: no such page\n", page);
+            none();
+            g_menu_closed++;  // nothing opened, but the page is used up: count it as closed
+            return;
         }
     }
     report_pause(true);
@@ -4517,8 +4688,14 @@ extern "C" void frontend_frame(void) {
     report_pause(false);
     g_test_close_at = 0;  // (ED_PAGE_TEST_MS: a page closed sooner leaves no deadline for the next menu)
     g_root_closes = false;
+    g_on_title = false;
+    g_skin = Skin::Launcher;  // the Esc debug menu and the launcher keep the launcher's look
+    g_skin_half = -1;
+    g_list_lines = 0;
+    g_list_top = 0;
     g_menu_player = 0;
     menu_was_held = false;
+    g_menu_closed++;
 }
 
 extern "C" bool frontend_problem(const char* heading, const char* text, bool can_wait) {
