@@ -17,7 +17,7 @@ ARITH = {'ADD': '+', 'SUB': '-', 'MULT': '*', 'DIV': '/', 'POW': '^'}
 
 
 class Fn:
-    __slots__ = ('params', 'vararg', 'maxstack', 'kstr', 'knum', 'kproto', 'code', 'locals')
+    __slots__ = ('params', 'vararg', 'maxstack', 'kstr', 'knum', 'kproto', 'code', 'locals', 'code_at')
 
 
 class Reader:
@@ -72,7 +72,9 @@ def _function(r):
     f.kstr = [r.string() for _ in range(r.int())]
     f.knum = [r.num() for _ in range(r.int())]
     f.kproto = [_function(r) for _ in range(r.int())]
-    f.code = [r.int() for _ in range(r.int())]
+    n = r.int()
+    f.code_at = r.p  # the code's byte offset in the chunk: instruction pc is at code_at + 4 * pc
+    f.code = [r.int() for _ in range(n)]
     return f
 
 

@@ -9,7 +9,7 @@ Rooms this level reaches on paper (its door walk) but whose scripts are none of 
 Co-op: 85 rows flagged (a call that branches on a per-player word within one call, with no live host hook where that word is read; `ed needs` and tools/ed/player_data.tsv for the words). Most often: the room in play 62, the script words 12, the look being set up 8, the room in play (in an input mode's own code) 3.
 A flag is a place to look, not a bug found: the host can still cover it another way (a helper around the whole script run, a swap around the caller), and a word that is one per game may be fine for both.
 
-Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 29 (0), who "the player" is 250 (0), one global per game 11 (3), one script state for both 74 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 31 (0), queued for a later frame 33 (1), run inside player 2's change 28 (0), only for the chapter's character (a hero gate) 2 (2), drawn from one camera 28 (0).
+Co-op patterns (`ed patterns`; counted per script or per distinct call: units, of them uncovered): asks the room in play 29 (0), who "the player" is 250 (0), one global per game 11 (3), one script state for both 74 (0), a table player 2's things fill 2 (0), stamped with the room in play when made 31 (0), queued for a later frame 33 (1), run inside player 2's change 28 (0), only for the chapter's character (a hero gate) 2 (1), drawn from one camera 28 (0).
 
 Rooms: [4](#room-4), [5](#room-5), [8](#room-8), [11](#room-11), [16](#room-16), [19](#room-19), [27](#room-27), [83](#room-83), [103](#room-103), [104](#room-104), [105](#room-105), [107](#room-107), [109](#room-109), [110](#room-110), [112](#room-112), [113](#room-113), [114](#room-114), [115](#room-115), [116](#room-116), [117](#room-117), [118](#room-118), [119](#room-119), [120](#room-120), [123](#room-123), [129](#room-129), [130](#room-130), [131](#room-131), [132](#room-132), [133](#room-133), [134](#room-134), [135](#room-135), [158](#room-158), [220](#room-220), [345](#room-345)
 
@@ -788,7 +788,7 @@ Not in this level's scripts, so it runs nothing here (it is in L10).
 
 Picks by the room in play (fn25), 2 tests; 12 rows of other rooms' branches are left out (followed over the script's jumps).
 
-Co-op patterns (`ed patterns`): only for the chapter's character (a hero gate) (uncovered), who "the player" is (bracket), one global per game (covered), a table player 2's things fill (n/a), one script state for both (n/a), asks the room in play (bracket).
+Co-op patterns (`ed patterns`): only for the chapter's character (a hero gate) (bracket), who "the player" is (bracket), one global per game (covered), a table player 2's things fill (n/a), one script state for both (n/a), asks the room in play (bracket).
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], the running script [hooked], the six prompts [hooked], the room slot table [hooked], the script words [hooked], reads the zones' inside words [helper], raw and processed pads, the input channels [helper], the cameras' records [hooked], hold's input channel [hooked], the pad routine's state [helper], control blocks [helper], busy [hooked], the player's object [helper], equipment, 20 records by holder id [keyed], asks if anyone is busy [helper].
 
@@ -2720,7 +2720,7 @@ Co-op, reaches: finds a node by id [hooked], the room in play [helper], current 
 
 Picks by the room in play (fn25), 2 tests; 12 rows of other rooms' branches are left out (followed over the script's jumps).
 
-Co-op patterns (`ed patterns`): only for the chapter's character (a hero gate) (uncovered), who "the player" is (bracket), one global per game (covered), a table player 2's things fill (n/a), one script state for both (n/a), asks the room in play (bracket).
+Co-op patterns (`ed patterns`): only for the chapter's character (a hero gate) (bracket), who "the player" is (bracket), one global per game (covered), a table player 2's things fill (n/a), one script state for both (n/a), asks the room in play (bracket).
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], the running script [hooked], the six prompts [hooked], the room slot table [hooked], the script words [hooked], reads the zones' inside words [helper], raw and processed pads, the input channels [helper], the cameras' records [hooked], hold's input channel [hooked], the pad routine's state [helper], control blocks [helper], busy [hooked], the player's object [helper], equipment, 20 records by holder id [keyed], asks if anyone is busy [helper].
 
@@ -3603,7 +3603,7 @@ Not in this level's scripts, so it runs nothing here (it is in L10).
 
 Picks by the room in play (fn25), 2 tests; 12 rows of other rooms' branches are left out (followed over the script's jumps).
 
-Co-op patterns (`ed patterns`): only for the chapter's character (a hero gate) (uncovered), who "the player" is (bracket), one global per game (covered), a table player 2's things fill (n/a), one script state for both (n/a), asks the room in play (bracket).
+Co-op patterns (`ed patterns`): only for the chapter's character (a hero gate) (bracket), who "the player" is (bracket), one global per game (covered), a table player 2's things fill (n/a), one script state for both (n/a), asks the room in play (bracket).
 
 Co-op, reaches: finds a node by id [hooked], the room in play [helper], current [hooked], the running script [hooked], the six prompts [hooked], the room slot table [hooked], the script words [hooked], reads the zones' inside words [helper], raw and processed pads, the input channels [helper], the cameras' records [hooked], hold's input channel [hooked], the pad routine's state [helper], control blocks [helper], busy [hooked], the player's object [helper], equipment, 20 records by holder id [keyed], asks if anyone is busy [helper].
 

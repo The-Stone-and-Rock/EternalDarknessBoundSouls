@@ -620,6 +620,11 @@ def generate(only_level=None, out=OUT):
     tsv_head = ['level', 'room', 'script', 'from', 'line', 'kind', 'call', 'what', 'if', 'via', 'coop_words', 'coop_flagged', 'patterns']
     all_flags = collections.Counter()
     all_units = Units()
+    import herogates
+    hero_gates = collections.defaultdict(list)  # (level, script) -> the bytecode's hero-gate compares
+    for g in herogates.all_gates():
+        if not g['path']:
+            hero_gates[(g['level'], g['script'])].append(g)
     for level in levels:
         rooms = level_rooms(d, level)
         placed |= set(rooms)
@@ -661,13 +666,15 @@ def generate(only_level=None, out=OUT):
                     not w.startswith('the room\'s ') for w in where)
                 script_words, script_flags, script_patterns = collections.OrderedDict(), collections.OrderedDict(), collections.OrderedDict()
                 cam_ok = patterns.keep_camera(rows)
-                hero_lines = patterns.hero_gate(d.body(sid, pack))
-                if hero_lines:  # a script-level pattern: the script itself tests the player's handle against 1
-                    for k in hero_lines:
-                        here = 'L%s/%s room %d line %d' % (pack, sid, rid, k)
-                        level_units.add('hero', ('script', pack, sid), 'uncovered', here)
-                        all_units.add('hero', ('script', pack, sid), 'uncovered', here)
-                    script_patterns.setdefault('hero', set()).add('uncovered')
+                gates = hero_gates.get((pack, int(sid)), [])
+                if gates:  # a script-level pattern: the script itself tests the player's handle against 1 (its bytecode)
+                    for g in gates:
+                        # covered by ED_COOP_HERO_ID's chunk patch when it turns the player away; a two-path compare is left
+                        cover = 'bracket' if g['turns_away'] else 'uncovered'
+                        here = 'L%s/%s room %d pc %d (+0x%X%s)' % (pack, sid, rid, g['pc'], g['offset'], '' if g['turns_away'] else ', two paths')
+                        level_units.add('hero', ('script', pack, sid), cover, here)
+                        all_units.add('hero', ('script', pack, sid), cover, here)
+                        script_patterns.setdefault('hero', set()).add(cover)
                 for x in rows:
                     if x['kind'] == 'door' and x['call'] == 'fn66':
                         doors.append('%s (script %s%s)' % (x['args'][0] if x['args'] else '?', x.get('via') or sid,

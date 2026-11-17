@@ -625,6 +625,11 @@ def cmd_stops(argv):
     stops.cmd_stops(argv)
 
 
+def cmd_herogates(argv):
+    import herogates
+    herogates.cmd_herogates(argv)
+
+
 def cmd_keep(argv):
     import know
     know.cmd_keep(argv)

@@ -105,9 +105,11 @@ PATTERNS = [
                'after-script is n/a (it\'s not followed here).'),
     dict(key='hero', name='only for the chapter\'s character (a hero gate)', unit='script',
          what='A script keeps the player\'s handle (fn78(1, 0), r13-21496) and tests it against 1, the chapter\'s character: '
-              'run as player 2\'s (their handle, e.g. 161), it turns them away. 44 of the 73 also pass that handle on '
-              '(holds, reloads, walks, look-ats).',
-         fix=[('coop_be_player2', None, 'makes player 2 the player for their runs, so the handle is theirs: the gate then fails')],
+              'run as player 2\'s (their handle, e.g. 161), it turns them away. Found in the bytecode (`ed herogates`): 52 '
+              'compares in 47 script files, 31 turning the player away, 21 with two paths.',
+         fix=[('coop_hero_chunk', None, 'ED_COOP_HERO_ID=1 (testing): the gate\'s PUSHINT 1 is written to player 2\'s id in '
+                                       'their runs, so the turn-away gates open ("bracket": only in their runs); two-path '
+                                       'compares are left')],
          example='Edward\'s lever L09/1951 (room 273): player 2 is turned away at `if L0 ~= 1` (logs/run-20261117-010635-duck-together, '
                  '`ed stops`)',
          trust='High: the test is in the script. No fix yet: the handle has to mean player 2\'s body inside their runs (an '
