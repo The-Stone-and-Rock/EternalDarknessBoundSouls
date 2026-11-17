@@ -458,3 +458,31 @@ mode belong in step 3). Then the six card tests (missed 1) and player 2's Defaul
   textures/GED/flashbacks/tex1_640x480_90abb11e0abc338a_14.dds, 2560x1920 BC7, stored bottom row first (flip the rows);
   card crop x 100-2560, y 197-1934 upright. Not UMnMenu.tpl image 12 (a redder variant, no HD copy). This replaces the
   live capture of room 69. Mock-up: Screenshots for Claude/default-art/00-top-picks.jpg (pick 1).
+
+## Built: step P1 (2026-11-17, checkpoint commit)
+
+- Default's picture: `ensure_portraits` also writes `portraits/Default.png` from UMnMenu.tpl image 26 (checked by its
+  XXH64, crop x 25-640, y 46-480 upright, 615x434); `ensure_default_hd` writes `portraits/DefaultHD.png` from the pack
+  (2560x1920 BC7, rows stored bottom first: turned, made half size 1230x868), stamped in `DefaultHD.txt`.
+  `portrait_rml` takes HD, else the disc's, else emblem.png. The preparing step makes both (`kPortraitsVersion` 2).
+- Step 7 done: `ensure_portraits_hd` writes the twelve 504x356 pack portraits to `portraits/hd/`, found by each disc
+  picture's XXH64 over 6144 bytes (the pack names matched all twelve; the rows are stored bottom first, as the disc's).
+  Both HD checks are answered from a cache while HD textures stay on or off.
+- Random: `SETTINGS_RANDOM` 13, `mod_pN_random`, `settings_character()`, `settings_costume()`,
+  `settings_roll_random()` in settings.c. hle.c reads the character through them (player_model, coop_p2_choice,
+  costume_on, coop_name_choice). The roster has Random second (index 1), so frame indexes after Default moved by one.
+- The cards for the pick page (later steps) take their picture from `portrait_rml` too, so Default and Random follow.
+
+### Built: step P1 review fixes (2026-11-17)
+
+- A pack picture that can't be used (Default's copy not 2 or more times 640x480, a portrait not a whole multiple of
+  126x89, a write that fails) is tried once: the stamp then says `failed <id>` (`DefaultHD.txt`,
+  `portraits/hd/stamp.txt`), the preparing step leaves it, and the pages don't decode it again. A new pack file (size
+  or time) is a new id, so it is tried again. A folder that can't be written can't keep that stamp either.
+- An old portraits stamp (a later `kPortraitsVersion`) now makes Default's HD picture again with them (it was deleted
+  and left unmade). The preparing step looks at both HD answers afresh (`g_default_hd_for`, `g_portraits_hd_for`).
+- `ensure_portraits_hd` keeps no answer while no disc is known (the pack's portraits are found by the disc's pictures).
+- Seen: scratch res and settings, the launcher's preparing step. Run B (old stamp) remade DefaultHD; run C (a scratch
+  pack with a 640x480 Default) wrote the `failed` stamp; run D said "everything prepared already"; run E showed the
+  disc's Default card with no new try; run F (the real pack, ED_PREPARE=1) made everything. Pictures and logs:
+  Screenshots for Claude/solo-coop-picker/P1-review-fixes/. Not run: the no-disc case (code only).

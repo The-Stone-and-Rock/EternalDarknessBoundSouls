@@ -73,8 +73,11 @@ typedef struct {
     int mod_sanity;
     int mod_enemies;      // 0 vanilla, 1 enhanced (harder hits, more creatures)
     int mod_insanity;     // sanity effects: 0 the game's own, 1 Enhanced, 2 off
-    int mod_p1_character; // player 1's character: 0 the chapter's own, 1-12 Pius .. Alex (Jump to Game order)
+    int mod_p1_character; // player 1's character: 0 the chapter's own, 1-12 Pius .. Alex (Jump to Game order),
+                          // 13 Random (SETTINGS_RANDOM: the one rolled for them, mod_p1_random)
     int mod_p2_character; // player 2's (co-op), the same way: chosen, not yet played
+    int mod_p1_random;    // Random's roll for player 1: 1-12, kept until Random is chosen again (0 none yet)
+    int mod_p2_random;    // player 2's
     int mod_p1_stats;     // player 1's health, magick and sanity: 0 the chapter character's, 1 the chosen one's
     int mod_p2_stats;     // player 2's, the same way
     long long mod_p1_costume;   // player 1's forms: 4 bits for each of the twelve characters, 0 their own body (hle.c kCostumes). Name, moves and stats stay theirs
@@ -89,6 +92,20 @@ extern Settings g_settings;
 
 void settings_load(void);
 void settings_save(void);
+
+// Choose Character's "Random": a character rolled once when it is chosen and kept (in settings.ini, across chapters
+// and restarts) until the player chooses again; choosing Random again rolls another. Its cards only ever show
+// "Random", never who was rolled.
+#define SETTINGS_RANDOM 13
+// The character a player plays (0 the chapter's own, 1-12): their choice, or for Random their roll.
+int settings_character(int player);
+// Their forms (4 bits a character, settings mod_p1_costume): for Random, the rolled character in their own body.
+long long settings_costume(int player);
+// Rolls Random for a player (another of the twelve than their last roll), keeps it in mod_pN_random, logs it and
+// returns it. The caller saves.
+int settings_roll_random(int player);
+// A character's name (0 "Default", 1-12, 13 "Random").
+const char* settings_character_name(int character);
 // Push the current values to the renderer, window and audio (safe to call
 // again after any change).
 void settings_apply(void);

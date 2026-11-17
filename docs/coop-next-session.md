@@ -3,6 +3,41 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: the Solo/Co-op picker, step P1: Default's and Random's pictures, and Random (checkpoint commit)
+docs/research/solo-coop-picker/plan.md (step P1 of the picker; the Solo/Co-op page itself is a later step: Start Game
+and Load Game do not ask yet).
+- **Default's picture is the game's own Tome and skull** (UMnMenu.tpl image 26, cropped to the card shape) on Choose
+  Character's cards and roster, title and Tome looks. Made from the player's own disc with the portraits
+  (`res/ui/portraits/Default.png`), and from the HD pack when HD textures are on (`DefaultHD.png`, stamped by the pack
+  file in `DefaultHD.txt`). emblem.png only if neither can be made. `kPortraitsVersion` is 2, so the first start after
+  this build shows the preparing step once (fast) and makes them. Nothing of the disc ships (make-win-package.sh checks).
+- **HD portraits (plan step 7) are in:** with HD textures on, the twelve come from the pack's 504x356 copies
+  (`res/ui/portraits/hd/`, found by each disc picture's XXH64, rows turned upright, stamped). HD off: the disc's.
+- **Random, a new choice beside Default** (both players, every look). Choosing it rolls one of the twelve (the host's
+  random; another than the last roll), kept in settings.ini (`mod_pN_character = 13`, `mod_pN_random = 1-12`) across
+  chapters and restarts until the player chooses again. A again on Random rolls someone new. Every card and name shows
+  "Random" and the user's silhouettes (`res/ui/random.png`, from random-source.jpg, crop x 20 y 30 1096x770, 630x445),
+  never who was rolled. Only the log names it: `[settings] Random for player N: rolled NAME`, and
+  `[player] chapter C's character ... played as M (Random: NAME)`. The game reads the roll through
+  `settings_character()` / `settings_costume()` (settings.c): the rolled character in their own body, their own stats.
+  Player 2 on Default still plays player 1's character (the roll too). Player 2's Random does nothing in solo.
+- Seen (Screenshots for Claude/solo-coop-picker/P1-default-random/): title cards and roster with Default (HD), Random
+  lit and chosen; the Tome roster (co-op half, and solo with HD off); a run with the saved roll (13/3) playing Anthony
+  and player 2's load-time roll playing Ellia; a re-roll in the Tome reloading player 1 as Lindsey; solo Random Max.
+- **Found, older than P1:** changing player 1's character from the Tome's Characters page in a co-op game (chapter 1,
+  room 341) hangs after the reload, in the game's words unpacking (pc 0x80155AA4, lr 0x801DB4C4, from the prompt
+  chooser 0x80117854). The HEAD build does the same (run -163718-jtg-p1-baseline-tome-change, an explicit character);
+  `ED_TEST_P1_CHARACTER` (a change outside the Tome) does not. saves/reports/hang-20261117-163217/163606/163817.
+- Not seen: player 2's roster in the Tome look, other languages (no row counts changed), the user's own play.
+- **The Solo/Co-op page itself is NOT built yet.** Start Game and Load Game still go straight on (the user noticed).
+  It comes in the plan's step 1 (the page) and step 3 (Start Game and Load ask).
+- **Review fixes (same commit):** a pack picture that can't be used is tried once, not at every start (stamp
+  `failed <id>`); an old portraits stamp makes Default's HD picture again too; the HD portraits keep no answer while no
+  disc is known. Seen with scratch res/settings and the launcher's preparing step (runs A-F, pictures and logs in
+  Screenshots for Claude/solo-coop-picker/P1-review-fixes/): the preparing step made everything (A, F), remade DefaultHD
+  on an old stamp (B), stamped a 640x480 pack copy `failed` (C), then said "everything prepared already" (D), and the
+  Default card fell back to the disc's picture (E). Not run: the no-disc case.
+
 ## 2026-11-17: the title's music under the title-look pages, step F5 (checkpoint commit)
 docs/research/firstrun-hd-flash/title-music.md ("Built: step F5" and "Built: step F5 review fixes").
 - **ASK THE USER FIRST:** the game's main menu has no song, so Choose Character is still quiet after the A's sound.

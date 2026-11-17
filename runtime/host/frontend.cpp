@@ -20,6 +20,7 @@
 
 #include <RmlUi/Core.h>
 #include <xxhash.h>
+#include <png.h>
 #include <RmlUi_Platform_SDL.h>
 #include <SDL3/SDL_audio.h>
 #include <SDL3/SDL_filesystem.h>
@@ -781,6 +782,7 @@ const std::vector<RosterTile>& roster_tiles() {
     static std::vector<RosterTile> tiles;
     if (tiles.empty()) {
         tiles.push_back({0, 0});
+        tiles.push_back({SETTINGS_RANDOM, 0});  // Random, beside Default: someone rolled once, kept, never shown
         for (int i = 1; i <= 12; i++)
             for (int form = 0; form <= forms_of(i); form++)
                 if (form == 0 || !form_row(i, form)->other)
@@ -807,11 +809,13 @@ int roster_index(int character, int form) {
 const char* tile_title(const RosterTile& t) {
     if (t.character == 0)
         return "Default";
+    if (t.character == SETTINGS_RANDOM)
+        return "Random";
     const CharacterForm* f = t.form != 0 ? form_row(t.character, t.form) : nullptr;
     return f != nullptr && f->title != nullptr ? f->title : kCharacters[t.character];
 }
 const char* tile_form_name(const RosterTile& t) {
-    if (t.character == 0)
+    if (t.character == 0 || t.character == SETTINGS_RANDOM)
         return "";
     return t.form != 0 ? form_row(t.character, t.form)->name : "";
 }
@@ -848,6 +852,12 @@ const CharacterInfo kCharacterInfo[13] = {
     {"2000 A.D.", "Alexandra Roivas, who returns to her grandfather's Rhode Island mansion to solve his murder.", 100, 125, 125},
 };
 
+// Random's words: who was rolled is never shown, on any page.
+#define kRandomAbout "Someone of the twelve, chosen at random when you choose this, and kept from chapter to chapter until you " \
+                     "choose again. Choosing Random again chooses someone new. Who it is stays a surprise."
+#define kRandomShort "Someone chosen at random, kept until you choose again. Who it is stays a surprise."
+#define kRandomStrip "Chosen at random and kept until you choose again: a surprise."  // one line on a Tome page
+
 // Character select's panel beside the frames, the same for every frame: the name, the form in red ink under
 // the Tome's ornament, when they lived, who they are, then the meters. A form's are its character's.
 std::string character_details_rml(const RosterTile& t) {
@@ -855,6 +865,9 @@ std::string character_details_rml(const RosterTile& t) {
         return "<div class=\"bio\"><div class=\"bio-name\">Default</div><div class=\"bio-body\"><div class=\"bio-form\">"
                "<div class=\"bio-form-rule\"></div></div><div class=\"bio-about\">Play as the game intended: every chapter "
                "with its own character.</div></div></div>";
+    if (t.character == SETTINGS_RANDOM)
+        return "<div class=\"bio\"><div class=\"bio-name\">Random</div><div class=\"bio-body\"><div class=\"bio-form\">"
+               "<div class=\"bio-form-rule\"></div></div><div class=\"bio-about\">" kRandomAbout "</div></div></div>";
     const CharacterInfo& c = kCharacterInfo[t.character];
     const CharacterForm* f = t.form != 0 ? form_row(t.character, t.form) : nullptr;
     const std::string about = f != nullptr ? f->about : c.about;
@@ -889,6 +902,8 @@ std::string character_strip_rml(const RosterTile& t) {
                       escape(t.character == 0 ? std::string("Default") : tile_title(t)) + "</span>";
     if (t.character == 0)
         return out + "</div><div class=\"strip-about\">Every chapter with its own character, as the game intended.</div></div>";
+    if (t.character == SETTINGS_RANDOM)
+        return out + "</div><div class=\"strip-about\">" kRandomStrip "</div></div>";
     const CharacterInfo& c = kCharacterInfo[t.character];
     const CharacterForm* f = t.form != 0 ? form_row(t.character, t.form) : nullptr;
     const std::string form = tile_form_name(t);
@@ -1054,7 +1069,263 @@ std::vector<uint8_t> decode_cmpr(const std::vector<uint8_t>& d, size_t at, int w
     return rgba;
 }
 
-// Writes the portraits that are missing; true when all twelve are there.
+// Default's picture: the game's own Tome and skull (UMnMenu.tpl image 26, 640x480 CMPR, the game over scene's picture
+// without its logo; XXH64 90abb11e0abc338a), cropped to the portraits' 126x89 shape: x 25-640, y 46-480 upright. Made
+// from the disc with the portraits (portraits/Default.png), and from the HD pack when HD textures are on and the pack
+// has it (portraits/DefaultHD.png, from its 2560x1920 copy, stamped by the pack's file). emblem.png only when neither
+// can be made. Both are made from the player's own disc or pack, so neither is in the repository or the package.
+constexpr int kDefaultImage = 26;
+constexpr uint64_t kDefaultHash = 0x90abb11e0abc338aull;
+constexpr int kDefaultX = 25, kDefaultY = 46, kDefaultW = 615, kDefaultH = 434;
+constexpr const char* kDefaultFile = "portraits/Default.png";
+constexpr const char* kDefaultHdFile = "portraits/DefaultHD.png";
+constexpr const char* kDefaultHdStamp = "portraits/DefaultHD.txt";
+constexpr int kDefaultHdVersion = 1;  // raised when the HD picture is made another way: it is made again
+
+// RGBA as a compressed PNG (the HD picture is too large to store plainly).
+bool write_png_z(const std::string& path, int w, int h, const std::vector<uint8_t>& rgba) {
+    png_image png{};
+    png.version = PNG_IMAGE_VERSION;
+    png.width = static_cast<png_uint_32>(w);
+    png.height = static_cast<png_uint_32>(h);
+    png.format = PNG_FORMAT_RGBA;
+    return png_image_write_to_file(&png, path.c_str(), 0, rgba.data(), 0, nullptr) != 0;
+}
+
+// Default's crop from a k-times picture of the 640x480 one (k 1 the disc's, 4 the pack's), made `by` times smaller.
+std::vector<uint8_t> default_crop(const std::vector<uint8_t>& rgba, int k, bool flip, int by, int* out_w, int* out_h) {
+    const int w = 640 * k, h = 480 * k, cw = kDefaultW * k / by, ch = kDefaultH * k / by;
+    std::vector<uint8_t> out(static_cast<size_t>(cw) * ch * 4);
+    for (int y = 0; y < ch; y++)
+        for (int x = 0; x < cw; x++)
+            for (int c = 0; c < 4; c++) {
+                unsigned sum = 0;
+                for (int dy = 0; dy < by; dy++)
+                    for (int dx = 0; dx < by; dx++) {
+                        const int sx = kDefaultX * k + x * by + dx, uy = kDefaultY * k + y * by + dy;
+                        const int sy = flip ? h - 1 - uy : uy;
+                        sum += rgba[(static_cast<size_t>(sy) * w + sx) * 4 + c];
+                    }
+                out[(static_cast<size_t>(y) * cw + x) * 4 + c] = static_cast<uint8_t>((sum + by * by / 2) / (by * by));
+            }
+    *out_w = cw;
+    *out_h = ch;
+    return out;
+}
+
+std::string read_text(const std::string& path);
+bool write_text(const std::string& path, const std::string& text);
+
+// The pack's Default picture's stamp: this way of making it, and the pack file's size and time ("" with HD textures
+// off or the pack without it).
+std::string default_hd_id() {
+    if (!g_settings.hd_textures || texpack_count() == 0)
+        return "";
+    const std::string pack = texpack_file(14, 640, 480, kDefaultHash);
+    if (pack.empty())
+        return "";
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(pack, ec);
+    const auto time = std::filesystem::last_write_time(pack, ec);
+    return "default-hd " + std::to_string(kDefaultHdVersion) + " " + std::to_string(ec ? 0 : size) + " " +
+           std::to_string(ec ? 0 : static_cast<long long>(time.time_since_epoch().count())) + " " + pack;
+}
+
+// True when the pack's Default picture is there and up to date with the pack (made now when it is not: once a run for
+// a pack). False with HD textures off or the pack without it.
+bool make_default_hd() {
+    const std::string id = default_hd_id();
+    if (id.empty())
+        return false;
+    const std::string png = res_dir() + "/ui/" + kDefaultHdFile, stamp = res_dir() + "/ui/" + kDefaultHdStamp;
+    struct stat st;
+    const std::string had = read_text(stamp);
+    if (stat(png.c_str(), &st) == 0 && had == id + "\n")
+        return true;
+    // A pack whose picture can't be used is tried once, not at every start: the stamp then says "failed" for this file.
+    if (had == "failed " + id + "\n")
+        return false;
+    static std::string tried;
+    if (tried == id)
+        return false;
+    tried = id;
+    const Uint64 t0 = SDL_GetTicks();
+    std::vector<uint8_t> rgba;
+    uint32_t w = 0, h = 0;
+    const int k = texpack_read_rgba(14, 640, 480, kDefaultHash, &rgba, &w, &h) ? static_cast<int>(w / 640) : 0;
+    if (k < 2 || w != 640u * k || h != 480u * k || rgba.size() < static_cast<size_t>(w) * h * 4) {
+        std::fprintf(stderr, "[frontend] Default's HD picture NOT made: the pack's is %ux%u, not 2 or more times 640x480\n",
+                     w, h);
+        std::error_code ec;
+        std::filesystem::create_directories(res_dir() + kPortraitDir, ec);
+        write_text(stamp, "failed " + id + "\n");
+        return false;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(res_dir() + kPortraitDir, ec);
+    int cw = 0, ch = 0;
+    // The pack's copy is stored as the disc's is, bottom row first: turned the right way up. Made half as large (the
+    // card is at most about 750 points wide at 4K).
+    const std::vector<uint8_t> crop = default_crop(rgba, k, true, k / 2 > 1 ? k / 2 : 1, &cw, &ch);
+    if (!write_png_z(png, cw, ch, crop) || !write_text(stamp, id + "\n")) {
+        std::fprintf(stderr, "[frontend] Default's HD picture NOT written to %s\n", png.c_str());
+        write_text(stamp, "failed " + id + "\n");  // (when the folder can't be written at all, this can't be kept either)
+        return false;
+    }
+    std::fprintf(stderr, "[frontend] Default's HD picture made from the pack (%ux%u, card %dx%d, %llu ms)\n", w, h, cw, ch,
+                 static_cast<unsigned long long>(SDL_GetTicks() - t0));
+    return true;
+}
+
+// The same, answered from the last look while HD textures stay on or off (a page asks again each time it is built).
+// The preparing page sets the last look back to -1 when it has removed a stamp, so the picture is looked at again.
+int g_default_hd_for = -1;
+bool ensure_default_hd() {
+    static bool ok = false;
+    if (g_default_hd_for != (g_settings.hd_textures ? 1 : 0)) {
+        ok = make_default_hd();
+        g_default_hd_for = g_settings.hd_textures ? 1 : 0;
+    }
+    return ok;
+}
+
+// The twelve portraits from the HD pack (its 504x356 copies of UMnMenu.tpl images 50-61), when HD textures are on and
+// the pack has all twelve: portraits/hd/NAME.png, stamped by the pack's files (portraits/hd/stamp.txt). Each is found
+// by its picture's XXH64 on the player's disc (the pack's name for it: 126x89 CMPR, 128x96 of blocks, 6144 bytes).
+std::string portrait_hd_file(int character) {
+    return std::string("portraits/hd/") + kCharacters[character] + ".png";
+}
+constexpr int kPortraitsHdVersion = 1;
+
+// The pack's files for the twelve, or empty when it lacks one (or HD textures are off, or there is no disc).
+std::vector<std::string> portraits_hd_pack(std::vector<uint64_t>* hashes_out) {
+    if (!g_settings.hd_textures || texpack_count() == 0)
+        return {};
+    static std::vector<uint64_t> hashes;
+    static bool hashed = false;
+    if (!hashed && !picture_disc().empty()) {
+        hashed = true;
+        const std::vector<uint8_t> tpl = read_disc_file(picture_disc(), "UMnMenu.tpl");
+        auto u32_at = [&](size_t at) {
+            return at + 4 <= tpl.size()
+                       ? (uint32_t(tpl[at]) << 24) | (uint32_t(tpl[at + 1]) << 16) | (uint32_t(tpl[at + 2]) << 8) | tpl[at + 3]
+                       : 0u;
+        };
+        if (u32_at(0) == 0x0020AF30u && u32_at(4) >= 62u)
+            for (int i = 1; i <= 12; i++) {
+                const size_t image = u32_at(u32_at(8) + static_cast<size_t>(i == 12 ? 50 : 50 + i) * 8);
+                const size_t data = u32_at(image + 8);
+                if (u32_at(image) != ((89u << 16) | 126u) || u32_at(image + 4) != 14u || data + 6144 > tpl.size()) {
+                    hashes.clear();
+                    break;
+                }
+                hashes.push_back(XXH64(&tpl[data], 6144, 0));
+            }
+    }
+    if (hashes.size() != 12)
+        return {};
+    std::vector<std::string> files;
+    for (uint64_t hash : hashes) {
+        files.push_back(texpack_file(14, 126, 89, hash));
+        if (files.back().empty())
+            return {};
+    }
+    if (hashes_out != nullptr)
+        *hashes_out = hashes;
+    return files;
+}
+
+// Their stamp: this way of making them and each pack file's size and time ("" when the pack can't give all twelve).
+std::string portraits_hd_id() {
+    const std::vector<std::string> files = portraits_hd_pack(nullptr);
+    if (files.empty())
+        return "";
+    std::string id = "portraits-hd " + std::to_string(kPortraitsHdVersion);
+    for (const std::string& file : files) {
+        std::error_code ec;
+        const auto size = std::filesystem::file_size(file, ec);
+        const auto time = std::filesystem::last_write_time(file, ec);
+        id += " " + std::to_string(ec ? 0 : size) + ":" + std::to_string(ec ? 0 : static_cast<long long>(time.time_since_epoch().count()));
+    }
+    return id;
+}
+
+// True when the twelve HD portraits are there and up to date with the pack (made now when not: once a run for a pack).
+bool make_portraits_hd() {
+    const std::string id = portraits_hd_id();
+    if (id.empty())
+        return false;
+    const std::string stamp = res_dir() + "/ui/portraits/hd/stamp.txt";
+    auto have_all = [] {
+        for (int i = 1; i <= 12; i++) {
+            struct stat st;
+            if (stat((res_dir() + "/ui/" + portrait_hd_file(i)).c_str(), &st) != 0)
+                return false;
+        }
+        return true;
+    };
+    const std::string had = read_text(stamp);
+    if (have_all() && had == id + "\n")
+        return true;
+    if (had == "failed " + id + "\n")
+        return false;  // (tried for these pack files already: see make_default_hd)
+    static std::string tried;
+    if (tried == id)
+        return false;
+    tried = id;
+    const Uint64 t0 = SDL_GetTicks();
+    std::vector<uint64_t> hashes;
+    portraits_hd_pack(&hashes);
+    std::error_code ec;
+    std::filesystem::create_directories(res_dir() + "/ui/portraits/hd", ec);
+    std::filesystem::remove(stamp, ec);
+    for (int i = 1; i <= 12; i++) {
+        std::vector<uint8_t> rgba;
+        uint32_t w = 0, h = 0;
+        if (!texpack_read_rgba(14, 126, 89, hashes[i - 1], &rgba, &w, &h) || w % 126 != 0 || h != w / 126 * 89 ||
+            rgba.size() < static_cast<size_t>(w) * h * 4) {
+            std::fprintf(stderr, "[frontend] HD portraits NOT made: the pack's %s is %ux%u, not a whole multiple of 126x89\n",
+                         kCharacters[i], w, h);
+            write_text(stamp, "failed " + id + "\n");
+            return false;
+        }
+        // Stored as the disc's are, bottom row first: turned the right way up.
+        std::vector<uint8_t> upright(rgba.size());
+        const size_t row = static_cast<size_t>(w) * 4;
+        for (uint32_t y = 0; y < h; y++)
+            std::memcpy(&upright[y * row], &rgba[(h - 1 - y) * row], row);
+        if (!write_png_z(res_dir() + "/ui/" + portrait_hd_file(i), static_cast<int>(w), static_cast<int>(h), upright)) {
+            std::fprintf(stderr, "[frontend] HD portraits NOT written (%s)\n", portrait_hd_file(i).c_str());
+            write_text(stamp, "failed " + id + "\n");
+            return false;
+        }
+    }
+    write_text(stamp, id + "\n");
+    std::fprintf(stderr, "[frontend] HD portraits made from the pack (12, %llu ms)\n",
+                 static_cast<unsigned long long>(SDL_GetTicks() - t0));
+    return true;
+}
+
+// The same, answered from the last look while HD textures stay on or off (a page asks again each time it is built).
+// With no disc known yet the answer isn't kept: the pack's portraits are found by the disc's pictures, so it is asked
+// again once a disc is chosen.
+int g_portraits_hd_for = -1;
+bool ensure_portraits_hd() {
+    static bool ok = false;
+    if (g_portraits_hd_for != (g_settings.hd_textures ? 1 : 0)) {
+        ok = make_portraits_hd();
+        if (!picture_disc().empty())
+            g_portraits_hd_for = g_settings.hd_textures ? 1 : 0;
+    }
+    return ok;
+}
+
+bool have_default_picture() {
+    struct stat st;
+    return stat((res_dir() + "/ui/" + kDefaultFile).c_str(), &st) == 0;
+}
+
+// Writes the portraits that are missing (and Default's picture); true when all twelve are there.
 bool ensure_portraits() {
     const std::string dir = res_dir() + kPortraitDir;
     auto have_all = [&] {
@@ -1066,7 +1337,7 @@ bool ensure_portraits() {
         return true;
     };
     static bool tried = false;
-    if (have_all() || tried || picture_disc().empty())
+    if ((have_all() && have_default_picture()) || tried || picture_disc().empty())
         return have_all();
     tried = true;
     const std::vector<uint8_t> tpl = read_disc_file(picture_disc(), "UMnMenu.tpl");
@@ -1081,26 +1352,56 @@ bool ensure_portraits() {
     }
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
-    for (int i = 1; i <= 12; i++) {
-        const size_t image = u32_at(u32_at(8) + static_cast<size_t>(i == 12 ? 50 : 50 + i) * 8);
-        const int h = int(tpl[image] << 8 | tpl[image + 1]), w = int(tpl[image + 2] << 8 | tpl[image + 3]);
-        if (u32_at(image + 4) != 14u || w != 126 || h != 89)
-            return false;
-        write_png(res_dir() + "/ui/" + portrait_file(i), w, h, decode_cmpr(tpl, u32_at(image + 8), w, h));
+    if (!have_default_picture()) {
+        const size_t image = u32_at(u32_at(8) + static_cast<size_t>(kDefaultImage) * 8);
+        const int h = image + 4 <= tpl.size() ? int(tpl[image] << 8 | tpl[image + 1]) : 0;
+        const int w = image + 4 <= tpl.size() ? int(tpl[image + 2] << 8 | tpl[image + 3]) : 0;
+        const size_t data = u32_at(image + 8);
+        const bool ok = w == 640 && h == 480 && u32_at(image + 4) == 14u && data + 640 * 480 / 2 <= tpl.size() &&
+                        XXH64(&tpl[data], 640 * 480 / 2, 0) == kDefaultHash;
+        if (ok) {
+            int cw = 0, ch = 0;
+            const std::vector<uint8_t> crop = default_crop(decode_cmpr(tpl, data, w, h), 1, false, 1, &cw, &ch);
+            if (write_png_z(res_dir() + "/ui/" + kDefaultFile, cw, ch, crop))
+                std::fprintf(stderr, "[frontend] Default's picture (the Tome and skull, %dx%d) written from the disc\n", cw, ch);
+        } else {
+            std::fprintf(stderr, "[frontend] Default's picture NOT made: UMnMenu.tpl's image %d is not the Tome and skull "
+                                 "(%dx%d format %u): the emblem\n", kDefaultImage, w, h, u32_at(image + 4));
+        }
     }
-    std::fprintf(stderr, "[frontend] character portraits written to %s\n", dir.c_str());
+    if (!have_all()) {
+        for (int i = 1; i <= 12; i++) {
+            const size_t image = u32_at(u32_at(8) + static_cast<size_t>(i == 12 ? 50 : 50 + i) * 8);
+            const int h = int(tpl[image] << 8 | tpl[image + 1]), w = int(tpl[image + 2] << 8 | tpl[image + 3]);
+            if (u32_at(image + 4) != 14u || w != 126 || h != 89)
+                return false;
+            write_png(res_dir() + "/ui/" + portrait_file(i), w, h, decode_cmpr(tpl, u32_at(image + 8), w, h));
+        }
+        std::fprintf(stderr, "[frontend] character portraits written to %s\n", dir.c_str());
+    }
     return have_all();
 }
 
-// A frame's picture: Default's the game's emblem, a form's its own (portraits/Karim-1.png, made by
-// tools/ed/form_portraits.py) when there is one, else the character's.
+// A frame's picture: Default's the game's Tome and skull (else its emblem), Random's the silhouettes (random.png, never
+// who was rolled), a form's its own (portraits/Karim-1.png, made by tools/ed/form_portraits.py) when there is one, else
+// the character's.
 std::string portrait_rml(const RosterTile& t) {
-    if (t.character == 0)
+    if (t.character == SETTINGS_RANDOM)
+        return "<img src=\"random.png\"/>";
+    if (t.character == 0) {
+        if (ensure_default_hd())
+            return std::string("<img src=\"") + kDefaultHdFile + "\"/>";
+        if (have_default_picture() || (ensure_portraits(), have_default_picture()))
+            return std::string("<img src=\"") + kDefaultFile + "\"/>";
         return "<img class=\"emblem\" src=\"emblem.png\"/>";
+    }
     struct stat st;
     const std::string form_picture = std::string("portraits/") + kCharacters[t.character] + "-" + std::to_string(t.form) + ".png";
     if (t.form != 0 && stat((res_dir() + "/ui/" + form_picture).c_str(), &st) == 0)
         return "<img src=\"" + form_picture + "\"/>";
+    // HD textures on and the pack has the twelve: theirs (made once for a pack).
+    if (ensure_portraits_hd())
+        return "<img src=\"" + portrait_hd_file(t.character) + "\"/>";
     // (Made here when missing, wherever a portrait is shown first: a card, the roster; once a run.)
     if (stat((res_dir() + "/ui/" + portrait_file(t.character)).c_str(), &st) == 0 ||
         (ensure_portraits() && stat((res_dir() + "/ui/" + portrait_file(t.character)).c_str(), &st) == 0))
@@ -1119,11 +1420,14 @@ std::string player_card_rml(int player, bool selected, size_t index) {
     std::string out = std::string("<div class=\"pcard p") + (player == 1 ? "2" : "1") + (selected ? " selected" : "") +
                       (off ? " off" : "") + "\" id=\"row" + std::to_string(index) + "\"><div class=\"pcard-head\"><div class=\"pcard-rule\"></div>" +
                       "<div class=\"pcard-who\">" + (player == 1 ? "Player II" : "Player I") + "</div><div class=\"pcard-rule\"></div></div>" +
-                      "<div class=\"pcard-frame" + (chosen == 0 ? " default" : "") + "\"><div class=\"pcard-portrait\">" + portrait_rml(t) +
+                      "<div class=\"pcard-frame" + (chosen == 0 ? " default" : chosen == SETTINGS_RANDOM ? " random" : "") +
+                      "\"><div class=\"pcard-portrait\">" + portrait_rml(t) +
                       "</div></div><div class=\"pcard-name\">" + escape(tile_title(t)) + "</div><div class=\"pcard-form\">" +
                       (tile_form_name(t)[0] != 0 ? escape(tile_form_name(t)) : std::string("&nbsp;")) + "</div>";
     if (chosen == 0) {
         out += "<div class=\"pcard-default\">Each chapter with its own character, as the game intended.</div>";
+    } else if (chosen == SETTINGS_RANDOM) {
+        out += "<div class=\"pcard-default\">" kRandomShort "</div>";  // (never who was rolled)
     } else {
         const CharacterInfo& c = kCharacterInfo[chosen];
         const struct {
@@ -1157,11 +1461,16 @@ void build_characters() {
     for (const RosterTile& t : roster_tiles()) {
         Row r{tile_title(t)};
         r.tile = true;
-        r.chosen = chosen_character() == t.character && (t.character == 0 || form_on(g_characters_player, t.character) == t.form);
+        r.chosen = chosen_character() == t.character &&
+                   (t.character == 0 || t.character == SETTINGS_RANDOM || form_on(g_characters_player, t.character) == t.form);
         r.value_rml = portrait_rml(t);
         r.activate = [t] {
             chosen_character() = t.character;
-            if (t.character != 0) {
+            if (t.character == SETTINGS_RANDOM) {
+                // Rolled now and kept (settings.ini) until the player chooses again; A on it again rolls someone new.
+                settings_roll_random(g_characters_player);
+                chosen_stats() = 1;  // their own stats, as any chosen character
+            } else if (t.character != 0) {
                 form_set(t.character, t.form);
                 chosen_stats() = 1;  // a chosen character plays with their own stats
             }
@@ -3787,7 +4096,8 @@ bool run_menu() {
 // renderer's cache folder (the shipped list it was built from: a cleared cache shows the step again). A piece not done
 // (skipped with B, or timed out) is offered again at the next start. The title Options picture is not here: it is in
 // the game's memory only, and is taken at the title's first frame (hle.c title_options_from_bank).
-constexpr int kPortraitsVersion = 1;  // raised when ensure_portraits makes other pictures: they are made again
+// 2: Default's picture (the Tome and skull) made with them.
+constexpr int kPortraitsVersion = 2;  // raised when ensure_portraits makes other pictures: they are made again
 
 std::string firstrun_path() { return res_dir() + "/firstrun.txt"; }
 
@@ -3907,7 +4217,20 @@ bool run_preparing() {
     const std::string portraits_want = "portraits " + std::to_string(kPortraitsVersion) + " " + disc_id;
     const std::string portraits_had = stamp_line(res_stamp, "portraits");
     const bool portraits_old = !portraits_had.empty() && portraits_had != portraits_want;
-    bool need_portraits = again || portraits_old || !have_portraits();
+    // Default's HD picture (HD textures on, the pack has it) is made with them: from the pack, stamped by its file.
+    // A stamp of "failed" for this very pack file was tried once already: not again at every start. The portraits made
+    // again (portraits_old) remove its stamp, so it is made again with them.
+    const std::string default_hd = default_hd_id(), default_hd_had = read_text(res_dir() + "/ui/" + kDefaultHdStamp);
+    const bool need_default_hd =
+        !default_hd.empty() && (again || portraits_old ||
+                                (default_hd_had != default_hd + "\n" && default_hd_had != "failed " + default_hd + "\n"));
+    // And the twelve HD portraits the same way.
+    const std::string portraits_hd = portraits_hd_id();
+    const std::string portraits_hd_had = read_text(res_dir() + "/ui/portraits/hd/stamp.txt");
+    const bool need_portraits_hd =
+        !portraits_hd.empty() &&
+        (again || (portraits_hd_had != portraits_hd + "\n" && portraits_hd_had != "failed " + portraits_hd + "\n"));
+    bool need_portraits = again || portraits_old || !have_portraits() || need_default_hd || need_portraits_hd;
     // The pipelines: built from this shipped list into this cache folder, for this run's anti-aliasing (the renderer
     // builds only the rows of its own sample count, pipeline_cache.cpp: another setting is a build of its own).
     const std::string pipelines_want =
@@ -3954,12 +4277,27 @@ bool run_preparing() {
         // (the renderer's worker, titlevideo's), the bar shared out between the pieces needed.
         if (!portraits_done && frames >= 2) {
             const Uint64 p0 = SDL_GetTicks();
-            if (again || portraits_old)
+            if (again || portraits_old) {
                 for (int i = 1; i <= 12; i++) {
                     std::error_code ec;
                     std::filesystem::remove(res_dir() + "/ui/" + portrait_file(i), ec);
                 }
+                std::error_code ec;
+                std::filesystem::remove(res_dir() + "/ui/" + kDefaultFile, ec);
+                std::filesystem::remove(res_dir() + "/ui/" + kDefaultHdStamp, ec);
+            }
             const bool ok = ensure_portraits();
+            // (each looked at afresh: a page shown before this one may have kept an older answer)
+            if (need_default_hd) {
+                g_default_hd_for = -1;
+                ensure_default_hd();
+            }
+            if (need_portraits_hd) {
+                std::error_code ec;
+                std::filesystem::remove(res_dir() + "/ui/portraits/hd/stamp.txt", ec);
+                g_portraits_hd_for = -1;
+                ensure_portraits_hd();
+            }
             portraits_ms = SDL_GetTicks() - p0;
             portraits_done = true;
             std::fprintf(stderr, "[prepare] the character portraits %s (%llu ms)\n", ok ? "made" : "NOT made",

@@ -261,3 +261,18 @@ Play with the sound on. Start from the launcher as usual.
   Character and F1 at the same moment: the page should open and no save should load.
 - Tell us: do you want a song under Choose Character? The game has none there, so it would be one we pick (for
   example the Options song).
+
+## 13. Solo / Co-op picker (2026-11-17)
+**Step P1 only: the Solo/Co-op page is not built yet.** Start Game and Load Game still go straight on. That page
+comes in a later step. What P1 adds, to try now:
+- Start from play.bat or the launcher. The "Preparing the game" page may show once, briefly (it makes the new
+  pictures). Start again: it should not show.
+- Open Choose Character (launcher, title, or the Tome's Options). The **Default** card should show the game's own
+  Tome and skull picture, not the Recomp logo. Say if it looks cut off or too dark.
+- A new **Random** card sits right after Default, with your silhouette picture. Choose it: the card should still say
+  "Random" (it never shows who was rolled). Start a chapter and see who you play. Close the game and start again:
+  you should play the same one. Choose Random again: someone new.
+- In co-op, player 2 on Default should play player 1's character (Random's roll too).
+- With HD textures on, the portraits should look sharper than before. Turn HD textures off: the old ones.
+- Known, older than P1: in a co-op game, changing player 1's character from the Tome's Characters page can freeze the
+  game after the reload. Avoid that for now, or tell us if it happens.

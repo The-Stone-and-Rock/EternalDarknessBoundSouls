@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 Settings g_settings = {
     .aspect = 2,  // 16:9
@@ -72,6 +73,8 @@ Settings g_settings = {
     .mod_enemies = 0,
     .mod_p1_character = 0,
     .mod_p2_character = 0,
+    .mod_p1_random = 0,
+    .mod_p2_random = 0,
     .mod_p1_stats = 1,
     .mod_p2_stats = 1,
     .mod_p1_costume = 0,
@@ -240,9 +243,13 @@ void settings_load(void) {
         else if (strcmp(key, "mod_insanity") == 0)
             g_settings.mod_insanity = clamp_int(n, 0, 2);
         else if (strcmp(key, "mod_p1_character") == 0)
-            g_settings.mod_p1_character = clamp_int(n, 0, 12);
+            g_settings.mod_p1_character = clamp_int(n, 0, SETTINGS_RANDOM);
         else if (strcmp(key, "mod_p2_character") == 0)
-            g_settings.mod_p2_character = clamp_int(n, 0, 12);
+            g_settings.mod_p2_character = clamp_int(n, 0, SETTINGS_RANDOM);
+        else if (strcmp(key, "mod_p1_random") == 0)
+            g_settings.mod_p1_random = clamp_int(n, 0, 12);
+        else if (strcmp(key, "mod_p2_random") == 0)
+            g_settings.mod_p2_random = clamp_int(n, 0, 12);
         else if (strcmp(key, "mod_p1_stats") == 0)
             g_settings.mod_p1_stats = clamp_int(n, 0, 1);
         else if (strcmp(key, "mod_p2_stats") == 0)
@@ -261,6 +268,65 @@ void settings_load(void) {
             snprintf(g_settings.disc, sizeof g_settings.disc, "%s", value);
     }
     fclose(f);
+    // Random with no roll kept (set by hand or by a test's JTG_SET): rolled now, once, and kept.
+    bool rolled = false;
+    for (int p = 0; p < 2; p++)
+        if ((p == 0 ? g_settings.mod_p1_character : g_settings.mod_p2_character) == SETTINGS_RANDOM &&
+            (p == 0 ? g_settings.mod_p1_random : g_settings.mod_p2_random) == 0) {
+            settings_roll_random(p);
+            rolled = true;
+        }
+    if (rolled)
+        settings_save();
+    for (int p = 0; p < 2; p++)
+        if ((p == 0 ? g_settings.mod_p1_character : g_settings.mod_p2_character) == SETTINGS_RANDOM)
+            fprintf(stderr, "[settings] player %d is Random: plays %s (%d), kept from settings.ini\n", p + 1,
+                    settings_character_name(settings_character(p)), settings_character(p));
+}
+
+static const char* const kCharacterNames[14] = {"Default", "Pius",   "Ellia",  "Anthony", "Karim",   "Max",     "Lindsey",
+                                                "Paul",    "Roberto", "Peter", "Edward",  "Michael", "Alex",    "Random"};
+
+const char* settings_character_name(int character) {
+    return character >= 0 && character <= SETTINGS_RANDOM ? kCharacterNames[character] : "?";
+}
+
+int settings_character(int player) {
+    const int choice = player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
+    if (choice != SETTINGS_RANDOM)
+        return choice;
+    const int roll = player == 1 ? g_settings.mod_p2_random : g_settings.mod_p1_random;
+    return roll >= 1 && roll <= 12 ? roll : 0;
+}
+
+long long settings_costume(int player) {
+    long long bits = player == 1 ? g_settings.mod_p2_costume : g_settings.mod_p1_costume;
+    const int choice = player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
+    const int character = settings_character(player);
+    if (choice == SETTINGS_RANDOM && character >= 1 && character <= 12)
+        bits &= ~(15LL << ((character - 1) * 4));
+    return bits;
+}
+
+// The host's own random (the game's needs its thread, and Random is chosen on the menus, game or no game): the time,
+// the clock and a count, stirred (splitmix64).
+int settings_roll_random(int player) {
+    static unsigned long long count;
+    unsigned long long z = (unsigned long long)time(NULL) * 0x9E3779B97F4A7C15ull ^ (unsigned long long)clock() << 20 ^
+                           (unsigned long long)(size_t)&count ^ ++count * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    z ^= z >> 31;
+    int* roll = player == 1 ? &g_settings.mod_p2_random : &g_settings.mod_p1_random;
+    const int last = *roll;
+    // Another than the last: choosing Random again rolls someone new.
+    int pick = (int)(z % (last >= 1 && last <= 12 ? 11u : 12u)) + 1;
+    if (last >= 1 && last <= 12 && pick >= last)
+        pick++;
+    *roll = pick;
+    fprintf(stderr, "[settings] Random for player %d: rolled %s (%d)%s\n", player + 1, settings_character_name(pick), pick,
+            last >= 1 && last <= 12 ? "" : ", the first roll");
+    return pick;
 }
 
 void settings_save(void) {
@@ -330,6 +396,8 @@ void settings_save(void) {
     fprintf(f, "mod_insanity = %d\n", g_settings.mod_insanity);
     fprintf(f, "mod_p1_character = %d\n", g_settings.mod_p1_character);
     fprintf(f, "mod_p2_character = %d\n", g_settings.mod_p2_character);
+    fprintf(f, "mod_p1_random = %d\n", g_settings.mod_p1_random);
+    fprintf(f, "mod_p2_random = %d\n", g_settings.mod_p2_random);
     fprintf(f, "mod_p1_stats = %d\n", g_settings.mod_p1_stats);
     fprintf(f, "mod_p2_stats = %d\n", g_settings.mod_p2_stats);
     fprintf(f, "mod_p1_costume = %lld\n", g_settings.mod_p1_costume);

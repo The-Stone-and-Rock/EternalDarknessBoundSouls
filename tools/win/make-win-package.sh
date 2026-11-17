@@ -61,10 +61,12 @@ found=$(find "$P" \( -iname '*.dol' -o -iname '*.iso' -o -iname '*.gcm' -o -inam
 
 # What the first-run step makes from the player's own disc (frontend.cpp run_preparing, hle.c
 # title_options_from_bank) never ships: the launcher's music, the title Options picture and its paints, the twelve
-# characters' portraits (the forms' NAME-FORM.png are the project's own and ship), and the step's stamps.
+# characters' portraits (the forms' NAME-FORM.png are the project's own and ship), Default's Tome-and-skull picture
+# (from the disc, DefaultHD from the HD pack) and the step's stamps. res/ui/random.png (Random's silhouettes, the
+# user's own picture) ships.
 made=$(find "$P" \( -path "$P/res/music/*" -o -path "$P/res/video/options*" -o -path "$P/res/video/mark-*" \
-    -o -path "$P/res/firstrun.txt" \) -print)
-for name in Pius Ellia Anthony Karim Roberto Max Edward Paul Michael Peter Lindsey Alex; do
+    -o -path "$P/res/firstrun.txt" -o -path "$P/res/ui/portraits/hd/*" -o -name DefaultHD.txt \) -print)
+for name in Pius Ellia Anthony Karim Roberto Max Edward Paul Michael Peter Lindsey Alex Default DefaultHD; do
     [ -e "$P/res/ui/portraits/$name.png" ] && made="$made
 $P/res/ui/portraits/$name.png"
 done

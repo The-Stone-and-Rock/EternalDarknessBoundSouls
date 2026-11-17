@@ -7511,9 +7511,10 @@ static int g_chapter_model = -1;  // the playable the chapter asked for
 static int character_chosen(int choice, long long bits);
 
 // Mods' Player 2 character (co-op), -1 for player 1's.
+// Random (settings_character): the character rolled for them, in their own body.
 static int coop_p2_choice(void) {
-    const int choice = g_settings.mod_p2_character;
-    return g_settings.mod_coop && choice >= 1 && choice <= 12 ? character_chosen(choice, g_settings.mod_p2_costume) : -1;
+    const int choice = settings_character(1);
+    return g_settings.mod_coop && choice >= 1 && choice <= 12 ? character_chosen(choice, settings_costume(1)) : -1;
 }
 
 static int player_model(void) {
@@ -7524,7 +7525,7 @@ static int player_model(void) {
     }
     if (test >= 0)
         return test;
-    return character_chosen(g_settings.mod_p1_character, g_settings.mod_p1_costume);
+    return character_chosen(settings_character(0), settings_costume(0));
 }
 
 // A character's other bodies, their forms. Only the body: their file's moves, name and stats stay,
@@ -7631,8 +7632,8 @@ static Costume* costume_on(int player) {
     if (player == 1 && !g_settings.mod_coop)
         return NULL;
     const int model = player == 0 ? player_model() : coop_wanted_character();
-    const long long bits = player == 0 ? g_settings.mod_p1_costume : g_settings.mod_p2_costume;
-    const int choice = player == 0 ? g_settings.mod_p1_character : g_settings.mod_p2_character;
+    const long long bits = settings_costume(player);
+    const int choice = settings_character(player);
     // The form is kept with the screen it was chosen on.
     int place = character_chosen(choice, bits) == model ? choice - 1 : -1;
     for (int i = 0; i < COSTUME_PLACES && place < 0; i++)
@@ -11880,7 +11881,10 @@ static void hle_chapter_character(CPUState* cpu) {
     if (want >= 0 && want != own) {
         static int told = -1;
         if (told != (int)chapter)
-            fprintf(stderr, "[player] chapter %u's character %d played as %d\n", chapter, own, want);
+            fprintf(stderr, "[player] chapter %u's character %d played as %d%s%s%s\n", chapter, own, want,
+                    g_settings.mod_p1_character == SETTINGS_RANDOM ? " (Random: " : "",
+                    g_settings.mod_p1_character == SETTINGS_RANDOM ? settings_character_name(settings_character(0)) : "",
+                    g_settings.mod_p1_character == SETTINGS_RANDOM ? ")" : "");
         told = (int)chapter;
     }
     hle_set_u32(cpu, (u32)(want >= 0 ? want : own));
@@ -21789,7 +21793,7 @@ static void words_rename(u8* words, const char* from, const char* to) {
 // The screen's character a player's words are named by (0 to 11), -1 the chapter's: player 2's Default is made as
 // player 1's character (coop_p2_choice), so it's named as player 1's, not the chapter's.
 static int coop_name_choice(bool p2) {
-    const int choice = p2 && g_settings.mod_p2_character != 0 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
+    const int choice = p2 && settings_character(1) != 0 ? settings_character(1) : settings_character(0);
     return choice - 1;
 }
 
