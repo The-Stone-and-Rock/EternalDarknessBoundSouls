@@ -6100,6 +6100,9 @@ static void page_closed() {
     g_list_top = 0;
     g_menu_player = 0;
     g_menu_was_held = false;
+    // (A key press left over from the page: an Esc repeat in the frame its release ended the wait. With the launcher's
+    // menu on Esc / Back on again by default it would open that menu over the game the player was going back to.)
+    std::fill(std::begin(g_key_pressed), std::end(g_key_pressed), false);
     g_menu_closed++;
 }
 
@@ -6189,7 +6192,14 @@ extern "C" void frontend_frame(void) {
     if (p && !p_was)
         photo_start = true;
     p_was = p;
-    photo::frame(photo_start && photo::g_state == photo::State::Off);
+    const bool photo_was = photo::g_state != photo::State::Off;
+    photo::frame(photo_start && !photo_was);
+    if (photo_was && photo::g_state == photo::State::Off) {
+        // Photo mode just ended, maybe by a Back hold that is still down: that hold is neither a tap (it would open the
+        // launcher's menu, on again by default) nor a new photo hold.
+        back_since = SDL_GetTicks();
+        back_photo = true;
+    }
     if (photo::g_state != photo::State::Off) {
         menu_was_held = true;
         std::fill(std::begin(g_key_pressed), std::end(g_key_pressed), false);
@@ -6218,8 +6228,9 @@ extern "C" void frontend_frame(void) {
         std::fprintf(stderr, "[frontend] test menu open for %llu ms\n", (unsigned long long)test_hold);
     }
     // A page the game's own menus asked for (the Tome's Options, the title's Options): the menu opens straight on it.
-    // Esc / Back open the launcher's menu over the game only as a debug menu (Options > Debug menu in game,
-    // or ED_DEBUG_MENU=1): in play everything is in the game's own menus.
+    // Esc / Back open the launcher's menu over the game while its switch is on (Options > Launcher menu in game: on by
+    // default again since 2026-11-18, a fallback while the Tome's pages settle; or ED_DEBUG_MENU=1). The game's own
+    // menus hold everything too.
     const int page = g_open_page.exchange(-1);
     static int debug_env = -1;
     if (debug_env < 0)

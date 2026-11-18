@@ -53,12 +53,13 @@ Before: a sound a player's zone set up (the muffled voices) was put back for the
   Your call whether player 2 should take the character's path. `python -I tools/ed/ed.py herogates --all` lists them.
 
 ## 6. The game's own menus hold the launcher's settings now (2026-11-17)
-The launcher's menu no longer opens over the game on Esc / Back (it's a debug menu now: launcher Options > Display >
-"Debug menu in game", or ED_DEBUG_MENU=1). Everything is in the game's own menus:
+The launcher's menu opens over the game on Esc / Back again for now (since 2026-11-18, a fallback while the Tome's pages
+settle: launcher Options > Display > "Launcher menu in game", on by default). Everything is also in the game's own menus:
 - **Player 1's Tome > Options** (L/R to the Options tab): under Controller / Audio / Display / Load/Save are four new
   plaques, **Characters, Save States, Settings, Mods**. Down from Load/Save reaches them; the game's gold ring and
   sounds move with you; A opens that page over the paused game; B comes straight back to the Tome.
-  Settings has Display, Sound, Graphics, Controls, then **Return to title screen** and **Quit game**.
+  Settings has Display, Sound, Graphics, Controls, then **Return to title screen**. (No Quit game row since 2026-11-18:
+  the Exit Game plaque beside Settings asks first.)
 - **Player 2's own Tome > Options**: only their **Characters** plaque (their character, on their controller). The four
   of the cross are player 1's (only player 1 saves).
 - **Title screen > Options**: since step 3 below, one scrolling list: the game's 8 rows, then Display, Sound,
@@ -275,8 +276,7 @@ Play with the sound on. Start from the launcher as usual.
   1's half shows the ask. After No, both players should walk again once the Tomes are closed.
 - The title's own Quit (Options, Up from the first row) should look and work as before ("Quit the game?").
 - Not tried yet: other languages, and 4:3 or very wide windows. Say if the plaques look wrong there.
-- Your choice: the Tome's Settings page still has its own "Quit game" row, which quits with no ask. Keep it, remove it,
-  or make it ask too?
+- The Tome's Settings page no longer has its own "Quit game" row (2026-11-18): Exit Game is the way out.
 **Step P6: save states made in the other mode.** Try:
 - In a solo game, open the Tome's Save States and choose a co-op save state (slot 3 is one). Its Load row should say
   "Made in co-op: the game starts again in co-op to load it." Press A: the window closes and opens again in a few

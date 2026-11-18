@@ -34056,7 +34056,8 @@ static void characters_reload(CPUState* cpu, u32 player) {
     // unpacker 0x801559D8 never ended (saves/reports/hang-20261117-204821.txt, pc 0x80155AA4).
     static bool tome_held;  // a Tome was open since the last reload (said with the reload's line)
     if (g_tw.sharing || g_tome_copy_open || g_tome_copy_ask || g_tome_copy_turn || g_coop_tome_owner >= 0) {
-        tome_held = true;
+        // (The owner is also 1 through a close-up of player 2's and its 20 reads after: a wait too, but not a Tome's.)
+        tome_held = tome_held || g_tw.sharing || g_tome_copy_open || g_tome_copy_ask;
         settled = 0u;
         return;
     }
