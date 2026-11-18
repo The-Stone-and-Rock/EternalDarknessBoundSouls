@@ -56,6 +56,8 @@ void hle_gx_state_load(const void* in);
 size_t hle_coop_state_size(void);
 void hle_coop_state_save(void* out);
 void hle_coop_state_load(const void* in);
+// A saved COOP blob (hle_coop_state_size bytes): player 2 in play, as a state saved in co-op has them.
+bool hle_coop_state_p2_in_play(const void* in);
 // Player 2's own count of each kind of thing; hle_coop_kinds_load(NULL)
 // for a state that has none: they start with player 1's.
 size_t hle_coop_kinds_size(void);

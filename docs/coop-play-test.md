@@ -264,6 +264,18 @@ Play with the sound on. Start from the launcher as usual.
   example the Options song).
 
 ## 13. Solo / Co-op picker (2026-11-17)
+**Step P6: save states made in the other mode.** Try:
+- In a solo game, open the Tome's Save States and choose a co-op save state (slot 3 is one). Its Load row should say
+  "Made in co-op: the game starts again in co-op to load it." Press A: the window closes and opens again in a few
+  seconds, in co-op, in that save's room, with both players. The other way round works too.
+- On the launcher, Load game > a slot made in the other mode: its Load row says "it plays in co-op" (or solo), and it
+  loads in that mode with no restart.
+- Afterwards, Start Game should still light the mode you picked last on the Solo / Co-op page.
+- In a co-op game, Save States > Slot 1 (or Slot 2): those were made in co-op before the separate rooms. Load should be
+  grey, with "Made in co-op before the separate rooms: it loads only in a solo game." A does nothing, and the co-op game
+  goes on. On the launcher before a game, the same slot says "it plays in solo, without player 2."
+- First of all: start play.bat again. Start Game and Load Game should each open the Solo / Co-op page.
+- Known, older than this: slot 1 loaded in solo can freeze right after it loads. Say if it does for you.
 **Step P5: Mods > Co-op is gone; its rows moved.** Try:
 - Mods (the launcher's, the title's Options > Mods, the Tome's Mods plaque) has no Co-op any more. The launcher's main
   list has no Co-op row either. To play co-op, pick Co-op on Start Game or Load Game.

@@ -762,6 +762,38 @@ u32 quickstate_file_mem1_size(const char* path) {
     return size;
 }
 
+int quickstate_file_coop_p2(const char* path) {
+    FILE* f = path != NULL ? fopen(path, "rb") : NULL;
+    if (f == NULL)
+        return -1;
+    QsFileHeader header;
+    int answer = -1;
+    if (fread(&header, sizeof header, 1, f) == 1 && memcmp(header.magic, QS_MAGIC, sizeof header.magic) == 0 &&
+        header.version == QS_VERSION && header.section_count <= QS_MAX_SECTIONS &&
+        strncmp(header.game_id, ED_GAME_ID, sizeof header.game_id) == 0) {
+        for (u32 i = 0; i < header.section_count; i++) {
+            QsSectionHeader h;
+            if (fread(&h, sizeof h, 1, f) != 1)
+                break;
+            if (memcmp(h.tag, "COOP", 4) == 0) {
+#ifdef ED_AURORA
+                if (h.size == hle_coop_state_size()) {
+                    u8* blob = (u8*)malloc((size_t)h.size);
+                    if (blob != NULL && fread(blob, (size_t)h.size, 1, f) == 1)
+                        answer = hle_coop_state_p2_in_play(blob) ? 1 : 0;
+                    free(blob);
+                }
+#endif
+                break;
+            }
+            if (h.size > 0x7FFFFFFFu || fseek(f, (long)h.size, SEEK_CUR) != 0)
+                break;
+        }
+    }
+    fclose(f);
+    return answer;
+}
+
 static bool load_state(CPUState* cpu, const char* path) {
     const double start = now_ms();
     size_t size = 0;

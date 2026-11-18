@@ -682,8 +682,13 @@ int main(int argc, char** argv) {
         titlevideo_preload();
         // Started again by a Solo / Co-op pick of the other mode (frontend.cpp restart_process, ED_TITLE_RESUME): past
         // the launcher, on the disc the last run played (ED_ISO, over argv's --iso: the launcher may have chosen another).
+        // And started again to load a save state made in the other mode (ED_STATE_RESUME, with ED_QUICKLOAD: plan step 6),
+        // past the launcher the same way.
         const char* resume = getenv("ED_TITLE_RESUME");
-        if (resume != NULL && resume[0] != '\0') {
+        const char* state_resume = getenv("ED_STATE_RESUME");
+        if ((resume != NULL && resume[0] != '\0') || (state_resume != NULL && state_resume[0] != '\0')) {
+            if (state_resume != NULL && state_resume[0] != '\0')
+                fprintf(stderr, "[rooms] started again to load %s, made in the other mode\n", state_resume);
             const char* disc = getenv("ED_ISO");
             if (disc != NULL && disc[0] != '\0') {
                 if (iso_path != NULL && strcmp(iso_path, disc) != 0)

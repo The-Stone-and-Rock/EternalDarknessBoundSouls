@@ -3,6 +3,40 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: the Solo/Co-op picker, step P6 review fix (checkpoint commit with P6)
+- The user said again that Start Game and Load Game show no Solo / Co-op page. Their last play (logs/play.log, 16:16)
+  is still older than P3 (18:17), so that build had no page. With today's build, the user's way (launcher Play, a copy
+  of their settings, play.bat's ED_ROOM_SLOTS=2 ED_COOP_STAY=1) opens the page on both: logs/run-20261117-201037-p6f-
+  playbat-start, -201117-p6f-playbat-load (P6-review/06, 07). They need to start play.bat again.
+- Review finding, real and fixed: the user's slot1.state and slot2.state are 48 MB but made in co-op (player 2 in play,
+  before the separate rooms). P6 called them solo, so in a co-op game the Tome's Slot 1 said "Made in solo" and
+  restarted into solo, ending the co-op game (and slot 1 stops in solo after ~60 frames). Now the state's COOP section
+  is read (`quickstate_file_coop_p2`, `hle_coop_state_p2_in_play`, frontend.cpp `state_old_coop`). In a co-op game,
+  Load is greyed with "Made in co-op before the separate rooms: it loads only in a solo game." and nothing restarts.
+  Real solo states (no player 2) still restart a co-op game into solo. The launcher's note for slot 1/2 now says "it
+  plays in solo, without player 2."
+- Seen: logs/run-20261117-200302-p6f-coop-tome-slot1-old-coop (greyed Load, A does nothing, still co-op),
+  -200442-p6f-coop-tome-slot5-solo (a fresh solo state still restarts into solo, one player), -200644-p6f-launcher-
+  slot1-note. Pictures: Screenshots for Claude/solo-coop-picker/P6-review/01-07.
+- Not seen: slot 1/2 from a solo game's Tome; the launcher over a running co-op game; another language; the Mac build.
+  The slot1 freeze in solo (older than P6) is still not looked into.
+
+## 2026-11-17: the Solo/Co-op picker, step P6: save states made the other way (checkpoint commit)
+- A save state plays only in its own mode (56 MB co-op, 48 MB solo). Loading one made in the other mode from the
+  Tome's Save States (or the launcher over a game) now starts the game again into that mode, loading the state. Before,
+  it was refused with a log line. The Slot page's Load row says so first. From the launcher before a game it already
+  worked (P3), and the row now says "Made in co-op: it plays in co-op." settings.ini keeps the mode picked last.
+- Code: frontend.cpp `state_other_mode`, `start_game`, `restart_process(resume, state)`, `build_slot`; main.c
+  `ED_STATE_RESUME`; hle.c `ED_INPUT_SCRIPT_RESUMED` also for it.
+- Seen both ways in pictures (Screenshots for Claude/solo-coop-picker/P6-state-mode/): solo game -> slot 3 -> co-op
+  in room 69 with both players; co-op game -> a fresh solo slot -> solo with one player. Runs
+  logs/run-20261117-193534-p6-solo-tome-load-slot3, -194822-p6-coop-tome-load-slot5-e.
+- Found, older than P6: saves/slot1.state loaded in solo stops after about 60 frames (hang-20261117-193301.txt, and
+  P3's hang-20261117-175959.txt at the same place). In no-launcher test runs the Slot page's Load is greyed (no disc
+  list). F11 still refuses a state of the other mode.
+- The user's settings.ini, slot1-3, boot.state, title.state and title-rooms.state have the same hashes as before; the
+  test's slot 4 and slot 5 were removed.
+
 ## 2026-11-17: the Solo/Co-op picker, step P5 review fix (checkpoint commit with P5)
 - Frame rate's note "Co-op plays at 60 frames a second." showed to solo players on any screen faster than 60 Hz.
   Now it shows only in a co-op game, or before a game when co-op was the last mode picked. Solo on a fast screen: no

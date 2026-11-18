@@ -59,6 +59,7 @@ void quickstate_request_save(const char* path);
 void quickstate_request_load(const char* path);
 const char* quickstate_boot_path(void);
 unsigned int quickstate_file_mem1_size(const char* path);
+int quickstate_file_coop_p2(const char* path);
 void hle_set_skip_intro(bool on);
 bool hle_start_up_hidden(void);
 unsigned hle_pad_reads(void);
@@ -495,14 +496,25 @@ int launcher_main_row() {
 // other mode: docs/research/solo-coop-picker/plan.md, step 4) it starts again on the title instead, past the launcher, and
 // goes on into Start Game or Load Game by itself (main.c, hle.c title_resume_step), on the disc this run plays. Every
 // boot choice of this run is dropped first, so the new one makes its own (frontend_title_resume_boot: its title machine
-// follows its own rooms). Returns only when the restart failed.
-void restart_process(const char* resume = nullptr) {
+// follows its own rooms). With `state` (a save state made in the other mode: start_game, plan step 6) it starts again
+// past the launcher, on the same disc, booting from that state (ED_QUICKLOAD): main.c's coop_follow_boot_state then
+// plays the state's mode (ED_STATE_RESUME marks the run for main.c and the test scripts). Returns only when the restart
+// failed.
+void restart_process(const char* resume = nullptr, const char* state = nullptr) {
     settings_save();
     unsetenv("ED_QUICKLOAD");
     unsetenv("ED_SKIP_INTRO");
     unsetenv("ED_TITLE_STATE");
     unsetenv("ED_TITLE_RESUME");
-    if (resume != nullptr) {
+    unsetenv("ED_STATE_RESUME");
+    if (state != nullptr) {
+        setenv("ED_QUICKLOAD", state, 1);
+        setenv("ED_STATE_RESUME", state, 1);
+        if (!g_run_disc.empty())
+            setenv("ED_ISO", g_run_disc.c_str(), 1);  // (main.c takes it over argv's --iso for a resume)
+        std::fprintf(stderr, "[frontend] starting again to load %s, made in the other mode (the same log goes on; disc %s)\n",
+                     state, g_run_disc.empty() ? "as given" : g_run_disc.c_str());
+    } else if (resume != nullptr) {
         setenv("ED_TITLE_RESUME", resume, 1);
         if (!g_run_disc.empty())
             setenv("ED_ISO", g_run_disc.c_str(), 1);  // (main.c takes it over argv's --iso for a resume)
@@ -548,6 +560,10 @@ void restart_process(const char* resume = nullptr) {
     execv(g_argv[0], g_argv);
 #endif
     unsetenv("ED_TITLE_RESUME");
+    if (state != nullptr) {
+        unsetenv("ED_QUICKLOAD");
+        unsetenv("ED_STATE_RESUME");
+    }
     std::fprintf(stderr, "[frontend] restart failed\n");
 }
 
@@ -610,6 +626,12 @@ extern "C" bool rooms_would_change(bool coop) {
     return (coop && rooms_asked_for_coop()) != (getenv("ED_ROOM_SLOTS") != nullptr);
 }
 
+// A 32-48 MB state with player 2 in play (its COOP section, quickstate_file_coop_p2): made in co-op before the separate
+// rooms (2026-11-11/12; the user's slot1.state and slot2.state). Its memory is solo's size, but it is not a solo state.
+static bool state_old_coop(const char* path, unsigned mem1) {
+    return mem1 != 0u && mem1 != 56u * 1024u * 1024u && quickstate_file_coop_p2(path) == 1;
+}
+
 extern "C" void coop_follow_boot_state(void) {
     const char* state = getenv("ED_QUICKLOAD");
     if (state == nullptr || state[0] == '\0')
@@ -627,7 +649,8 @@ extern "C" void coop_follow_boot_state(void) {
     settings_run_coop(coop);
     settings_apply();  // (co-op's frame rate)
     std::fprintf(stderr, "[rooms] %s is a %s state (%u MB): this run plays %s (settings.ini keeps mod_coop = %d)\n", state,
-                 coop ? "co-op" : "solo", mem1 >> 20, coop ? "co-op" : "solo", coop ? 0 : 1);
+                 coop ? "co-op" : state_old_coop(state, mem1) ? "co-op (before the separate rooms)" : "solo", mem1 >> 20,
+                 coop ? "co-op" : state_old_coop(state, mem1) ? "solo, player 2 out of the way" : "solo", coop ? 0 : 1);
 }
 
 // main.c, after rooms_follow_coop, in a program started again by a Solo / Co-op pick (ED_TITLE_RESUME, restart_process):
@@ -663,6 +686,23 @@ extern "C" void frontend_title_resume_boot(void) {
 static std::atomic<int> g_title_pick_result{-1};
 extern "C" int frontend_title_pick_take(void) { return g_title_pick_result.exchange(-1); }
 
+// A save state plays only in the mode it was made in: its memory is co-op's 56 MB (the separate rooms) or solo's smaller
+// one (plan step 6). 1 or 0: made in co-op or solo, and this run's memory is the other one's, so loading it starts the
+// game again (start_game). -1: it loads in place (or its size can't be read, and the load itself says why). The same test
+// as a boot state's (coop_follow_boot_state): a smaller state loads in co-op when co-op has no separate rooms.
+// -2: a state made in co-op before the separate rooms (state_old_coop) in a co-op game with them. It can't load here, and
+// it is not a solo state, so the game does not start again in solo for it (the co-op game would end, and the user's
+// slot1.state stops in solo after about 60 frames: saves/reports/hang-20261117-193301.txt). It loads in a solo game.
+int state_other_mode(const std::string& path) {
+    const unsigned mem1 = quickstate_file_mem1_size(path.c_str());
+    if (mem1 == 0u)
+        return -1;
+    const bool coop = mem1 == 56u * 1024u * 1024u;
+    if (!coop && state_old_coop(path.c_str(), mem1))
+        return getenv("ED_ROOM_SLOTS") != nullptr ? -2 : -1;
+    return rooms_would_change(coop) ? (coop ? 1 : 0) : -1;
+}
+
 void start_game(int slot) {
     snprintf(g_settings.disc, sizeof g_settings.disc, "%s", g_discs[g_disc].path.c_str());
     settings_save();
@@ -676,7 +716,24 @@ void start_game(int slot) {
             return;
         }
         if (slot != 0) {
-            quickstate_request_load(slot_path(slot).c_str());
+            // Made in the other mode (Save States in the Tome, or Load game on the launcher over the game): the game
+            // starts again from it, past the launcher, and plays its mode (main.c, coop_follow_boot_state). settings.ini
+            // keeps the mode picked last, as for any boot state. A failed restart leaves the page as it was.
+            const std::string path = slot_path(slot);
+            const int other = state_other_mode(path);
+            if (other == -2) {
+                // (The Slot page greys its Load for it: this is the launcher's other ways in.)
+                std::fprintf(stderr, "[rooms] slot %d was made in co-op before the separate rooms: this co-op game can't load "
+                                     "it, and it is not a solo state (not loaded; it loads in a solo game)\n", slot);
+                return;
+            }
+            if (other >= 0) {
+                std::fprintf(stderr, "[rooms] slot %d is a %s save state: this run is %s, so the game starts again to load it\n",
+                             slot, other ? "co-op" : "solo", other ? "solo" : "co-op");
+                restart_process(nullptr, path.c_str());
+                return;
+            }
+            quickstate_request_load(path.c_str());
         } else {
             struct stat st;
             const bool title = g_settings.mod_skip_intro && stat(title_state_path(), &st) == 0;
@@ -2258,6 +2315,29 @@ void build_slot() {
     Row load{"Load"};
     load.enabled = disc_playable();
     load.activate = [slot] { start_game(slot); };
+    {
+        // A save state made in the other mode plays in its own (state_other_mode; before a game, main.c's
+        // coop_follow_boot_state, the same rule): said before it is loaded.
+        // A state made in co-op before the separate rooms is not a solo one (state_old_coop): a co-op game with the rooms
+        // can't load it, so its Load is greyed there; before a game it plays in solo, player 2 out of the way (coop_park).
+        const unsigned mem1 = quickstate_file_mem1_size(slot_path(slot).c_str());
+        const bool coop = mem1 == 56u * 1024u * 1024u;
+        const int mode = g_in_game ? state_other_mode(slot_path(slot)) : -1;
+        const bool old_coop = !coop && state_old_coop(slot_path(slot).c_str(), mem1);
+        const bool other = g_in_game ? mode >= 0
+                                     : !old_coop && mem1 != 0u && coop != (g_settings.mod_coop != 0) && (coop || rooms_asked_for_coop());
+        if (mode == -2) {
+            load.enabled = false;
+            load.change = [](int) {};  // (greyed but still lit by Up/Down, as Frame rate in co-op: its note can be read)
+            load.note = "Made in co-op before the separate rooms: it loads only in a solo game.";
+        } else if (!g_in_game && old_coop && rooms_asked_for_coop()) {
+            load.note = "Made in co-op before the separate rooms: it plays in solo, without player 2.";
+        } else if (other) {
+            load.note = std::string("Made in ") + (coop ? "co-op" : "solo") + ": " +
+                        (g_in_game ? std::string("the game starts again in ") + (coop ? "co-op" : "solo") + " to load it."
+                                   : std::string("it plays in ") + (coop ? "co-op." : "solo."));
+        }
+    }
     g_rows.push_back(load);
 
     const int to = free_slot();

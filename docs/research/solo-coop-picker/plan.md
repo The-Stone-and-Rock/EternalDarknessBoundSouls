@@ -727,3 +727,75 @@ Four reviewer findings were checked against the code. All four were real, and al
 - **Seen** (launcher, `ED_MENU_OPEN=display`, keys d,d, scratch settings copies, 120 Hz screen): solo, Frame rate lit
   and no note (P5-menus/17); co-op, Frame rate lit with "Co-op plays at 60 frames a second." (18). Not seen: the
   same row in a solo Tome game (the same function and test, `mod_coop` 0 there), a 60 Hz screen.
+
+## Built: step P6, save states made the other way (plan step 6; 2026-11-17, checkpoint commit)
+
+- **Before a game it already worked** (P3's `coop_follow_boot_state`): the launcher's Continue and Load game set
+  `ED_QUICKLOAD`, and main.c plays the state's mode (56 MB co-op, smaller solo). Nothing changed there. The Slot page's
+  Load row now says so: "Made in co-op: it plays in co-op." (only when it differs from the mode picked last).
+- **In a game** (the Tome's Save States, or the launcher over a running game; both reach `start_game(slot)` with
+  `g_in_game`): new `state_other_mode(path)` in frontend.cpp reads the state's MEM1 size (`quickstate_file_mem1_size`)
+  and asks `rooms_would_change(coop)`, the same rule as the boot. When it is the other mode, `restart_process(nullptr,
+  path)` starts the program again with `ED_QUICKLOAD` = the state, `ED_STATE_RESUME` = the state and `ED_ISO` = this
+  run's disc. The new process's `coop_follow_boot_state` and `rooms_follow_coop` choose the mode; settings.ini keeps the
+  mode picked last (`settings_run_coop`, as for any boot state). No page and no question: a state can only play in its
+  own mode. The Load row's note says first: "Made in co-op: the game starts again in co-op to load it."
+- `restart_process` drops `ED_STATE_RESUME` for every caller, and on a failed restart puts back what it set (the page
+  stays as it was; not run). main.c: `ED_STATE_RESUME` is handled like `ED_TITLE_RESUME` for the disc (ED_ISO over
+  argv's `--iso`, `frontend_resume_discs`), so Return to launcher has the disc list. The launcher is skipped because
+  `ED_QUICKLOAD` is set. hle.c: such a run plays `ED_INPUT_SCRIPT_RESUMED` (test scripts), not the first run's presses.
+- A 32-48 MB state with no player 2 in it (made in solo) in a co-op game with the separate rooms now restarts into solo
+  (it was refused). A 32-48 MB state with player 2 in it is not a solo state: see the review fix below. A 56 MB state
+  where co-op has no separate rooms (`ED_ROOM_SLOTS=0`) is still refused, as at boot.
+- The memory card's saves need nothing: `coop_park`, `coop_spawn` and `coop_adopt` were not changed (not run again).
+- **Seen** (Screenshots for Claude/solo-coop-picker/P6-state-mode/, scratch settings copies and a scratch card, run.sh
+  `launcher` with `ED_MENU_OPEN=slotN` + `ED_LAUNCHER_TEST_KEYS=a` so the launcher fills the disc list):
+  - -193534-p6-solo-tome-load-slot3: a fresh solo state (slot 5, made for the test from a jtg solo run and deleted after)
+    loaded from the launcher, solo; the Tome's Save States (01), Slot 3's Load with "Made in co-op: the game starts
+    again in co-op to load it." (02); A: "slot 3 is a co-op save state ... starts again", the restart in 2 s, the disc
+    list filled, separate rooms on, slot3.state loaded in room 69, both players, the screen split (03, 04).
+  - -194822-p6-coop-tome-load-slot5-e: slot 3 from the launcher with scratch `mod_coop = 0` (the launcher's note "Made in
+    co-op: it plays in co-op.", 05), co-op; the Tome in player 1's half, Slot 5's Load with "Made in solo: the game
+    starts again in solo to load it." (06); A: the restart, separate rooms off, slot5.state in room 341, one player
+    (timeline "P2 none"), 121 fps (07).
+- **Test notes:** in a run with no launcher (jtg.sh, run.sh with a state) the disc list is empty, so the Slot page's
+  Load is greyed and skipped: a "d" from Save here lands on Duplicate (the first try copied slot 3 to slot 4, removed
+  after a byte check). slot3.state opens the Tome on four first-time hints (Use, Equip, Check, L/R): four B presses
+  before L. saves/slot1.state loaded in solo stops after about 60 frames (saves/reports/hang-20261117-193301.txt), the
+  same place as P3's run (hang-20261117-175959.txt, P3's build): older than P6, not looked into.
+- **Not seen:** F11 (load the newest state) still refuses a state of the other mode; the launcher over a running game
+  (same `start_game` code); a failed restart; the Mac build; the user's play. `ed test` not run, as told.
+
+## Built: step P6 review fix (2026-11-17, the P6 checkpoint commit)
+
+- **The finding (real).** `state_other_mode`, like P3's `coop_follow_boot_state`, took every state that is not 56 MB as
+  made in solo. The user's saves/slot1.state and slot2.state are 48 MB, but they hold a player 2 in play (their COOP
+  section: player 2 found, not parked). They were made in co-op before the separate rooms. So in a co-op game the Tome's
+  Slot 1 said "Made in solo" and restarted the program into solo, ending the co-op game, and slot 1 then stops in solo
+  after about 60 frames (hang-20261117-193301.txt). Before P6 the load was refused and the co-op game went on.
+- **How a state's mode is read now.** New `quickstate_file_coop_p2(path)` (quickstate.c) reads the COOP section and asks
+  `hle_coop_state_p2_in_play` (hle.c: player 2 found and not put out of the way). Read from the saves folder: every
+  56 MB state and slot1/slot2, test-cofm, jtg-ch1-room183, reload-p2, karim-start, lever, p2cam-door, shadow-room338,
+  coop-apart, coop-recover have player 2 in play; a fresh solo state (made by a jtg solo run) has none.
+- **The rule** (frontend.cpp `state_old_coop`, `state_other_mode`): a 32-48 MB state with player 2 in play is an old
+  co-op state. In a co-op game with the separate rooms it returns -2: no restart; the Slot page greys Load with
+  "Made in co-op before the separate rooms: it loads only in a solo game." (still lit by Up/Down, so the note can be
+  read; A does nothing). `start_game` logs and returns for it (the launcher's other ways in). In a solo game it loads in
+  place, as before P6. A 32-48 MB state with no player 2 still restarts a co-op game into solo (P6, unchanged).
+- **Before a game** (the launcher, P3's rule, kept): such a state plays in solo, player 2 out of the way. Its Load row
+  now says "Made in co-op before the separate rooms: it plays in solo, without player 2." (it said "Made in solo"), and
+  the boot log says "a co-op (before the separate rooms) state (48 MB): this run plays solo, player 2 out of the way".
+- **Seen** (Screenshots for Claude/solo-coop-picker/P6-review/, scratch settings copies and a scratch card, play.bat's
+  ED_ROOM_SLOTS=2 ED_COOP_STAY=1):
+  - -200302-p6f-coop-tome-slot1-old-coop: co-op game from slot 3, Tome > Save States > Slot 1: Load greyed and lit,
+    the note (01); A on it: nothing, still the co-op game, both halves (02). No restart line, no hang report.
+  - -200442-p6f-coop-tome-slot5-solo: the fresh solo state as slot 5: "Made in solo: the game starts again in solo to
+    load it." (03); A: the restart, "separate rooms off", room 341 with one player (timeline "P2 none") (04).
+  - -200644-p6f-launcher-slot1-note: the launcher's Slot 1 with co-op settings: the new note (05).
+  - -201037-p6f-playbat-start and -201117-p6f-playbat-load: the user's way (launcher Play, a copy of their settings,
+    no ED_TITLE_PICK): Start Game and Load Game each open the Solo / Co-op page (06, 07).
+- The test's slot 5 was deleted. settings.ini, slot1-3, boot.state, title.state and title-rooms.state have their
+  hashes from before the runs.
+- **Not seen:** slot 1 or 2 loaded in a solo game from the Tome (unchanged from before P6); the launcher over a running
+  co-op game choosing slot 1 (same `start_game` and `build_slot` code); another language; the Mac build. The slot1 hang
+  in solo is still not looked into.

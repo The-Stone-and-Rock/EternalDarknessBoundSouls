@@ -41,6 +41,10 @@ bool quickstate_request_reboot(CPUState* cpu, u32 start, u32 end, bool rebooted)
 // A state file's guest memory (MEM1) size in bytes, read from its section headers alone: 56 MB is a co-op state (the two
 // room slots), 32-48 MB a solo one. 0 when the file can't be read or is not a state of this game.
 u32 quickstate_file_mem1_size(const char* path);
+// Whether a state file has player 2 in play (its COOP section: player 2 found and not put out of the way, hle.c): 1 for a
+// state made in co-op, 0 for one made in solo, -1 when it can't be read (no COOP section: an older state, or no state).
+// A 32-48 MB state with player 2 in play was made in co-op before the separate rooms (plan step 6's review).
+int quickstate_file_coop_p2(const char* path);
 
 // Nonzero while a save or load waits for a safe point.
 extern int g_quickstate_pending;

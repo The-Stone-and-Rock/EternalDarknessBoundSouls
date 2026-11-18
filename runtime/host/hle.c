@@ -35555,6 +35555,14 @@ void hle_coop_state_save(void* out) {
     memcpy(out, &s, sizeof s);
 }
 
+// A saved co-op state (hle_coop_state_size bytes, from a state file): player 2 found and not put out of the way, as a
+// state saved in co-op has them (a solo game has none, or keeps a co-op save's player 2 parked: coop_park).
+bool hle_coop_state_p2_in_play(const void* in) {
+    HleCoopState s;
+    memcpy(&s, in, sizeof s);
+    return s.p2 != 0u && s.parked == 0u;
+}
+
 // Player 2's quick spells and what they are casting, a state of their own
 // (states saved before them keep loading).
 typedef struct {
@@ -35974,9 +35982,10 @@ void hle_install(CPUState* cpu) {
     const char* once_frame = getenv("ED_AUTO_INPUT_ONCE");
     if (once_frame != NULL && once_frame[0] != '\0')
         g_auto_input_once_frame = strtoull(once_frame, NULL, 0);
-    // (Testing: a program started again by a Solo / Co-op pick, ED_TITLE_RESUME, plays ED_INPUT_SCRIPT_RESUMED instead,
-    // so the first run's presses, at the same guest frames, do not come again.)
-    parse_input_script(getenv(getenv("ED_TITLE_RESUME") != NULL ? "ED_INPUT_SCRIPT_RESUMED" : "ED_INPUT_SCRIPT"));
+    // (Testing: a program started again by a Solo / Co-op pick, ED_TITLE_RESUME, or to load a save state made in the
+    // other mode, ED_STATE_RESUME, plays ED_INPUT_SCRIPT_RESUMED instead, so the first run's presses do not come again.)
+    parse_input_script(getenv(getenv("ED_TITLE_RESUME") != NULL || getenv("ED_STATE_RESUME") != NULL ? "ED_INPUT_SCRIPT_RESUMED"
+                                                                                                     : "ED_INPUT_SCRIPT"));
 #ifdef ED_AURORA
     memset(g_textures, 0, sizeof g_textures);
     memset(g_tluts, 0, sizeof g_tluts);
