@@ -3884,7 +3884,8 @@ void build_launcher_home() {
         return none;
     };
     const bool playable = disc_playable();
-    const std::string no_disc = disc_row().note;
+    // (The discs are looked for once, as the launcher opens: a disc put in the folder now is found at the next start.)
+    const std::string no_disc = disc_row().note + (g_discs.empty() ? " Then start the launcher again." : "");
     const int newest = newest_slot();
     int used = 0;
     for (int slot = 1; slot <= kSlotCount; slot++)
@@ -4414,6 +4415,7 @@ void render() {
     g_doc->SetClass("launcher-dark", dark);
     g_doc->SetClass("home", dark && g_screen == Screen::Launcher);
     g_doc->SetClass("credits", dark && g_screen == Screen::Credits);
+    g_doc->SetClass("nodisc", dark && g_screen == Screen::Launcher && !disc_playable());  // (the help line in the warning's colour)
     g_doc->SetClass("bar", on_bar());
     g_doc->SetClass("narrow", dark && shape > 0.f && shape < 1.5f);
     g_doc->SetClass("art", dark && launcher_art_ready());
@@ -5018,6 +5020,18 @@ MenuStep menu_step() {
                 g_test_key_at++;
             if (g_test_key_at < g_test_keys.size()) {
                 const char c = g_test_keys[g_test_key_at++];
+                // "c=ID" (testing): a mouse click on the element with that id (row3, stab2), through RmlUi to MenuListener.
+                if (c == 'c' && g_test_key_at < g_test_keys.size() && g_test_keys[g_test_key_at] == '=') {
+                    const size_t end = std::min(g_test_keys.find(',', g_test_key_at), g_test_keys.size());
+                    const std::string id = g_test_keys.substr(g_test_key_at + 1, end - g_test_key_at - 1);
+                    g_test_key_at = end;
+                    Rml::Element* e = g_doc->GetElementById(id);
+                    std::fprintf(stderr, "[frontend] test click on %s%s\n", id.c_str(), e != nullptr ? "" : " (no such element)");
+                    if (e != nullptr)
+                        e->Click();
+                    std::fprintf(stderr, "[frontend] after the click: screen %d row %d tab %d bar %d\n", static_cast<int>(g_screen), g_selected,
+                                 g_tab, on_bar() ? g_bar_at : -1);
+                }
                 const int b = c == 'u' ? kUp : c == 'd' ? kDown : c == 'l' ? kLeft : c == 'r' ? kRight : c == 'a' ? kAccept
                               : c == 'b' ? kBack : c == 'w' ? kScrollUp : c == 's' ? kScrollDown
                               : c == 'q' ? kPageLeft : c == 'e' ? kPageRight : -1;  // (q, e: LB, RB)
@@ -5335,9 +5349,20 @@ bool run_preparing() {
     uint32_t pipelines_total = 0;
     int frames = 0;
     for (const char* c : {"spread", "pause", "centered", "slots", "dense", "settings", "roster", "cards", "overlay",
-                          "skin-title", "skin-tome", "tome-under", "title-art", "title-art-hd", "title-list", "tome-halves"})
+                          "skin-title", "skin-tome", "tome-under", "title-art", "title-art-hd", "title-list", "tome-halves",
+                          "launcher", "launcher-dark", "home", "credits", "nodisc", "bar", "narrow", "art"})
         g_doc->SetClass(c, false);
-    g_doc->SetClass("launcher", true);
+    // The main launcher's new look has the page too: a dark card on the backdrop, no side bar (menu.rcss,
+    // body.launcher-dark.preparing). The old look (ED_LAUNCHER_OLD): on the launcher's parchment, as before.
+    if (launcher_dark()) {
+        for (const char* c : {"launcher-dark", "skin-title"})
+            g_doc->SetClass(c, true);
+        g_doc->SetClass("art", launcher_art_ready());
+        if (Rml::Element* bar = g_doc->GetElementById("sidebar"); bar != nullptr)
+            bar->SetInnerRML("");
+    } else {
+        g_doc->SetClass("launcher", true);
+    }
     g_doc->SetClass("preparing", true);
     g_doc->GetElementById("heading")->SetInnerRML("");
     g_doc->GetElementById("menu1")->SetInnerRML("");
@@ -5402,7 +5427,10 @@ bool run_preparing() {
                          titlevideo_title_art_hd() ? "made" : "NOT made", static_cast<unsigned long long>(hd_ms));
         }
         const bool timed_out = now - t0 > 300000;  // (5 minutes: the rest is offered again next start)
-        if ((portraits_done && pipelines_done && hd_done) || skipped || timed_out) {
+        // ED_PREPARE_HOLD_MS=N (testing): the page stays up at least N ms, so a picture of it can be taken on a PC where
+        // everything is made in a moment.
+        static const Uint64 hold_ms = std::getenv("ED_PREPARE_HOLD_MS") != nullptr ? std::strtoull(std::getenv("ED_PREPARE_HOLD_MS"), nullptr, 10) : 0;
+        if ((portraits_done && pipelines_done && hd_done && now - t0 >= hold_ms) || skipped || timed_out) {
             if (timed_out && !skipped)
                 std::fprintf(stderr, "[prepare] stopped after 5 minutes: the rest is offered again next start\n");
             break;

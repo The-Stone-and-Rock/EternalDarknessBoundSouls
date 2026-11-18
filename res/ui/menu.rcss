@@ -2612,7 +2612,7 @@ body.launcher-dark .h-title {
 	line-height: 6.3vh;
 	font-family: "Alegreya SC";
 	font-weight: bold;
-	font-size: 4.86vh;
+	font-size: 5.06vh;
 	color: #dff3f8;
 	white-space: nowrap;
 	font-effect: glow(1px 12px #7fe0f590);
@@ -2938,4 +2938,421 @@ body.launcher-dark .c-foot {
 	font-size: 1.8vh;
 	line-height: 2.5vh;
 	color: #6d9098;
+}
+
+/* The rows of a tab's page: a little lighter than the title look's, as no painted list is behind them here. */
+body.launcher-dark .row {
+	color: #7fa3ab;
+}
+
+/* The first-start page (frontend.cpp run_preparing) in this look: a dark card in the window's middle, on the backdrop;
+   no side bar and no directions while it is up. */
+body.launcher-dark.preparing #sidebar,
+body.launcher-dark.preparing #footbar,
+body.launcher-dark.preparing #art-shade,
+body.launcher-dark.preparing #heading,
+body.launcher-dark.preparing .note,
+body.launcher-dark.preparing #hint {
+	display: none;
+}
+
+body.launcher-dark.preparing #book {
+	left: 50%;
+	right: auto;
+	top: 27vh;
+	width: 76vh;
+	height: 45vh;
+	margin-left: -38vh;
+	padding: 5vh 0 0 0;
+	box-sizing: border-box;
+	background-color: #0a1518f0;
+	border: 1px #3b5359;
+}
+
+body.launcher-dark.preparing #pages {
+	display: block;
+	flex: none;
+	width: 100%;
+}
+
+body.launcher-dark.preparing .page,
+body.launcher-dark.preparing .menu {
+	display: block;
+	padding: 0;
+}
+
+body.launcher-dark.preparing .prep {
+	font-family: "IM FELL English";
+	color: #8db2ba;
+}
+
+body.launcher-dark.preparing .prep-title {
+	font-family: "Alegreya SC";
+	font-weight: bold;
+	font-size: 4vh;
+	line-height: 5vh;
+	letter-spacing: 0.2vh;
+	color: #dff3f8;
+	font-effect: glow(1px 12px #7fe0f590);
+}
+
+body.launcher-dark.preparing .prep-sub {
+	font-family: "Alegreya SC";
+	font-weight: bold;
+	font-size: 1.8vh;
+	line-height: 2.8vh;
+	letter-spacing: 0.5vh;
+	text-transform: uppercase;
+	color: #c9ab68;
+}
+
+body.launcher-dark.preparing .prep .gap {
+	height: 1px;
+	margin: 2.4vh 9vh 3vh 9vh;
+	decorator: none;
+	background-color: #3b5359;
+}
+
+body.launcher-dark.preparing .prep-doing {
+	font-size: 2.3vh;
+	line-height: 3vh;
+	color: #8db2ba;
+}
+
+body.launcher-dark.preparing .prep-bar {
+	width: 78%;
+	height: 1.3vh;
+	margin: 1.6vh auto 1vh auto;
+	border: 1px #486168;
+	border-radius: 0.65vh;
+	background-color: #00000080;
+}
+
+body.launcher-dark.preparing .prep-fill {
+	border-radius: 0.65vh;
+	background-color: #5f98a5;
+}
+
+body.launcher-dark.preparing .prep-count {
+	font-size: 1.8vh;
+	line-height: 2.4vh;
+	color: #6d9098;
+}
+
+body.launcher-dark.preparing .prep-note {
+	margin-top: 3vh;
+	font-size: 1.7vh;
+	line-height: 2.2vh;
+	font-style: italic;
+	color: #6d9098;
+}
+
+body.launcher-dark.preparing .prep-skip {
+	margin-top: 0.9vh;
+	font-family: "Fira Sans";
+	font-size: 1.2vh;
+	line-height: 1.8vh;
+	letter-spacing: 0.25vh;
+	text-transform: uppercase;
+	color: #486168;
+}
+
+/* A tab's page of rows (the user, 2026-11-18: larger letters, lined up, and switches that look ticked): the page's
+   name at the left over a thin line, as the Play page's title is; under it the rows on one dark sheet, every name on
+   one edge and every value in one column at the other; the chosen row lit as the chosen tab is. */
+body.launcher-dark #heading {
+	box-sizing: border-box;
+	width: 104vh;
+	max-width: 100%;
+	align-self: center;
+	height: 8.4vh;
+	line-height: 8.4vh;
+	padding-left: 2.4vh;
+	font-size: 6.4vh;
+	text-align: left;
+	color: #a0e3f1;
+	border-bottom: 1px #3b5359;
+}
+
+body.launcher-dark #pages {
+	width: 104vh;
+}
+
+body.launcher-dark .page,
+body.launcher-dark.spread .page,
+body.launcher-dark.spread #page1 {
+	padding: 0;
+}
+
+body.launcher-dark.spread #page1 {
+	margin-left: 2vh;
+}
+
+body.launcher-dark .menu,
+body.launcher-dark.spread .menu {
+	flex: none;
+	justify-content: flex-start;
+	margin-top: 2.6vh;
+	padding: 1.4vh 0;
+	background-color: #0a1518d8;
+	border: 1px #3b5359;
+}
+
+body.launcher-dark .row,
+body.launcher-dark.dense .row {
+	min-height: 5.2vh;
+	padding: 0 2.4vh 0 2vh;
+	border-left: 0.37vh transparent;
+	font-size: 3.9vh;
+}
+
+body.launcher-dark.dense .row {
+	min-height: 4.5vh;
+	font-size: 3.4vh;
+}
+
+body.launcher-dark.spread .row {
+	min-height: 4.2vh;
+	font-size: 3.1vh;
+}
+
+body.launcher-dark .row.selected {
+	border-left-color: #a0e3f1;
+	decorator: horizontal-gradient(#486168a0 #48616800);
+}
+
+body.launcher-dark .value {
+	font-size: 3.2vh;
+}
+
+body.launcher-dark.dense .value,
+body.launcher-dark.spread .value {
+	font-size: 2.5vh;
+}
+
+body.launcher-dark .tag {
+	font-size: 1.9vh;
+}
+
+body.launcher-dark .section {
+	padding: 0 2.4vh;
+	font-size: 2.3vh;
+	letter-spacing: 0.2vh;
+	color: #c9ab68;
+}
+
+body.launcher-dark .gap {
+	height: 1.2vh;
+}
+
+/* Back, and a slot's own page (Load, Duplicate, Delete): centred rows, as before, on the same sheet. */
+body.launcher-dark .row.back,
+body.launcher-dark.centered .row {
+	border-left-width: 0;
+	padding: 0 2vh;
+}
+
+body.launcher-dark .row.back.selected,
+body.launcher-dark.centered .row.selected {
+	decorator: none;
+	background-color: #48616860;
+}
+
+body.launcher-dark .note {
+	box-sizing: border-box;
+	width: 104vh;
+	max-width: 100%;
+	align-self: center;
+	height: 6.4vh;
+	margin: 1.4vh 0 0 0;
+	padding: 0 2.4vh;
+	font-size: 2.5vh;
+	line-height: 3.1vh;
+	text-align: left;
+	color: #8db2ba;
+}
+
+/* On or off: a box, ticked when on (the tick is the knob, turned: two of its edges). */
+body.launcher-dark .switch,
+body.launcher-dark .switch.on {
+	width: 3vh;
+	height: 3vh;
+	border: 0.22vh #5e848d;
+	border-radius: 0.4vh;
+	background-color: #000000c0;
+}
+
+body.launcher-dark .switch.on {
+	border-color: #a0e3f1;
+	background-color: #1d4450;
+}
+
+body.launcher-dark .switch .knob {
+	display: none;
+}
+
+body.launcher-dark .switch.on .knob {
+	display: block;
+	width: 0.7vh;
+	height: 1.5vh;
+	margin: 0.1vh 0 0 0.8vh;
+	border-radius: 0;
+	background-color: transparent;
+	border-right: 0.4vh #a0e3f1;
+	border-bottom: 0.4vh #a0e3f1;
+	transform: rotate(45deg);
+}
+
+body.launcher-dark .row.disabled .switch,
+body.launcher-dark .row.disabled .switch.on {
+	border-color: #2f4348;
+	background-color: transparent;
+}
+
+body.launcher-dark .row.disabled .switch.on .knob {
+	background-color: transparent;
+	border-color: #2f4348;
+}
+
+body.launcher-dark .slider {
+	width: 20vh;
+	height: 1.2vh;
+}
+
+/* The two cards and the roster keep their own wide pages: no sheet behind them, their names in the middle. */
+body.launcher-dark.cards .menu,
+body.launcher-dark.roster .menu,
+body.launcher-dark.credits .menu {
+	padding: 0;
+	background-color: transparent;
+	border-width: 0;
+}
+
+body.launcher-dark.cards .menu,
+body.launcher-dark.roster .menu {
+	margin-top: 0;
+}
+
+body.launcher-dark.roster .row,
+body.launcher-dark.cards .row {
+	border-left-width: 0;
+}
+
+/* The Play page's own boxes are not rows on a sheet. */
+body.launcher-dark.home .menu,
+body.launcher-dark.preparing .menu {
+	margin-top: 0;
+	padding: 0;
+	background-color: transparent;
+	border-width: 0;
+}
+
+/* The Play page's small letters, a little larger than the mock-up's (the user: not tiny). */
+body.launcher-dark .h-btn {
+	font-size: 1.3vh;
+}
+
+body.launcher-dark .h-tile-name {
+	font-size: 1.3vh;
+}
+
+body.launcher-dark .h-tile-change {
+	font-size: 1.2vh;
+}
+
+body.launcher-dark .h-ready {
+	font-size: 1.45vh;
+}
+
+body.launcher-dark .h-for {
+	font-size: 1.5vh;
+}
+
+body.launcher-dark .h-big-sub {
+	font-size: 1.75vh;
+}
+
+body.launcher-dark .h-line {
+	font-size: 2.05vh;
+}
+
+body.launcher-dark .h-right,
+body.launcher-dark .h-version {
+	font-size: 1.95vh;
+}
+
+body.launcher-dark.home .note {
+	align-self: flex-start;
+	padding: 0;
+	font-size: 1.75vh;
+	color: #6d9098;
+}
+
+body.launcher-dark #hint {
+	font-size: 1.75vh;
+}
+
+body.launcher-dark #built {
+	font-size: 1.3vh;
+}
+
+body.launcher-dark .c-who {
+	font-size: 2.3vh;
+	line-height: 3.2vh;
+}
+
+body.launcher-dark .c-what {
+	font-size: 2.5vh;
+	line-height: 3.3vh;
+}
+
+body.launcher-dark .c-foot {
+	font-size: 2.1vh;
+	line-height: 2.9vh;
+}
+
+/* No disc found: the Play page's help line (what to do about it) in the warning's colour, larger. */
+body.launcher-dark.home.nodisc .note {
+	font-size: 2.05vh;
+	font-style: normal;
+	color: #d9805a;
+}
+
+/* The first-start page's small lines, a little larger (the user: not tiny). */
+body.launcher-dark.preparing .prep-count {
+	font-size: 2.1vh;
+}
+
+body.launcher-dark.preparing .prep-note {
+	font-size: 2.1vh;
+	line-height: 2.7vh;
+}
+
+body.launcher-dark.preparing .prep-skip {
+	font-size: 1.5vh;
+	line-height: 2.2vh;
+	color: #6d9098;
+}
+
+/* A window less wide than 3:2 (4:3, the window's own first size): the panel beside the bar is too narrow for the
+   roster with its details and tight for the two cards, so both are drawn smaller, whole (frontend.cpp: body.narrow). */
+body.launcher-dark.narrow.roster .page {
+	padding: 0 2vh;
+}
+
+body.launcher-dark.narrow .roster-wrap {
+	width: 122vh;
+	transform: scale(0.8);
+	transform-origin: left top;
+}
+
+body.launcher-dark.narrow .pcards {
+	transform: scale(0.92);
+	transform-origin: center top;
+}
+
+/* The roster's four frames to a line need a little more than the 70vh they have elsewhere: their frames' edges are in
+   dp, and in a small window on a dense screen the fourth frame dropped to the next line. */
+body.launcher-dark .roster-wrap .roster {
+	width: 74vh;
 }
