@@ -36,5 +36,11 @@ look do not change. No file or exe renames yet (the user: "rename later to avoid
 Not decided (ask with a picture when reached): whether Continue stays as the third button (it was my addition), what
 Credits shows, the small-window and 4:3 / 21:9 fits.
 
+**Built 2026-11-18** (what, how, and what was and was not tested: the top of `docs/coop-next-session.md`). The user's
+asks during the build: the letters on the tabs' pages larger and lined up (now a large page name over a thin line, the
+rows on one dark sheet, every value in one column), and the On / Off switches drawn so they look ticked (a box with a
+tick; only in the main launcher). Dropped from the mock-up: "F11: fullscreen" (not a real key here) and Play's cut
+corner. Added: a "Game disc" line under Saves and one help line at the page's foot.
+
 The groundwork is `prep.json` (maps of the launcher code, the panel data, a 17-step plan and a skeptic's 21 problems
 with fixes: apply the fixes). The user's style for this work: quick, plain words, pictures first, checkpoint commits.

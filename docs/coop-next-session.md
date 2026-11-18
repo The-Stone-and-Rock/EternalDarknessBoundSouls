@@ -1,5 +1,53 @@
 # HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit, through native menus step 6, the Tome look in co-op; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
 
+## 2026-11-18: the new MAIN launcher is built (the user's mock-up 7); committed, not pushed
+What the user chose is `docs/research/launcher-redesign/decisions.md`; pictures of every step are in
+`Screenshots for Claude/launcher-redesign/` (step1-home, step2-update, step3-display, sheet-*.png).
+- **What was built.** Only the launcher the program opens with. A side bar of tabs (Play, Choose Character, Display,
+  Graphics, Sound, Controls, Mods, Credits, and Quit at its foot), the lit tab's page in the panel beside it, one line
+  of directions at the window's foot, the user's own picture dimmed behind (`res/ui/launcher-art.png`). The Play page:
+  the one-line title with its glow, BOUND SOULS, READY (or NO GAME DISC FOUND), the version with **Check Updates**
+  (it becomes a lit **Update** when a newer release is out, and then only opens the GitHub Releases page), Play /
+  Load / Continue, three tiles (HD textures, Resolution, Frame rate: A changes them), "Recommended settings: coming
+  soon" with a greyed Auto-set, both players' controllers with Configure, the save states used, the game disc.
+  After the user's asks the same day: the tabs' pages have a large name over a thin line, larger rows on one dark
+  sheet with the values in one column, and On / Off is a box that is ticked.
+- **How it is made** (`runtime/host/frontend.cpp`, the block before `render()`; `res/ui/menu.rcss`, the last block,
+  `body.launcher-dark`; `runtime/host/updatecheck.cpp`). `launcher_dark()` is true only while `frontend_run_launcher`
+  has its menu up (`g_launcher_up`), so the menu over a game, "Return to launcher" there, the title look and the Tome
+  look take none of it. The body wears `launcher-dark` plus the title look's own class `skin-title` (its colours and
+  hands), never `launcher`. Tabs open the old launcher's own pages (`open_tab`); a tab's own page has no Back row,
+  and Back or Left there goes to the side bar. The Play page's rows are `build_launcher_home` (fixed order, the
+  `kHome*` enum), drawn by `home_rml`, moved over by `home_move` (lines and columns). The tiles are the Display and
+  Image pages' own rows (built by `build_options_rows`, picked by name), so a tile and its row cannot differ.
+  `res/version.txt` holds this build's version: **raise it with every release** (the update check compares it with the
+  highest tag in the releases list; GitHub's "latest" skips pre-releases, so the list is read).
+- **Doors for tests.** `ED_LAUNCHER_OLD=1` the launcher as it was. `ED_LAUNCHER_TEST_KEYS`: `q` / `e` are LB / RB,
+  `c=row3` or `c=stab2` clicks that element (tabs are `stab0`..`stab7`, Quit `stab8`). `ED_UPDATE_TEST=0.1.7` (or
+  `fail`) answers the update check with no request. `ED_PREPARE=1 ED_PREPARE_HOLD_MS=6000` keeps the first-start
+  page up for a picture. `ED_FRONTEND_LOG=1` lines now end with the tab and the bar's place.
+- **Seen in pictures and logs.** The Play page against mock-ups 7a and 7b at 1920x1080; every tab's page; the bar
+  (Up / Down, A / Right, B back to it, LB / RB), the Play page's arrows, Configure, Load > a slot > Back, the two
+  cards, the roster, by scripted presses with the log; a hover by real window messages and clicks through RmlUi
+  (`c=`); Play starts the game (the title came up); the first-start page; the no-disc state (a folder with no disc);
+  4:3 (1280x960: the roster and the cards drawn smaller), 16:9, 21:9; the real update check ("this is 0.1.6, the
+  newest release is 0.1.6") and a failed one; the old look by `ED_LAUNCHER_OLD=1`; the in-game menu and the title
+  look's Display page after a start from the new launcher (both as before).
+- **Not tested.** A Tome-look page (no picture: it needs a game with the Tome open; nothing of this change is
+  reachable there by the gate and the stylesheet's prefix). A real hand on the mouse and a real controller (presses
+  were scripted). The Update button's own press (it would open the browser on the user's desktop: `SDL_OpenURL`).
+  Unplugging a controller while the Play page is up. HDR calibration from the Display tab. The Mac and Steam Deck
+  builds (updatecheck.cpp uses `curl` there: not compiled here). `ed test` stopped in `test-shadow-steady` on a missing
+  `probe.txt` (a run from a save state, past the launcher; the last run of it that had the file was 2026-11-13): not
+  looked into, and I ran it without `ED_RUN_AWAY=1` by mistake (two short game windows on the desktop).
+- **Differences from the mock-up, for the user to judge.** No "F11: fullscreen" in the directions (F11 is "load the
+  newest save state" in this game). Play's cut corner is not drawn. A "Game disc" line was added under Saves (the old
+  launcher's disc row has to stay reachable) and one help line under it. The small letters are a little larger than
+  the mock-up's.
+- **Still the user's to decide** (decisions.md): whether Continue stays the third button; what Credits shows (now the
+  README's credits); whether the title screen's and the Tome's switches should be ticked boxes too (only the main
+  launcher's were changed); a larger backdrop picture if they have one (this one is 1200x896).
+
 ## 2026-11-18: the Tome character change freeze fixed; the launcher menu on Esc / Back is back; Settings' old Quit row gone
 - **The freeze (the user, 2026-11-17 evening; hang-20261117-204821, also 163217/163606/163817): fixed, committed.**
   A character chosen on the Tome's Characters page in co-op reloaded the game while the Tome was still open (the world
