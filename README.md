@@ -9,30 +9,26 @@
 *Bound Souls* is a split-screen co-op fork of
 **[Eternal Darkness Recomp](https://github.com/griches/eternaldarknessrecomp) by griches**, the native
 recompilation of the game this project is built on. Everything that makes the game run on a modern PC is his work;
-Bound Souls adds a second player, a cast of 34 playable bodies and a set of mods on top.
+Bound Souls adds a second player, 34 playable characters and forms, and a set of mods on top.
 
 > **You need your own European disc (`GEDP01`)** as an `.iso` or `.gcm`. Nothing from the game is in this
 > repository. The USA disc (`GEDE01`) is not supported.
+
+![The title screen with Choose Character lit](https://github.com/The-Stone-and-Rock/EternalDarknessBoundSouls/releases/download/v0.1.6/v0.1.6-title-menu.jpg)
+
+Co-op is **experimental**, and the menus mark anything else that is new. Bug reports are welcome in the
+[Issues](https://github.com/The-Stone-and-Rock/EternalDarknessBoundSouls/issues), and each version's known issues
+are on the [Releases](https://github.com/The-Stone-and-Rock/EternalDarknessBoundSouls/releases) page.
 
 ---
 
 ## The dream
 
-Eternal Darkness was always a story about many souls bound to one fate: twelve people across two thousand years,
-each pulled into the same war against the Ancients. **Bound Souls asks: what if two of them faced it side by side?**
+Eternal Darkness is a story of many souls bound to one fate: twelve people across two thousand years, each pulled
+into the same war against the Ancients. **Bound Souls asks: what if two of them faced it side by side?**
 
-The goal is a real co-op game, not two players sharing one character's camera. Two players in the same world, each
-with their **own half of the screen, their own Tome, their own spells, weapons, sanity and health**, walking
-through the same rooms, fighting the same horrors, and losing their minds in their own ways. Any of the game's
-characters can stand beside any other, in any chapter: Pius and Alex in the Roivas mansion, Karim and Chandra in the
-Forbidden City, Edward's spirit guiding his granddaughter in person.
-
-Nothing is rebuilt from scratch. Co-op works by letting the game's own code run for each player in turn, so every
-examine, pickup, puzzle, door and scene is the game's own, just played by two.
-
-**Legend:** 🧪 = *Experimental, expect glitches.* These are the same rows the menus tag
-"(Experimental, expect glitches)". Co-op is new, and the game was only ever meant for one player: please report
-what breaks.
+Two players share one world, each with their own half of the screen. Any character can stand beside any other:
+Pius and Alex in the Roivas mansion, Karim and Chandra in the Forbidden City.
 
 ## At a glance
 
@@ -40,89 +36,78 @@ what breaks.
 | --- | --- |
 | **Players** | 1, or 2 on one screen (side by side, or above and below) |
 | **Playable characters** | **12**: Pius, Ellia, Anthony, Karim, Max, Lindsey, Paul, Roberto, Peter, Edward, Michael and Alex |
-| **Other forms** | **22** more: spirits, corpses, the Liche, Chandra and her forms, the Bishop, the Custodian and more (**34 in all**) |
+| **Other forms** | **22** more from the story: spirits, corpses, the Liche, Chandra, the Bishop and others (**34 in all**) |
 | **Tomes** | One for each player, open at the same time |
+| **Rooms** | Split up and explore different rooms |
 | **Save slots** | 100 save states, besides the game's own memory-card saves |
-| **Sanity effects** | All 35 of the game's, on demand or at doors |
+| **Sanity effects** | Any of the game's 35 on demand, in solo play |
 
 ---
 
 ## Features
 
-### Two-player co-op 🧪
+### Two-player co-op
 
-*Launcher > Co-op, or Mods > Co-op.*
+*On the title screen: Start Game or Load Game, then Co-op.*
 
-- 🧪 **Split-screen co-op**: a second player joins on the same screen, side by side or above and below, each
-  with their own view of the world. Co-op plays at 60 frames a second.
-- 🧪 **Player 2's own controls**: their own controller or keyboard, controller type, layout and button mapping.
-- 🧪 **Each player's own camera**: the game's Original fixed cameras, Third person or First person, chosen for
-  each player.
-- 🧪 **Two Tomes at once**: each player opens their own Tome in their own half while the world keeps going for
-  the other.
-- 🧪 **Each player's own magick**: both cast at the same time, each with their own quick spells, spells they've
-  made, magick bar and enchanting.
-- 🧪 **Player 2's own health, sanity, weapons and ammo**, with their bars on their side of the screen, and their
-  own reloads.
-- 🧪 **Player 2 can do everything**: examine, pick up and use items, ring bells, talk, pull levers and solve
-  puzzles, with their own prompts and close-ups in their half.
-- 🧪 **Nobody waits**: when one player picks something up, reads or examines, the other keeps playing. A find
-  shows only to whoever made it; the other gets a notice.
-- 🧪 **Doors and scenes belong to whoever triggers them**, and the other player follows along.
-- 🧪 **Creatures hunt both players**, and each player loses sanity as a horror comes into their own view.
-- 🧪 **The opening nightmare in co-op**: the same opening shots for each player, a shotgun for both, and no Tome
-  for either until the nightmare ends.
-- 🧪 **Co-op saves**: player 2 is kept as their own character with what they carried.
+- **Split screen**: side by side or above and below, at 60 frames a second.
+- **Everything of your own**: a Tome, magick, health, sanity, weapons and ammo for each player.
+- **Go your own way**: split up and explore different rooms, each half of the screen showing its own room's
+  light, mist and flames.
+- **Nobody waits**: examine, read, pick up and cast at the same time, and work a puzzle while your partner plays
+  on. A scene plays in the half of whoever starts it, and the story's big moments bring you both together.
+- **Creatures hunt you both**, and the sight of them costs each of you sanity.
+- **Your own controls and camera**: controller or keyboard with your own button mapping, in Original, Third
+  person or First person view.
+- **Co-op saves**: player 1 saves for both, and a save loads with the two of you together.
 
-### Characters 🧪
+### Characters
 
-*Launcher > Choose Character, or in a game, Mods > Characters.*
+*Choose Character on the title screen or the launcher, or in a game from your own Tome: Options > Characters.*
 
-- 🧪 **Any character for either player, in any chapter.** The game's own words use the name of the character
-  you chose, and you can keep their stats or take the chapter's. A change mid-game reloads right where you stand.
-- 🧪 **22 other forms from the story**, each with its own frame and portrait: Pius the **Liche**; Ellia's
-  **spirit** and **corpse**; Anthony's **spirit**, **cursed** and **corpse** forms; Karim's **spirit**;
-  **Chandra**, her **spirit** and **Mutilated Chandra**; Max's, Paul's, Roberto's and Edward's **spirits**; **the
-  Bishop**, **the Custodian** and the **Black Robes**; and **the Maid**, her **spirit**, **the Servant**, **the
-  Footman** and **Inspector Legrasse**. Ghost forms trail blue sparkles.
-- 🧪 **Any weapon, its own moves**: every character uses any weapon with its original owner's attacks, reload and
-  finishing move, and each player gets their own finisher close-up.
-- 🧪 **A character select screen**: every character and form in a scrolling gallery with portraits, names, their
-  story and stats, and a card for each player.
+![Choose Character: a card for Player I and a card for Player II](https://github.com/The-Stone-and-Rock/EternalDarknessBoundSouls/releases/download/v0.1.6/v0.1.6-choose-character.jpg)
+
+- **Any character for either player, in any chapter**, with their own stats or the chapter's. Swap mid-game and
+  carry on from where you stand.
+- **22 other forms from the story**, each with its own portrait: Pius the Liche, Chandra, the Bishop, the
+  Custodian, and the spirits and corpses of the cast. Spirits trail blue sparkles.
+- **Any weapon in any hands**: every character wields every weapon, with a finishing close-up for each player.
+- **A character select screen**: portraits, story and stats for everyone, a card for each player, and a
+  **Random** choice that stays a surprise until you are in the game.
+
+![Picking a character: portraits of the characters and forms with their story and stats](https://github.com/The-Stone-and-Rock/EternalDarknessBoundSouls/releases/download/v0.1.6/v0.1.6-choose-character-roster.jpg)
 
 ### Mods
 
-*Launcher > Mods, or Mods in the pause menu.*
+*In a game: the Tome's Options > Mods. Before one: Mods in the title's Options or the launcher.*
 
-- **Sanity Effects**: pick any of the game's 35 sanity effects and play it on your save, or have random effects
-  strike at doors (single player).
-- 🧪 **Challenge: Enhanced sanity effects**: once sanity drops below 95%, any door can bring an effect, more often
-  as it falls. *Off* turns the game's random effects off.
-- 🧪 **Cheats**: *All magick* (every rune, circle and spell) and *Full stats* (health, sanity and magick kept full,
-  for each player).
-- **Skip intro**: Main menu goes straight to the title menu, Jump to Game straight into the chapter.
-- **Title video**: your own video behind the title menu, with the game's music and words on top.
+- **Sanity Effects** (solo, in a game): play any of the game's 35 whenever you like, or let a random one strike
+  at doors.
+- **Challenge**: *Enhanced* (solo) brings sanity effects at doors, more often as your sanity falls. *Off* keeps
+  only the story's.
+- **Cheats** (in a game): *All magick* and *Full stats*, one switch each, covering both players.
+- **Title video**: Bound Souls' own video behind the title menu, switched on or off before a game.
+- **Skip intro**: a switch on the launcher to skip the opening movies.
 
-### Graphics 🧪
+### Graphics
 
-*Options > Graphics. All new in Bound Souls, on top of what the original recomp already offers.*
+*Options > Graphics, on top of what the original recomp already offers.*
 
-- 🧪 **Character shadows from each room's own lamps**, easing between lights, *Light* or *Dark*, *Soft* or *Hard*,
-  plus contact shadows where characters meet the floor and walls (**Shadows**).
-- 🧪 **Per-pixel lighting, skin scattering and full-size ambient occlusion** (**Lighting**).
-- 🧪 **Haze around lamps and spells, light shafts, and spells that glow** (**Effects**).
-- 🧪 **SMAA, 4x MSAA or both, and sharpening** (**Image**).
-- 🧪 **Scenes fill the whole screen**, with no black bars, solo and co-op.
+- **Shadows and light**: soft or hard character shadows, contact shadows, per-pixel lighting and higher-quality
+  ambient occlusion.
+- **Atmosphere**: glowing spells, haze and light shafts.
+- **A cleaner picture**: anti-aliasing and sharpening.
+- **Scenes fill the whole screen**, with no black bars.
 
 ### Menus and comfort
 
-- **A redesigned launcher and menus** on the Tome's parchment, with switches, sliders and arrows, Graphics split
-  into short pages, and every menu remembering where you were.
-- 🧪 **100 save state slots**, ten to a page, with Load, Duplicate and Delete. F1 to F10 save, F11 loads the newest.
-  The cursor starts on the save you made last.
-- **Skip any cutscene with Start**, even the first time you see it.
-- **No forced Tome help pages**: the Health, Sanity and Magick help no longer pops the Tome open and pauses play.
-- **Switch button prompts in Nintendo's colours** with a Switch controller.
+*In a game, these are in the Tome's Options (player 1's in co-op).*
+
+- **Settings inside the game**: Display, Sound, Graphics and Controls, in the title's Options or in a game under
+  the Tome's Options > Settings. Opening them in co-op pauses the game for you both.
+- **100 save states** in the Tome's Options, with Load, Duplicate and Delete for solo and co-op states alike.
+  F1 to F10 save to the first ten, and F11 loads the newest from the mode you are playing.
+- **Skip any cutscene with Start**, no forced help pages, and Switch button prompts with a Switch controller.
 
 ---
 
@@ -130,22 +115,14 @@ what breaks.
 
 The road to a game that feels like it was always made for two:
 
-- **Each player's own sanity effects**: when the game calls for one, each player gets their own, tied to their own
-  sanity, so the two can see different horrors at the same moment.
-- **Shared discoveries**: whoever finds the last piece of a spell gets the Tome's discovery page, and the other gets
-  the spell with a notice like *"Pius found Enchant Spell"*. Runes and pages reach both players.
-- **Player 2's own menu** for items and spells, alongside their Tome.
-- **Using an item without holding the other player** (the Bronze Necklace still pauses player 2).
-- **Chapters that cross into each other**: rooms that lead into another chapter, for sanity effects and a
-  **randomizer**.
-- **Spawn an enemy** from the Cheats page.
-- **The character select, alive**: a turning model of each character on hover, and **Charlemagne** as a playable
-  form.
-- **Effects that face each player's own camera** (torch flames and sparkles face player 1's for now).
-- **True 120 frames a second in co-op** (60 for now; 120 already works solo).
-- **Every chapter checked for both players**: every examine, pickup and scene, chapter by chapter.
+- **Sanity effects of your own**: each player's horrors come from their own sanity meter.
+- **The whole story for two**: every chapter, start to finish, side by side.
+- **More in player 2's Tome**: camera and controls pages of their own.
+- **Call your partner to your side** from any room.
+- **A randomizer**, the final touch: a different journey every time.
 
-Ideas and bug reports are welcome in the Issues.
+Ideas are welcome in the [Issues](https://github.com/The-Stone-and-Rock/EternalDarknessBoundSouls/issues).
+Every version's changes are on the [Releases](https://github.com/The-Stone-and-Rock/EternalDarknessBoundSouls/releases) page.
 
 ---
 
@@ -184,20 +161,27 @@ Image > HD textures** says how many it found. The pack is the work of **Zombie**
 
 ### Playing
 
-- The launcher opens on **Main menu**. **Continue** loads your newest save state, **Load game** any of them, and
-  **Choose Character** and **Co-op** set up the players.
-- For co-op, plug in two controllers (or one and the keyboard), turn on **Split-screen co-op**, and pick each
-  player's character.
-- In the game, the View/Back button or **Esc** opens the pause menu: save states, Options, Mods, and the way back
-  to the title or the launcher.
-- If something goes wrong, the game says so on screen and writes a report to `saves/reports/`. Please attach it
-  to an issue with a few words on what you were doing.
+- The first start, and the first after an update, takes a minute or so to prepare the game. Then **Main menu**
+  leads to the title screen.
+- **Start Game** and **Load Game** ask **Solo** or **Co-op**; return to the title to change. **Jump to Game**
+  starts any chapter in the mode you picked last.
+- For co-op, plug in two controllers. With one controller and the keyboard, set *Options > Controls > Player II >
+  Plays with* to **Keyboard**.
+- **Choose Character**, on the title screen or the launcher, sets who each player plays.
+- In a game, player 1's Tome holds Characters, Save States, Settings and Mods under **Options**, and player 2's
+  holds their own Characters. **Esc** or the View/Back button opens the launcher's menu too.
+- On the launcher, **Continue** loads your newest save state and **Load game** any of them, once you have made
+  one.
+- The title screen's Choose Character and settings rows show with the game set to English. In other languages,
+  use the launcher and the Tome.
+- If something goes wrong, the game writes a report to `saves/reports/`. Attach it and `logs/play.log` to an
+  issue, with a few words on what you were doing.
 
 ## Controls
 
-A controller works as it is, and the keyboard too. *Options > Controls* switches layout (Modern, Original or
-Custom), sets hold or toggle, deadzone and vibration, and remaps any action. Player 2 has their own under
-*Co-op > Player 2 controls*.
+A controller or the keyboard works straight away. *Options > Controls* has a card for each player, **Player I**
+and **Player II**, with their own device, layout (Modern, Original or Custom) and button mapping. Hold or toggle,
+stick deadzone and vibration are on Player I's card.
 
 | Action | Modern (default) | Original (GameCube positions) | Keyboard |
 | --- | --- | --- | --- |
@@ -211,7 +195,7 @@ Custom), sets hold or toggle, deadzone and vibration, and remaps any action. Pla
 | Quickcast | <img src="res/ui/glyphs/ink/xbox/north.png" width="30" alt="Y"> | <img src="res/ui/glyphs/ink/xbox/north.png" width="30" alt="Y"> | <img src="res/ui/glyphs/ink/kb/i.png" width="30" alt="I"> |
 | Spells | <img src="docs/glyphs/dpad.png" width="30" alt="D-pad"> | <img src="docs/glyphs/dpad.png" width="30" alt="D-pad"> | <img src="res/ui/glyphs/ink/kb/arrows.png" width="30" alt="Arrow keys"> |
 | Tome / skip a cutscene | <img src="res/ui/glyphs/ink/xbox/start.png" width="30" alt="Menu"> | <img src="res/ui/glyphs/ink/xbox/start.png" width="30" alt="Menu"> | <img src="res/ui/glyphs/ink/kb/enter.png" width="30" alt="Enter"> |
-| Pause menu (saves, options) | <img src="res/ui/glyphs/ink/xbox/back.png" width="30" alt="View"> | <img src="res/ui/glyphs/ink/xbox/back.png" width="30" alt="View"> | <img src="res/ui/glyphs/ink/kb/escape.png" width="30" alt="Esc"> |
+| Launcher's menu (save states, options) | <img src="res/ui/glyphs/ink/xbox/back.png" width="30" alt="View"> | <img src="res/ui/glyphs/ink/xbox/back.png" width="30" alt="View"> | <img src="res/ui/glyphs/ink/kb/escape.png" width="30" alt="Esc"> |
 
 PlayStation and Switch controllers use the same buttons in the same places, with their own icons.
 
