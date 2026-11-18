@@ -225,6 +225,9 @@ When you finish something, change its mark here in the same commit as the work. 
   Lesson: ONE rectangle of the whole screen is a "whole screen" picture to the split and is lost from both halves.
   Blue Screen (28) and Game Reset (26) need UInsane's pictures (plan.md): the same way, with the picture as two
   halves or a marked matrix. Not heard: the sounds (runs are muted).
+- `[OPEN]` **12c. The user's reminders (2026-11-18, late): the body falling apart with the head that is picked up and
+  recites (17), and Walk on Ceiling (22) where the chapter calls for it, for each player on their own.** Both are
+  door-started and return to the room before: `docs/research/sanity-per-player/plan.md`, "The user's reminders".
 - `[OPEN]` **12b. What is left of it, in order.** (1) NOT SEEN YET: effects 1, 4, 5, 8, 38 for player 2 in a picture,
   and the user's play. Effect 4 (TV shut off) draws
   full-screen rectangles, which the renderer may not bring back into a half: look first. (2) Player 1's own overlays

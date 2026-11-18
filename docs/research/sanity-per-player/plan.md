@@ -139,3 +139,22 @@ guest memory, bound with 0x801E1B74 and the bank before put back, a host timer, 
   user's earlier wish: each player's on their own side).
 - Save states do not carry player 2's set. The Mods menu's Sanity Effects is solo only. Events other code sends to the
   tracker outside player 2's update reach player 1's set.
+
+## The user's reminders (2026-11-18, late): do not leave these out
+
+- **The body falling apart, and the head that can be picked up and recites** (Head of Shakespeare, 17; "the body
+  breaking apart" has no name of its own in the table, see sanity.md: it may be 17 or another's variant, to be seen
+  forced). Setup 0x8009A7AC, step 0x8009A8D4 (body animation, a stream, event 53). Door-started, on the player and the
+  room, and it RETURNS (event 81, transition 17 back to the kept place). Needs step 4 of the door plan above (the
+  return's bracket for player 2) and its parts' spawns traced, so the parts and the head are that player's.
+- **Walk on Ceiling** (22), only where the chapter calls for it: the game starts it only at a door into its own ten
+  rooms (30, 105, 151, 161, 167, 243, 248, 253, 255, 257: 0x800689D0(room, 1)), the door's own look asks for it
+  (0x8004305C -> 0x80068770). Setup 0x8009B520, step 0x8009B760: it writes its OWN room change (the ticket
+  0x80155770, 0x801E4610) and returns. For player 2: their door's bracket already has their set in; its own ticket
+  and the return need the same care as step 4. Keep the game's room rule: never start it elsewhere.
+- Built since this plan was written: TV Video (25) for player 2 by the host doing mode 8's work (board, 12a). Blue
+  Screen (28, mode 10 0x80113590: picture 6, sound 583 at tick 1 and at each press, 6 presses or 300 ticks) and Game
+  Reset (26, mode 7 0x80112F24: picture 2, stream at tick 3, 150 ticks) go the same way once UInsane's pictures are in
+  memory of their own (1.39 MB, loaded by 0x801562B8, unpacked by 0x80156924, bound with 0x801E1B74; the picture drawn
+  by 0x8019D470(n, alpha, 0) is ONE whole-screen quad: draw it as two halves or with a marked matrix, or it is lost
+  from both halves as the single black rectangle was).
