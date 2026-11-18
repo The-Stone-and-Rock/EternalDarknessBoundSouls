@@ -45,7 +45,10 @@
   windows-at-once/): it already worked, as the user said, and `coop_words_tick`'s case never came up in the run (its
   log line "the words tick's nested calls left pass-through off" would say so). The general check -222456-jtg-sweep-
   shared-check (ED_ROOM_SLOTS=2 ED_COOP_STAY=1, the Tome, a character change, the reload, both walking): no hang.
-  Not run: the players apart (the fog and room draws' paths), a failed weapon copy, an arrival scene. (3) F11 still refuses a state made in the other mode. (4) By
+  The players apart, by the kit's own check (`ed check L09/1951 --modes apart`, run -223703-check-L09-1951-apart: player
+  1 through the door to room 279 with its arrival scene 1624, player 2 staying in 273, each half its own room for 2,000
+  frames, the script to its line 11, no new hang report; picture 03 in the same folder). Not run: a failed weapon copy
+  (it needs the copy to fail), a compare of that apart run with the build before (none was kept). (3) F11 still refuses a state made in the other mode. (4) By
   ear: every sound and the music (all runs were muted); real B/Esc/mouse on the pages; other languages; 4:3 and 21:9.
   (5) The user to try: play.bat, Tome > Load/Save > Load on their own saves; a character change from the Tome (it reloads
   when the Tome closes); the new character page; Esc / Back for the launcher's menu.
