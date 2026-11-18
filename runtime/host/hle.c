@@ -8219,6 +8219,8 @@ static void hle_moves_want(CPUState* cpu) {
                 fprintf(stderr, "[player] moves part %d not in %d's file: %d instead\n", part, model, (int)cpu->gpr[4]);
             told = part;
         }
+        g_hle_passthrough = true;  // (a nested dispatch, wpn_part's or a failed wpn_serve's, answers for itself)
+        g_hle_tail_call = false;
         return;
     }
     const int first = p2 ? 0 : P2_MOVES_OTHERS;
@@ -14526,6 +14528,8 @@ static void room_section_draw(CPUState* cpu, u32 fn) {
         if (!whole_fog) {
             fog_list(cpu, fn, section, slot, false);
             fog_whole_seen(cpu, section, room0, room1);
+            g_hle_passthrough = true;  // (the game's own draw; a nested dispatch may have changed it)
+            g_hle_tail_call = false;
             return;
         }
         fog_list(cpu, fn, section, slot, true);  // (its list is its own: only a compile is marked here)
@@ -17197,6 +17201,7 @@ static void tome_stops_taken(CPUState* cpu) { tome_stops_call(cpu, TOME_INPUT_TA
 static void tome_stops_return(CPUState* cpu) {
     (void)cpu;
     g_hle_passthrough = false;  // (the dispatcher returns to the caller: the game's own handler doesn't run)
+    g_hle_tail_call = false;
 }
 static void tome_stops_free(CPUState* cpu) {
     const int m = g_tome_copy_turn ? 1 : 0;
@@ -18279,6 +18284,7 @@ static void tw_mode_change(CPUState* cpu) {
     split_skip_views_set(g_tw.world_tick ? 0 : (g_coop_tome_owner == 1 ? 2 : 1));
     dol_aurora_frame_unpaced(true);
     aurora_split_only_view(g_tome_copy_open ? 2 : g_coop_tome_owner >= 0 ? 1 - g_coop_tome_owner : -1);
+    g_hle_passthrough = true;  // (last: the nested calls above change it)
 }
 
 static void cheat_apply(CPUState* cpu);
@@ -19124,6 +19130,16 @@ static void coop_words_tick(CPUState* cpu) {
     }
     coop_words_own_io(cpu, &p1w, false);
     coop_state(cpu, &g_coop_events_p1, false);
+    // (Last: the nested pad read and channel step change it. Left off, the game's own tick did not run and player 1's
+    // window was not stepped that frame: the sweep of 2026-11-18, docs/research/passthrough-sweep/.)
+    if (!g_hle_passthrough) {
+        static unsigned said;
+        if (said++ < 3u)
+            fprintf(stderr, "[coop] the words tick's nested calls left pass-through off: put back, player 1's window steps (frame %llu)\n",
+                    (unsigned long long)(cpu->timebase / 675000ull));
+    }
+    g_hle_passthrough = true;
+    g_hle_tail_call = false;
 }
 
 // The arrival's camera kept (rooms/design-arrival-camera.md H5; R4c's keep, generalised): player 2's own change cut their
@@ -24306,6 +24322,8 @@ static void coop_script_timers(CPUState* cpu) {
             u32 ignore = 0u;
             hle_guest_call(cpu, COOP_RUN_SCRIPT, args, 3, 0.0, &ignore);
             cpu->lr = lr;
+            g_hle_passthrough = true;  // (the game's own timers run after this: the nested script's hooks change it)
+            g_hle_tail_call = false;
             if (getenv("ED_COOP_LOG") != NULL)
                 fprintf(stderr, "[coop] player 2's arrival scene %d: run as player 1's for their own camera (frame %llu)\n", script,
                         (unsigned long long)(cpu->timebase / 675000ull));
@@ -30209,8 +30227,10 @@ static void fog_object_draw(CPUState* cpu) {
     if (room1 == -1 || (s32)mem_read32(cpu, o + 592u) != room1)
         return;
     FogSave fog;
-    if (!fog_begin(cpu, room1, &fog, FOG_SITE_ACTOR, -1))
+    if (!fog_begin(cpu, room1, &fog, FOG_SITE_ACTOR, -1)) {
+        g_hle_passthrough = true;  // (the game's own draw: a nested dispatch passes itself through)
         return;
+    }
     u32 args[6], out = 0u;
     for (int i = 0; i < 6; i++)
         args[i] = cpu->gpr[3 + i];
@@ -30526,6 +30546,7 @@ static void fog_door_setup(CPUState* cpu) {  // 0x801E0170 at lr 0x80152164
     if (slot < 0 || slot == (s32)mem_read32(cpu, ROOM_SLOT_TABLE))
         return;
     const u32 e = fog_ask(cpu, (u32)slot);
+    g_hle_passthrough = true;  // (the game's setup always runs: a nested dispatch passes itself through)
     if (e == 0u)
         return;
     if (!g_fog_noise_filled) {
@@ -32572,10 +32593,12 @@ static void hle_find_by_id(CPUState* cpu) {
         node = g_coop_p2;  // whose hand
     else if ((cpu->lr == 0x800C996Cu || cpu->lr == 0x800C9DF4u) && getenv("ED_COOP_NO_COPIES") == NULL)
         node = coop_weapon_copy(cpu, id, cpu->lr == 0x800C996Cu);  // what goes in it (ED_COOP_NO_COPIES=1: the one)
-    if (node != 0u) {
-        g_hle_passthrough = false;
+    // (Last: coop_weapon_copy's nested calls change both. No copy made: the game's own look-up answers, with player 1's
+    // original, not the id handed back as a node.)
+    g_hle_passthrough = node == 0u;
+    g_hle_tail_call = false;
+    if (node != 0u)
         hle_set_u32(cpu, node);
-    }
 }
 
 // A weapon taken up has the player's moves made again (0x80131CF8): every
@@ -34366,7 +34389,9 @@ static void coop_held_weapon(CPUState* cpu) {
         return;
     u32 own = 0u;
     const u32 find[2] = {mem_read32(cpu, node + 16u), 0u};
-    if (!hle_guest_call(cpu, EQUIP_FIND, find, 2, 0.0, &own) || !guest_ram_range_valid(cpu, own, EQUIP_ENTRIES + 4u))
+    const bool found = hle_guest_call(cpu, EQUIP_FIND, find, 2, 0.0, &own);
+    g_hle_passthrough = true;  // (a nested dispatch passes itself through)
+    if (!found || !guest_ram_range_valid(cpu, own, EQUIP_ENTRIES + 4u))
         return;
     const u32 n = mem_read32(cpu, own + EQUIP_ENTRIES);
     for (u32 i = 0u; i < n && i < 32u; i++) {
@@ -34389,6 +34414,8 @@ static void coop_held_weapon(CPUState* cpu) {
         hle_set_u32(cpu, thing);
         return;
     }
+    g_hle_passthrough = true;  // (nothing of theirs to fight with: the game's own answer; the nested looks change it)
+    g_hle_tail_call = false;
 }
 
 static void find_coop(CPUState* cpu) {

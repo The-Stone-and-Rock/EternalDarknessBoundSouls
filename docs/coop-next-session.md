@@ -35,13 +35,17 @@
 - **Next, in order:** (1) the title sounds are built (above); hear them by ear. (2) The sweep for other hooks that can leave
   pass-through wrong after nested game calls is done (247 hooks read in six parts, each part's finds re-read by a
   skeptic; docs/research/passthrough-sweep/result.json has every find with its fix and risk). No second memory wipe.
-  Confirmed, NOT fixed yet (the user is told first; one hook at a time, a run each): `coop_words_tick` (player 1's words
-  window is not stepped on frames where player 2's own window is up and their turn was refused: the most likely to be
-  felt in play), `hle_find_by_id` (a failed weapon copy for player 2 hands the caller the id as a node), `hle_moves_want`
-  (two rare failed-load returns), `coop_script_timers` (the game's script timers a frame late once per arrival scene),
-  `tome_stops_return` (the tail flag); and hardening only, right today by luck: `room_section_draw`, `tw_mode_change`,
-  `fog_object_draw`, `fog_door_setup`, `coop_held_weapon`. Refuted: `coop_sign_follow`, `title_main_start_load`,
-  `sanity_door_rules`, `coop_reload_trace`, `coop_grab_events`, `coop_equip_take`. (3) F11 still refuses a state made in the other mode. (4) By
+  Fixed 2026-11-18 (the user's go-ahead), each as the skeptic's smallest fix: `coop_words_tick`, `hle_find_by_id`,
+  `hle_moves_want`'s player 1 return, `coop_script_timers`, `tome_stops_return`, and the hardening of `room_section_draw`,
+  `tw_mode_change`, `fog_object_draw`, `fog_door_setup`, `coop_held_weapon`. NOT changed: `hle_moves_want`'s failed
+  `p2_moves_load` return (passing through there is what twisted Paul; left as it is). Refuted: `coop_sign_follow`,
+  `title_main_start_load`, `sanity_door_rules`, `coop_reload_trace`, `coop_grab_events`, `coop_equip_take`.
+  Seen: both players' words up together, player 1 closing theirs first, player 2 theirs after, the same on the build
+  before these fixes and after (runs -222809-jtg-two-windows3-before, -222833-...-after; Screenshots for Claude/two-
+  windows-at-once/): it already worked, as the user said, and `coop_words_tick`'s case never came up in the run (its
+  log line "the words tick's nested calls left pass-through off" would say so). The general check -222456-jtg-sweep-
+  shared-check (ED_ROOM_SLOTS=2 ED_COOP_STAY=1, the Tome, a character change, the reload, both walking): no hang.
+  Not run: the players apart (the fog and room draws' paths), a failed weapon copy, an arrival scene. (3) F11 still refuses a state made in the other mode. (4) By
   ear: every sound and the music (all runs were muted); real B/Esc/mouse on the pages; other languages; 4:3 and 21:9.
   (5) The user to try: play.bat, Tome > Load/Save > Load on their own saves; a character change from the Tome (it reloads
   when the Tome closes); the new character page; Esc / Back for the launcher's menu.
