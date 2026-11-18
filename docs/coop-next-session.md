@@ -28,6 +28,14 @@
   before, -211537-jtg-tome-load-after; Load itself, -212413-jtg-tome-load-list; Screenshots for Claude/tome-load-fix/). The user's slot3.state: put back at its
   first frame (-heal-probe-slot3). The same hazard may sit in other whole-replacement hooks that make nested game calls
   and end without clearing the flags: not looked for yet.
+- **Next, in order:** (1) the user's answer on the title sounds (docs/research/solo-coop-picker/next-requests.md, "Read
+  for P8 and P9": P8 is already so by the code; the question is the lit row's loop and what plays under the page), then
+  build and check it by recording. (2) The sweep for other hooks that can leave pass-through on after nested game calls
+  (workflow run wf_d053beaa-569, started 2026-11-18; its result was not in when this was written: read it, fix only what
+  a skeptic confirmed, one hook at a time with a run each). (3) F11 still refuses a state made in the other mode. (4) By
+  ear: every sound and the music (all runs were muted); real B/Esc/mouse on the pages; other languages; 4:3 and 21:9.
+  (5) The user to try: play.bat, Tome > Load/Save > Load on their own saves; a character change from the Tome (it reloads
+  when the Tome closes); the new character page; Esc / Back for the launcher's menu.
 - **The launcher's menu opens over the game again on Esc / Back** (the user, 2026-11-18: a fallback while the Tome's
   pages settle). `debug_menu` is on by default (settings.c) and set to 1 in the user's settings.ini; the row is now
   "Launcher menu in game" (launcher Options > Display). The Tome's pages stay as they are. Not seen in a run (scripts
