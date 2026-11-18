@@ -29,8 +29,9 @@ const char* const kPage = "https://github.com/The-Stone-and-Rock/EternalDarkness
 const char* const kAgent = "EternalDarknessBoundSouls-launcher";
 
 std::atomic<int> g_state{kUpdateIdle};
-std::mutex g_mutex;
-std::string g_latest;
+// Never destroyed: the check's thread is detached and may still be waiting for the network when the program ends.
+std::mutex& g_mutex = *new std::mutex;
+std::string& g_latest = *new std::string;
 
 // "v0.1.7" or "0.1.7-beta" as numbers: {0, 1, 7}.
 std::vector<int> version_numbers(const std::string& text) {
@@ -110,7 +111,13 @@ bool fetch(std::string* body) {
             char chunk[8192];
             DWORD got = 0;
             ok = true;
-            while (WinHttpReadData(request, chunk, sizeof chunk, &got) && got != 0) {
+            while (true) {
+                if (!WinHttpReadData(request, chunk, sizeof chunk, &got)) {
+                    ok = false;  // (cut off part way: not an answer)
+                    break;
+                }
+                if (got == 0)
+                    break;
                 body->append(chunk, got);
                 if (body->size() > 4u * 1024u * 1024u) {  // (a list of releases is far smaller)
                     ok = false;

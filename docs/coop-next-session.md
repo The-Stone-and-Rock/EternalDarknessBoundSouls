@@ -40,6 +40,10 @@ What the user chose is `docs/research/launcher-redesign/decisions.md`; pictures 
   builds (updatecheck.cpp uses `curl` there: not compiled here). `ed test` stopped in `test-shadow-steady` on a missing
   `probe.txt` (a run from a save state, past the launcher; the last run of it that had the file was 2026-11-13): not
   looked into, and I ran it without `ED_RUN_AWAY=1` by mistake (two short game windows on the desktop).
+- **One review at the end** (a fresh reader of the whole change): nothing that reaches the other menus; three small
+  things fixed (LB / RB on the side bar while the save states' list is shown; the update check's thread outliving its
+  own data at exit; a download cut off part way counted as an answer). Left as it is: the check takes the HIGHEST
+  version among the fork's releases, so an upstream tag (v0.8-v0.9.6 exist as tags) must never be made a release there.
 - **Differences from the mock-up, for the user to judge.** No "F11: fullscreen" in the directions (F11 is "load the
   newest save state" in this game). Play's cut corner is not drawn. A "Game disc" line was added under Saves (the old
   launcher's disc row has to stay reachable) and one help line under it. The small letters are a little larger than

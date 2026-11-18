@@ -4033,8 +4033,8 @@ void home_move(int dx, int dy) {
 
 // The main launcher's presses, before the menus' own (menu_step): true when it took them all.
 bool launcher_input(const bool* pressed, bool* dirty) {
-    // LB / RB: the tab before or after, from anywhere but the save states' list (its own pages).
-    if ((pressed[kPageLeft] || pressed[kPageRight]) && g_screen != Screen::Play) {
+    // LB / RB: the tab before or after, from anywhere but inside the save states' list (they turn its own pages).
+    if ((pressed[kPageLeft] || pressed[kPageRight]) && (g_bar || g_screen != Screen::Play)) {
         const bool was_on_bar = g_bar;
         open_tab((g_tab + (pressed[kPageLeft] ? kTabCount - 1 : 1)) % kTabCount);
         g_bar_at = g_tab;
