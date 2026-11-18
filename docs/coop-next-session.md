@@ -11,7 +11,8 @@ What the user chose is `docs/research/launcher-redesign/decisions.md`; pictures 
   Load / Continue, three tiles (HD textures, Resolution, Frame rate: A changes them), "Recommended settings: coming
   soon" with a greyed Auto-set, both players' controllers with Configure, the save states used, the game disc.
   After the user's asks the same day: the tabs' pages have a large name over a thin line, larger rows on one dark
-  sheet with the values in one column, and On / Off is a box that is ticked.
+  sheet with the values in one column, and On / Off is a styled toggle switch (a ticked box was tried and refused; the
+  user will send a photo of the toggle they want: picture step4-toggles is where it stands).
 - **How it is made** (`runtime/host/frontend.cpp`, the block before `render()`; `res/ui/menu.rcss`, the last block,
   `body.launcher-dark`; `runtime/host/updatecheck.cpp`). `launcher_dark()` is true only while `frontend_run_launcher`
   has its menu up (`g_launcher_up`), so the menu over a game, "Return to launcher" there, the title look and the Tome
@@ -33,6 +34,8 @@ What the user chose is `docs/research/launcher-redesign/decisions.md`; pictures 
   4:3 (1280x960: the roster and the cards drawn smaller), 16:9, 21:9; the real update check ("this is 0.1.6, the
   newest release is 0.1.6") and a failed one; the old look by `ED_LAUNCHER_OLD=1`; the in-game menu and the title
   look's Display page after a start from the new launcher (both as before).
+- **Settings through the tabs.** One setting changed on each of Display (FPS counter), Sound (Music), Graphics >
+  Image (Sharpening) and Mods (Skip intro) by scripted presses, then Back: all four were in the settings file after.
 - **Not tested.** A Tome-look page (no picture: it needs a game with the Tome open; nothing of this change is
   reachable there by the gate and the stylesheet's prefix). A real hand on the mouse and a real controller (presses
   were scripted). The Update button's own press (it would open the browser on the user's desktop: `SDL_OpenURL`).

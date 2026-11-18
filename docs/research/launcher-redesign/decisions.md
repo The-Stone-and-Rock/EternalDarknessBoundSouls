@@ -38,8 +38,9 @@ Credits shows, the small-window and 4:3 / 21:9 fits.
 
 **Built 2026-11-18** (what, how, and what was and was not tested: the top of `docs/coop-next-session.md`). The user's
 asks during the build: the letters on the tabs' pages larger and lined up (now a large page name over a thin line, the
-rows on one dark sheet, every value in one column), and the On / Off switches drawn so they look ticked (a box with a
-tick; only in the main launcher). Dropped from the mock-up: "F11: fullscreen" (not a real key here) and Play's cut
+rows on one dark sheet, every value in one column), and the On / Off switches reworked. A ticked box was tried first
+and the user said no: they are TOGGLES, styled (now a pill switch in the look's colours, its knob at the right and lit
+when on; only in the main launcher). The user will send a photo of how the toggle should look: match that when it comes. Dropped from the mock-up: "F11: fullscreen" (not a real key here) and Play's cut
 corner. Added: a "Game disc" line under Saves and one help line at the page's foot.
 
 The groundwork is `prep.json` (maps of the launcher code, the panel data, a 17-step plan and a skeptic's 21 problems
