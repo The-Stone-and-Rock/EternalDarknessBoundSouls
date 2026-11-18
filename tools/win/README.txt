@@ -15,9 +15,10 @@ experimental: expect glitches, and please report them.
    "More info", then "Run anyway". A black window stays open behind the game
    while it runs; that's normal.
 
-Two players: plug in two controllers (or one and the keyboard), then on the
-launcher open Co-op, turn on Split-screen co-op, and pick each player's
-character under Choose Character.
+Two players: plug in two controllers (or one and the keyboard), pick each
+player's character under Choose Character, then choose Co-op when Start Game
+or Load Game asks "Solo or Co-op". The screen split and player 2's camera are
+in Options > Display; player 2's buttons are in Options > Controls > Player II.
 
 Separate rooms (new, experimental, co-op only): each player can go through
 doors on their own and play in a different room from the other, each half of

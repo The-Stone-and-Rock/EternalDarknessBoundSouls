@@ -674,3 +674,56 @@ Four reviewer findings were checked against the code. All four were real, and al
   (the play.bat way, regression). Pictures: Screenshots for Claude/solo-coop-picker/P4-review/01-07. saves/title.state
   and boot.state were rewritten by the runs and put back byte-identical, with their file times. settings.ini, the card,
   title-rooms.state and slot3.state were never changed.
+
+## Built: step P5, Mods > Co-op goes and its rows find homes (plan step 5; 2026-11-17, checkpoint commit)
+
+- **Gone:** Mods > Co-op (the whole section 1 of `build_mods_rows`: "Split-screen co-op", "Screen split", "Player 2 plays
+  with", "Player 2 controls", "Player 1 camera", "Player 2 camera"), the Mods list's "Co-op" row (`build_mods`), the
+  launcher's "Co-op" row (`build_launcher`) and the test door `ED_MENU_OPEN=coop` (no script in tools/ used it). Mods'
+  other sections keep their numbers (2 Challenge, 3 Characters, 4 Cheats, 5 Sanity Effects); `g_mods_section` starts at
+  2. The settings keys (`mod_coop`, `mod_split`, `mod_p2_input`, `mod_p2_camera`) are unchanged in settings.c, so old
+  settings.ini files load as before.
+- **Repeats dropped:** "Player 2 plays with" is player 2's Controls "Plays with"; "Player 1 camera" is Display's Camera.
+- **Moved to Display, under Camera** (`build_options_rows`): "Co-op screen split" (Side by side / Above and below,
+  `mod_split`) and "Player 2 camera" (`mod_p2_camera`). Shown and changeable always. Notes: "For co-op games." / in a
+  co-op game "Changes when the menu closes." (the Tome page keeps its halves, `g_skin_split`); "Player 2's half in
+  co-op. Original: the game's own cameras."
+- **Never-shown rows deleted:** Options' sections IV (Controls) and VI (Mods, with its Disc row) in
+  `build_options_rows`. Options itself has its own Controls, Mods and Disc rows (`build_options`).
+- **Words:** Sanity Effects in a co-op game: "Single player for now: choose Solo from Start Game or Load Game." Frame
+  rate: greyed (and 60) only in a co-op game (`mod_coop && in_play()`); before a game it can be set for solo, note
+  "Co-op plays at 60 frames a second." Player 2's Choose Character card is dimmed only in a solo game ("Solo game: pick
+  Co-op at Start Game"); before a game, with solo picked last, it is not dimmed and says "For co-op: pick it at Start
+  Game".
+- **Tidy:** the title's Mods hides Characters (Choose Character is the title's own row), Cheats and Sanity Effects;
+  Title video is hidden in a game. `card_screen()` was already the one helper for the six card tests (P2).
+- Docs: coop-play-test.md (sections 6, 8, 9, 13), coop-player2-menu.md, tools/win/README.txt and play.bat's comment
+  no longer point at Mods > Co-op.
+- **Seen** (Screenshots for Claude/solo-coop-picker/P5-menus/, scratch settings, the scratch card copy):
+  - Launcher (scratchpad runs, ED_MENU_OPEN, scratch settings): the main list with no Co-op (01); Mods: Challenge,
+    Cheats, Sanity Effects, Skip intro, Title video (02); Display with the two rows under Camera, solo (03); co-op:
+    Frame rate not greyed, 120, "Co-op plays at 60 frames a second." (04).
+  - Title (jtg, `ED_TITLE_PAGE_TEST`): logs/run-20261117-190802-jtg-p5-title-mods-solo, Mods = Challenge, Title video,
+    Back (05); -190901-jtg-p5-title-display-solo, "Co-op screen split" lit with "For co-op games." and "Player 2 camera"
+    with its note, the list scrolling (06, 07); -191026-jtg-p5-title-display-coop, Frame rate open in co-op on the title
+    with its note (08); -190947-jtg-p5-title-chars-solo, player 2's card not dimmed, "For co-op: pick it at Start Game"
+    (09).
+  - Tome, co-op (-191143-jtg-p5-tome-coop): Settings > Display in player 1's half, Frame rate greyed, the split changed
+    to "Above and below" with "Changes when the menu closes." while the page kept side by side (10); after the close
+    the screen split above and below, the Tome in the top half (11); the Mods plaque: Challenge, Characters, Cheats,
+    Sanity Effects, Back (12); Sanity Effects' greyed rows say "Single player for now: choose Solo ..." (13).
+  - Tome, solo (-191446-jtg-p5-tome-solo): Display with Frame rate open (14); Mods with no Title video (15); Mods >
+    Characters: player 2's card dimmed, "Solo game: pick Co-op at Start Game" (16).
+- **Not seen:** another language; the mouse; the Solo / Co-op page itself again (its code is unchanged); a co-op game
+  started from the picker after this build (the jtg co-op run goes through ED_TITLE_PICK=coop and split as before);
+  "Player 2 camera" changed and then played; the user's play. `ed test` not run, as told.
+
+## Built: step P5 review fix (2026-11-17, the P5 checkpoint commit)
+
+- **Frame rate's note** (`build_options_rows`): the test was `coop_game || faster`, so on any screen faster than 60
+  Hz a solo player saw "Co-op plays at 60 frames a second.", even in a solo game. Now the co-op note shows only in a
+  co-op game or, on a faster screen, when co-op was the last mode picked (`coop_game || (faster && mod_coop)`). A solo
+  player on a fast screen gets no note, as before P5; a 60 Hz screen still gets the screen-rate hint.
+- **Seen** (launcher, `ED_MENU_OPEN=display`, keys d,d, scratch settings copies, 120 Hz screen): solo, Frame rate lit
+  and no note (P5-menus/17); co-op, Frame rate lit with "Co-op plays at 60 frames a second." (18). Not seen: the
+  same row in a solo Tome game (the same function and test, `mod_coop` 0 there), a 60 Hz screen.

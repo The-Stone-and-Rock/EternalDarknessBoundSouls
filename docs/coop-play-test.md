@@ -152,9 +152,10 @@ Try, with co-op on:
 - Player 1: Characters. Move round the portraits. Back.
 - Player 2: their Tome > Options > Characters. The page sits on their copy Tome in their half, player 1's half dimmed.
 - Both Tomes open at once, then player 1's Settings: player 2's Tome stays in their half, dimmed.
-- Over and under split (Mods > Co-op): the page should go in the top half for player 1, the bottom for player 2.
-- Player 1: Tome > Options > Mods > Co-op, change "Screen split". The page should stay where it is. The new split shows
-  once you close the page.
+- Over and under split (Display > Co-op screen split, since P5): the page should go in the top half for player 1, the
+  bottom for player 2.
+- Player 1: Tome > Options > Settings > Display, change "Co-op screen split". The page should stay where it is. The new
+  split shows once you close the page.
 - Say if the page is too small to read in a half on your screen.
 
 ## 7. Karim's skeletal pedestal (chapter 4), for Claude to trace
@@ -192,8 +193,8 @@ Play with `play-rooms-log.bat subtitles`, co-op on, in Alex's mansion (chapter 0
   about. Its words should match what is said, at normal speed, on player 1's Tome page. Say if they are wrong words.
 - Save a state (F1) while a line is in both halves. The save should wait until the line goes. Load it later: no
   line should be left on either half once the talking stops.
-- Turn "Split-screen co-op" off in the mods menu while a line is up: one line, in the middle of the full screen, and
-  nothing left behind after it.
+- (Gone since P5: co-op can no longer be turned off in a game. Mods > Co-op was removed; Start Game and Load Game ask
+  Solo or Co-op.)
 - Say if a line is ever in the wrong half, cut off, left behind after it ends, or in both halves with the players in
   different rooms.
 - Since step F2 (2026-11-17): with a line in both halves, player 2's copy should be in the middle of their half, the
@@ -206,7 +207,7 @@ The flash should be one smooth lavender fade, with no dark triangle from the mid
 - Player 2 answers the hall phone (room 69). At the end of the call the flash should light player 2's half only, and
   fade evenly. The same with player 1 in another room.
 - Player 1 answers it instead: the flash in player 1's half only.
-- Turn "Split-screen co-op" off while a call is up: the flash on the whole screen.
+- (Gone since P5: co-op can no longer be turned off during a call.)
 - Single player: play a sanity effect to its end (Mods, Sanity Effects). Its closing flash should be smooth too.
 - If you can, try the 21:9 aspect setting: the flash should still fill the whole half.
 - The first flash after clearing the shader cache may stutter. It should still stay in the right half all the way.
@@ -263,6 +264,21 @@ Play with the sound on. Start from the launcher as usual.
   example the Options song).
 
 ## 13. Solo / Co-op picker (2026-11-17)
+**Step P5: Mods > Co-op is gone; its rows moved.** Try:
+- Mods (the launcher's, the title's Options > Mods, the Tome's Mods plaque) has no Co-op any more. The launcher's main
+  list has no Co-op row either. To play co-op, pick Co-op on Start Game or Load Game.
+- The title's Mods shows only Challenge and Title video. The Tome's Mods shows Challenge, Characters, Cheats and Sanity
+  Effects (no Title video).
+- Display (title, launcher or the Tome's Settings) has two new rows under Camera: "Co-op screen split" (Side by side or
+  Above and below) and "Player 2 camera". Change the split in the Tome in a co-op game: it should change when you close
+  the menu.
+- "Player 2 plays with" is only on player 2's Controls page now (Controls > Player II > Plays with).
+- Frame rate: before a game you can always set it (it is for solo; co-op plays at 60). In a co-op game it is grey.
+  With Co-op picked last, its note says "Co-op plays at 60 frames a second." With Solo picked last, or in a solo
+  game, there should be no note on a fast screen.
+- Choose Character on the title in solo: player 2's card is no longer dimmed. It says "For co-op: pick it at Start
+  Game". In a solo game (the Tome) it is dimmed and says "Solo game: pick Co-op at Start Game".
+- Your old settings.ini loads as before: the split, player 2's camera and "plays with" keep what you had.
 **Step P3: Start Game and Load Game now ask Solo or Co-op.** You saw no page before: that build was older than this
 step. Start play.bat again (the new build) and try:
 - On the title, press A (or Start) on Start Game. The Solo / Co-op page should open, the mode you played last lit.

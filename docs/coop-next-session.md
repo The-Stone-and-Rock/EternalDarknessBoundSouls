@@ -3,6 +3,30 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: the Solo/Co-op picker, step P5 review fix (checkpoint commit with P5)
+- Frame rate's note "Co-op plays at 60 frames a second." showed to solo players on any screen faster than 60 Hz.
+  Now it shows only in a co-op game, or before a game when co-op was the last mode picked. Solo on a fast screen: no
+  note, as before P5.
+- Seen: launcher Display, cursor on Frame rate, 120 Hz screen, scratch settings: solo no note
+  (Screenshots for Claude/solo-coop-picker/P5-menus/17), co-op with the note (18). Not seen: the solo Tome's Display
+  on Frame rate (same code), a 60 Hz screen, the user's play. settings.ini and saves/boot.state unchanged.
+
+## 2026-11-17: the Solo/Co-op picker, step P5: Mods > Co-op goes (checkpoint commit)
+docs/research/solo-coop-picker/plan.md, "Built: step P5".
+- **No co-op switch any more.** Mods > Co-op, the Mods list's Co-op row and the launcher's Co-op row are gone. Co-op is
+  picked on Start Game / Load Game (P3, P4). Mid-game the mode cannot change (Return to title, then Start or Load);
+  `ED_TEST_COOP_OFF` stays for tests. Test kits keep setting `mod_coop` themselves (`JTG_SET`, `ED_TITLE_PICK`).
+- **Rows moved:** "Co-op screen split" and "Player 2 camera" are on Display under Camera (title, launcher, the Tome's
+  Settings). "Player 2 plays with" lives only on Controls > Player II. "Player 1 camera" was Display's Camera.
+- **Words:** Sanity Effects in co-op points at Solo on Start Game / Load Game; Frame rate greys only in a co-op game;
+  player 2's Choose Character card is dimmed only in a solo game and points at Start Game's Co-op.
+- **Tidy:** the title's Mods is Challenge and Title video only; the Tome's Mods has no Title video; Options' two
+  never-shown sections (IV Controls, VI Mods and its Disc row) deleted. `ED_MENU_OPEN=coop` is gone.
+- Seen in pictures: Screenshots for Claude/solo-coop-picker/P5-menus/ 01-16 (launcher, title, Tome solo and co-op).
+  The split changed in the Tome took effect as the menu closed (11). Not seen: other languages, the mouse, the user's
+  play. saves/boot.state was rewritten by the jtg runs and put back byte-identical (with its time); settings.ini, the
+  card, title.state, title-rooms.state and slot3.state were not changed.
+
 ## 2026-11-17: the Solo/Co-op picker, step P4 review fixes (checkpoint commit with P4)
 docs/research/solo-coop-picker/plan.md, "Built: step P4 review fixes". Four review findings, all real, all fixed:
 - **Disc list after a restart:** main.c `frontend_resume_discs` fills it as the launcher does, so Return to launcher

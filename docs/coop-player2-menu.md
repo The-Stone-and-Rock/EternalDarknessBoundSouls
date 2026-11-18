@@ -63,8 +63,8 @@ Not needed for player 2 for now: Journal, Cinematics, Options.
 Player 2's Controls are reached from Controls itself: the title's Options > Controls, the Tome's Settings > Controls and
 the launcher's Options > Controls first show a Player I / Player II page (frontend.cpp `Screen::Pick`,
 docs/research/solo-coop-picker/plan.md). Player II opens their page (Plays with, Controller, Controller type, Layout,
-Button mapping); Back returns to the cards on Player II. Mods > Co-op's "Player 2 controls" row still works until plan
-step 5 removes that page. Player 2's Tome has only its Characters plaque, so player 2 cannot open Settings from it yet.
+Button mapping); Back returns to the cards on Player II. Mods > Co-op (and its "Player 2 controls" and "Player 2 plays
+with" rows) was removed in picker step P5: this page is the only way to player 2's controls now. Player 2's Tome has only its Characters plaque, so player 2 cannot open Settings from it yet.
 
 ## Open problems
 

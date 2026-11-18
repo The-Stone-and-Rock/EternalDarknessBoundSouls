@@ -29,7 +29,7 @@ void frontend_resume_discs(const char* iso_path);
 void frontend_frame(void);
 
 // Co-op separate rooms only with co-op on (ED_ROOM_SLOTS / ED_COOP_STAY, asked by play.bat): sets or clears the two
-// switches for this run from the ask and Mods > Co-op, before the game's memory, title machine and hooks read them.
+// switches for this run from the ask and the mode picked (Start Game / Load Game's Solo or Co-op), before the game's memory, title machine and hooks read them.
 // True when that changed them.
 bool rooms_follow_coop(void);
 // True when playing co-op (or solo) would need this run's separate rooms changed, so the game started again; a pure
@@ -68,9 +68,9 @@ void frontend_toast_player(int player, const char* text);
 enum {
     FRONTEND_PAGE_CHARACTERS = 0,  // that player's character roster
     FRONTEND_PAGE_SETTINGS = 1,    // Options: display, sound, graphics, controls
-    FRONTEND_PAGE_MODS = 2,        // co-op, challenge, cheats
+    FRONTEND_PAGE_MODS = 2,        // challenge, characters, cheats, sanity effects
     FRONTEND_PAGE_STATES = 3,      // save states (player 1's)
-    FRONTEND_PAGE_TITLE_SETTINGS = 4,  // Options from the title screen: with Mods (co-op, characters) and Quit
+    FRONTEND_PAGE_TITLE_SETTINGS = 4,  // Options from the title screen: with Mods (challenge, title video) and Quit
     // The title screen's own rows, each opening its page alone (Back from it closes the menu):
     FRONTEND_PAGE_TITLE_CHARACTERS = 5,  // Choose Character: the two players' cards (as the launcher's row)
     FRONTEND_PAGE_TITLE_DISPLAY = 6,

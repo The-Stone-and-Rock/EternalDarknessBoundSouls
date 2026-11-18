@@ -559,7 +559,7 @@ static const char* title_state_path() { return getenv("ED_ROOM_SLOTS") != nullpt
 
 // Co-op separate rooms are co-op's alone (the user, 2026-11-12: "Co op fixes should not apply to solo plays"). play.bat
 // asks for them for every run (ED_ROOM_SLOTS=2, ED_COOP_STAY=1); the ask is kept (ED_ROOM_SLOTS_ASKED, ED_COOP_STAY_ASKED,
-// carried through restart_process with the environment) and the switches themselves are set only while Mods > Co-op is on,
+// carried through restart_process with the environment) and the switches themselves are set only while co-op is chosen,
 // and cleared otherwise: solo plays the game's own one room, its memory (48 MB) and title machine, with none of the two-room
 // hooks. A solo play with them on froze returning into a room (saves/reports/hang-20261112-025508).
 // A launch that names neither switch (the exe started on its own, the Mac's play.sh, a shortcut, a release) is asked for
@@ -706,17 +706,16 @@ void start_game(int slot) {
 // The Mods page: from the launcher, the in-game menu and Options, back to the
 // one it came from. Options keeps its own way back (g_options_return).
 Screen g_mods_return = Screen::Launcher;
-int g_mods_section = 1;  // the Mods page open: 1 Co-op, 2 Challenge, 3 Characters
+int g_mods_section = 2;  // the Mods page open: 2 Challenge, 3 Characters, 4 Cheats, 5 Sanity Effects (1 was Co-op)
 int g_mods_row = 0;      // the Mods row to come back to
 // A Mods section's page goes back to the Mods list, or to the launcher when opened from it (Choose
-// Character and Co-op are there too), at that row.
+// Character is there too), at that row.
 Screen g_mods_page_return = Screen::Mods;
 int g_mods_page_return_row = 0;
 void mods_page_back();
 int section_number(const std::string& heading);
 int g_options_row = 0;  // the Options row to come back to (its pages, Controls, Mods)
-// Controls: player 1's or player 2's from the Player I / Player II page (Screen::Pick), player 2's from Mods (co-op), and
-// back.
+// Controls: player 1's or player 2's from the Player I / Player II page (Screen::Pick), and back.
 Screen g_controls_return = Screen::Options;
 int g_controls_return_row = 0;
 // The two-card page (docs/research/solo-coop-picker/plan.md): Solo / Co-op before a game (the title's Start Game or
@@ -751,8 +750,8 @@ bool in_play() { return g_in_game && !g_on_title; }
 enum class Skin { Launcher, Title, Tome };
 Skin g_skin = Skin::Launcher;
 int g_skin_half = -1;  // the Tome's: its co-op half (0 or 1), -1 the whole picture
-// The co-op split while that page is up (Mods > Co-op's "Screen split", 1 one above the other): taken once as the page
-// opens, as hle.c gives it to the renderer (aurora_split_page), so a change on the Mods page moves nothing until the
+// The co-op split while that page is up (Display's "Co-op screen split", 1 one above the other): taken once as the page
+// opens, as hle.c gives it to the renderer (aurora_split_page), so a change on the Display page moves nothing until the
 // page closes and the renderer and the page keep the same halves.
 int g_skin_split = 0;
 
@@ -1565,12 +1564,14 @@ std::string portrait_rml(const RosterTile& t) {
 
 // Choose Character: a player's card. Their label between the Tome's rules, their chosen frame's picture in
 // a leather mount that glows in the player's colour (gold for the first, blue for the second), the name and
-// form, the meters, and which stats they play with. Player 2's is dimmed while co-op is off.
+// form, the meters, and which stats they play with. Player 2's is dimmed in a solo game only: before a game (the title,
+// the launcher) it can be set up for a co-op game, and its foot says where co-op is chosen (Start Game's Co-op).
 std::string player_card_rml(int player, bool selected, size_t index) {
     const int chosen = player == 1 ? g_settings.mod_p2_character : g_settings.mod_p1_character;
     const RosterTile t{chosen, form_on(player, chosen)};
     const int stats = player == 1 ? g_settings.mod_p2_stats : g_settings.mod_p1_stats;
-    const bool off = player == 1 && !g_settings.mod_coop;
+    const bool solo = player == 1 && !g_settings.mod_coop;
+    const bool off = solo && in_play();
     std::string out = std::string("<div class=\"pcard p") + (player == 1 ? "2" : "1") + (selected ? " selected" : "") +
                       (off ? " off" : "") + "\" id=\"row" + std::to_string(index) + "\"><div class=\"pcard-head\"><div class=\"pcard-rule\"></div>" +
                       "<div class=\"pcard-who\">" + (player == 1 ? "Player II" : "Player I") + "</div><div class=\"pcard-rule\"></div></div>" +
@@ -1598,7 +1599,8 @@ std::string player_card_rml(int player, bool selected, size_t index) {
         out += "</div>";
     }
     out += std::string("<div class=\"pcard-foot\">") +
-           (off ? "Co-op is off" : chosen == 0 ? "The chapter's own stats" : stats == 1 ? "Their own stats" : "The chapter's stats") +
+           (off ? "Solo game: pick Co-op at Start Game" : solo ? "For co-op: pick it at Start Game"
+            : chosen == 0 ? "The chapter's own stats" : stats == 1 ? "Their own stats" : "The chapter's stats") +
            "</div><div class=\"pcard-press\">" + (selected ? "A &#8212; choose character" : "&nbsp;") + "</div></div>";
     return out;
 }
@@ -1819,57 +1821,9 @@ void move_in_roster(int dx, int dy) {
 }
 
 void build_mods_rows() {
-    Row coop{"Split-screen co-op", on_off(g_settings.mod_coop)};
-    coop.section = "I \u00b7 Co-op";
-    coop.toggle = true;
-    coop.change = [](int) {
-        g_settings.mod_coop = !g_settings.mod_coop;
-        settings_coop_chosen();  // (the player's choice: saved, also in a run that plays its boot state's mode)
-        changed();  // co-op has its own frame rate
-    };
-    g_rows.push_back(coop);
-
-    static const char* const kSplit[] = {"Side by side", "Above and below"};
-    Row split{"Screen split", kSplit[g_settings.mod_split]};
-    split.enabled = g_settings.mod_coop;
-    split.change = [](int dir) { cycle(g_settings.mod_split, 2, dir); };
-    g_rows.push_back(split);
-
-    static const char* const kInput[] = {"Controller", "Keyboard"};
-    Row input{"Player 2 plays with", kInput[g_settings.mod_p2_input]};
-    input.enabled = g_settings.mod_coop;
-    input.change = [](int dir) { cycle(g_settings.mod_p2_input, 2, dir); };
-    g_rows.push_back(input);
-
-    Row p2_controls{"Player 2 controls"};
-    p2_controls.activate = [] {
-        controls::set_menu_player(1);
-        g_controls_return = Screen::ModsPage;
-        g_controls_return_row = g_selected;
-        g_screen = Screen::Controls;
-        g_selected = 0;
-    };
-    g_rows.push_back(p2_controls);
-
-    // Each player's camera: player 1's is Options' Camera, player 2's their own.
-    Row p1_camera{"Player 1 camera", camera_mode_name(g_settings.camera)};
-    p1_camera.change = [](int dir) {
-        static const int kModes[] = {CAMERA_ORIGINAL, CAMERA_THIRD_PERSON, CAMERA_FIRST_PERSON};
-        int at = 0;
-        for (int i = 0; i < 3; i++)
-            if (kModes[i] == g_settings.camera)
-                at = i;
-        cycle(at, 3, dir);
-        g_settings.camera = kModes[at];
-    };
-    g_rows.push_back(p1_camera);
-
-    static const char* const kP2Camera[] = {"Third person", "First person", "Original"};
-    Row p2_camera{"Player 2 camera", kP2Camera[g_settings.mod_p2_camera]};
-    p2_camera.enabled = g_settings.mod_coop;
-    p2_camera.change = [](int dir) { cycle(g_settings.mod_p2_camera, 3, dir); };
-    g_rows.push_back(p2_camera);
-
+    // Mods > Co-op is gone (docs/research/solo-coop-picker/plan.md step 5): Start Game and Load Game ask Solo or Co-op
+    // (mod_coop, kept in settings.ini), player 2's controls are Controls > Player II, and the screen split and player
+    // 2's camera are on Display, under Camera. The sections keep their numbers (II Challenge ... V Sanity Effects).
     static const char* const kEnemies[] = {"Vanilla", "Enhanced"};
     Row enemies{"Creatures", kEnemies[g_settings.mod_enemies]};
     enemies.section = "II \u00b7 Challenge";
@@ -1936,7 +1890,8 @@ void build_mods_rows() {
     static int sanity_effect = 0;
     static bool sanity_ignore = false;
     const bool sanity_can = in_play() && !g_settings.mod_coop;
-    const char* const sanity_not = g_settings.mod_coop ? "Single player for now: turn co-op off." : "In a game, from its menu.";
+    const char* const sanity_not = g_settings.mod_coop ? "Single player for now: choose Solo from Start Game or Load Game."
+                                                       : "In a game, from its menu.";
     Row effect{"Effect", std::to_string(hle_sanity_number(sanity_effect)) + ": " + hle_sanity_name(sanity_effect)};
     effect.section = "V \u00b7 Sanity Effects";
     effect.note = hle_sanity_what(sanity_effect);
@@ -2015,12 +1970,16 @@ void build_mods() {
         r.experimental = true;
         return r;
     };
-    g_rows.push_back(experimental(page("Co-op", 1)));
+    // (No Co-op: Start Game and Load Game ask Solo or Co-op.)
     g_rows.push_back(page("Challenge", 2));
-    if (g_in_game)  // on the launcher it's Choose Character, under Load game
+    // In a game only: on the launcher and the title it's Choose Character, their own row.
+    if (in_play())
         g_rows.push_back(experimental(page("Characters", 3)));
-    g_rows.push_back(experimental(page("Cheats", 4)));
-    g_rows.push_back(page("Sanity Effects", 5));
+    // Not on the title: cheats and sanity effects are for a game going (greyed there, they did nothing).
+    if (!g_on_title) {
+        g_rows.push_back(experimental(page("Cheats", 4)));
+        g_rows.push_back(page("Sanity Effects", 5));
+    }
     // Only on the launcher: it is how Start game starts.
     if (!g_in_game) {
         Row skip{"Skip intro", on_off(g_settings.mod_skip_intro)};
@@ -2030,18 +1989,20 @@ void build_mods() {
         skip.change = [](int) { g_settings.mod_skip_intro = !g_settings.mod_skip_intro; };
         g_rows.push_back(skip);
     }
-    // The title menu's moving background (titlevideo.cpp), once made.
-    std::error_code ec;
-    const bool have_video =
-        std::filesystem::is_regular_file(std::filesystem::path(frontend_res_dir()) / "video" / "title.mpg", ec);
-    Row video{"Title video", have_video ? on_off(g_settings.mod_title_video) : "none"};
-    video.gap = g_in_game;
-    video.toggle = true;
-    video.enabled = have_video;
-    if (!have_video)
-        video.note = "No video yet: tools/title_video.py makes one.";
-    video.change = [](int) { g_settings.mod_title_video = !g_settings.mod_title_video; };
-    g_rows.push_back(video);
+    // The title menu's moving background (titlevideo.cpp), once made. Not in a game (it is the title's).
+    if (!in_play()) {
+        std::error_code ec;
+        const bool have_video =
+            std::filesystem::is_regular_file(std::filesystem::path(frontend_res_dir()) / "video" / "title.mpg", ec);
+        Row video{"Title video", have_video ? on_off(g_settings.mod_title_video) : "none"};
+        video.gap = g_in_game;
+        video.toggle = true;
+        video.enabled = have_video;
+        if (!have_video)
+            video.note = "No video yet: tools/title_video.py makes one.";
+        video.change = [](int) { g_settings.mod_title_video = !g_settings.mod_title_video; };
+        g_rows.push_back(video);
+    }
     Row back{"Back"};
     back.gap = true;
     back.activate = [] {
@@ -2082,7 +2043,6 @@ void mods_page_back() {
 
 const char* mods_page_name() {
     switch (g_mods_section) {
-    case 1: return "Co-op";
     case 2: return "Challenge";
     case 3: return "Choose Character";
     case 4: return "Cheats";
@@ -2122,7 +2082,8 @@ void build_launcher() {
         g_rows.push_back(load);
     }
 
-    // Each player's character, and co-op: the Mods pages of the same names, opened from here.
+    // Each player's character: the Mods page of the same name, opened from here. (No Co-op row: the title's Start Game
+    // and Load Game ask Solo or Co-op, and Continue and Load game play a save state in the mode it was made in.)
     auto mods_page = [](const char* label, int section, const char* note) {
         Row r{label};
         r.note = note;
@@ -2139,7 +2100,6 @@ void build_launcher() {
         return r;
     };
     g_rows.push_back(mods_page("Choose Character", 3, "Player 1's and player 2's characters and forms."));
-    g_rows.push_back(mods_page("Co-op", 1, "Split-screen co-op, the screen split, player 2's controls and cameras."));
 
     Row options{"Options"};
     options.gap = true;
@@ -2666,10 +2626,14 @@ void build_options_rows() {
             if (choices[i] == g_settings.frame_rate)
                 shown = g_settings.frame_rate;
     }
-    Row rate{"Frame rate", std::to_string(g_settings.mod_coop ? 60 : shown)};
-    rate.enabled = faster && !g_settings.mod_coop;
-    if (g_settings.mod_coop) {
-        rate.note = "Split-screen co-op plays at 60. This setting is for playing alone.";
+    // Co-op plays at 60 (settings_apply): greyed in a co-op game only. Before a game (the title, the launcher) it can be
+    // set for solo, whichever mode was picked last. The co-op note shows only when co-op was the last mode picked; a
+    // solo player on a fast screen gets no note, as before.
+    const bool coop_game = g_settings.mod_coop && in_play();
+    Row rate{"Frame rate", std::to_string(coop_game ? 60 : shown)};
+    rate.enabled = faster && !coop_game;
+    if (coop_game || (faster && g_settings.mod_coop)) {
+        rate.note = "Co-op plays at 60 frames a second.";
     } else if (!faster) {
 #ifdef __PROSPERO__
         rate.note = "Your TV is running at 60 Hz. 120 needs a TV that takes 120 Hz, with Enable 120 Hz "
@@ -2820,19 +2784,8 @@ void build_options_rows() {
     graphics_rows("IX \u00b7 Effects", {enhancement::kGlow, enhancement::kSpellRim, enhancement::kSpellFx, enhancement::kVolumetric,
                                         enhancement::kShafts});
 
-    // Controls: the layout here, everything else (vibration, hold or toggle,
-    // deadzone, mapping) a page of its own.
-    Row controls_row = layout_row();
-    controls_row.label = "Controls";
-    controls_row.section = "IV \u00b7 Controls";
-    controls_row.page = 1;
-    controls_row.activate = [] {
-        controls::set_menu_player(0);
-        g_screen = Screen::Controls;
-        g_selected = 0;
-    };
-    g_rows.push_back(controls_row);
-
+    // (Controls and Mods are rows of Options itself, build_options: their sections here, IV and VI with its Disc row,
+    // were never shown, and are gone.)
     static const char* const kCameraNotes[] = {"", "", "The right stick turns it.", "The right stick looks around."};
     Row camera{"Camera", camera_mode_name(g_settings.camera)};
     camera.experimental = true;
@@ -2849,6 +2802,22 @@ void build_options_rows() {
         g_settings.camera = kModes[at];
     };
     g_rows.push_back(camera);
+
+    // From Mods > Co-op (gone: Start Game asks Solo or Co-op). Shown always, so they can be set before a co-op game. In
+    // a co-op game the split changes as the menu closes (g_skin_split: the page keeps its halves while it is up).
+    static const char* const kSplit[] = {"Side by side", "Above and below"};
+    Row split{"Co-op screen split", kSplit[g_settings.mod_split & 1]};
+    split.page = 1;
+    split.note = g_settings.mod_coop && in_play() ? "Changes when the menu closes." : "For co-op games.";
+    split.change = [](int dir) { cycle(g_settings.mod_split, 2, dir); };
+    g_rows.push_back(split);
+
+    static const char* const kP2Camera[] = {"Third person", "First person", "Original"};
+    Row p2_camera{"Player 2 camera", kP2Camera[std::clamp(g_settings.mod_p2_camera, 0, 2)]};
+    p2_camera.page = 1;
+    p2_camera.note = "Player 2's half in co-op. Original: the game's own cameras.";
+    p2_camera.change = [](int dir) { cycle(g_settings.mod_p2_camera, 3, dir); };
+    g_rows.push_back(p2_camera);
 
     static const char* const kGameFont[] = {"Sharp", "Tome", "Original"};
     Row font{"Game text", kGameFont[g_settings.game_font]};
@@ -2871,17 +2840,6 @@ void build_options_rows() {
     debug.note = "Esc or Back opens this menu over the game. Off: settings are in the Tome's Options and the title's Options.";
     debug.change = [](int) { g_settings.debug_menu = !g_settings.debug_menu; };
     g_rows.push_back(debug);
-
-    Row mods = mods_row(Screen::Options);
-    mods.section = "VI \u00b7 Mods";
-    mods.page = 1;
-    g_rows.push_back(mods);
-
-    if (g_options_return == Screen::Launcher && !g_disc_on_main) {
-        Row disc = disc_row();
-        disc.page = 1;
-        g_rows.push_back(disc);
-    }
 
     Row back{"Back"};
     back.gap = true;
@@ -3016,7 +2974,7 @@ void build_options() {
     }
 
     // Opened from the game's own menus (the debug menu off, these are the launcher's rows' only home in play): from the
-    // title's More Options, Mods too (co-op and the characters, before a game); from the Tome's Settings, the way back
+    // title's More Options, Mods too (Challenge and the title video, before a game); from the Tome's Settings, the way back
     // to the title screen. Quit from either.
     if (g_root_closes && g_root == Screen::Options) {
         if (g_on_title) {
@@ -4850,7 +4808,7 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
     g_screen = Screen::Launcher;
     g_selected = launcher_main_row();
     // ED_MENU_OPEN=options, graphics, display, sound, image, shadows, lighting, effects, game,
-    // controls, mapping, mods, coop, challenge, characters-page, cheats, characters, load, pick-mode, pick-load, pick-controls,
+    // controls, mapping, mods, challenge, characters-page, cheats, characters, load, pick-mode, pick-load, pick-controls,
     // states, slotN, deleteN or overwriteN[,row] (testing): the launcher opens on that page, at that
     // row; controls2 and mapping2 show player 2's, slotN and deleteN slot N's.
     if (const char* page = std::getenv("ED_MENU_OPEN"); page != nullptr) {
@@ -4874,8 +4832,8 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
                       {"sound", Screen::OptionsPage, 2},        {"image", Screen::OptionsPage, 3},
                       {"game", Screen::OptionsPage, 5},         {"shadows", Screen::OptionsPage, 7},
                       {"lighting", Screen::OptionsPage, 8},     {"effects", Screen::OptionsPage, 9},
-                      {"coop", Screen::ModsPage, 1},            {"challenge", Screen::ModsPage, 2},
-                      {"characters-page", Screen::ModsPage, 3}, {"cheats", Screen::ModsPage, 4}};
+                      {"challenge", Screen::ModsPage, 2},       {"characters-page", Screen::ModsPage, 3},
+                      {"cheats", Screen::ModsPage, 4}};
         for (const auto& p : kPages)
             if (std::strncmp(page, p.name, std::strlen(p.name)) == 0) {
                 g_screen = p.screen;

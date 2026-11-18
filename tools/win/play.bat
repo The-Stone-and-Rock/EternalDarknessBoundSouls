@@ -19,7 +19,7 @@ if not defined iso (
 )
 if not exist logs mkdir logs
 rem Co-op separate rooms (experimental): two rooms loaded at once, and the other player stays in their room when one
-rem takes a door. Only with co-op on (Mods > Co-op): solo plays the game's own one room. Quick-save states made in co-op
+rem takes a door. Only in co-op (Start Game's Co-op): solo plays the game's own one room. Quick-save states made in co-op
 rem won't load solo and the other way round (memory card saves do).
 set ED_ROOM_SLOTS=2
 set ED_COOP_STAY=1

@@ -94,7 +94,7 @@ void settings_load(void);
 void settings_save(void);
 // This run plays co-op or solo as its boot state was made (main.c: ED_QUICKLOAD's memory size), whatever settings.ini
 // says; settings_save keeps the file's own mod_coop until the player picks a mode (settings_coop_chosen: the Solo /
-// Co-op page, Mods > Co-op), so a test run never changes the user's choice.
+// Co-op page on Start Game and Load Game), so a test run never changes the user's choice.
 void settings_run_coop(bool coop);
 void settings_coop_chosen(void);
 
