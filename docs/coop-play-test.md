@@ -264,6 +264,19 @@ Play with the sound on. Start from the launcher as usual.
   example the Options song).
 
 ## 13. Solo / Co-op picker (2026-11-17)
+**Step P7: Exit Game in player 1's Tome.** Start play.bat again (the new build), then try:
+- In a game, open the Tome and go to its Options page. Under Settings and Mods there is a fifth plaque, "Exit Game".
+  Down from Settings or Mods reaches it, Up goes back. Say if it looks like the other plaques.
+- A on it: "Exit the game?" with "No, go back" lit first. Press B, and also try No: you should be back on the Tome
+  with Exit Game still lit. Try the mouse and Esc too (only test keys were used so far).
+- A again and pick "Yes, exit": the game window should close by itself in a moment. Start again: your settings should
+  be as you left them. Progress you did not save is lost, as the ask says.
+- In co-op: player 1's Tome has Exit Game; player 2's Tome still shows only Characters. When player 1 asks, only player
+  1's half shows the ask. After No, both players should walk again once the Tomes are closed.
+- The title's own Quit (Options, Up from the first row) should look and work as before ("Quit the game?").
+- Not tried yet: other languages, and 4:3 or very wide windows. Say if the plaques look wrong there.
+- Your choice: the Tome's Settings page still has its own "Quit game" row, which quits with no ask. Keep it, remove it,
+  or make it ask too?
 **Step P6: save states made in the other mode.** Try:
 - In a solo game, open the Tome's Save States and choose a co-op save state (slot 3 is one). Its Load row should say
   "Made in co-op: the game starts again in co-op to load it." Press A: the window closes and opens again in a few

@@ -3,6 +3,23 @@
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
+## 2026-11-17: step P7, Exit Game in player 1's Tome (committed)
+docs/research/solo-coop-picker/plan.md, "Built: step P7". Reviewers found nothing; the memory move was checked (five
+stubs end exactly at +0xC000; the copies at +0xC000..+0xCD80 touch nothing else). Next: P8, then P9.
+To try in play: docs/coop-play-test.md section 13, "Step P7".
+Runs: logs/run-20261117-202123-jtg-p7-solo-exit, -202338-jtg-p7-coop-tomes, -202535-jtg-p7-coop-yes,
+-202659-jtg-p7-title-quit-check.
+- A fifth plaque, "Exit Game", on the Tome's Options page under Settings and Mods, player 1's Tome only (solo and
+  co-op; player 2's copy Tome still has only Characters). A opens the title Quit's ask in the Tome look: "Exit the
+  game?", No first (back to the Tome), Yes saves the settings and quits as the hidden launcher's Quit does.
+- Code: hle.c `kTomeStopsP1` (5 stops, `TOME_STOP_MAX` 5, the plaque bank to +0xC000, `TITLE_QUAD_COPIES` moved to
+  +0xC000), plaques.h/.cpp (5 plaques), frontend.h `FRONTEND_PAGE_QUIT`, frontend.cpp `build_quit_ask` words.
+- Seen in pictures (Screenshots for Claude/solo-coop-picker/P7-exit-game/ 01-12): solo and co-op player 1's plaque, the
+  ask, No back on the Tome, Yes closing the game cleanly (log "window closed", no hang report), player 2 without it,
+  both walking after, the title's Quit ask unchanged. Not seen: real B/Esc/mouse, 4:3, 21:9, other languages.
+- The Tome's Settings page still has its own "Quit game" row (no ask). Ask the user whether to keep it.
+- saves/boot.state was rewritten by the jtg runs and put back byte-identical; settings.ini and the card untouched.
+
 ## 2026-11-17: the Solo/Co-op picker, step P6 review fix (checkpoint commit with P6)
 - The user said again that Start Game and Load Game show no Solo / Co-op page. Their last play (logs/play.log, 16:16)
   is still older than P3 (18:17), so that build had no page. With today's build, the user's way (launcher Play, a copy

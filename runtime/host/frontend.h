@@ -82,6 +82,9 @@ enum {
     // Solo or Co-op: two cards (docs/research/solo-coop-picker/plan.md). `player` is the title row it asks for
     // (0 Start Game, 1 Load Game: the page's heading). hle.c's title_main_start_load opens it (plan step 3).
     FRONTEND_PAGE_TITLE_PICK = 12,
+    // Player 1's Tome, Options > Exit Game: "Exit the game?" (No first, back to the Tome); Yes saves the settings and
+    // quits, as the launcher's Quit does. Not a title page (outside TITLE_SETTINGS..TITLE_PICK).
+    FRONTEND_PAGE_QUIT = 13,
 };
 // How the page is drawn, chosen by whoever opens it: the launcher's parchment, the title's look (over the title
 // screen), or a Tome page (over the Tome: in `half` 0 or 1, that co-op half, -1 the whole picture).

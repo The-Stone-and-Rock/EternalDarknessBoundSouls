@@ -17027,7 +17027,8 @@ static void tome_other_page(CPUState* cpu) { (void)cpu; }
 // leaves the game; everything it had is in the game's own menus and looks built in). Under the game's cross of four
 // (Controller, Audio, Display, Load/Save: indexes 0-3 of the page's own cursor) are more stops, 4 and up, moved to with
 // the game's own cursor and ring and sounds (docs/research/in-game-menu/03-tome-options.md section 9):
-//   player 1's Tome: Characters, Save States, Settings, Mods (their pages open over the paused game, Back returns here);
+//   player 1's Tome: Characters, Save States, Settings, Mods (their pages open over the paused game, Back returns here),
+//   and Exit Game under them ("Exit the game?" asked first: FRONTEND_PAGE_QUIT);
 //   player 2's copy Tome: their own Characters alone (only player 1 has the shared settings and saves).
 // All on the page's own functions, gated to the Options page being the page (r13-24304 is its frame):
 //   Up/Down 0x8010172C and Left/Right 0x8010179C move among the stops (the game's own sets 0-3 as before);
@@ -17058,7 +17059,7 @@ static void tome_other_page(CPUState* cpu) { (void)cpu; }
 // Host scratch for the labels' words and the frames' colour: between the co-op Tome's memory (SCRATCH_TOME +
 // TW_TOME_MEMORY, 0x822D8020) and SPELL_COLOUR (0x82300000).
 #define SCRATCH_MENU 0x822F0000u
-#define TOME_STOP_MAX 4
+#define TOME_STOP_MAX 5
 
 typedef struct {
     const char* label;
@@ -17066,14 +17067,17 @@ typedef struct {
     int page;        // FRONTEND_PAGE_*
     s8 up, down, left, right;  // the index each direction goes to (-1: stays)
 } TomeStop;
-// Player 1's: two by two under Load/Save (its ring 292..413, y 87..119), as wide as the cross (217..506).
+// Player 1's: two by two under Load/Save (its ring 292..413, y 87..119), as wide as the cross (217..506), then Exit
+// Game alone under them, under Load/Save as player 2's Characters is (the user, 2026-11-17: player 1 needs an exit game
+// button in the Tome's Options; it asks first, as the title's Quit).
 // The rectangles are the rings' (as the game's ring table); each plaque's picture is 140x40 round it, from 8 left and 3
 // above (the painted Load/Save plaque's art round its ring: plaques.cpp).
 static const TomeStop kTomeStopsP1[] = {
     {"Characters", 226, 131, 122, 32, FRONTEND_PAGE_CHARACTERS, 3, 6, -1, 5},
     {"Save States", 374, 131, 122, 32, FRONTEND_PAGE_STATES, 3, 7, 4, -1},
-    {"Settings", 226, 173, 122, 32, FRONTEND_PAGE_SETTINGS, 4, -1, -1, 7},
-    {"Mods", 374, 173, 122, 32, FRONTEND_PAGE_MODS, 5, -1, 6, -1},
+    {"Settings", 226, 173, 122, 32, FRONTEND_PAGE_SETTINGS, 4, 8, -1, 7},
+    {"Mods", 374, 173, 122, 32, FRONTEND_PAGE_MODS, 5, 8, 6, -1},
+    {"Exit Game", 292, 215, 122, 32, FRONTEND_PAGE_QUIT, 6, -1, -1, -1},
 };
 // Player 2's (their copy Tome): their own Characters, under Load/Save; the cross's four are not theirs.
 static const TomeStop kTomeStopsP2[] = {
@@ -17711,7 +17715,7 @@ static const u8 kTitleRowQuads[8][4] = {{23, 0, 0, 0}, {14, 16, 17, 0}, {15, 18,
                                         {6, 0, 0, 0},  {7, 0, 0, 0},    {8, 20, 21, 22}, {9, 0, 0, 0}};
 // A copy of quads 0-23 per scroll 0..5 in host scratch (the game's table is never written: Aurora keeps an array's
 // upload while its base stays the same, so each scroll has its own base). Same bytes each time it is written.
-#define TITLE_QUAD_COPIES (SCRATCH_MENU + 0xA000u)  // to + 0xAD80 (the plaque bank ends at + 0xA000)
+#define TITLE_QUAD_COPIES (SCRATCH_MENU + 0xC000u)  // to + 0xCD80 (the plaque bank ends at + 0xC000)
 #define TITLE_QUAD_COPY_SIZE 0x240u                 // 24 quads x 24 bytes
 #define TITLE_OPTIONS_BIND 0x8019D358u              // (texcoords, positions): GXSetArray for the quads
 #define TITLE_OPTIONS_BIND_RETURN 0x8001D598u       // its call in the Options draw
@@ -17782,7 +17786,7 @@ static void title_options_bind(CPUState* cpu) {
 // override swaps each stub for its plaque. The bank is written into whichever memory is in (player 2's copy Tome turn
 // runs on a whole copy), the same bytes at the same address in both. The plaques' frame is the game's own Options page
 // picture, handed over once from the game's memory (UBookPak image 27, from the art bank r13-24316).
-#define PLAQUE_BANK (SCRATCH_MENU + 0x1000u)  // to SCRATCH_MENU + 0xA000 (SPELL_COLOUR is at + 0x10000)
+#define PLAQUE_BANK (SCRATCH_MENU + 0x1000u)  // to SCRATCH_MENU + 0xC000 (5 stubs; TITLE_QUAD_COPIES follows)
 #define PLAQUE_HEADERS (PLAQUE_BANK + 12u + 8u * PLAQUE_COUNT)
 #define PLAQUE_CANARY (PLAQUE_BANK + 0xF0u)
 #define PLAQUE_DATA (PLAQUE_BANK + 0x100u)

@@ -26,7 +26,7 @@ namespace {
 
 constexpr uint32_t kCmpr = 14;
 constexpr int kCount = PLAQUE_COUNT;
-const char* const kWords[kCount] = {"Characters", "Save States", "Settings", "Mods"};
+const char* const kWords[kCount] = {"Characters", "Save States", "Settings", "Mods", "Exit Game"};
 constexpr uint16_t kVersion = 2;  // in each stub's second block: a new look gets new bytes (new hashes)
 // The picture: a 140x40 rectangle of the 640x480 page (the ring, 122x32, inside it as on the painted ones), 4 pixels
 // to a unit.

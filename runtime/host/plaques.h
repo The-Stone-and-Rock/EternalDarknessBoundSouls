@@ -3,7 +3,7 @@
 // transparent stubs hle.c writes into guest memory. Part of the renderer's one texture override (buttons.cpp).
 #include <stdint.h>
 
-#define PLAQUE_COUNT 4                // Characters, Save States, Settings, Mods (ids 0-3)
+#define PLAQUE_COUNT 5                // Characters, Save States, Settings, Mods, Exit Game (ids 0-4)
 #define PLAQUE_STUB_W 280u            // each stub's size (CMPR): a size no game picture has
 #define PLAQUE_STUB_H 64u
 #define PLAQUE_STUB_BYTES ((PLAQUE_STUB_W / 8u) * (PLAQUE_STUB_H / 8u) * 32u)

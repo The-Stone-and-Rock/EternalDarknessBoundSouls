@@ -799,3 +799,37 @@ Four reviewer findings were checked against the code. All four were real, and al
 - **Not seen:** slot 1 or 2 loaded in a solo game from the Tome (unchanged from before P6); the launcher over a running
   co-op game choosing slot 1 (same `start_game` and `build_slot` code); another language; the Mac build. The slot1 hang
   in solo is still not looked into.
+
+## Built: step P7, Exit Game in player 1's Tome (2026-11-17)
+
+docs/research/solo-coop-picker/next-requests.md, P7. The user: player 1 needs an exit game button in the Tome's Options.
+- **Where.** A fifth plaque, "Exit Game", on the Tome's own Options page, alone under Settings and Mods (ring x 292,
+  y 215, under Load/Save as player 2's single Characters plaque). Only in `kTomeStopsP1` (hle.c): player 2's copy Tome
+  keeps its one Characters plaque, and player 1's copy Tome (in player 2's close-up) has no stops, as before. Down from
+  Settings or Mods goes to it; Up from it goes to Settings.
+- **What it does.** A goes to a new page id, `FRONTEND_PAGE_QUIT` (13, frontend.h), outside the title range so
+  `g_on_title` stays false. frontend.cpp opens the title Quit's own ask page on it (`Screen::QuitAsk`) in the Tome look.
+  In the Tome the heading is "Exit the game?", the rows "No, go back" ("Back to the Tome.") and "Yes, exit" ("Unsaved
+  progress is lost. These settings are saved."). On the title the words are as before. No (and B) close the page,
+  back on the Tome with the ring on Exit Game. Yes does what the hidden in-game launcher's Quit does: `settings_save()`,
+  `dol_aurora_request_quit()`, close the page. The program then leaves through the usual way out (the main loop's
+  "window closed", the atexit waits from F3).
+- **The plaque's picture.** `PLAQUE_COUNT` 5 (plaques.h), "Exit Game" in plaques.cpp `kWords`. Five 280x64 stubs do not
+  fit the old bank space (+0x1000..+0xA000), so the bank now runs to `SCRATCH_MENU + 0xC000` and `TITLE_QUAD_COPIES`
+  moved from +0xA000 to +0xC000 (to +0xCD80; written on every title Options draw, so a state with the old copies is
+  fine). The bank's canary has the count in it, so a state with the old 4-stub bank gets the new one written.
+  +0xCD80..+0x10000 is still free.
+- **Seen in pictures** (Screenshots for Claude/solo-coop-picker/P7-exit-game/, fresh Jump to Game runs, 16:9 1280x720):
+  - Solo (-202123-jtg-p7-solo-exit): the plaque lit (01, zoom 06), the ask with No lit (02) and Yes lit (03), No back
+    on the Tome (04), A again and Yes (05): log "[frontend] Quit game from the Tome", "[run] stopped: window closed",
+    "[gx-core] shutdown", "game closed". The run's settings.ini was written at the quit. No hang report.
+  - Co-op, both Tomes open (-202338-jtg-p7-coop-tomes): player 1's half has Exit Game, player 2's Options shows only
+    Characters after three Downs (07); the ask in player 1's half with player 2's dimmed (08, 09); No back on both
+    Tomes (10); both closed and walked after (11; timeline P1 and P2 walk 2900-2990).
+  - Co-op Yes (-202535-jtg-p7-coop-yes): "Quit game from the Tome", "window closed", "game closed", no hang report.
+  - The title's Quit ask is unchanged ("Quit the game?", "Yes, quit", the old note; -202659-jtg-p7-title-quit-check, 12).
+- **Not seen:** a real B, Esc or mouse on the ask (test keys only); 4:3 and 21:9; other languages (the plaques fall
+  back to text labels when the Options picture isn't 432x480; that path was not run with five); player 2 holding the
+  real Tome (`g_coop_tome_owner == 1`, the P2 stops by `tome_stops_player`, from the code).
+- **Left as it was:** the Tome's Settings page still has its own "Quit game" row (no ask) and "Return to title screen".
+  The user may want that row gone now, or asking too.

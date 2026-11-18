@@ -279,6 +279,7 @@ through (05 §3.6: a passed-through intercept runs the function).
 
 For each s in 1..5, a copy of quads 0..23 (576 bytes) lives in host scratch, say `SCRATCH_MENU + 0xA000 + s * 0x240`
 (free: the plaque bank ends at `+0xA000`, SPELL_COLOUR is at `+0x10000`, `hle.c:17192`). In copy s:
+(Since step P7 the bank holds five plaques and ends at `+0xC000`; the copies moved to `SCRATCH_MENU + 0xC000`.)
 
 - every quad of a row r >= s has its 4 y values moved by `dy = slot_y(r - s) - slot_y(r)`;
 - every quad of a row r < s (scrolled off the top) has its 4 corners set to one point: a quad of no size draws nothing

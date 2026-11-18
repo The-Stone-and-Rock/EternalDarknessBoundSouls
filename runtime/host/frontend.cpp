@@ -2414,20 +2414,24 @@ void build_slot_overwrite() {
     g_rows.push_back(save);
 }
 
-// Quit game from the title's Options list, asked first: Up from the row Options opens on wraps to it.
+// Quit game from the title's Options list, asked first: Up from the row Options opens on wraps to it. The same ask from
+// player 1's Tome (Options > Exit Game, FRONTEND_PAGE_QUIT): No goes back to the Tome; Yes quits as the launcher's
+// Quit over a game does (the settings saved, then the program's own way out).
 void build_quit_ask() {
     Row no{"No, go back"};
-    no.note = "Back to Options.";
+    no.note = g_on_title ? "Back to Options." : "Back to the Tome.";
     no.activate = [] {
         g_screen = Screen::InGame;  // past the page: the menu closes
         g_selected = 0;
     };
     g_rows.push_back(no);
 
-    Row yes{"Yes, quit"};
-    yes.note = "These settings are saved. The game's own options reach the memory card only when you leave Options with B.";
+    Row yes{g_on_title ? "Yes, quit" : "Yes, exit"};
+    yes.note = g_on_title
+                   ? "These settings are saved. The game's own options reach the memory card only when you leave Options with B."
+                   : "Unsaved progress is lost. These settings are saved.";
     yes.activate = [] {
-        std::fprintf(stderr, "[frontend] Quit game from the title\n");
+        std::fprintf(stderr, "[frontend] Quit game from %s\n", g_on_title ? "the title" : "the Tome");
         settings_save();
         dol_aurora_request_quit();
         g_close = true;
@@ -3661,7 +3665,7 @@ void render() {
                           : g_screen == Screen::Characters ? (g_characters_player == 1 ? "Player 2 Character"
                                                                                        : "Player 1 Character")
                           : g_screen == Screen::Problem  ? g_problem_heading.c_str()
-                          : g_screen == Screen::QuitAsk  ? "Quit the game?"
+                          : g_screen == Screen::QuitAsk  ? (g_on_title ? "Quit the game?" : "Exit the game?")
                           : g_screen == Screen::Pick     ? (g_pick_kind == PickKind::Controls ? "Controls"
                                                             : g_pick_title_row == 1           ? "Load Game"
                                                                                               : "Start Game")
@@ -6303,6 +6307,7 @@ extern "C" void frontend_frame(void) {
             g_root = Screen::Pick;
             break;
         case FRONTEND_PAGE_TITLE_QUIT:  // asked first (Yes/No), "No" the first choice
+        case FRONTEND_PAGE_QUIT:        // the same ask from player 1's Tome (Options > Exit Game)
             g_screen = g_root = Screen::QuitAsk;
             g_selected = 0;
             break;
