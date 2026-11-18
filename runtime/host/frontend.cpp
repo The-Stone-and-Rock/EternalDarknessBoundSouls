@@ -835,12 +835,17 @@ Row mods_row(Screen from) {
 const char* const kCharacters[] = {"Default", "Pius", "Ellia", "Anthony", "Karim",
                                    "Max", "Lindsey", "Paul", "Roberto", "Peter",
                                    "Edward", "Michael", "Alex"};
-// Portrait frames four to a line, the details panel beside them; on a Tome page three to a line, the details in a strip
-// under them (the page is narrow).
+// Portrait frames four to a line, the details panel beside them. On a Tome page (the user, 2026-11-18: the portraits
+// three to a line were too small to see, most of all in a co-op half): the names in a list, one to a line, and the lit
+// one's portrait large beside it with its name, form, year and meters (as the Tome's own Inventory: a list and a picture).
 int roster_columns() {
-    return g_skin == Skin::Tome ? 3 : 4;
+    return g_skin == Skin::Tome ? 1 : 4;
 }
 constexpr int kRosterLines = 3;    // lines of frames in view; the rest scroll, a line at a time
+constexpr int kRosterNameLines = 12;  // a Tome page's list of names
+int roster_view_lines() {
+    return g_skin == Skin::Tome ? kRosterNameLines : kRosterLines;
+}
 int g_roster_top = 0;              // the first line in view
 int g_characters_return_row = 0;    // the Mods row to come back to
 int g_characters_player = 0;        // whose character the page chooses: 0 player 1, 1 player 2
@@ -1112,6 +1117,52 @@ std::string character_strip_rml(const RosterTile& t) {
                (m.value < 0 ? std::string("?") : std::to_string(m.value)) + "</span></div>";
     }
     return out + "</div></div>";
+}
+
+// A Tome page's picture of the lit (or chosen) one, beside the list of names: the portrait large, then the strip's
+// name, form, year and meters under it, and who they are in a line or two (there is room for it now).
+std::string portrait_rml(const RosterTile& t);
+std::string character_look_rml(const RosterTile& t) {
+    std::string about;
+    if (t.character == 0) {
+        about = "Every chapter with its own character, as the game intended.";
+    } else if (t.character == SETTINGS_RANDOM) {
+        about = kRandomStrip;
+    } else {
+        const CharacterForm* f = t.form != 0 ? form_row(t.character, t.form) : nullptr;
+        about = f != nullptr ? f->about : kCharacterInfo[t.character].about;
+    }
+    const std::string form = tile_form_name(t);
+    std::string year;
+    if (t.character != 0 && t.character != SETTINGS_RANDOM) {
+        const CharacterForm* f = t.form != 0 ? form_row(t.character, t.form) : nullptr;
+        year = f != nullptr && f->year != nullptr ? f->year : kCharacterInfo[t.character].year;
+    }
+    std::string out = "<div class=\"look\"><div class=\"look-portrait" + std::string(t.character == 0 ? " default" : "") + "\">" +
+                      portrait_rml(t) + "</div><div class=\"look-name\">" + escape(tile_title(t)) + "</div><div class=\"look-line\">";
+    if (!form.empty())
+        out += "<span class=\"strip-form\">" + escape(form) + "</span>";
+    if (!year.empty())
+        out += "<span class=\"strip-year\">" + escape(year) + "</span>";
+    out += "</div><div class=\"look-about\">" + escape(about) + "</div>";
+    if (t.character != 0 && t.character != SETTINGS_RANDOM) {
+        const CharacterInfo& c = kCharacterInfo[t.character];
+        const struct {
+            const char* name;
+            const char* kind;
+            int value;
+        } meters[] = {{"Health", "health", c.health}, {"Magick", "magick", c.magick}, {"Sanity", "sanity", c.sanity}};
+        out += "<div class=\"look-meters\">";
+        for (const auto& m : meters) {
+            const int width = m.value < 0 ? 0 : std::min(100, m.value * 100 / 150);
+            out += std::string("<div class=\"smeter\"><span class=\"smeter-name\">") + m.name +
+                   "</span><div class=\"meter-bar\"><div class=\"meter-fill " + m.kind + "\" style=\"width: " +
+                   std::to_string(width) + "%;\"></div></div><span class=\"smeter-value\">" +
+                   (m.value < 0 ? std::string("?") : std::to_string(m.value)) + "</span></div>";
+        }
+        out += "</div>";
+    }
+    return out + "</div>";
 }
 
 // The page's rows under the frames: Stats, Back.
@@ -3334,18 +3385,18 @@ void roster_keep_in_view() {
         const int line = g_selected / roster_columns();
         if (line < g_roster_top)
             g_roster_top = line;
-        else if (line >= g_roster_top + kRosterLines)
-            g_roster_top = line - kRosterLines + 1;
+        else if (line >= g_roster_top + roster_view_lines())
+            g_roster_top = line - roster_view_lines() + 1;
     }
-    g_roster_top = std::clamp(g_roster_top, 0, std::max(roster_lines() - kRosterLines, 0));
+    g_roster_top = std::clamp(g_roster_top, 0, std::max(roster_lines() - roster_view_lines(), 0));
 }
 
 // The mouse wheel over the page: the frames move a line, and the highlight with them if it's left behind.
 void roster_wheel(int dy) {
-    g_roster_top = std::clamp(g_roster_top + dy, 0, std::max(roster_lines() - kRosterLines, 0));
+    g_roster_top = std::clamp(g_roster_top + dy, 0, std::max(roster_lines() - roster_view_lines(), 0));
     if (g_selected < roster_count()) {
         const int line = g_selected / roster_columns();
-        const int to = std::clamp(line, g_roster_top, g_roster_top + kRosterLines - 1);
+        const int to = std::clamp(line, g_roster_top, g_roster_top + roster_view_lines() - 1);
         g_selected = std::min(g_selected + (to - line) * roster_columns(), roster_count() - 1);
     }
 }
@@ -3604,10 +3655,10 @@ std::string roster_panel_end() {
     const int lines = roster_lines();
     const std::string bar = "<div class=\"roster-bar\"><img class=\"roster-cap\" src=\"tome/mark.png\"/><div class=\"roster-rail\">"
                             "<div class=\"roster-track\"></div><div class=\"roster-thumb\" style=\"top: " +
-                            std::to_string(g_roster_top * 100 / lines) + "%; height: " + std::to_string(std::min(kRosterLines, lines) * 100 / lines) +
+                            std::to_string(g_roster_top * 100 / lines) + "%; height: " + std::to_string(std::min(roster_view_lines(), lines) * 100 / lines) +
                             "%;\"></div></div><img class=\"roster-cap bottom\" src=\"tome/mark.png\"/></div>";
     return "</div>" + bar + "</div><div class=\"roster-details\">" +
-           (g_skin == Skin::Tome ? character_strip_rml(shown) : character_details_rml(shown)) + "</div></div>";
+           (g_skin == Skin::Tome ? character_look_rml(shown) : character_details_rml(shown)) + "</div></div>";
 }
 
 // A row's control, right of its name: a switch, a bar or a value with arrows
@@ -3713,7 +3764,7 @@ void render() {
             if (!in_roster)
                 roster_keep_in_view();
             const int line = static_cast<int>(i) / roster_columns();
-            if (line < g_roster_top || line >= g_roster_top + kRosterLines) {
+            if (line < g_roster_top || line >= g_roster_top + roster_view_lines()) {
                 if (!in_roster)
                     rml[0] += "<div class=\"roster-wrap\"><div class=\"roster-scroll\"><div class=\"roster\">";
                 in_roster = true;
@@ -3722,6 +3773,15 @@ void render() {
             if (!in_roster)
                 rml[0] += "<div class=\"roster-wrap\"><div class=\"roster-scroll\"><div class=\"roster\">";
             in_roster = true;
+            if (g_skin == Skin::Tome) {
+                // A Tome page: the name on a line of the list, its form in red after it; the picture is beside the list.
+                const std::string form = tile_form_name(roster_tiles()[i]);
+                rml[0] += "<div class=\"tile" + std::string(static_cast<int>(i) == g_selected ? " selected" : "") +
+                          (r.chosen ? " chosen" : "") + "\" id=\"row" + std::to_string(i) + "\"><span class=\"name\">" +
+                          escape(r.label) + "</span>" +
+                          (form.empty() ? std::string() : "<span class=\"tile-form\">" + escape(form) + "</span>") + "</div>";
+                continue;
+            }
             rml[0] += "<div class=\"tile" + std::string(roster_tiles()[i].character == 0 ? " default" : "") +
                       std::string(static_cast<int>(i) == g_selected ? " selected" : "") +
                       (r.chosen ? " chosen" : "") + "\" id=\"row" + std::to_string(i) +

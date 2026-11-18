@@ -1875,8 +1875,9 @@ body.skin-tome .list-more img {
 	height: 0.7em;
 }
 
-/* Choose a character on a Tome page: the frames three to a line, three lines in view, the scroll bar beside them, and
-   under them one strip for the highlighted (or chosen) one: the name, the form, the year and the meters. */
+/* Choose a character on a Tome page (the user, 2026-11-18: the small frames could not be seen): the names in a list,
+   twelve in view with the scroll bar beside them, and right of it the highlighted (or chosen) one's portrait large,
+   with the name, the form, the year, who they are and the meters under it. */
 body.skin-tome.roster #heading {
 	font-size: 1.15em;
 }
@@ -1890,47 +1891,131 @@ body.skin-tome.roster #pages {
 }
 
 body.skin-tome .roster-wrap {
-	flex-direction: column;
-	align-items: center;
+	flex-direction: row;
+	align-items: flex-start;
+	justify-content: center;
+	margin-top: 0.2em;
 }
 
 body.skin-tome .roster-scroll {
-	height: auto;
+	height: 16.2em;
 }
 
 body.skin-tome .roster-wrap .roster {
-	width: 19.2em;
+	display: block;
+	width: 7.3em;
 	padding: 0;
 }
 
+/* A line of the list: the name, and its form in red after it. */
 body.skin-tome .tile {
+	display: flex;
+	align-items: center;
 	box-sizing: border-box;
-	width: 6.1em;
-	margin: 0.08em 0.12em;
-	padding: 0.18em 0.15em 0.05em 0.15em;
+	width: 7.3em;
+	height: 1.35em;
+	margin: 0;
+	padding: 0 0.3em;
 	border-width: 2px;
-	border-radius: 0.2em;
-}
-
-body.skin-tome .portrait {
-	width: 4.15em;
-	height: 2.93em;
-	margin: 0 auto;
-	border-width: 1px;
-	box-shadow: #00000059 0 0.12em 0.3em 0;
+	border-radius: 0.15em;
+	text-align: left;
+	white-space: nowrap;
+	overflow: hidden;
 }
 
 body.skin-tome .name {
-	height: 1.25em;
-	line-height: 1.25em;
-	margin-top: 0.1em;
-	font-size: 0.6em;
+	height: auto;
+	line-height: 1.3em;
+	margin-top: 0;
+	font-size: 0.84em;
 }
 
 body.skin-tome .tile-form {
-	height: 1.2em;
-	line-height: 1.2em;
-	font-size: 0.52em;
+	height: auto;
+	line-height: 1.3em;
+	margin-left: 0.5em;
+	font-size: 0.66em;
+}
+
+/* The picture beside the list: the chapter pictures' 126x89 shape, as large as the page lets it be. */
+.look {
+	width: 10.9em;
+}
+
+.look-portrait {
+	width: 10.6em;
+	height: 7.49em;
+	margin: 0 auto;
+	border: 1px #5a3a20;
+	background-color: #3a24120f;
+	box-shadow: #00000059 0 0.15em 0.4em 0;
+}
+
+.look-portrait img {
+	width: 100%;
+	height: 100%;
+}
+
+.look-portrait img.emblem {
+	width: auto;
+	height: 100%;
+}
+
+.look-portrait.default {
+	text-align: center;
+	background-color: #0b0d12;
+}
+
+.look-name {
+	height: 1.35em;
+	line-height: 1.35em;
+	margin-top: 0.15em;
+	font-family: "La Belle Aurore";
+	font-size: 1.05em;
+	text-align: center;
+	white-space: nowrap;
+}
+
+.look-line {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	height: 1em;
+	white-space: nowrap;
+}
+
+.look-line .strip-form,
+.look-line .strip-year {
+	margin: 0 0.35em;
+}
+
+.look-about {
+	height: 5em;
+	margin: 0.25em 0.2em 0 0.2em;
+	font-size: 0.64em;
+	line-height: 1.22em;
+	text-align: center;
+	color: #4a3018;
+	overflow: hidden;
+}
+
+.look-meters {
+	margin: 0.3em 0.6em 0 0.6em;
+}
+
+.look-meters .smeter {
+	height: 0.95em;
+	margin: 0;
+}
+
+.look-meters .smeter-name {
+	width: 4.4em;
+	margin-right: 0;
+}
+
+.look-meters .smeter-value {
+	width: 2.2em;
+	text-align: right;
 }
 
 body.skin-tome .tile.selected {
@@ -1984,8 +2069,8 @@ body.skin-tome .roster-thumb {
 
 body.skin-tome .roster-details {
 	flex: 0 0 auto;
-	width: 19.6em;
-	margin: 0.15em 0 0 0;
+	width: 10.9em;
+	margin: 0 0 0 0.4em;
 	border-width: 0;
 	border-radius: 0;
 	box-shadow: none;

@@ -24,7 +24,7 @@
   lost them ("[boot] the disc's name at 0x80000000 was lost ... put back").
   Seen, old build against new, the same presses (chapter 1 co-op, Tome > Options > Load/Save > A, A): before, "Game File
   Access Failed! ... not created by Eternal Darkness"; after, the save list (logs/run-20261117-211534-jtg-tome-load-
-  before, -211537-jtg-tome-load-after; Screenshots for Claude/tome-load-fix/). The user's slot3.state: put back at its
+  before, -211537-jtg-tome-load-after; Load itself, -212413-jtg-tome-load-list; Screenshots for Claude/tome-load-fix/). The user's slot3.state: put back at its
   first frame (-heal-probe-slot3). The same hazard may sit in other whole-replacement hooks that make nested game calls
   and end without clearing the flags: not looked for yet.
 - **The launcher's menu opens over the game again on Esc / Back** (the user, 2026-11-18: a fallback while the Tome's
@@ -33,9 +33,16 @@
   cannot press Esc or Back); it is the same switch as before.
 - **The Tome's Settings page has no "Quit game" row any more** (it quit with no question): Exit Game, the plaque beside
   Settings, asks first. The title's Options keeps its own.
-- **Mock-ups for a bigger character page in the Tome** (the user: the portraits are too small): Screenshots for
-  Claude/tome-character-layout/ A (one large picture), B (large picture and a strip of five), C (a list and the
-  picture). Waiting for the user's pick; build nothing before it.
+- **The Tome's character page is a list and a large picture now (the user chose mock-up C, 2026-11-18).** Tome look only
+  (the title's and the launcher's grids are as before): the names one to a line, twelve in view, a form in red after its
+  name, the scroll bar beside them; right of it the lit one's portrait at 10.6em (about 2.5 times the old frames), the
+  name, form, year, who they are and the three meters stacked. frontend.cpp `roster_columns` (1 on a Tome page),
+  `roster_view_lines`, `character_look_rml`; menu.rcss "Choose a character on a Tome page" (.look*). Up/Down and
+  Left/Right both step through the list; Stats and Back under it as before. Random's words are clear of Stats now.
+  Seen: Screenshots for Claude/tome-character-layout/built-C-solo.jpg and built-C-coop.jpg (runs -212329-jtg-layout-c3-
+  solo, -212124-jtg-layout-c2-coop). Not seen: player 2's page in their copy Tome, the mouse, 4:3 and 21:9, HD portraits
+  of the twelve at this size beside the disc's (both showed in the runs: Chandra's and Pius's forms are their own
+  pictures). The mock-ups A, B, C are in the same folder.
 
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
