@@ -4348,6 +4348,63 @@ void sanity_door_run(CPUState* cpu);
 // for it to stand still, the game then held at its next present.
 static volatile unsigned g_pad_reads;
 unsigned hle_pad_reads(void) { return g_pad_reads; }
+#ifdef ED_AURORA
+// The pad read is the host's whole: the game's own PADRead must never run after it. The read's nested game calls
+// (coop_pad_read, coop_menu_input: hooks inside them set g_hle_passthrough) left the flag on at its end on some frames,
+// so the dispatcher ran the game's PADRead too, with r3 = this read's return (the motor mask, 0): it wrote four "no
+// controller" records (10 zero bytes and 0xFF, 12 bytes apart) at address 0, over the disc's name at 0x80000000 that
+// the IPL leaves there, the boot magic and the memory size. The game then went on, but the Tome's Load/Save checks a
+// save's game code against that name (0x800B9A68: CARDGetStatus +40 against 0x80000000) and said the file "was not
+// created by Eternal Darkness" (the user, 2026-11-17). The user's slot 1-3 states have the wipe; the title's have not.
+// So: the flags cleared at the read's end, and the first 0x30 bytes put back where a game or a state already lost them.
+const char* ed_game_id(void);
+static void low_memory_heal(CPUState* cpu) {
+    static u8 good[0x30];
+    static bool have;
+    const char* const id = ed_game_id();
+    bool ok = id != NULL && strlen(id) == 6u;
+    if (!ok)
+        return;
+    for (u32 i = 0u; i < 6u; i++)
+        ok = ok && mem_read8(cpu, 0x80000000u + i) == (u8)id[i];
+    if (ok) {
+        if (!have)
+            for (u32 i = 0u; i < sizeof good; i++)
+                good[i] = mem_read8(cpu, 0x80000000u + i);
+        have = true;
+        return;
+    }
+    if (have) {
+        for (u32 i = 0u; i < sizeof good; i++)
+            mem_write8(cpu, 0x80000000u + i, good[i]);
+    } else {
+        // Never seen whole in this run (it began on a state that had lost it): the disc's own header, and the four
+        // words after it as this build's boot leaves them (saves/title.state: the boot magic, the version, 24 MB, the
+        // console type).
+        dvd_read_to_guest(cpu, 0x80000000u, 0, 0x20u);
+        mem_write32(cpu, 0x80000020u, 0x0D15EA5Eu);
+        mem_write32(cpu, 0x80000024u, 0x00000001u);
+        mem_write32(cpu, 0x80000028u, 0x01800000u);
+        mem_write32(cpu, 0x8000002Cu, 0x00000001u);
+    }
+    fprintf(stderr, "[boot] the disc's name at 0x80000000 was lost (a pad read's wipe, or a state made with it): put back%s (frame %llu)\n",
+            have ? "" : " from the disc", (unsigned long long)(cpu->timebase / 675000ull));
+}
+static void pad_read_ends(CPUState* cpu, bool monitor) {
+    if (g_hle_passthrough || g_hle_tail_call) {
+        static unsigned said;
+        if (said < 5u)
+            fprintf(stderr, "[pad] the read's nested calls left %s on at its end: cleared, the game's own PADRead does not run (frame %llu)\n",
+                    g_hle_passthrough ? "pass-through" : "the tail call", (unsigned long long)(cpu->timebase / 675000ull));
+        said++;
+    }
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+    if (!monitor)
+        low_memory_heal(cpu);
+}
+#endif
+
 static void hle_PADRead(CPUState* cpu) {
     g_pad_reads++;
 #ifdef ED_AURORA
@@ -4611,6 +4668,9 @@ static void hle_PADRead(CPUState* cpu) {
         mem_write8(cpu, p + 10u, (u8)state[i].error);
         mem_write8(cpu, p + 11u, 0);
     }
+#ifdef ED_AURORA
+    pad_read_ends(cpu, monitor);
+#endif
     hle_set_u32(cpu, motor_mask);
 }
 

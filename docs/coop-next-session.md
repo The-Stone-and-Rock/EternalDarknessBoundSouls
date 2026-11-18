@@ -11,6 +11,22 @@
   Seen: logs/run-20261117-210755-jtg-fix-tome-change (chapter 1, co-op; the same presses as the hanging baseline
   -163718, plus Start to close the Tome): reload at the close, both players walking after, no hang report. Picture:
   Screenshots for Claude/tome-character-change-fix/01. Not seen: player 2's change from their copy Tome, the user's play.
+- **The Tome's Load/Save said the save "was not created by Eternal Darkness" (the user, 2026-11-17): fixed.**
+  The card and the save are fine. The message is UMemcardText.bin group 0 entry 36 (card dialog state 66), raised only by
+  0x800B9A68: it compares the save's game code (CARDGetStatus +40) with the disc's name the IPL leaves at 0x80000000,
+  and that name had been wiped. Cause: the pad read (`hle_PADRead`) is the host's whole, but its nested game calls
+  left `g_hle_passthrough` on at its end on some frames, so the dispatcher then ran the game's own PADRead with r3 = the
+  read's return (0): four "no controller" records written at address 0, over 0x80000000-0x8000002F (the disc's name, the
+  boot magic, the memory size). The title's states have the name whole (so the title's Load Game worked); the user's
+  slot 1-3 states and most in-game states since 2026-11-02 have it wiped. Fix (hle.c `pad_read_ends`,
+  `low_memory_heal`): the flags are cleared at the read's end (logged the first 5 times: "[pad] the read's nested
+  calls left pass-through on"), and the 0x30 bytes are put back at the next pad read wherever a game or a loaded state
+  lost them ("[boot] the disc's name at 0x80000000 was lost ... put back").
+  Seen, old build against new, the same presses (chapter 1 co-op, Tome > Options > Load/Save > A, A): before, "Game File
+  Access Failed! ... not created by Eternal Darkness"; after, the save list (logs/run-20261117-211534-jtg-tome-load-
+  before, -211537-jtg-tome-load-after; Screenshots for Claude/tome-load-fix/). The user's slot3.state: put back at its
+  first frame (-heal-probe-slot3). The same hazard may sit in other whole-replacement hooks that make nested game calls
+  and end without clearing the flags: not looked for yet.
 - **The launcher's menu opens over the game again on Esc / Back** (the user, 2026-11-18: a fallback while the Tome's
   pages settle). `debug_menu` is on by default (settings.c) and set to 1 in the user's settings.ini; the row is now
   "Launcher menu in game" (launcher Options > Display). The Tome's pages stay as they are. Not seen in a run (scripts
