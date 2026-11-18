@@ -33989,6 +33989,17 @@ static void characters_reload(CPUState* cpu, u32 player) {
         settled = 0u;
         return;
     }
+    // A Tome is open (co-op: the world goes on behind player 1's, so the mode reads "play" in the world's tick; or a copy
+    // Tome of either player's): the reload waits for it to close, as solo's does (its Tome is mode 3). Ending the game
+    // from under an open Tome (a character chosen on the Tome's Characters page) left the Tome's words and the prompt
+    // chooser's pack (r13-24036) behind; the prompt's words were then unpacked from freed memory and the byte-pair
+    // unpacker 0x801559D8 never ended (saves/reports/hang-20261117-204821.txt, pc 0x80155AA4).
+    static bool tome_held;  // a Tome was open since the last reload (said with the reload's line)
+    if (g_tw.sharing || g_tome_copy_open || g_tome_copy_ask || g_tome_copy_turn || g_coop_tome_owner >= 0) {
+        tome_held = true;
+        settled = 0u;
+        return;
+    }
     // ED_TEST_P1_CHARACTER=frame,choice (testing): Player 1 character changed
     // to choice at that frame, as the in-game menu would.
     static int test_frame = -2, test_choice;
@@ -34038,8 +34049,10 @@ static void characters_reload(CPUState* cpu, u32 player) {
         p2_wrong = true;
     u32 choice = ((u32)(want1 & 0x3FFF) << 16) | (u32)(want2 & 0xFFFF) | (wearing1 ? 0x80000000u : 0u) | (wearing2 ? 0x40000000u : 0u);
     choice ^= (wearing1 ? (u32)on1->form << 26 : 0u) ^ (wearing2 ? (u32)on2->form << 12 : 0u);
-    if ((p1 == want1 && !p2_wrong) || choice == g_reload_tried)
+    if ((p1 == want1 && !p2_wrong) || choice == g_reload_tried) {
+        tome_held = false;
         return;
+    }
     g_reload_tried = choice;
     settled = 0u;
     u32 save = 0u, picture = 0u, size = 0u, ignore = 0u;
@@ -34055,8 +34068,9 @@ static void characters_reload(CPUState* cpu, u32 player) {
     }
     const u32 load = GAME_END_LOAD;
     hle_guest_call(cpu, GAME_END, &load, 1, 0.0, &ignore);
-    fprintf(stderr, "[player] characters changed (player 1 %d, now %d; player 2 %d%s): reloading where they stand\n",
-            want1, p1, want2, p2_wrong ? ", not them" : "");
+    fprintf(stderr, "[player] characters changed (player 1 %d, now %d; player 2 %d%s): reloading where they stand%s\n",
+            want1, p1, want2, p2_wrong ? ", not them" : "", tome_held ? " (it waited for the Tome to close)" : "");
+    tome_held = false;
 }
 
 // Where player 1 stands and the game's frame, as of the last pad read (photo mode's portraits).
