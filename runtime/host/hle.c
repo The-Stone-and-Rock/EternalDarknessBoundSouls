@@ -27586,7 +27586,7 @@ static void sanity_door_rules(CPUState* cpu) {
 }
 
 // (Each player's own sanity effects in co-op, sanity_p2_step below: what the rules' intercept needs of it.)
-static const s8 kSanityP2[] = {1, 4, 5, 6, 7, 8, 10, 14, 21, 24, 25, 31, 32, 33, 35, 38};  // the effects player 2's own set may roll so far
+static const s8 kSanityP2[] = {1, 4, 5, 6, 7, 8, 10, 14, 17, 21, 24, 25, 31, 32, 33, 35, 38};  // the effects player 2's own set may roll so far
 static bool g_sanity_p2_in;         // player 2's update of the tracker is running
 static int g_sanity_p2_forced = -1;  // ED_SANITY_P2_TEST's effect while it is asked for
 static bool sanity_p2_has(int effect) {
@@ -28067,6 +28067,39 @@ static void sanity_p2_link(CPUState* cpu, u32 id, u32 link[2]) {
 static void sanity_p2_unlink(CPUState* cpu, const u32 link[2]) {
     if (link[0] != 0u)
         mem_write32(cpu, link[0], link[1]);
+}
+// A thing picked up by player 2 (0x800C362C(the picker's node)): when it is a sanity effect's own (Head of Shakespeare's
+// head, flag 0x4000), the game looks in the tracker's data (0x8006A32C(holder, 17)), writes there, shows its words and
+// sends event 91 to the picker's own link to the tracker, which plays the recital. With player 1's set in memory the
+// head would be taken with no recital. So their pickup runs with THEIR set and link in, as their update does.
+// (return-spec.md, section 4. Not done yet: player 1 refused on the head of player 2's effect; the head's cleanup.)
+#define SANITY_PICKUP 0x800C362Cu
+static void sanity_pickup(CPUState* cpu) {
+    static bool running;
+    g_hle_passthrough = true;
+    g_hle_tail_call = false;
+    u32 node = 0u, holder = 0u, id = 0u, out = 0u;
+    if (running || !g_settings.mod_coop || !g_sanity_p2.made || g_sanity_p2_in || g_sanity_p2_door || g_coop_p2 == 0u || cpu->gpr[3] != g_coop_p2 ||
+        !sda_ready(cpu) || !sanity_tracker(cpu, &node, &holder) || node != g_sanity_p2.node || holder != g_sanity_p2.holder_at ||
+        !hle_guest_call(cpu, SANITY_ID, &node, 1, 0.0, &id))
+        return;
+    running = true;
+    const u32 args[4] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5], cpu->gpr[6]};
+    u32 link[2];
+    sanity_set_io(cpu, &g_sanity_p1_kept, node, holder, true);
+    sanity_set_io(cpu, &g_sanity_p2, node, holder, false);
+    sanity_p2_link(cpu, id, link);
+    g_sanity_p2_tracker_id = id;
+    g_sanity_p2_in = true;
+    hle_guest_call(cpu, SANITY_PICKUP, args, 4, 0.0, &out);
+    g_sanity_p2_in = false;
+    sanity_p2_unlink(cpu, link);
+    sanity_set_io(cpu, &g_sanity_p2, node, holder, true);
+    sanity_set_io(cpu, &g_sanity_p1_kept, node, holder, false);
+    running = false;
+    hle_set_u32(cpu, out);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
 }
 // A door of player 2's with the other player staying (the stay's bracket, notify_ticket_run to coop_stay_change_end:
 // the ticket's runner with them the player): their sanity set is the one in memory for all of it, so the game's own
@@ -28867,7 +28900,7 @@ static void sanity_tool_install(CPUState* cpu) {
             u32 at;
             void (*fn)(CPUState*);
             const char* what;
-        } kOwn[] = {{SANITY_LEVEL, sanity_level, "the level"}, {SANITY_OVERLAY, sanity_overlay, "the overlay"}};  // (the event for later: in split_send)
+        } kOwn[] = {{SANITY_LEVEL, sanity_level, "the level"}, {SANITY_OVERLAY, sanity_overlay, "the overlay"}, {SANITY_PICKUP, sanity_pickup, "the pickup"}};  // (the event for later: in split_send)
         for (size_t i = 0; i < sizeof kOwn / sizeof kOwn[0]; i++) {
             HleDispatchEntry* e = hle_dispatch_entry(kOwn[i].at);
             if (e != NULL && e->intercept == NULL && e->notify == NULL)

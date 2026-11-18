@@ -236,6 +236,12 @@ When you finish something, change its mark here in the same commit as the work. 
   (logs/run-20261118-183045-jtg-sanity2-shrink; Screenshots for Claude/sanity-per-player/07). NOT judged: where
   exactly they are put back (they came back at the room's entry place), and a clean picture of before and after
   (in that run both players also walked through doors by the test's own sticks). 33 and 35 not run.
+- `[NOT VERIFIED]` **12a, Head of Shakespeare (17) allowed player 2, and their pickup theirs** (`sanity_pickup`, an
+  intercept on 0x800C362C: their set and link in when the picker is player 2). Seen by the log only: started at their
+  door, ran 1083 frames (solo's was 1030), the return ran as theirs, player 2 back at 64 599 399 beside player 1,
+  no hang (logs/run-20261118-184436-jtg-sanity2-head). NOT seen: the head off in a close picture, the pickup and its
+  recital, player 1 refused on player 2's head, the head's cleanup (return-spec.md section 4). Next after it: 11
+  Blood Bath (the body falling apart: needs the death's event 81 kept for them), then 22 in another chapter.
 - `[OPEN]` **12c. The user's reminders (2026-11-18, late): the body falling apart with the head that is picked up and
   recites (17), and Walk on Ceiling (22) where the chapter calls for it, for each player on their own.** Both are
   door-started and return to the room before: `docs/research/sanity-per-player/plan.md`, "The user's reminders".
