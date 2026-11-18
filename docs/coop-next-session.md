@@ -193,6 +193,14 @@ When you finish something, change its mark here in the same commit as the work. 
   ended it, and 3600 ticks on picked Bleeding Walls (1); player 1's tracker stayed at rest throughout. MUTE is in player
   2's half alone (logs/run-20261118-170714-jtg-sanity2-roll; Screenshots for Claude/sanity-per-player/02). The blood
   of effect 1 was not found in the picture (room 100's far camera): not judged.
+- `[DONE]` **12a, later the same night.** Player 2's set is stepped at the pad read (a hold of either player's does not
+  stop it); an effect of theirs that holds play holds THEM alone (`g_sanity_p2_busy`: TV Shut Off ran 165 frames with
+  player 1 walking, their whole half black); an effect of theirs that goes on in the background ends when they come
+  into another room (Blood Drip, seen); 6 and 7 are allowed them (their controller state is in for the update);
+  `ED_SANITY_P2_TEST` takes several, `F,E;F,E`. Pictures: Screenshots for Claude/sanity-per-player/01 to 03.
+  **The plan for everything left, with every address the readers found, is `docs/research/sanity-per-player/plan.md`:
+  read it before the next step** (door effects for a door player 2 takes, then the whole-game screens in one half by
+  the Tome copy's way, then the world effects' halves, sound, save states, the menu).
 - `[OPEN]` **12b. What is left of it, in order.** (1) NOT SEEN YET: effects 1, 4, 5, 8, 38 for player 2 in a picture,
   and the user's play. Effect 4 (TV shut off) draws
   full-screen rectangles, which the renderer may not bring back into a half: look first. (2) Player 1's own overlays
