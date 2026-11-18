@@ -27560,7 +27560,7 @@ static void sanity_door_rules(CPUState* cpu) {
 }
 
 // (Each player's own sanity effects in co-op, sanity_p2_step below: what the rules' intercept needs of it.)
-static const s8 kSanityP2[] = {1, 4, 5, 6, 7, 8, 14, 24, 31, 38};  // the effects player 2's own set may roll so far
+static const s8 kSanityP2[] = {1, 4, 5, 6, 7, 8, 10, 14, 21, 24, 31, 38};  // the effects player 2's own set may roll so far
 static bool g_sanity_p2_in;         // player 2's update of the tracker is running
 static int g_sanity_p2_forced = -1;  // ED_SANITY_P2_TEST's effect while it is asked for
 static bool sanity_p2_has(int effect) {

@@ -211,6 +211,10 @@ When you finish something, change its mark here in the same commit as the work. 
   effect at their next room leaves alone an effect that very door started. In the test the start was forced whatever
   the next room's list says (`sanity_door_rules`, only for `ED_SANITY_P2_TEST`'s effect); in play the game's own rule
   stands (the next room must have a list), not seen yet. Follow mode has no bracket: not done there.
+- `[DONE]` **12a, Phantom Creatures (21) and Locked in Room (10) allowed player 2.** 21 seen: asked for in their set,
+  started at their own door, three phantoms round them in room 51, none in player 1's room 100, player 1 walking
+  (logs/run-20261118-174701-jtg-sanity2-phantoms; Screenshots for Claude/sanity-per-player/05). 10 not run. In a
+  SHARED room both players would see the phantoms: not kept to a half yet.
 - `[OPEN]` **12b. What is left of it, in order.** (1) NOT SEEN YET: effects 1, 4, 5, 8, 38 for player 2 in a picture,
   and the user's play. Effect 4 (TV shut off) draws
   full-screen rectangles, which the renderer may not bring back into a half: look first. (2) Player 1's own overlays
