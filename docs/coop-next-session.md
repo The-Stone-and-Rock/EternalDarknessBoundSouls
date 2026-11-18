@@ -10,7 +10,8 @@
   to close)". So: choose in the Tome, close the Tome, the game reloads where they stand about a second later.
   Seen: logs/run-20261117-210755-jtg-fix-tome-change (chapter 1, co-op; the same presses as the hanging baseline
   -163718, plus Start to close the Tome): reload at the close, both players walking after, no hang report. Picture:
-  Screenshots for Claude/tome-character-change-fix/01. Not seen: player 2's change from their copy Tome, the user's play.
+  Screenshots for Claude/tome-character-change-fix/01. Player 2's change from their own copy Tome too (run
+  -212655-jtg-p2-tome-change, picture 02: it waited, reloaded, both walked). Not seen: the user's play.
 - **The Tome's Load/Save said the save "was not created by Eternal Darkness" (the user, 2026-11-17): fixed.**
   The card and the save are fine. The message is UMemcardText.bin group 0 entry 36 (card dialog state 66), raised only by
   0x800B9A68: it compares the save's game code (CARDGetStatus +40) with the disc's name the IPL leaves at 0x80000000,
@@ -40,7 +41,7 @@
   `roster_view_lines`, `character_look_rml`; menu.rcss "Choose a character on a Tome page" (.look*). Up/Down and
   Left/Right both step through the list; Stats and Back under it as before. Random's words are clear of Stats now.
   Seen: Screenshots for Claude/tome-character-layout/built-C-solo.jpg and built-C-coop.jpg (runs -212329-jtg-layout-c3-
-  solo, -212124-jtg-layout-c2-coop). Not seen: player 2's page in their copy Tome, the mouse, 4:3 and 21:9, HD portraits
+  solo, -212124-jtg-layout-c2-coop), and player 2's in their half (built-C-player2-half.jpg). Not seen: the mouse, 4:3 and 21:9, HD portraits
   of the twelve at this size beside the disc's (both showed in the runs: Chandra's and Pius's forms are their own
   pictures). The mock-ups A, B, C are in the same folder.
 
