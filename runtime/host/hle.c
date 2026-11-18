@@ -3976,6 +3976,12 @@ static void notify_card_screen(CPUState* cpu) {
         cpu->gpr[3] = 0u;
 }
 
+// The frame the host last pressed a button for the player on a memory card screen that is passed over (below, and
+// skip_card_select): that press's own sound is left out (tome_copy_sound), as nobody pressed and nothing shows. It was
+// the title's choose sound 636 (from 0x8001AE0C) alone over the chapter's first music, a sharp crack as the game loads
+// (the user, 2026-11-18; logs/run-20261118-141752-jtg-sound-trace). 0: none.
+static unsigned long long g_card_press_frame;
+
 static void skip_card_inserted(CPUState* cpu, DolPadState* pad) {
     static unsigned reads;
     const unsigned long long frame = cpu->timebase / 675000ull;
@@ -3993,6 +3999,7 @@ static void skip_card_inserted(CPUState* cpu, DolPadState* pad) {
     pad->button |= 0x0100u;
     pad->analog_a = 0xFFu;
     pad->error = 0;
+    g_card_press_frame = frame != 0u ? frame : 1u;
 }
 
 static void skip_card_select(CPUState* cpu, DolPadState* pad) {
@@ -4025,6 +4032,7 @@ static void skip_card_select(CPUState* cpu, DolPadState* pad) {
     else
         pad->analog_a = 0xFFu;
     pad->error = 0;
+    g_card_press_frame = cpu->timebase / 675000ull != 0u ? cpu->timebase / 675000ull : 1u;
 }
 
 #ifdef ED_AURORA
@@ -15408,6 +15416,7 @@ static void tome_copy_sound_live(CPUState* cpu, u32 fn, int count) {
 // played as the page opened, so the A's own is left out, on that frame only. 0: none.
 static u64 g_title_replay_quiet_frame;
 #define TITLE_A_SOUND_RETURN 0x8001A688u  // the 633 every main-menu A ends with (0x8001A684)
+#define TITLE_CARD_A_SOUND_RETURN 0x8001AE10u  // the 636 an A on the title's later screens plays (0x8001AE0C)
 static void tome_copy_sound(CPUState* cpu) {
     const u64 frame = cpu->timebase / 675000ull;
     if (g_title_replay_quiet_frame != 0u && cpu->lr == TITLE_A_SOUND_RETURN && cpu->gpr[3] == 633u &&
@@ -15419,6 +15428,24 @@ static void tome_copy_sound(CPUState* cpu) {
         g_hle_passthrough = false;
         g_hle_tail_call = false;
         return;
+    }
+    // The host's own press on a memory card screen that is passed over (skip_card_inserted, skip_card_select): the
+    // title's sound for it is left out, as the screen is. Only the title's own A sound (636 from 0x8001AE0C), within
+    // half a second of the host's last press (the screen's A is taken a few frames after the read that pressed it);
+    // any other sound in that time is logged so a run tells what else a passed-over screen plays.
+    if (g_card_press_frame != 0u && frame - g_card_press_frame <= 30u) {
+        static unsigned told;
+        const bool press_sound = cpu->lr == TITLE_CARD_A_SOUND_RETURN && cpu->gpr[3] == 636u;
+        if (told++ < 12u)
+            fprintf(stderr, "[title] sound %u from lr 0x%08X, %llu frames after the host's press on the passed-over memory card screen: %s (frame %llu)\n",
+                    cpu->gpr[3], cpu->lr, (unsigned long long)(frame - g_card_press_frame),
+                    press_sound ? "left out, nobody pressed" : "played", (unsigned long long)frame);
+        if (press_sound) {
+            hle_set_u32(cpu, ~0u);
+            g_hle_passthrough = false;
+            g_hle_tail_call = false;
+            return;
+        }
     }
     tome_copy_sound_live(cpu, SOUND_PLAIN, 2);
 }
@@ -17517,8 +17544,10 @@ static void title_main_choose(CPUState* cpu) {
     title_page_hold_start(cpu);
     frontend_open_page_skin(FRONTEND_PAGE_TITLE_CHARACTERS, 0, FRONTEND_SKIN_TITLE, -1);
 }
-// Start Game and Load Game ask Solo or Co-op first (docs/research/solo-coop-picker/plan.md, step 3). An intercept on the
-// title's A, which is also its Start (the handler is bound to mask 0x1100), at the main menu's rows 0 and 1. It does the
+// Start Game, Load Game and Jump to Game ask Solo or Co-op first (docs/research/solo-coop-picker/plan.md, step 3; Jump to
+// Game since 2026-11-18: the page comes before its chapter grid, so only the row crosses a restart and the chapter is
+// picked after). An intercept on the
+// title's A, which is also its Start (the handler is bound to mask 0x1100), at the main menu's rows 0, 1 and 3. It does the
 // A's first steps as the game does (0x8013E154: input taken this frame, so no Up/Down in the same frame; the two
 // whispers stopped; the choose sound 633) and opens the page over the live title, the pad the page's. A pick that this
 // run's rooms fit sets mod_coop (frontend.cpp) and the host then presses A once on the same row (title_pick_replay):
@@ -17533,7 +17562,8 @@ static unsigned g_title_pick_closed;  // the close count as it opened
 static s32 g_title_replay_row = -1;   // the row the host presses A on, -1 none
 static u64 g_title_replay_from;
 static unsigned g_title_replay_reads;
-static const char* title_row_name(u32 row) { return row == 1u ? "Load Game" : "Start Game"; }
+#define TITLE_JUMP_ROW 3u  // the game's own row: Jump to Game (shown once a game is finished: TITLE_SHOWN's bits >= 2)
+static const char* title_row_name(u32 row) { return row == TITLE_JUMP_ROW ? "Jump to Game" : row == 1u ? "Load Game" : "Start Game"; }
 // A program started again by a Solo / Co-op pick (title_resume_step below): -2 ED_TITLE_RESUME not read yet, -1 none or
 // done, else the row it goes on into.
 static int g_title_resume = -2;
@@ -17541,7 +17571,7 @@ static void title_resume_read(unsigned long long frame) {
     if (g_title_resume != -2)
         return;
     const char* t = getenv("ED_TITLE_RESUME");
-    g_title_resume = t == NULL ? -1 : strcmp(t, "start") == 0 ? 0 : strcmp(t, "load") == 0 ? 1 : -1;
+    g_title_resume = t == NULL ? -1 : strcmp(t, "start") == 0 ? 0 : strcmp(t, "load") == 0 ? 1 : strcmp(t, "jump") == 0 ? (int)TITLE_JUMP_ROW : -1;
     if (g_title_resume >= 0)
         fprintf(stderr, "[title] started again by the Solo / Co-op page: %s once the title is up (frame %llu)\n",
                 title_row_name((u32)g_title_resume), frame);
@@ -17573,8 +17603,8 @@ static void title_main_start_load(CPUState* cpu) {
         g_hle_tail_call = false;
         return;
     }
-    if (row > 1u)
-        return;
+    if (row > 1u && row != TITLE_JUMP_ROW)
+        return;  // (Start Game, Load Game and Jump to Game ask; Options and Credits start no game)
     const unsigned long long frame = cpu->timebase / 675000ull;
     if (g_title_replay_row == (s32)row) {
         g_title_replay_row = -1;
@@ -17666,6 +17696,10 @@ static void title_resume_step(CPUState* cpu, unsigned long long frame) {
         return;
     const u32 row = (u32)g_title_resume;
     g_title_resume = -1;
+    if (row == TITLE_JUMP_ROW && title_bits(mem_read8(cpu, TITLE_SHOWN)) < 2u) {
+        fprintf(stderr, "[title] started again for Jump to Game, but this card does not show it: nothing pressed (frame %llu)\n", frame);
+        return;
+    }
     mem_write32(cpu, TITLE_CURSOR, row);
     g_title_replay_row = (s32)row;
     g_title_replay_from = frame;
@@ -34170,6 +34204,52 @@ static void coop_test_swap(CPUState* cpu) {
 
 static u32 g_reload_tried = ~0u;  // the choice last reloaded for (a quick load forgets it)
 
+// What the game's end-and-load (0x80022328 -> 0x80021648) puts back to a new game's and no save carries, kept over a
+// reload where the players stand and put back with the game's own setters once play is on again: the screen path a
+// script asked for (fn46: r13-25672, the frame function copies it on through 0x800442BC; the opening dream's and the
+// other-era rooms' own colours), the effects gate (ed276: r13-29000, setter 0x80119090; 0 in the dream) and the
+// prompts-off bit (ed277: bit 1 of r13-24044, setter 0x80117288(1, on)). A change of characters in the opening dream
+// (L00/1911 sets all three, and its start is not run again) came back in play's colours with the bars on
+// (logs/run-20261118-131413-karim-solo-test). Any chapter, either player's change: no test of where they are.
+#define SCREEN_PATH_ASKED 25672u      // r13-: fn46's word
+#define SCREEN_PATH_SET 0x80044190u   // (on)
+#define EFFECTS_GATE 29000u           // r13-: ed276's word
+#define EFFECTS_GATE_SET 0x80119090u  // (on)
+#define PROMPTS_OFF 24044u            // r13-: ed277's word, bit 1
+#define PROMPTS_OFF_SET 0x80117288u   // (mask, set)
+static struct {
+    bool kept;
+    u32 screen, gate, prompts_off;
+} g_reload_keep;
+static void reload_keep_take(CPUState* cpu) {
+    g_reload_keep.kept = true;
+    g_reload_keep.screen = mem_read32(cpu, cpu->gpr[13] - SCREEN_PATH_ASKED);
+    g_reload_keep.gate = mem_read32(cpu, cpu->gpr[13] - EFFECTS_GATE);
+    g_reload_keep.prompts_off = mem_read32(cpu, cpu->gpr[13] - PROMPTS_OFF) & 1u;
+}
+static void reload_keep_put(CPUState* cpu) {
+    if (!g_reload_keep.kept)
+        return;
+    g_reload_keep.kept = false;
+    const u32 screen = mem_read32(cpu, cpu->gpr[13] - SCREEN_PATH_ASKED);
+    const u32 gate = mem_read32(cpu, cpu->gpr[13] - EFFECTS_GATE);
+    const u32 prompts_off = mem_read32(cpu, cpu->gpr[13] - PROMPTS_OFF) & 1u;
+    fprintf(stderr, "[player] the reload is back in play: screen path %u (was %u), effects gate %u (was %u), prompts off %u (was %u)%s (frame %llu)\n",
+            screen, g_reload_keep.screen, gate, g_reload_keep.gate, prompts_off, g_reload_keep.prompts_off,
+            screen == g_reload_keep.screen && gate == g_reload_keep.gate && prompts_off == g_reload_keep.prompts_off ? ": as before it"
+                                                                                                                  : ": put back as before it",
+            (unsigned long long)(cpu->timebase / 675000ull));
+    u32 ignore = 0u;
+    if (screen != g_reload_keep.screen)
+        hle_guest_call(cpu, SCREEN_PATH_SET, &g_reload_keep.screen, 1, 0.0, &ignore);
+    if (gate != g_reload_keep.gate)
+        hle_guest_call(cpu, EFFECTS_GATE_SET, &g_reload_keep.gate, 1, 0.0, &ignore);
+    if (prompts_off != g_reload_keep.prompts_off) {
+        const u32 args[2] = {1u, g_reload_keep.prompts_off};
+        hle_guest_call(cpu, PROMPTS_OFF_SET, args, 2, 0.0, &ignore);
+    }
+}
+
 static s32 actor_model(CPUState* cpu, u32 node) {
     const u32 actor = node != 0u ? mem_read32(cpu, node + (u32)(s32)g_coop_actor_offset) : 0u;
     return guest_ram_range_valid(cpu, actor, 160u) ? (s16)mem_read16(cpu, actor + 154u) : -1;
@@ -34177,6 +34257,9 @@ static s32 actor_model(CPUState* cpu, u32 node) {
 
 static void characters_reload(CPUState* cpu, u32 player) {
     static unsigned settled;  // frames in play since the last reload or load
+    if (g_reload_keep.kept && mem_read32(cpu, cpu->gpr[13] - 26188u) == GAME_MODE_PLAY &&
+        mem_read32(cpu, cpu->gpr[13] - 26240u) == GAME_MODE_PLAY)
+        reload_keep_put(cpu);  // (the reload's load is over: play is the mode asked for and the mode on)
     if (g_coop_actor_offset == 0 || g_chapter_model < 0 || mem_read32(cpu, cpu->gpr[13] - 26188u) != GAME_MODE_PLAY ||
         coop_busy(cpu) || hle_save_held() || g_character_load.active || g_pack.stage != 0) {
         settled = 0u;
@@ -34260,6 +34343,7 @@ static void characters_reload(CPUState* cpu, u32 player) {
         fprintf(stderr, "[player] characters changed, but the save to reload through was not written (%u)\n", size);
         return;
     }
+    reload_keep_take(cpu);
     const u32 load = GAME_END_LOAD;
     hle_guest_call(cpu, GAME_END, &load, 1, 0.0, &ignore);
     fprintf(stderr, "[player] characters changed (player 1 %d, now %d; player 2 %d%s): reloading where they stand%s\n",
@@ -35911,6 +35995,7 @@ void hle_coop_state_load(const void* in) {
     g_fade_mover = 0;  // (R4: no door of the loaded state's is the host's; review-safety 8)
     g_stay_start.on = false;
     g_reload_tried = ~0u;
+    g_reload_keep.kept = false;  // (a loaded state has its own)
     g_coop_tome_p2 = false;
     g_coop_next_cast_p2 = false;
     g_play_script_p2 = false;  // the loaded r13-24248 had no ed177 store this session: its script runs as the game's

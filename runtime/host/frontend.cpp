@@ -534,7 +534,7 @@ void restart_process(const char* resume = nullptr, const char* state = nullptr) 
         if (!g_run_disc.empty())
             setenv("ED_ISO", g_run_disc.c_str(), 1);  // (main.c takes it over argv's --iso for a resume)
         std::fprintf(stderr, "[frontend] starting again for %s (the same log goes on; disc %s)\n",
-                     std::strcmp(resume, "load") == 0 ? "Load Game" : "Start Game",
+                     std::strcmp(resume, "jump") == 0 ? "Jump to Game" : std::strcmp(resume, "load") == 0 ? "Load Game" : "Start Game",
                      g_run_disc.empty() ? "as given" : g_run_disc.c_str());
     } else {
         std::fprintf(stderr, "[frontend] starting again (the same log goes on)\n");
@@ -796,6 +796,8 @@ int g_controls_return_row = 0;
 enum class PickKind { Mode, Controls };
 PickKind g_pick_kind = PickKind::Controls;
 int g_pick_title_row = 0;
+// The title row a Solo / Co-op page is for, as the game counts its rows: 0 Start Game, 1 Load Game, 3 Jump to Game.
+const char* pick_title_row_name() { return g_pick_title_row == 3 ? "Jump to Game" : g_pick_title_row == 1 ? "Load Game" : "Start Game"; }
 // The Solo / Co-op card whose A needs the game started again (the other mode than this run's rooms): its line says so
 // while the program starts again in it (g_pick_restart_row: the title row it goes on into, -1 none; live_page_frame).
 // -1 none. g_pick_note_failed: the restart did not happen (the line says so, the mode as it was).
@@ -1844,7 +1846,7 @@ void build_pick() {
                     g_pick_restart_row = g_pick_title_row;
                     g_pick_restart_at = SDL_GetTicks();
                     std::fprintf(stderr, "[frontend] pick: %s for %s, saved: the game starts again in it\n", name,
-                                 g_pick_title_row == 1 ? "Load Game" : "Start Game");
+                                 pick_title_row_name());
                     return;
                 }
                 g_settings.mod_coop = coop;
@@ -1852,8 +1854,7 @@ void build_pick() {
                 changed();  // (co-op's frame rate)
                 settings_save();
                 g_title_pick_result = g_pick_title_row * 2 + (coop ? 1 : 0);
-                std::fprintf(stderr, "[frontend] pick: %s for %s, saved\n", name,
-                             g_pick_title_row == 1 ? "Load Game" : "Start Game");
+                std::fprintf(stderr, "[frontend] pick: %s for %s, saved\n", name, pick_title_row_name());
                 g_close = true;
             };
         }
@@ -4228,9 +4229,7 @@ void render() {
                           : g_screen == Screen::Problem  ? g_problem_heading.c_str()
                           : g_screen == Screen::QuitAsk  ? (g_on_title ? "Quit the game?" : "Exit the game?")
                           : g_screen == Screen::Credits  ? "Credits"
-                          : g_screen == Screen::Pick     ? (g_pick_kind == PickKind::Controls ? "Controls"
-                                                            : g_pick_title_row == 1           ? "Load Game"
-                                                                                              : "Start Game")
+                          : g_screen == Screen::Pick     ? (g_pick_kind == PickKind::Controls ? "Controls" : pick_title_row_name())
                                                          : "Paused";
     g_doc->GetElementById("heading")->SetInnerRML(heading);
     // The main launcher's new look: its Play page and its Credits are drawn whole (home_rml, credits_rml), and while the
@@ -4968,7 +4967,7 @@ void pick_restart_now() {
     }
     std::fprintf(stderr, "[frontend] the Solo / Co-op pick: the game %s after %llu ms\n",
                  held ? "is held (no pad read for 100 ms)" : "still reads its pad", static_cast<unsigned long long>(SDL_GetTicks() - start));
-    restart_process(row == 1 ? "load" : "start");
+    restart_process(row == 3 ? "jump" : row == 1 ? "load" : "start");
     g_settings.mod_coop = !g_settings.mod_coop;  // (this run's mode again)
     settings_save();
     g_pick_note_failed = true;
@@ -5638,7 +5637,7 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
             }
         // pick-mode / pick-load (Solo / Co-op under Start Game or Load Game's heading) and pick-controls (Player I / II).
         if (std::strncmp(page, "pick-", 5) == 0) {
-            g_pick_title_row = std::strncmp(page, "pick-load", 9) == 0 ? 1 : 0;
+            g_pick_title_row = std::strncmp(page, "pick-jump", 9) == 0 ? 3 : std::strncmp(page, "pick-load", 9) == 0 ? 1 : 0;
             open_pick(std::strncmp(page, "pick-controls", 13) == 0 ? PickKind::Controls : PickKind::Mode, Screen::Launcher, 0);
         }
         if (g_screen == Screen::SlotOverwrite)
@@ -6688,11 +6687,13 @@ extern "C" bool frontend_photo_active(void) { return photo::g_state != photo::St
 // Options row. frontend_frame opens it over the paused game, driven by that player's controller; Back closes it.
 static std::atomic<int> g_open_page{-1};
 static std::atomic<int> g_open_page_player{0};
+static std::atomic<int> g_open_page_row{0};  // the Solo / Co-op page's title row (0 Start Game, 1 Load Game, 3 Jump to Game)
 static std::atomic<int> g_open_page_skin{FRONTEND_SKIN_LAUNCHER};
 static std::atomic<int> g_open_page_half{-1};
 static std::atomic<unsigned> g_menu_closed{0};
 extern "C" void frontend_open_page_skin(int page, int player, int skin, int half) {
     g_open_page_player = player == 1 ? 1 : 0;
+    g_open_page_row = player == 3 ? 3 : player == 1 ? 1 : 0;
     g_open_page_skin = skin;
     g_open_page_half = half == 0 || half == 1 ? half : -1;
     g_open_page = page;  // last: frontend_frame takes the page, then the rest
@@ -6910,7 +6911,7 @@ extern "C" void frontend_frame(void) {
     if (!ensure_ui()) {
         // (No Solo / Co-op page can show: the title's Start Game or Load Game goes on in this run's mode.)
         if (page == FRONTEND_PAGE_TITLE_PICK)
-            g_title_pick_result = (g_open_page_player.load() == 1 ? 2 : 0) + (g_settings.mod_coop ? 1 : 0);
+            g_title_pick_result = g_open_page_row.load() * 2 + (g_settings.mod_coop ? 1 : 0);
         if (page >= 0)
             g_menu_closed++;  // the asked-for page is used up and can't open: a caller waiting on the count goes on
         return;
@@ -7033,8 +7034,8 @@ extern "C" void frontend_frame(void) {
             open_pick(PickKind::Controls, Screen::InGame, 0);
             g_root = Screen::Pick;
             break;
-        case FRONTEND_PAGE_TITLE_PICK:  // Solo / Co-op, for the title's Start Game (player 0) or Load Game (1)
-            g_pick_title_row = player == 1 ? 1 : 0;
+        case FRONTEND_PAGE_TITLE_PICK:  // Solo / Co-op, for the title's Start Game (row 0), Load Game (1) or Jump to Game (3)
+            g_pick_title_row = g_open_page_row.load();
             g_menu_player = 0;
             open_pick(PickKind::Mode, Screen::InGame, 0);
             g_root = Screen::Pick;

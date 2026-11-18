@@ -1,4 +1,4 @@
-# HANDOFF 2026-11-18 (afternoon): START HERE. Everything is committed on tools/game-kit through c6e4c63 and NOT pushed (ten commits past v0.1.6); controls.cpp's test edits stay uncommitted by rule. What to play: docs/coop-play-test.md
+# HANDOFF 2026-11-18 (evening): START HERE. Everything is committed on tools/game-kit and NOT pushed (past v0.1.6; the evening's checkpoint is items 1, 3 and 5 of the board); controls.cpp's test edits stay uncommitted by rule. What to play: docs/coop-play-test.md
 
 ## The status board (keep it true: every session marks what it finishes)
 
@@ -31,7 +31,19 @@ When you finish something, change its mark here in the same commit as the work. 
    moveset on every body: never swap in another character's.
 
 ### Open work, in the user's order
-- `[OPEN]` **1. A high-pitched break in the sound when the game loads from the title screen** (the user, 2026-11-18).
+- `[NOT VERIFIED]` **1. A high-pitched break in the sound when the game loads from the title screen** (the user, 2026-11-18).
+  Built 2026-11-18 (evening), confirmed in a recording, NOT yet heard by the user. What it was: the host presses A for
+  the player on the memory card screen that is passed over (Start Game, Jump to Game, Load Game), and the title's own
+  choose sound for that press (636, from 0x8001AE0C) played alone, a 3 ms crack on top of the chapter's first music.
+  How: `skip_card_inserted` / `skip_card_select` note the frame of their press (`g_card_press_frame`) and
+  `tome_copy_sound` (hle.c) leaves that one sound out within 30 frames of it (log: "[title] sound 636 ... left out,
+  nobody pressed"). Seen: the recording before has the sound three times (two presses and the stray one), after only
+  the two presses (logs/run-20261118-140502-jtg-sound-title-jtg against -142146-jtg-sound-fix; ED_PCM_OUT); the same
+  line on Start Game's path (-142354-jtg-dream-change-keep). The disc music's decode was checked sample for sample:
+  clean. `[OPEN]` still, if the user still hears a break: the speakers' buffer runs empty for about 270 ms on the first
+  frames of the first room of every start ("[audio] ran dry after a 270 ms pause", logs/play.log line 79 and every
+  title-to-game run): the game thread is held that long and the sound is paced by it (interrupt.c `interrupt_poll`).
+  The user can press M in play when they hear it (controls.cpp writes logs/mark-N.wav with a DRY table). Before this:
   Not looked at. Where to start: `docs/research/firstrun-hd-flash/title-music.md` (the title's music under the pages,
   "[audio] ran dry"), `runtime/host/audio.c`, and what changed last at the title: 9d0f752 (the Choose Character
   row's loop sound) and the Solo / Co-op picker's restart (P3, P4). Memory: co-op must not restore MusyX globals.
@@ -45,16 +57,58 @@ When you finish something, change its mark here in the same commit as the work. 
   looks like a beautiful remaster, breaks nothing, and works the same in co-op; changing these options in co-op
   broke features before, so each is checked in co-op too. Judge on the whole game in pictures: `ed chapters N` for
   saves 1 to 12, before and after (`ed system graphics`, `docs/game/systems/graphics.md`).
-- `[OPEN]` **3. Jump to Game on the title screen does not ask Solo or Co-op.** Start Game and Load Game do (the
+  **Read 2026-11-18 evening (nothing changed yet):** Remastered spells off is NOT the original look: Spell glow
+  (`spell_rim`, on by default: a rim on spell meshes and 63x63 sparks into the glow) and Glow / HDR bloom (every
+  additive draw, the streak textures always registered as emitters, settings.c:449-453) still change spells; the 64
+  HD spell textures are the pack's own, untouched by the remaster. The removal list: settings.h:33,
+  settings.c:38/176/373, frontend.cpp's kSpellFx rows, texpack.cpp:234-422 (the textures-spellfx parts), hle.c's runes
+  block 10016-10568 with P7/P7b's rune lights, the renderer's rune lights (shadow.cpp, shadow.hpp, gxcore_draw.cpp,
+  aurora_backend), then the patch regenerated. Costs logged once (2026-11-04, logs/run-20261104-1401*-time2-*, GPU ms
+  a frame): all off 2.4-3.5, all on 11.2 co-op / 14.3 solo; occlusion 1.2 (the largest zone), sharpening+SMAA 0.94,
+  character shadows 0.26-0.41, glow 0.23, haze 0.1; about half the cost is unzoned (per-pixel lighting, glow's second
+  draws, the shadow atlas). Contact shadows showed no visible change on slot 1 (chapter-tour-review.md:11); light
+  shafts are "only a soft halo". In co-op the whole chain runs for each half AND the hidden game frame. Measure with
+  `AURORA_GPU_TIME_LOG=1` ("[gpu-pass]" lines) on Jump to Game runs, solo and co-op, one option at a time. The
+  user's own settings.ini already has occlusion, contact shadows and haze off, glow 2, HDR on.
+- `[DONE]` **3. Jump to Game on the title screen asks Solo or Co-op** (2026-11-18 evening). How: `title_main_start_load`
+  (hle.c) lets the game's row 3 through as well as 0 and 1 (`TITLE_JUMP_ROW`; `ED_TITLE_RESUME=jump` for the restart),
+  and frontend.cpp carries the row itself (`g_open_page_row`, `pick_title_row_name`, restart word "jump", test door
+  `pick-jump`). The page comes before the chapter grid, so only the row crosses a restart. Scripts are unchanged:
+  jtg.sh answers with `ED_TITLE_PICK`. Seen: the page under the heading Jump to Game, Co-op picked from a co-op start
+  goes on into chapter 1 (logs/run-20261118-141958-jtg-jump-pick-coop), Solo picked from a co-op start restarts and
+  opens the chapter grid in solo (-142236-jtg-jump-pick-solo-restart); pictures in Screenshots for Claude/
+  jump-to-game-pick/. Not seen: Back on the page, a real controller, the user's play. Was: does not ask Solo or Co-op.
+  Start Game and Load Game do (the
   picker, steps P1 to P7 below: `FRONTEND_PAGE_TITLE_PICK`, hle.c `title_main_start_load`,
   `docs/research/solo-coop-picker/plan.md`). Add the same page before Jump to Game's chapter grid.
 - `[NOT VERIFIED]` **4. The shotgun on Karim: the reload**, and Roberto, Lindsey and Max with it (same fix, not run).
   See the Karim section below. One logged play by the user settles it (Z once in the open).
-- `[OPEN]` **5. Changing character in the middle of the opening dream drops the dream's own mode** (the sepia look
+- `[FIXED]` **5. Changing character in the middle of the opening dream drops the dream's own mode** (2026-11-18
+  evening). Cause: the reload is the game's own end-and-load (0x80022328 -> 0x80021648), which puts three words back to
+  a new game's that no save carries and only a script's start sets: the screen path (fn46, r13-25672: the dream's and
+  the other-era rooms' colours), the effects gate (ed276, r13-29000: the bars) and the prompts-off bit (ed277,
+  r13-24044). How: `reload_keep_take` / `reload_keep_put` in hle.c, round `characters_reload`'s GAME_END: read before,
+  put back with the game's own setters (0x80044190, 0x80119090, 0x80117288) once play is on again. Any chapter, either
+  player's change, no dream test. Seen: solo new game, Alex to Karim at frame 2300 in the dream, "the reload is back
+  in play: screen path 0 (was 1), effects gate 1 (was 0), prompts off 0 (was 1): put back", Karim with the Shotgun in
+  sepia with no bars (logs/run-20261118-142354-jtg-dream-change-keep; Screenshots for Claude/dream-character-change/).
+  Not seen: co-op and player 2's change (the same path), the user's play. Not carried: the dream's own clock
+  (0x80323F1C, 1400 ticks to script 2027) starts over at a reload, so the dream runs longer after a change. The input
+  mode (ed56's byte 0x80323AEB) is in the save and the game sets it again itself. So FINISH HIM in the dream (item 7)
+  after a change was the prompts-off bit lost, not a new rule. Was: (the sepia look
   goes, the bars come on): seen in logs/run-20261118-131413-karim-solo-test at the reload. `characters_reload` (hle.c).
 - `[OPEN]` **6. `ed test` has not passed since the launcher work**: it stopped in `test-shadow-steady` on a missing
   `probe.txt` (last had one 2026-11-13) and was then cut short so the user could play. Run it (`ED_RUN_AWAY=1`),
   find why the probe file is not written, and get it green before the next co-op fix.
+  **Found 2026-11-18 evening (read, nothing changed yet):** not the launcher. Since P3 (213a350, 2026-11-17) a boot
+  state smaller than 56 MB makes the run SOLO (`coop_follow_boot_state`, frontend.cpp), so all 20 scenarios, which load
+  33 to 41 MB states of 2026-11-04, have run without player 2 since; the probe file is written only for split views,
+  and scenarios.py:91 crashes on its absence. Also saves/slot7.state is gone (door-open, costume-door) and
+  saves/slot1.state is the user's own slot now (both-walk, door-climb): those four failed before too. The user's rule
+  (2026-11-18): `ed test` starts from Jump to Game and makes fresh states on today's exe, never old states. Plan: each
+  scenario names its start (chapter, door scripts, puts), the driver makes one 56 MB state per start per exe with
+  jtg.sh + ED_SAVE_STATE (as tools/ed/check.py already does) and runs the scenario from it; two starts (chapter 3 room
+  147 by door script 892, chapter 4 room 338) cover 18 of 20; frames become relative to the state's.
 - `[DECIDE]` **7. FINISH HIM inside the opening dream for player 1.** The game does not draw it there (its chooser
   0x80117628 takes slot 3 only on the walking or R-held channel; the dream has its own input mode). Player 2 has it
   there in co-op because the host draws theirs. Left as the game has it. Do not ask the user about this again
@@ -67,6 +121,18 @@ When you finish something, change its mark here in the same commit as the work. 
   good); a larger backdrop picture.
 - `[OPEN]` **10. Push** (ten commits past v0.1.6 are local). Only when the user says: fork/main, never origin.
   A release then needs `res/version.txt` raised.
+- `[OPEN]` **12. Independent sanity effects for each player in co-op** (the user, 2026-11-18; docs/coop-todo.md's first
+  section). Read 2026-11-18 evening, nothing built: the game has ONE tracker (the thing of kind 32, handler 0x8006CEAC),
+  one clock and one deck (41 records at r13-25476, the same table for the whole game; chapter limits are code,
+  0x8006EB6C; each room file has its own list), watching player 1 only. Player 2 has their own meter and bar already
+  and nothing rolls for them. The vehicle that exists: player 2's own set as their words have (`CoopWordsOwn`,
+  `coop_words_tick`: a kept copy put in, the game's function called under `coop_be_player2`, put back), and for the
+  picture the two ways a draw is kept to one half (the +4096 move of `flash_submit_notify`, the out-of-view matrix mark
+  of `coop_found_mark`). Steps, one run each: (1) player 2's level from their own meter, no rolls; (2) their rolls for
+  the picture and camera effects (1, 4, 5, 6, 7, 8, 14, 24, 31) kept to their half; (3) player 1's kept to theirs;
+  (4) door effects for whoever took the door; (5) the whole-game screens (15, 25, 26, 28) and the sound by the user's
+  answers; (6) the menu. `[DECIDE]` the user's answers on the whole-game screens, body effects, shared-room things
+  and sound are asked 2026-11-18.
 - `[OPEN]` **11. Everything older that is still open** is in `docs/coop-todo.md` ("Open issues", "Requested
   2026-11-13") and `docs/coop-glitch-todo.md`; the co-op sweep chapter by chapter; the kit session
   (`docs/prompts/session-kit-mapping.md`). Put the marks on those lists as each is touched.
