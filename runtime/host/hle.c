@@ -17485,6 +17485,18 @@ static void title_main_start_load(CPUState* cpu) {
     if (!sda_ready(cpu) || mem_read8(cpu, TITLE_STATE) != TITLE_MAIN)
         return;
     const u32 row = mem_read32(cpu, TITLE_CURSOR);
+    if (row == TITLE_CHOOSE_ROW && title_on_main(cpu)) {
+        // Choose Character's A, done here so its row's loop (title_choose_loop) plays on under the page: the game's own
+        // A stops the lit row's loop (0x8001A464) before its 633. The A's other steps as the game does them: input taken,
+        // the choose sound 633 once (the same single sound Load Game's A plays), then the page (title_main_choose).
+        hle_guest_call(cpu, TITLE_INPUT_TAKEN, NULL, 0, 0.0, NULL);
+        const u32 sound[2] = {633u, 100u};
+        hle_guest_call(cpu, SOUND_PLAIN, sound, 2, 0.0, NULL);
+        title_main_choose(cpu);
+        g_hle_passthrough = false;  // (last: the nested calls change it)
+        g_hle_tail_call = false;
+        return;
+    }
     if (row > 1u)
         return;
     const unsigned long long frame = cpu->timebase / 675000ull;
@@ -17682,6 +17694,32 @@ static void title_options_from_bank(CPUState* cpu) {
     fprintf(stderr, "[title] the title bank's %u pictures have no Options picture of this language: kept when Options is drawn\n",
             count);
 }
+// Choose Character's row has a loop while it is lit, as every row of the game's has (Up/Down 0x8001B810 stops the old
+// row's, its handle in TM+56, and starts the new row's: Start 629, Load 630, Options 631, Jump to Game 724, Credits 632;
+// the spare row 5 nothing). The user's choice, 2026-11-18: Credits' loop (632), and it plays on under the page. Started
+// from the main menu's draw when the cursor is on the row and no loop is held; the game stops it as any row's (Up/Down,
+// an A of its own, the idle timeout), and title_main_start_load's row-5 branch keeps the A from stopping it.
+#define TITLE_CHOOSE_LOOP 632u
+static void title_choose_loop(CPUState* cpu) {
+    static u64 retry_at;
+    if (!title_on_main(cpu) || mem_read32(cpu, TITLE_CURSOR) != TITLE_CHOOSE_ROW ||
+        mem_read32(cpu, TITLE_WHISPERS + 4u) != 0xFFFFFFFFu)
+        return;
+    const u64 frame = cpu->timebase / 675000ull;
+    if (frame < retry_at)
+        return;
+    const u32 sound[2] = {TITLE_CHOOSE_LOOP, 100u};
+    u32 handle = 0xFFFFFFFFu;
+    if (!hle_guest_call(cpu, SOUND_PLAIN, sound, 2, 0.0, &handle) || handle == 0xFFFFFFFFu) {
+        retry_at = frame + 60u;
+        fprintf(stderr, "[title] Choose Character's loop did not start (sound %u): tried again in a second (frame %llu)\n",
+                TITLE_CHOOSE_LOOP, (unsigned long long)frame);
+        return;
+    }
+    mem_write32(cpu, TITLE_WHISPERS + 4u, handle);
+    fprintf(stderr, "[title] Choose Character's loop: sound %u, handle 0x%08X (frame %llu)\n", TITLE_CHOOSE_LOOP, handle,
+            (unsigned long long)frame);
+}
 // Every title screen's draw: r3 the state, r4 its cursor (during a cross-fade the old screen is drawn with its own).
 static void title_main_draw(CPUState* cpu) {
     if (cpu->gpr[3] != TITLE_MAIN || !sda_ready(cpu))
@@ -17712,6 +17750,7 @@ static void title_main_draw(CPUState* cpu) {
     const bool english = mem_read32(cpu, cpu->gpr[13] - TITLE_LANGUAGE) == 0u;
     titlevideo_menu_row(english ? (int)cpu->gpr[4] : -1);
     title_quads_put(cpu, english && titlevideo_menu_painted());
+    title_choose_loop(cpu);
     if (g_title_idle_reset) {
         // Bit 0x2 clear: the game's own code (0x8001C568) starts its stopwatch and resets it to 0 on this frame.
         mem_write32(cpu, TITLE_FLAGS, mem_read32(cpu, TITLE_FLAGS) & ~0x2u);

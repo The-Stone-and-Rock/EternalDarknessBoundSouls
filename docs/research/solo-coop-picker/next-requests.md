@@ -53,3 +53,17 @@ plays on the title screen is fine to use."
   loop off. Nothing at the page's close: the game stops TM+56 at Up/Down, any A and the idle timeout. Never keep the
   handle in r13-26144 (Options and Jump overwrite it). Check with ED_TRACE_FN=0x8019DB90,0x8019DC00,sndFXStartEx and
   ED_PCM_OUT, as run -154055-jtg-f5-final-main; a quick Down, Down shows two copies of 629 overlapping for a second.
+
+## Built: P8 and P9 (2026-11-18), the user's answer: "the same loop of the credits icon ... carry over when the page is seen"
+
+- Choose Character's row plays Credits' loop (sound 632) while it is lit, and the loop plays on under the page. hle.c
+  `title_choose_loop` (from `title_main_draw`: cursor on row 5, TM+56 == -1: SOUND_PLAIN(632, 100), the handle to TM+56)
+  and the row-5 branch of `title_main_start_load` (input taken, 633 once, `title_main_choose`, no pass-through: the
+  game's own A would stop the loop). The game stops it as any row's (Up/Down, the idle timeout).
+- P8 needed nothing: the A's one 633 is the same sound Load Game's A plays.
+- Seen in the sound trace of run -214548-jtg-choose-loop (ED_TRACE_FN=0x8019DB90,0x8019DC00): Down, Down: 630's stop,
+  then 632 started once (frame 761, handle 4); A at 1101: one 633, no stop; the page open 1101-1522: no call; Down at
+  1800: the stop of handle 4, then Options' 631. The recording (ED_PCM_OUT) is never silent from the title's start to
+  the end, the page's 7 seconds included.
+- Not done: heard by ear; Credits to Choose Character quickly (the game's 1 s fade of one 632 over the start of the
+  next); the title Options pages and the Solo / Co-op page are as before.

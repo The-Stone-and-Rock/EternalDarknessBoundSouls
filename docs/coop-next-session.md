@@ -28,9 +28,11 @@
   before, -211537-jtg-tome-load-after; Load itself, -212413-jtg-tome-load-list; Screenshots for Claude/tome-load-fix/). The user's slot3.state: put back at its
   first frame (-heal-probe-slot3). The same hazard may sit in other whole-replacement hooks that make nested game calls
   and end without clearing the flags: not looked for yet.
-- **Next, in order:** (1) the user's answer on the title sounds (docs/research/solo-coop-picker/next-requests.md, "Read
-  for P8 and P9": P8 is already so by the code; the question is the lit row's loop and what plays under the page), then
-  build and check it by recording. (2) The sweep for other hooks that can leave pass-through on after nested game calls
+- **The title's Choose Character row has Credits' loop, and it plays on under the page (the user's answer, 2026-11-18):**
+  docs/research/solo-coop-picker/next-requests.md, "Built: P8 and P9". Seen in a sound trace and a recording, not by ear.
+  The Tome's pages still pause the game for both players: the user's choice for now (2026-11-18: "leave those settings
+  ... to see how it plays").
+- **Next, in order:** (1) the title sounds are built (above); hear them by ear. (2) The sweep for other hooks that can leave pass-through on after nested game calls
   (workflow run wf_d053beaa-569, started 2026-11-18; its result was not in when this was written: read it, fix only what
   a skeptic confirmed, one hook at a time with a run each). (3) F11 still refuses a state made in the other mode. (4) By
   ear: every sound and the music (all runs were muted); real B/Esc/mouse on the pages; other languages; 4:3 and 21:9.
