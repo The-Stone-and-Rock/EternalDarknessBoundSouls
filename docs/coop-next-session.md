@@ -225,6 +225,17 @@ When you finish something, change its mark here in the same commit as the work. 
   Lesson: ONE rectangle of the whole screen is a "whole screen" picture to the split and is lost from both halves.
   Blue Screen (28) and Game Reset (26) need UInsane's pictures (plan.md): the same way, with the picture as two
   halves or a marked matrix. Not heard: the sounds (runs are muted).
+- `[DONE]` **12a, the return ("it wasn't real") for player 2 alone, with Shrink (32), Expand (33) and Sinking (35)
+  allowed them.** Built as `docs/research/sanity-per-player/return-spec.md` section 2: the return's ticket is marked
+  in `notify_room_ticket` (`g_sanity_p2_return`), the mod's bracket for a change of player 2's is opened at the load
+  the ticket's tick calls (`notify_room_change` -> `sanity_p2_return_open` -> `stay_bracket_open`, the body of
+  `notify_ticket_run` made a helper), with their controller state and busy bits in, and closed by
+  `coop_stay_change_end` (`sanity_p2_door(false)`). `SanityOwn` also holds 0x80319578 and 0x803196C8, and the words
+  r13-25380 / -25384. Seen: Shrink asked for in their set, started at their door, a tiny player 2 in their half, the
+  return asked and run as theirs in one frame, their tracker at rest after, no hang
+  (logs/run-20261118-183045-jtg-sanity2-shrink; Screenshots for Claude/sanity-per-player/07). NOT judged: where
+  exactly they are put back (they came back at the room's entry place), and a clean picture of before and after
+  (in that run both players also walked through doors by the test's own sticks). 33 and 35 not run.
 - `[OPEN]` **12c. The user's reminders (2026-11-18, late): the body falling apart with the head that is picked up and
   recites (17), and Walk on Ceiling (22) where the chapter calls for it, for each player on their own.** Both are
   door-started and return to the room before: `docs/research/sanity-per-player/plan.md`, "The user's reminders".
