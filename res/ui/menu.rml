@@ -10,6 +10,12 @@
 	<!-- A co-op Tome page (body.tome-halves): a veil over the partner's half, paused while the page is up, placed by
 	     frontend.cpp render. -->
 	<div id="veil"></div>
+	<!-- The main launcher's new look (body.launcher-dark, hidden in every other look): the backdrop picture
+	     (res/ui/launcher-art.png) dimmed behind everything, the strip the directions lie on, and the side bar of tabs
+	     (filled by frontend.cpp sidebar_rml). -->
+	<div id="art"><div id="art-shade"></div></div>
+	<div id="footbar"></div>
+	<div id="sidebar"></div>
 	<!-- One sheet of parchment (res/ui/pause.png): the heading, the rows (Button
 	     mapping in two columns), and the chosen row's help under them. -->
 	<div id="book">

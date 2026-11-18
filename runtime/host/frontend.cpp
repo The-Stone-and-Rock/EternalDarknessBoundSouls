@@ -12,6 +12,7 @@
 #include "host/settings.h"
 #include "host/texpack.h"
 #include "host/titlevideo.h"
+#include "host/updatecheck.h"
 
 #include <aurora/gfx.h>
 #include <aurora/imgui.h>
@@ -25,6 +26,7 @@
 #include <SDL3/SDL_audio.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_misc.h>
 #include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_scancode.h>
@@ -326,7 +328,8 @@ std::string region_name(const std::string& id) {
 // --- Menu model -------------------------------------------------------------
 
 enum class Screen { Launcher, Play, States, Slot, SlotDelete, SlotOverwrite, Options, OptionsPage, Graphics, Controls, Mapping, InGame,
-                    Problem, Mods, ModsPage, Characters, QuitAsk, Pick };
+                    Problem, Mods, ModsPage, Characters, QuitAsk, Pick,
+                    Credits };  // (the main launcher's Credits tab: words only, no rows)
 
 struct Row {
     std::string label;
@@ -347,6 +350,12 @@ struct Row {
     bool toggle = false;         // On/Off: drawn as a switch
     int slider = -1;             // 0-100: drawn as a bar, with value beside it
     bool experimental = false;   // "(Experimental, expect glitches)" after its name
+    // The main launcher's Play page (build_launcher_home): its line down the page and its place along it (-1: not there),
+    // the small words under a big button, and whether it is one of the three tiles.
+    int hline = -1;
+    int hcol = 0;
+    std::string sub;
+    bool htile = false;
 };
 
 Rml::ElementDocument* g_doc = nullptr;
@@ -485,7 +494,13 @@ int g_launcher_row = -1;
 
 // The launcher's row the cursor starts on: Main menu (the user's choice, 2026-11-07), after the disc row and Continue
 // when they are there; the disc row while no playable disc is chosen.
+// The main launcher's new look (launcher_dark, further down): only while the launcher the program opens with is up.
+bool g_launcher_up = false;
+bool launcher_dark();
+
 int launcher_main_row() {
+    if (launcher_dark())
+        return 0;  // (the Play page's first row is always Play: build_launcher_home)
     if (g_disc_on_main && !disc_playable())
         return 0;
     return (g_disc_on_main ? 1 : 0) + (newest_slot() != 0 ? 1 : 0);
@@ -2148,7 +2163,13 @@ const char* mods_page_name() {
     }
 }
 
+void build_launcher_home();
+
 void build_launcher() {
+    if (launcher_dark()) {
+        build_launcher_home();  // (the main launcher's Play page; this list stays for "Return to launcher" over a game)
+        return;
+    }
     if (g_disc_on_main)
         g_rows.push_back(disc_row());
 
@@ -3685,6 +3706,497 @@ std::string row_control(const Row& r, bool plain, bool opens) {
     return out;
 }
 
+// ---- The main launcher's new look (the user's design, 2026-11-18: docs/research/launcher-redesign/decisions.md) ----
+// Only the launcher the program opens with (g_launcher_up, set by frontend_run_launcher): a side bar of tabs, each tab
+// one of the launcher's own pages drawn in the panel beside it (in the title look's colours), and the Play page
+// (Screen::Launcher) laid out by home_rml. The menu over a running game, "Return to launcher" there, the title look and
+// the Tome look never see any of it: launcher_dark() is false for them. All of its style is menu.rcss's last block
+// (body.launcher-dark). ED_LAUNCHER_OLD=1 (testing): the launcher as it was.
+void activate_selected();
+void go_back();
+
+enum { kTabPlay, kTabCharacter, kTabDisplay, kTabGraphics, kTabSound, kTabControls, kTabMods, kTabCredits, kTabCount };
+const char* const kTabNames[kTabCount] = {"Play", "Choose Character", "Display", "Graphics", "Sound", "Controls", "Mods", "Credits"};
+const char* const kTabNotes[kTabCount] = {
+    "",
+    "Player 1's and player 2's characters and forms. Experimental, expect glitches.",
+    "The window, the picture's size and shape, the cameras and the game's text.",
+    "Textures, shadows, lighting and effects. Experimental, expect glitches.",
+    "Music, effects and voices.",
+    "Each player's controller, layout and button mapping.",
+    "Challenge, cheats, sanity effects, the intro and the title video.",
+    "",
+};
+int g_tab = kTabPlay;  // the tab whose page is in the panel
+bool g_bar = false;    // the cursor is on the side bar (read through on_bar only, so it never leaks into another menu)
+int g_bar_at = 0;      // where on the bar: a tab, or kTabCount for Quit
+
+bool launcher_dark() {
+    static const bool old_look = std::getenv("ED_LAUNCHER_OLD") != nullptr;
+    return g_launcher_up && !old_look && g_skin == Skin::Launcher && g_screen != Screen::Problem;
+}
+
+bool on_bar() { return launcher_dark() && g_bar; }
+
+// The page a tab opens on: Back there goes to the side bar, and its Back row is not drawn (build_rows).
+bool at_tab_root() {
+    switch (g_tab) {
+    case kTabPlay: return g_screen == Screen::Launcher;
+    case kTabCharacter: return g_screen == Screen::ModsPage && g_mods_section == 3;
+    case kTabDisplay: return g_screen == Screen::OptionsPage && g_options_section == 1;
+    case kTabSound: return g_screen == Screen::OptionsPage && g_options_section == 2;
+    case kTabGraphics: return g_screen == Screen::Graphics;
+    case kTabControls: return g_screen == Screen::Pick;
+    case kTabMods: return g_screen == Screen::Mods;
+    default: return g_screen == Screen::Credits;
+    }
+}
+
+// The tab a page belongs to (a page opened by ED_MENU_OPEN lights its tab).
+int tab_of_screen() {
+    switch (g_screen) {
+    case Screen::OptionsPage: return g_options_section == 2 ? kTabSound : options_page_in_graphics() ? kTabGraphics : kTabDisplay;
+    case Screen::Options: return kTabDisplay;
+    case Screen::Graphics: return kTabGraphics;
+    case Screen::Controls:
+    case Screen::Mapping:
+    case Screen::Pick: return kTabControls;
+    case Screen::ModsPage: return g_mods_section == 3 ? kTabCharacter : kTabMods;
+    case Screen::Characters: return kTabCharacter;
+    case Screen::Mods: return kTabMods;
+    case Screen::Credits: return kTabCredits;
+    default: return kTabPlay;
+    }
+}
+
+// Leaving a page any way but its own Back (another tab, Quit, Play): what each page's Back does, in one place.
+void leave_page() {
+    settings_save();
+    controls::set_menu_player(0);
+}
+
+// A tab's page in the panel, as the old launcher's rows opened them.
+void open_tab(int tab) {
+    leave_page();
+    g_tab = tab;
+    g_launcher_row = -1;
+    g_options_return = Screen::Launcher;
+    g_mods_return = Screen::Launcher;
+    g_selected = 0;
+    switch (tab) {
+    case kTabCharacter:
+        g_mods_section = 3;
+        g_mods_page_return = Screen::Launcher;
+        g_mods_page_return_row = 0;
+        g_screen = Screen::ModsPage;
+        break;
+    case kTabDisplay:
+    case kTabSound:
+        g_options_section = tab == kTabSound ? 2 : 1;
+        g_screen = Screen::OptionsPage;
+        break;
+    case kTabGraphics: g_screen = Screen::Graphics; break;
+    case kTabControls: open_pick(PickKind::Controls, Screen::Launcher, 0); break;
+    case kTabMods: g_screen = Screen::Mods; break;
+    case kTabCredits: g_screen = Screen::Credits; break;
+    default:
+        g_screen = Screen::Launcher;
+        g_selected = launcher_main_row();
+        break;
+    }
+}
+
+// From the side bar into the page (its rows built): the row it was on, else its first; a page with nothing to choose
+// (Credits) keeps the cursor on the bar.
+void enter_panel() {
+    g_bar = false;
+    if (g_screen == Screen::Launcher) {
+        g_selected = launcher_main_row();
+        return;
+    }
+    const int n = static_cast<int>(g_rows.size());
+    auto can = [](const Row& r) { return r.enabled || r.change; };
+    if (g_selected < n && can(g_rows[g_selected]))
+        return;
+    for (int i = 0; i < n; i++)
+        if (can(g_rows[i])) {
+            g_selected = i;
+            return;
+        }
+    g_bar = true;
+    g_bar_at = g_tab;
+}
+
+void launcher_quit() {
+    leave_page();
+    g_play = false;
+    g_close = true;
+}
+
+// This build's version ("0.1.6"): the first line of res/version.txt, raised with each release.
+const std::string& launcher_version() {
+    static std::string version;
+    static bool read = false;
+    if (!read) {
+        read = true;
+        if (FILE* f = std::fopen((res_dir() + "/version.txt").c_str(), "rb"); f != nullptr) {
+            char line[64] = {};
+            if (std::fgets(line, sizeof line, f) != nullptr)
+                version.assign(line, std::strcspn(line, "\r\n \t"));
+            std::fclose(f);
+        }
+    }
+    return version;
+}
+
+// What a player plays with, for the Play page: their controller when one is connected, else the keyboard.
+std::string player_plays_with(int player) {
+    if (controls::player_has_controller(player) && !controls::detected_pad_type(player).empty()) {
+        controls::set_menu_player(player);
+        const std::string name = controls::controller_name();
+        controls::set_menu_player(0);  // (always player 1's again: the Controls pages read the menu player)
+        return name + ": connected";
+    }
+    if (controls::player_has_keyboard(player) || !controls::player_has_controller(player))
+        return "Keyboard";
+    return player == 1 ? "No second controller" : "No controller";
+}
+std::string g_home_pads[2];
+
+std::string with_commas(uint32_t v);
+
+// The Play page's rows. Their order is fixed (home_rml draws them by place): Play, Load, Continue; the three tiles;
+// Auto-set; Configure; Check Updates; the disc. Up, Down, Left and Right go by hline and hcol (home_move).
+enum { kHomePlay, kHomeLoad, kHomeContinue, kHomeTextures, kHomeResolution, kHomeRate, kHomeAuto, kHomeConfigure, kHomeUpdate,
+       kHomeDisc, kHomeCount };
+void build_launcher_home() {
+    // Resolution, Frame rate and HD textures are the Display and Image pages' own rows, so a tile and its row never differ.
+    std::vector<Row> options;
+    std::swap(options, g_rows);
+    build_options_rows();
+    std::swap(options, g_rows);
+    auto option = [&](const char* label) {
+        for (const Row& r : options)
+            if (r.label == label)
+                return r;
+        Row none{label, "?"};
+        none.enabled = false;
+        return none;
+    };
+    const bool playable = disc_playable();
+    const std::string no_disc = disc_row().note;
+    const int newest = newest_slot();
+    int used = 0;
+    for (int slot = 1; slot <= kSlotCount; slot++)
+        used += slot_used(slot) ? 1 : 0;
+
+    Row play{"Play"};
+    play.enabled = playable;
+    play.note = playable ? "Start from the title screen (your memory card saves are there)." : no_disc;
+    play.activate = [] {
+        leave_page();
+        start_game(0);
+    };
+    play.hline = 1;
+    g_rows.push_back(play);
+
+    Row load{"Load"};
+    load.sub = used != 0 ? "Your save states" : "No save states yet";
+    load.enabled = playable && used != 0;
+    load.note = !playable ? no_disc : "Your save states: load, duplicate or delete one. Experimental, expect glitches.";
+    load.activate = [] {
+        g_screen = Screen::Play;
+        g_selected = play_row(newest_slot());  // the save made last
+    };
+    load.hline = 1;
+    load.hcol = 1;
+    g_rows.push_back(load);
+
+    Row cont{"Continue"};
+    cont.sub = "No save state yet";
+    if (newest != 0) {
+        // (Solo or co-op as the slot's own page tells them apart: build_slot.)
+        const unsigned mem1 = quickstate_file_mem1_size(slot_path(newest).c_str());
+        const bool coop = mem1 == 56u * 1024u * 1024u || (mem1 != 0u && state_old_coop(slot_path(newest).c_str(), mem1));
+        cont.sub = "Newest: slot " + std::to_string(newest) + (mem1 == 0u ? "" : coop ? ", co-op" : ", solo");
+    }
+    cont.enabled = playable && newest != 0;
+    cont.note = !playable ? no_disc : "Back where you saved last (" + slot_time(newest) + ").";
+    cont.activate = [newest] {
+        leave_page();
+        start_game(newest);
+    };
+    cont.hline = 1;
+    cont.hcol = 2;
+    g_rows.push_back(cont);
+
+    Row textures = option("HD textures");
+    textures.label = "HD TEXTURES";
+    textures.value = textures.enabled ? textures.value + ": " + with_commas(static_cast<uint32_t>(texpack_count())) + " found" : "No pack";
+    Row resolution = option("Resolution");
+    resolution.label = "RESOLUTION";
+    Row rate = option("Frame rate");
+    rate.label = "FRAME RATE";
+    if (rate.value != "60")
+        rate.value += " solo, 60 co-op";
+    int col = 0;
+    for (Row* tile : {&textures, &resolution, &rate}) {
+        tile->section.clear();
+        tile->page = 0;
+        tile->toggle = false;
+        tile->htile = true;
+        tile->hline = 2;
+        tile->hcol = col++;
+        g_rows.push_back(*tile);
+    }
+
+    Row automatic{"Auto-set"};
+    automatic.enabled = false;
+    automatic.hline = 3;
+    automatic.hcol = 2;
+    g_rows.push_back(automatic);
+
+    Row configure{"Configure"};
+    configure.note = kTabNotes[kTabControls];
+    configure.activate = [] {
+        open_tab(kTabControls);
+        g_bar = false;
+    };
+    configure.hline = 4;
+    configure.hcol = 2;
+    g_rows.push_back(configure);
+
+    const UpdateState state = updatecheck_state();
+    Row update{state == kUpdateNewer ? "Update" : state == kUpdateChecking ? "Checking" : "Check Updates"};
+    update.enabled = !launcher_version().empty() && state != kUpdateChecking;
+    update.note = state == kUpdateNewer ? "Opens the Releases page in your browser. Nothing is installed by itself."
+                                        : "Looks on GitHub for a newer release. Nothing is downloaded.";
+    update.activate = [] {
+        if (updatecheck_state() == kUpdateNewer)
+            SDL_OpenURL(updatecheck_page());
+        else
+            updatecheck_start(launcher_version());
+    };
+    update.hline = 0;
+    update.hcol = 2;
+    g_rows.push_back(update);
+
+    // The disc: only a choice when there is more than one (else a line to read, and with none Play's help says what to do).
+    Row disc = disc_row();
+    disc.enabled = static_cast<bool>(disc.change);
+    disc.hline = 5;
+    disc.hcol = 2;
+    g_rows.push_back(disc);
+
+    for (int p = 0; p < 2; p++)
+        g_home_pads[p] = player_plays_with(p);
+}
+
+bool home_can(const Row& r) {
+    return r.hline >= 0 && (r.enabled || r.htile);
+}
+
+// The Play page's arrows: Up and Down to the nearest line with something to choose, at the nearest place along it;
+// Left and Right along the line, and Left from its first place to the side bar.
+void home_move(int dx, int dy) {
+    const int n = static_cast<int>(g_rows.size());
+    if (g_selected >= n)
+        return;
+    const Row& at = g_rows[g_selected];
+    int best = -1, best_line = 0, best_col = 0;
+    for (int i = 0; i < n; i++) {
+        const Row& r = g_rows[i];
+        if (i == g_selected || !home_can(r))
+            continue;
+        if (dy != 0 ? (dy < 0 ? r.hline >= at.hline : r.hline <= at.hline)
+                    : (r.hline != at.hline || (dx < 0 ? r.hcol >= at.hcol : r.hcol <= at.hcol)))
+            continue;
+        const int line = std::abs(r.hline - at.hline), column = std::abs(r.hcol - at.hcol);
+        if (best < 0 || line < best_line || (line == best_line && column < best_col)) {
+            best = i;
+            best_line = line;
+            best_col = column;
+        }
+    }
+    if (best >= 0) {
+        g_selected = best;
+    } else if (dx < 0) {
+        g_bar = true;
+        g_bar_at = g_tab;
+    }
+}
+
+// The main launcher's presses, before the menus' own (menu_step): true when it took them all.
+bool launcher_input(const bool* pressed, bool* dirty) {
+    // LB / RB: the tab before or after, from anywhere but the save states' list (its own pages).
+    if ((pressed[kPageLeft] || pressed[kPageRight]) && g_screen != Screen::Play) {
+        const bool was_on_bar = g_bar;
+        open_tab((g_tab + (pressed[kPageLeft] ? kTabCount - 1 : 1)) % kTabCount);
+        g_bar_at = g_tab;
+        build_rows();
+        if (!was_on_bar)
+            enter_panel();
+        *dirty = true;
+        return true;
+    }
+    if (g_bar) {
+        // The side bar: Up and Down show each tab's page at once; A or Right goes into it. Back does nothing here.
+        if (pressed[kUp] || pressed[kDown]) {
+            g_bar_at = (g_bar_at + (pressed[kUp] ? kTabCount : 1)) % (kTabCount + 1);
+            if (g_bar_at < kTabCount && g_bar_at != g_tab)
+                open_tab(g_bar_at);
+            *dirty = true;
+        } else if (pressed[kAccept] && g_bar_at == kTabCount) {
+            launcher_quit();
+            *dirty = true;
+        } else if ((pressed[kAccept] || pressed[kRight]) && g_bar_at < kTabCount) {
+            enter_panel();
+            *dirty = true;
+        }
+        return true;
+    }
+    if (g_screen == Screen::Launcher) {
+        if (pressed[kUp] || pressed[kDown] || pressed[kLeft] || pressed[kRight]) {
+            home_move(pressed[kLeft] ? -1 : pressed[kRight] ? 1 : 0, pressed[kUp] ? -1 : pressed[kDown] ? 1 : 0);
+            *dirty = true;
+        } else if (pressed[kAccept]) {
+            activate_selected();
+            *dirty = true;
+        } else if (pressed[kBack]) {
+            go_back();
+            *dirty = true;
+        }
+        return true;
+    }
+    // A tab's own page: Left from a row with nothing to change (and from the first of two cards) goes to the side bar.
+    if (pressed[kLeft] && g_screen != Screen::Characters && g_selected < static_cast<int>(g_rows.size())) {
+        const Row& r = g_rows[g_selected];
+        if (card_screen() ? r.card == 1 : !(r.change && (r.enabled || r.browse))) {
+            g_bar = true;
+            g_bar_at = g_tab;
+            *dirty = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+// The side bar: the names at its top, the tabs, Quit and the line under it. A tab is stabN (N = kTabCount: Quit); no
+// other id starts with "stab" (MenuListener).
+std::string sidebar_rml() {
+    std::string out = "<div id=\"brand\"><div class=\"b1\">ETERNAL DARKNESS</div><div class=\"b2\">BOUND SOULS</div>"
+                      "<div class=\"b-rule\"><div class=\"b-line\"></div><img class=\"b-mark\" src=\"tome/mark.png\"/>"
+                      "<div class=\"b-line\"></div></div></div><div id=\"sidelist\">";
+    auto tab = [&](int t, const char* name) {
+        out += std::string("<div class=\"stab") + (t == g_tab ? " active" : "") + (g_bar && t == g_bar_at ? " focus" : "") +
+               "\" id=\"stab" + std::to_string(t) + "\">" + name + "</div>";
+    };
+    for (int t = 0; t < kTabCount; t++)
+        tab(t, kTabNames[t]);
+    out += "</div><div id=\"sidefoot\">";
+    tab(kTabCount, "Quit");
+    out += "<div id=\"built\">Built on Eternal Darkness Recomp by griches</div></div>";
+    return out;
+}
+
+// The Play page (the user's mock-up 7): the title, the version and Check Updates, Play / Load / Continue, the three
+// tiles, the recommended-settings placeholder, the controllers and the saves. Each thing to choose is a row of
+// build_launcher_home, drawn here with its row<i> id (the mouse).
+std::string home_rml() {
+    if (static_cast<int>(g_rows.size()) < kHomeCount)
+        return "";
+    auto state = [](int i) {
+        return std::string(!g_bar && g_selected == i ? " selected" : "") + (g_rows[i].enabled ? "" : " disabled");
+    };
+    auto id = [](int i) { return " id=\"row" + std::to_string(i) + "\""; };
+    auto button = [&](int i, const char* extra = "") {
+        return "<div class=\"h-btn" + std::string(extra) + state(i) + "\"" + id(i) + ">" + escape(g_rows[i].label) + "</div>";
+    };
+    auto section = [](const char* name) {
+        return std::string("<div class=\"h-sec\"><div class=\"h-sec-name\">") + name + "</div><div class=\"h-sec-rule\"></div></div>";
+    };
+    const bool playable = disc_playable();
+    const UpdateState update = updatecheck_state();
+    const std::string version = launcher_version();
+    std::string words = version.empty() ? "" : "Version " + version;
+    if (update == kUpdateNewer)
+        words += "  -  " + updatecheck_latest() + " is out";
+    else if (update == kUpdateNone)
+        words += "  -  up to date";
+    else if (update == kUpdateFailed)
+        words += "  -  could not check";
+    else if (update == kUpdateChecking)
+        words += "  -  checking";
+    int used = 0;
+    for (int slot = 1; slot <= kSlotCount; slot++)
+        used += slot_used(slot) ? 1 : 0;
+
+    std::string out = "<div class=\"hpage\">"
+                      "<div class=\"h-title\">ETERNAL DARKNESS: SANITY'S REQUIEM</div>"
+                      "<div class=\"h-name\">BOUND SOULS</div>"
+                      "<div class=\"h-for\">FOR ONE OR TWO PLAYERS</div><div class=\"h-rule\"></div>";
+    out += std::string("<div class=\"h-status\"><div class=\"h-ready") + (playable ? "" : " no") + "\">" +
+           (playable ? "READY" : "NO GAME DISC FOUND") + "</div><div class=\"h-fill\"></div><div class=\"h-version" +
+           (update == kUpdateNewer ? " newer" : "") + "\">" + escape(words) + "</div>" +
+           button(kHomeUpdate, update == kUpdateNewer ? " lit" : "") + "</div>";
+    out += "<div class=\"h-three\">";
+    for (int i = kHomePlay; i <= kHomeContinue; i++)
+        out += "<div class=\"h-big" + std::string(i == kHomePlay ? " play" : "") + state(i) + "\"" + id(i) + "><div class=\"h-big-name\">" +
+               escape(g_rows[i].label) + "</div>" +
+               (g_rows[i].sub.empty() ? "" : "<div class=\"h-big-sub\">" + escape(g_rows[i].sub) + "</div>") + "</div>";
+    out += "</div><div class=\"h-three tiles\">";
+    for (int i = kHomeTextures; i <= kHomeRate; i++)
+        out += "<div class=\"h-tile" + state(i) + "\"" + id(i) + "><div class=\"h-tile-name\">" + escape(g_rows[i].label) +
+               "</div><div class=\"h-tile-value\">" + escape(g_rows[i].value) + "</div><div class=\"h-tile-change\">CHANGE</div></div>";
+    out += "</div>";
+    auto line = [](const std::string& left, const std::string& right, const char* kind = "") {
+        return "<div class=\"h-line\"><div class=\"h-left\">" + left + "</div><div class=\"h-fill\"></div><div class=\"h-right" +
+               std::string(kind) + "\">" + right + "</div></div>";
+    };
+    out += section("RECOMMENDED SETTINGS");
+    out += "<div class=\"h-line\"><div class=\"h-left soon\">Recommended settings for this PC: coming soon.</div>"
+           "<div class=\"h-fill\"></div>" + button(kHomeAuto) + "</div>";
+    out += section("CONTROLLERS");
+    out += line("Player I", escape(g_home_pads[0]), " p1");
+    out += line("Player II", escape(g_home_pads[1]), " p2");
+    out += "<div class=\"h-line tall\"><div class=\"h-left\">Controller settings</div><div class=\"h-fill\"></div>" +
+           button(kHomeConfigure) + "</div>";
+    out += section("SAVES");
+    out += line("Save states", std::to_string(used) + " of " + std::to_string(kSlotCount) + " used");
+    out += "<div class=\"h-line h-disc" + state(kHomeDisc) + (g_discs.empty() || !playable ? " none" : "") + "\"" + id(kHomeDisc) +
+           "><div class=\"h-left\">Game disc</div><div class=\"h-fill\"></div><div class=\"h-right\">" +
+           escape(g_rows[kHomeDisc].value) + "</div></div>";
+    out += "</div>";
+    return out;
+}
+
+// The Credits tab: the README's credits, as words.
+std::string credits_rml() {
+    auto entry = [](const char* who, const char* what) {
+        return std::string("<div class=\"c-entry\"><div class=\"c-who\">") + who + "</div><div class=\"c-what\">" + what + "</div></div>";
+    };
+    return "<div class=\"credits\">" +
+           entry("griches", "Eternal Darkness Recomp, the recompilation that made Bound Souls possible: the native port, "
+                            "widescreen, controls, baked shadows, save slots and everything else under the co-op. Thank you.") +
+           entry("Zombie", "The HD texture pack.") +
+           entry("DolRecomp, GXRuntime and StrikersRecomp", "The tools and the host this is built on.") +
+           entry("unending-occlusion", "The decomp, for function names.") +
+           entry("Alegreya SC, Fira Sans, IM Fell English, La Belle Aurore", "The typefaces (SIL Open Font License). Kenney's Input Prompts, the button pictures (CC0).") +
+           entry("Silicon Knights and Nintendo", "The game itself.") +
+           "<div class=\"c-foot\">Bound Souls is a fan project, not affiliated with or endorsed by Nintendo or Silicon Knights. "
+           "Please own the game.</div></div>";
+}
+
+// Whether the launcher's backdrop picture is there to ask for (RmlUi never tries a picture again after a failed load).
+bool launcher_art_ready() {
+    static int ready = -1;
+    if (ready < 0) {
+        std::error_code ec;
+        ready = std::filesystem::is_regular_file(std::filesystem::path(res_dir()) / "ui" / "launcher-art.png", ec) ? 1 : 0;
+    }
+    return ready == 1;
+}
+
 void render() {
     if (g_doc == nullptr)
         return;
@@ -3710,11 +4222,17 @@ void render() {
                                                                                        : "Player 1 Character")
                           : g_screen == Screen::Problem  ? g_problem_heading.c_str()
                           : g_screen == Screen::QuitAsk  ? (g_on_title ? "Quit the game?" : "Exit the game?")
+                          : g_screen == Screen::Credits  ? "Credits"
                           : g_screen == Screen::Pick     ? (g_pick_kind == PickKind::Controls ? "Controls"
                                                             : g_pick_title_row == 1           ? "Load Game"
                                                                                               : "Start Game")
                                                          : "Paused";
     g_doc->GetElementById("heading")->SetInnerRML(heading);
+    // The main launcher's new look: its Play page and its Credits are drawn whole (home_rml, credits_rml), and while the
+    // cursor is on the side bar no row of the page is lit.
+    const bool dark = launcher_dark();
+    const bool whole_page = dark && (g_screen == Screen::Launcher || g_screen == Screen::Credits);
+    const int lit = on_bar() ? -1 : g_selected;
     std::string rml[2];
     bool spread = false;
     bool in_roster = false;
@@ -3742,7 +4260,7 @@ void render() {
             rml[0] += "<div class=\"list-more up\"><img src=\"tome/mark.png\"/></div>";
     }
     const int list_end = std::min(g_list_top + g_list_lines, static_cast<int>(g_rows.size()));
-    for (size_t i = 0; i < g_rows.size(); i++) {
+    for (size_t i = 0; !whole_page && i < g_rows.size(); i++) {
         const Row& r = g_rows[i];
         if (slot_list && static_cast<int>(i) < slot_rows && static_cast<int>(i) / kSlotsShown != g_slots_page)
             continue;
@@ -3752,8 +4270,8 @@ void render() {
         if (r.card != 0) {
             if (r.card == 1)
                 rml[0] += "<div class=\"pcards\">";
-            rml[0] += g_screen == Screen::Pick ? pick_card_rml(r.card - 1, static_cast<int>(i) == g_selected, i)
-                                               : player_card_rml(r.card - 1, static_cast<int>(i) == g_selected, i);
+            rml[0] += g_screen == Screen::Pick ? pick_card_rml(r.card - 1, static_cast<int>(i) == lit, i)
+                                               : player_card_rml(r.card - 1, static_cast<int>(i) == lit, i);
             rml[0] += r.card == 1 ? "<div class=\"pcards-mid\"><div class=\"pcards-line\"></div><img class=\"pcards-mark\" "
                                     "src=\"tome/mark.png\"/><div class=\"pcards-line\"></div></div>"
                                   : "</div>";
@@ -3776,14 +4294,14 @@ void render() {
             if (g_skin == Skin::Tome) {
                 // A Tome page: the name on a line of the list, its form in red after it; the picture is beside the list.
                 const std::string form = tile_form_name(roster_tiles()[i]);
-                rml[0] += "<div class=\"tile" + std::string(static_cast<int>(i) == g_selected ? " selected" : "") +
+                rml[0] += "<div class=\"tile" + std::string(static_cast<int>(i) == lit ? " selected" : "") +
                           (r.chosen ? " chosen" : "") + "\" id=\"row" + std::to_string(i) + "\"><span class=\"name\">" +
                           escape(r.label) + "</span>" +
                           (form.empty() ? std::string() : "<span class=\"tile-form\">" + escape(form) + "</span>") + "</div>";
                 continue;
             }
             rml[0] += "<div class=\"tile" + std::string(roster_tiles()[i].character == 0 ? " default" : "") +
-                      std::string(static_cast<int>(i) == g_selected ? " selected" : "") +
+                      std::string(static_cast<int>(i) == lit ? " selected" : "") +
                       (r.chosen ? " chosen" : "") + "\" id=\"row" + std::to_string(i) +
                       "\"><div class=\"portrait\">" + r.value_rml + "</div><div class=\"name\">" + escape(r.label) +
                       "</div><div class=\"tile-form\">" +
@@ -3802,7 +4320,7 @@ void render() {
         else if (r.gap)
             out += "<div class=\"gap\"></div>";
         out += "<div class=\"row";
-        if (static_cast<int>(i) == g_selected)
+        if (static_cast<int>(i) == lit)
             out += " selected";
         if (!r.enabled)
             out += " disabled";
@@ -3842,15 +4360,35 @@ void render() {
         rml[0] += roster_panel_end();
     if (scrolls && !title_marks && g_list_top + g_list_lines < static_cast<int>(g_rows.size()))
         rml[0] += "<div class=\"list-more down\"><img src=\"tome/mark.png\"/></div>";
+    if (whole_page)
+        rml[0] = g_screen == Screen::Credits ? credits_rml() : home_rml();
     g_doc->GetElementById("menu0")->SetInnerRML(rml[0]);
     g_doc->GetElementById("menu1")->SetInnerRML(rml[1]);
-    const bool have = g_selected < static_cast<int>(g_rows.size());
+    const bool have = !on_bar() && g_selected < static_cast<int>(g_rows.size());
     // (The title look's list has no room for a row's experimental tag: its help says it instead.)
     std::string note = have ? g_rows[g_selected].note : "";
     if (have && g_skin != Skin::Launcher && g_rows[g_selected].experimental)
         note = "Experimental, expect glitches. " + note;
+    if (on_bar())
+        note = g_bar_at < kTabCount ? kTabNotes[g_bar_at] : "Close the launcher.";
     g_doc->GetElementById("note")->SetInnerRML(escape(note));
+    // The main launcher's new look: its side bar, and one line of directions at the window's foot.
+    auto keys = [](std::initializer_list<const char*> list) {
+        std::string out;
+        for (const char* k : list)
+            out += std::string("<span class=\"hk\">") + k + "</span>";
+        return out;
+    };
+    if (Rml::Element* bar = g_doc->GetElementById("sidebar"); bar != nullptr)
+        bar->SetInnerRML(dark ? sidebar_rml() : "");
     g_doc->GetElementById("hint")->SetInnerRML(
+        on_bar()                      ? keys({"Up / Down: choose a tab", "A / Enter / Right: open it", "LB / RB (Q / E): next tab"})
+        : dark && g_screen == Screen::Launcher ? keys({"Arrows: move", "A / Enter: select", "B / Esc: to the tabs", "LB / RB (Q / E): next tab"})
+        : dark && slot_list           ? keys({"Up / Down: choose", "LB / RB (Q / E): page", "A / Enter: select", "B / Esc: back"})
+        : dark && g_screen == Screen::Characters ? keys({"Arrows: choose", "Right stick: scroll", "A / Enter: select", "B / Esc: back"})
+        : dark && card_screen()       ? keys({"Left / Right: choose the player", "A / Enter: select", "B / Esc: back", "LB / RB (Q / E): next tab"})
+        : dark                        ? keys({"Up / Down: choose", "Left / Right: change", "A / Enter: select", "B / Esc: back", "LB / RB (Q / E): next tab"})
+        :
         g_screen == Screen::InGame    ? "Up/Down choose &#183; Left/Right change &#183; A select &#183; B resume"
         : g_screen == Screen::Problem ? "Up/Down choose &#183; A select"
         : g_screen == Screen::QuitAsk ? "Up/Down choose &#183; A select &#183; B back"
@@ -3863,7 +4401,22 @@ void render() {
     g_doc->SetClass("spread", spread);
     // The launcher: its picture behind it (res/ui/launcher.png), the menu on
     // the picture's blank parchment, no frame, notes or directions.
-    g_doc->SetClass("launcher", g_screen == Screen::Launcher);
+    g_doc->SetClass("launcher", g_screen == Screen::Launcher && !dark);
+    // The main launcher's new look (menu.rcss's last block): "home" its Play page, "credits" its Credits, "bar" while the
+    // cursor is on the side bar, "narrow" in a window less wide than 3:2 (4:3), "art" once the backdrop picture is there.
+    float shape = 0.f;
+    {
+        uint32_t w = 0, h = 0;
+        dol_aurora_get_display_info(nullptr, &w, &h);
+        if (h != 0)
+            shape = static_cast<float>(w) / static_cast<float>(h);
+    }
+    g_doc->SetClass("launcher-dark", dark);
+    g_doc->SetClass("home", dark && g_screen == Screen::Launcher);
+    g_doc->SetClass("credits", dark && g_screen == Screen::Credits);
+    g_doc->SetClass("bar", on_bar());
+    g_doc->SetClass("narrow", dark && shape > 0.f && shape < 1.5f);
+    g_doc->SetClass("art", dark && launcher_art_ready());
     // The pause menu: the launcher's parchment over the dimmed game.
     g_doc->SetClass("pause", g_screen == Screen::InGame);
     g_doc->SetClass("centered", centered);
@@ -3888,7 +4441,8 @@ void render() {
                                      g_screen == Screen::Mapping) &&
                                     g_options_return == Screen::InGame));
     // The look the caller chose (frontend_open_page_skin); the launcher's has no class of its own.
-    g_doc->SetClass("skin-title", g_skin == Skin::Title);
+    // (The main launcher's new look wears the title look's colours: only the class, never g_skin.)
+    g_doc->SetClass("skin-title", g_skin == Skin::Title || dark);
     g_doc->SetClass("skin-tome", g_skin == Skin::Tome);
     g_doc->SetClass("tome-under", tome_under_page());
     // The title look: the Options picture behind, where the game lays it; a list page in its word column, its letters
@@ -4013,7 +4567,11 @@ void build_rows() {
     case Screen::Characters: build_characters(); break;
     case Screen::QuitAsk: build_quit_ask(); break;
     case Screen::Pick: build_pick(); break;
+    case Screen::Credits: break;  // (words only: credits_rml)
     }
+    // The main launcher's new look: a tab's own page has no Back row (Back, or Left, goes to the side bar).
+    if (launcher_dark() && at_tab_root())
+        std::erase_if(g_rows, [](const Row& r) { return r.label == "Back"; });
     // A Tome page is one narrow leaf: one column (Button Mapping's keys, the Mods rows), so it scrolls as one list.
     if (g_skin == Skin::Tome)
         for (Row& r : g_rows)
@@ -4055,6 +4613,13 @@ void activate_selected() {
 }
 
 void go_back() {
+    // The main launcher's new look: Back on a tab's own page goes to the side bar (never to the old Options list).
+    if (launcher_dark() && at_tab_root()) {
+        leave_page();
+        g_bar = true;
+        g_bar_at = g_tab;
+        return;
+    }
     switch (g_screen) {
     case Screen::Play:
         g_screen = Screen::Launcher;
@@ -4120,6 +4685,10 @@ void go_back() {
         g_screen = Screen::InGame;  // past the page: the menu closes
         g_selected = 0;
         break;
+    case Screen::Credits:
+        g_screen = Screen::Launcher;
+        g_selected = 0;
+        break;
     case Screen::Launcher:
     case Screen::Problem:  // only its rows close it (no quitting by accident)
         break;
@@ -4145,12 +4714,34 @@ public:
         }
         Rml::Element* e = event.GetTargetElement();
         bool on_prev = false;
-        while (e != nullptr && e->GetId().rfind("row", 0) != 0) {
+        // (An id of "row" or "stab" and a number: nothing else, so a click on empty space between them is no row.)
+        auto is = [](Rml::Element* el, const char* prefix) {
+            const std::string& id = el->GetId();
+            const size_t n = std::strlen(prefix);
+            return id.rfind(prefix, 0) == 0 && id.size() > n && id[n] >= '0' && id[n] <= '9';
+        };
+        while (e != nullptr && !is(e, "row") && !is(e, "stab")) {
             on_prev = on_prev || e->IsClassSet("prev");
             e = e->GetParentNode();
         }
         if (e == nullptr)
             return;
+        if (is(e, "stab")) {
+            // The main launcher's side bar: a click opens the tab (or quits); the cursor stays on the bar.
+            const int tab = std::atoi(e->GetId().c_str() + 4);
+            if (!launcher_dark() || event.GetId() != Rml::EventId::Click || controls::capturing() || tab < 0 || tab > kTabCount)
+                return;
+            if (tab == kTabCount) {
+                launcher_quit();
+            } else {
+                if (tab != g_tab || !at_tab_root())
+                    open_tab(tab);
+                g_bar = true;
+                g_bar_at = tab;
+            }
+            build_rows();
+            return;
+        }
         const int index = std::atoi(e->GetId().c_str() + 3);
         if (index < 0 || index >= static_cast<int>(g_rows.size()))
             return;
@@ -4164,12 +4755,14 @@ public:
             const bool moved = last_x >= 0 && (mx != last_x || my != last_y);
             last_x = mx;
             last_y = my;
-            if (moved && g_selected != index) {
+            if (moved && (g_selected != index || on_bar())) {
                 g_selected = index;
+                g_bar = false;
                 render();
             }
         } else if (event.GetId() == Rml::EventId::Click) {
             g_selected = index;
+            g_bar = false;
             if (on_prev && g_rows[index].change)
                 g_rows[index].change(-1);
             else
@@ -4218,6 +4811,7 @@ bool ensure_ui() {
     for (const char* font : {"FiraSans-Regular.ttf", "FiraSans-Bold.ttf",
                              "IMFellEnglish-Regular.ttf", "IMFellEnglish-Italic.ttf",
                              "IMFellEnglishSC-Regular.ttf",
+                             "AlegreyaSC-Regular.ttf", "AlegreyaSC-Bold.ttf",  // the main launcher's title and heads
                              "LaBelleAurore.ttf"})  // the title's and the Tome's painted hand (tome.cpp's too)
         if (!Rml::LoadFontFace(res + "/fonts/" + font))
             std::fprintf(stderr, "[frontend] font missing: %s/fonts/%s\n", res.c_str(), font);
@@ -4234,6 +4828,9 @@ bool ensure_ui() {
     // selection from the keyboard whenever the pointer rests over the menu.
     menu->AddEventListener(Rml::EventId::Mousemove, &g_listener);
     menu->AddEventListener(Rml::EventId::Mousescroll, &g_listener);
+    // The main launcher's side bar (its tabs: MenuListener).
+    if (Rml::Element* bar = g_doc->GetElementById("sidebar"); bar != nullptr)
+        bar->AddEventListener(Rml::EventId::Click, &g_listener);
     return true;
 }
 
@@ -4422,15 +5019,20 @@ MenuStep menu_step() {
             if (g_test_key_at < g_test_keys.size()) {
                 const char c = g_test_keys[g_test_key_at++];
                 const int b = c == 'u' ? kUp : c == 'd' ? kDown : c == 'l' ? kLeft : c == 'r' ? kRight : c == 'a' ? kAccept
-                              : c == 'b' ? kBack : c == 'w' ? kScrollUp : c == 's' ? kScrollDown : -1;
+                              : c == 'b' ? kBack : c == 'w' ? kScrollUp : c == 's' ? kScrollDown
+                              : c == 'q' ? kPageLeft : c == 'e' ? kPageRight : -1;  // (q, e: LB, RB)
                 if (b >= 0)
                     pressed[b] = true;
-                std::fprintf(stderr, "[frontend] test key %c on screen %d row %d\n", c, static_cast<int>(g_screen), g_selected);
+                std::fprintf(stderr, "[frontend] test key %c on screen %d row %d tab %d bar %d\n", c, static_cast<int>(g_screen), g_selected,
+                             g_tab, on_bar() ? g_bar_at : -1);
             }
             static const int step = std::getenv("ED_PAGE_TEST_STEP_MS") != nullptr ? std::atoi(std::getenv("ED_PAGE_TEST_STEP_MS")) : 700;
             g_test_key_next = g_test_key_at < g_test_keys.size() ? SDL_GetTicks() + std::max(step, 50) : 0;
         }
         bool dirty = false;
+        // The main launcher's new look: its side bar and its Play page take their presses first (launcher_input).
+        if (launcher_dark() && launcher_input(pressed, &dirty))
+            std::fill(pressed, pressed + kButtonCount, false);
         if (g_screen == Screen::Characters) {
             // A grid: every arrow moves (and left/right change nothing).
             if (pressed[kUp] || pressed[kDown] || pressed[kLeft] || pressed[kRight]) {
@@ -4502,10 +5104,10 @@ MenuStep menu_step() {
         if (log && dirty)
             std::fprintf(stderr,
                          "[frontend] up=%d down=%d left=%d right=%d accept=%d back=%d "
-                         "-> screen=%d row=%d close=%d\n",
+                         "-> screen=%d row=%d close=%d tab=%d bar=%d\n",
                          pressed[kUp], pressed[kDown], pressed[kLeft], pressed[kRight],
                          pressed[kAccept], pressed[kBack], static_cast<int>(g_screen),
-                         g_selected, g_close);
+                         g_selected, g_close, g_tab, on_bar() ? g_bar_at : -1);
         if (g_close)
             return MenuStep::Closed;
         static Uint64 refresh = 0;
@@ -4513,6 +5115,29 @@ MenuStep menu_step() {
             SDL_GetTicks() > refresh) {
             refresh = SDL_GetTicks() + 500;  // controller plugged in / out
             dirty = true;
+        }
+        if (launcher_dark()) {
+            // The Play page: built again only when what it shows changed (a controller plugged in or out, looked at
+            // twice a second; the update check's answer), so a click on it is never lost to a rebuild in between.
+            static Uint64 pads_at = 0;
+            static int update_shown = -1, narrow_shown = -1;
+            if (g_screen == Screen::Launcher && SDL_GetTicks() > pads_at) {
+                pads_at = SDL_GetTicks() + 500;
+                for (int p = 0; p < 2; p++)
+                    dirty = dirty || player_plays_with(p) != g_home_pads[p];
+            }
+            if (static_cast<int>(updatecheck_state()) != update_shown) {
+                update_shown = static_cast<int>(updatecheck_state());
+                dirty = true;
+            }
+            // (A window made narrower or wider than 3:2: the page's fit follows, render's "narrow".)
+            uint32_t w = 0, h = 0;
+            dol_aurora_get_display_info(nullptr, &w, &h);
+            const int narrow = h != 0 && static_cast<float>(w) / static_cast<float>(h) < 1.5f ? 1 : 0;
+            if (narrow != narrow_shown) {
+                narrow_shown = narrow;
+                dirty = true;
+            }
         }
         if (g_skin == Skin::Title && g_settings.hd_textures && !g_art_hd_shown && titlevideo_title_art_hd())
             dirty = true;  // (the HD backdrop just written: shown without waiting for a key)
@@ -4942,6 +5567,9 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
     // disc choice lives in Options.
     g_disc_on_main = !(g_settings.disc[0] != '\0' && disc_playable() &&
                        g_discs[g_disc].path == g_settings.disc);
+    g_launcher_up = true;  // (before the first row is chosen: launcher_main_row asks launcher_dark)
+    g_bar = false;
+    g_tab = kTabPlay;
     g_screen = Screen::Launcher;
     g_selected = launcher_main_row();
     // ED_MENU_OPEN=options, graphics, display, sound, image, shadows, lighting, effects, game,
@@ -4996,7 +5624,13 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
     // The first start (or after an update): the disc's pictures and the shaders made before the menu (run_preparing).
     if (disc_playable() && !run_preparing()) {
         g_launcher_music.stop();
+        g_launcher_up = false;
         return false;
+    }
+    if (launcher_dark()) {
+        g_tab = tab_of_screen();
+        g_bar_at = g_tab;
+        dol_aurora_measure_screen();  // (once: the Frame rate tile's choices are the screen's, as the Options page measured them)
     }
     // ED_LAUNCHER_TEST_KEYS="a" (testing): presses on the launcher as ED_PAGE_TEST_KEYS's, the first 1.5 s after it opens.
     if (const char* t = std::getenv("ED_LAUNCHER_TEST_KEYS"); t != nullptr && t[0] != '\0') {
@@ -5006,6 +5640,9 @@ extern "C" bool frontend_run_launcher(const char* default_iso, char* iso_out,
     }
     const bool played = run_menu();
     g_launcher_music.stop();
+    g_launcher_up = false;  // (from here every menu is the old looks': over the game, the title's, the Tome's)
+    g_bar = false;
+    g_tab = kTabPlay;
     if (!played || !g_play)
         return false;
     snprintf(iso_out, iso_cap, "%s", g_discs[g_disc].path.c_str());

@@ -2328,3 +2328,614 @@ body.skin-tome.tome-halves #veil {
 	z-index: -1;
 	background-color: #000000a0;
 }
+
+/* ---- The main launcher's new look (body.launcher-dark): the launcher the program opens with, and only it. ----
+   The user's design of 2026-11-18 (docs/research/launcher-redesign/decisions.md, mock-up 7): a side bar of tabs, the
+   page of the lit tab in the panel beside it, one line of directions along the window's foot, and behind it all the
+   user's own picture (res/ui/launcher-art.png), dimmed. The colours and hands are the title look's (body.skin-title,
+   whose class this look wears too: frontend.cpp render), so every page a tab opens is drawn as the title's are. Every
+   rule here starts with body.launcher-dark, apart from the three new boxes hidden in every other look; every size is in
+   vh (a part of the window's height), from the mock-up's 1920 by 1080. */
+#art,
+#footbar,
+#sidebar {
+	display: none;
+}
+
+body.launcher-dark {
+	background-color: #040c0f;
+	decorator: none;
+	font-size: 3.2vh;
+}
+
+body.launcher-dark #art {
+	display: block;
+	position: absolute;
+	z-index: -1;  /* under the page (as #backdrop) */
+	left: 0;
+	top: 0;
+	width: 100%;
+	height: 100%;
+}
+
+/* Only when the picture is there (frontend.cpp launcher_art_ready): without it the page is the plain blue-black. */
+body.launcher-dark.art #art {
+	decorator: image(launcher-art.png cover);
+	image-color: #3d4547;
+}
+
+/* Darker still behind the page's words, fading out to the right. */
+body.launcher-dark #art-shade {
+	position: absolute;
+	left: 31.5vh;
+	top: 0;
+	width: 92.6vh;
+	height: 100%;
+	decorator: horizontal-gradient(#02080a96 #02080a00);
+}
+
+body.launcher-dark #footbar {
+	display: block;
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 4.1vh;
+	box-sizing: border-box;
+	background-color: #050b0ef0;
+	border-top: 1px #3b5359;
+}
+
+body.launcher-dark #hint {
+	left: 3.15vh;
+	right: auto;
+	bottom: 0;
+	height: 4.1vh;
+	line-height: 4.1vh;
+	font-family: "IM FELL English";
+	font-size: 1.57vh;
+	color: #5e848d;
+	text-align: left;
+	white-space: nowrap;
+}
+
+body.launcher-dark .hk {
+	display: inline-block;
+	margin-right: 2.6vh;
+}
+
+/* The side bar. */
+body.launcher-dark #sidebar {
+	display: block;
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 31.5vh;
+	height: 95.9vh;
+	box-sizing: border-box;
+	background-color: #0a1518ee;
+	border-right: 1px #3b5359;
+}
+
+body.launcher-dark #brand {
+	padding: 3.7vh 0 0 3.15vh;
+}
+
+body.launcher-dark #brand .b1 {
+	font-family: "Alegreya SC";
+	font-size: 1.76vh;
+	line-height: 2.4vh;
+	letter-spacing: 0.33vh;
+	color: #8db2ba;
+}
+
+body.launcher-dark #brand .b2 {
+	font-family: "Alegreya SC";
+	font-weight: bold;
+	font-size: 2.4vh;
+	line-height: 3.4vh;
+	letter-spacing: 0.44vh;
+	color: #c9ab68;
+}
+
+body.launcher-dark .b-rule {
+	display: flex;
+	align-items: center;
+	width: 25.2vh;
+	margin-top: 1.6vh;
+}
+
+body.launcher-dark .b-line {
+	flex: 1;
+	height: 1px;
+	background-color: #3b5359;
+}
+
+body.launcher-dark .b-mark {
+	width: 1.5vh;
+	height: 1.5vh;
+	margin: 0 0.9vh;
+}
+
+body.launcher-dark #sidelist {
+	margin-top: 3.4vh;
+}
+
+body.launcher-dark .stab {
+	display: block;
+	box-sizing: border-box;
+	height: 5.56vh;
+	line-height: 5.56vh;
+	margin-bottom: 0.37vh;
+	padding-left: 2.78vh;
+	border-left: 0.37vh transparent;
+	font-family: "La Belle Aurore";
+	font-size: 3.15vh;
+	color: #6d9098;
+	white-space: nowrap;
+}
+
+body.launcher-dark .stab:hover {
+	color: #8db2ba;
+}
+
+/* The tab whose page is shown; and the bar's own cursor (while it has it: body.bar), brighter. */
+body.launcher-dark .stab.active {
+	color: #a0e3f1;
+	border-left-color: #a0e3f1;
+	decorator: horizontal-gradient(#486168be #48616800);
+}
+
+body.launcher-dark .stab.focus {
+	color: #e6f7fb;
+	border-left-color: #e6f7fb;
+	font-effect: glow(1px 9px #a0e3f1aa);
+}
+
+body.launcher-dark #sidefoot {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+}
+
+body.launcher-dark #built {
+	margin: 4.1vh 0 0.5vh 0;
+	padding-left: 3.15vh;
+	font-family: "Fira Sans";
+	font-size: 1.2vh;
+	line-height: 1.6vh;
+	color: #486168;
+	white-space: nowrap;
+}
+
+/* The panel: every page of a tab. No sheet of its own: the words lie on the dimmed picture. */
+body.launcher-dark #book,
+body.launcher-dark.roster #book,
+body.launcher-dark.cards #book {
+	position: absolute;
+	left: 31.5vh;
+	right: 0;
+	top: 0;
+	width: auto;
+	max-width: none;
+	height: 95.9vh;
+	margin: 0;
+	padding: 3vh 0 1vh 0;
+	decorator: none;
+	background-color: transparent;
+	border-width: 0;
+	border-radius: 0;
+}
+
+body.launcher-dark #heading {
+	color: #8db2ba;
+}
+
+/* A list of rows: one column in the panel's middle, not stretched across a wide window. */
+body.launcher-dark #pages {
+	width: 100vh;
+	max-width: 100%;
+	align-self: center;
+}
+
+body.launcher-dark .page {
+	padding: 0 5vh;
+}
+
+body.launcher-dark.roster #pages,
+body.launcher-dark.cards #pages,
+body.launcher-dark.spread #pages {
+	width: 100%;
+}
+
+body.launcher-dark.roster .page {
+	padding: 0 7vh;
+}
+
+body.launcher-dark.cards .page {
+	padding: 0 2vh;
+}
+
+/* The Play page (frontend.cpp home_rml): one column as wide as the title's line, so every edge under it lines up. */
+body.launcher-dark.home #heading,
+body.launcher-dark.home #page1 {
+	display: none;
+}
+
+body.launcher-dark.home #book {
+	padding: 0;
+}
+
+body.launcher-dark.home #pages {
+	display: block;
+	flex: none;
+	width: 100%;
+}
+
+body.launcher-dark.home .page {
+	display: block;
+	padding: 0 0 0 7.4vh;
+}
+
+body.launcher-dark.home.narrow .page {
+	padding-left: 4.4vh;
+}
+
+body.launcher-dark.home .menu {
+	display: block;
+}
+
+body.launcher-dark.home .note {
+	width: 90.9vh;
+	height: 2.6vh;
+	line-height: 2.6vh;
+	margin: 0.3vh 0 0 8.9vh;
+	font-size: 1.6vh;
+	font-style: italic;
+	text-align: left;
+	white-space: nowrap;
+}
+
+body.launcher-dark.home.narrow .note {
+	margin-left: 5.9vh;
+}
+
+body.launcher-dark .hpage {
+	width: 92.4vh;
+	font-family: "IM FELL English";
+}
+
+body.launcher-dark .h-title {
+	margin-top: 7.3vh;
+	height: 6.3vh;
+	line-height: 6.3vh;
+	font-family: "Alegreya SC";
+	font-weight: bold;
+	font-size: 4.86vh;
+	color: #dff3f8;
+	white-space: nowrap;
+	font-effect: glow(1px 12px #7fe0f590);
+}
+
+body.launcher-dark .h-name {
+	height: 4.44vh;
+	line-height: 4.44vh;
+	font-family: "Alegreya SC";
+	font-weight: bold;
+	font-size: 3.7vh;
+	letter-spacing: 0.9vh;
+	color: #d4b874;
+	white-space: nowrap;
+	font-effect: glow(1px 10px #e0b86040);
+}
+
+body.launcher-dark .h-for {
+	margin-top: 2.04vh;
+	height: 1.67vh;
+	line-height: 1.67vh;
+	font-family: "Fira Sans";
+	font-size: 1.39vh;
+	letter-spacing: 0.5vh;
+	color: #6d9098;
+}
+
+body.launcher-dark .h-rule {
+	margin-top: 2.04vh;
+	height: 1px;
+	background-color: #3b5359;
+}
+
+body.launcher-dark .h-status {
+	display: flex;
+	align-items: center;
+	margin-top: 2.13vh;
+	height: 3.3vh;
+}
+
+body.launcher-dark .h-ready {
+	font-family: "Fira Sans";
+	font-weight: bold;
+	font-size: 1.3vh;
+	letter-spacing: 0.37vh;
+	color: #a0e3f1;
+	white-space: nowrap;
+}
+
+body.launcher-dark .h-ready.no {
+	color: #d9805a;
+}
+
+body.launcher-dark .h-fill {
+	flex: 1;
+}
+
+body.launcher-dark .h-version {
+	margin-right: 1.6vh;
+	font-size: 1.76vh;
+	color: #8db2ba;
+	white-space: nowrap;
+}
+
+body.launcher-dark .h-version.newer {
+	color: #c9ab68;
+}
+
+/* The small buttons: Check Updates (lit as Update when a newer release is out), Auto-set, Configure. */
+body.launcher-dark .h-btn {
+	box-sizing: border-box;
+	width: 14.8vh;
+	height: 3.3vh;
+	line-height: 3.1vh;
+	text-align: center;
+	font-family: "Fira Sans";
+	font-weight: bold;
+	font-size: 1.11vh;
+	letter-spacing: 0.3vh;
+	text-transform: uppercase;
+	color: #a0e3f1;
+	background-color: #000000c8;
+	border: 1px #486168;
+	white-space: nowrap;
+}
+
+body.launcher-dark .h-btn.lit {
+	color: #e6f7fb;
+	background-color: #1d4450;
+	border-color: #a0e3f1;
+}
+
+body.launcher-dark .h-btn.disabled {
+	color: #486168;
+}
+
+body.launcher-dark .h-btn.selected,
+body.launcher-dark .h-big.selected,
+body.launcher-dark .h-tile.selected {
+	border-color: #a0e3f1;
+	box-shadow: #a0e3f160 0 0 2vh 0.4vh, #a0e3f1 0 0 0 1px;
+}
+
+body.launcher-dark .h-btn.selected {
+	color: #e6f7fb;
+}
+
+/* Play, Load and Continue, then the three tiles: three across, each as wide as the one under it. */
+body.launcher-dark .h-three {
+	display: flex;
+	margin-top: 1.11vh;
+	height: 8.7vh;
+}
+
+body.launcher-dark .h-three.tiles {
+	margin-top: 3.33vh;
+	height: 9.63vh;
+}
+
+body.launcher-dark .h-big,
+body.launcher-dark .h-tile {
+	box-sizing: border-box;
+	flex: 1;
+	height: 100%;
+	margin-left: 2.22vh;
+	background-color: #0a1518e8;
+	border: 1px #486168;
+}
+
+body.launcher-dark .h-big:first-child,
+body.launcher-dark .h-tile:first-child {
+	margin-left: 0;
+}
+
+body.launcher-dark .h-big {
+	text-align: center;
+}
+
+body.launcher-dark .h-big-name {
+	height: 5.2vh;
+	line-height: 5.2vh;
+	margin-top: 0.3vh;
+	font-family: "La Belle Aurore";
+	font-size: 3.52vh;
+	color: #8db2ba;
+}
+
+body.launcher-dark .h-big-sub {
+	font-style: italic;
+	font-size: 1.57vh;
+	line-height: 2vh;
+	color: #6d9098;
+}
+
+body.launcher-dark .h-big.play {
+	decorator: vertical-gradient(#1d4450 #0e262d);
+	border-color: #5f98a5;
+}
+
+body.launcher-dark .h-big.play .h-big-name {
+	height: 8.3vh;
+	line-height: 8.3vh;
+	margin-top: 0;
+	font-size: 4.81vh;
+	color: #e6f7fb;
+}
+
+body.launcher-dark .h-big.selected .h-big-name {
+	color: #e6f7fb;
+	font-effect: glow(1px 9px #a0e3f188);
+}
+
+body.launcher-dark .h-big.disabled {
+	decorator: none;
+	border-color: #3b5359;
+}
+
+body.launcher-dark .h-big.disabled .h-big-name,
+body.launcher-dark .h-big.disabled .h-big-sub {
+	color: #3b5359;
+	font-effect: none;
+}
+
+body.launcher-dark .h-tile {
+	padding: 1.2vh 0 0 1.67vh;
+	border-color: #3b5359;
+}
+
+body.launcher-dark .h-tile-name {
+	font-family: "Fira Sans";
+	font-size: 1.11vh;
+	line-height: 1.6vh;
+	letter-spacing: 0.3vh;
+	color: #6d9098;
+}
+
+body.launcher-dark .h-tile-value {
+	margin-top: 0.5vh;
+	font-size: 2.13vh;
+	line-height: 3vh;
+	color: #cfe9f0;
+	white-space: nowrap;
+}
+
+body.launcher-dark .h-tile-change {
+	margin-top: 0.8vh;
+	font-family: "Fira Sans";
+	font-size: 1.02vh;
+	line-height: 1.5vh;
+	letter-spacing: 0.3vh;
+	color: #c9ab68;
+}
+
+body.launcher-dark .h-tile.disabled .h-tile-value {
+	color: #486168;
+}
+
+body.launcher-dark .h-tile.disabled .h-tile-change {
+	color: #3b5359;
+}
+
+/* A section: its name in gold, a thin line to the column's edge, and its lines under it. */
+body.launcher-dark .h-sec {
+	display: flex;
+	align-items: center;
+	height: 2.2vh;
+	margin: 3.6vh 0 0.8vh 0;
+}
+
+body.launcher-dark .h-sec-name {
+	font-family: "Alegreya SC";
+	font-weight: bold;
+	font-size: 1.57vh;
+	letter-spacing: 0.36vh;
+	color: #c9ab68;
+	white-space: nowrap;
+}
+
+body.launcher-dark .h-sec-rule {
+	flex: 1;
+	height: 1px;
+	margin-left: 2.2vh;
+	background-color: #3b5359;
+}
+
+body.launcher-dark .h-line {
+	display: flex;
+	align-items: center;
+	height: 3.33vh;
+	padding-left: 1.5vh;
+	font-size: 1.85vh;
+	color: #8db2ba;
+}
+
+body.launcher-dark .h-line.tall {
+	margin-top: 0.56vh;
+}
+
+body.launcher-dark .h-left.soon {
+	font-style: italic;
+	color: #6d9098;
+}
+
+body.launcher-dark .h-right {
+	font-size: 1.76vh;
+	white-space: nowrap;
+}
+
+body.launcher-dark .h-right.p1 {
+	color: #c9ab68;
+}
+
+body.launcher-dark .h-right.p2 {
+	color: #8fc8f0;
+}
+
+/* The disc: a line to read; lit only where there is more than one to choose from; red when none is found. */
+body.launcher-dark .h-disc.none .h-right {
+	color: #d9805a;
+}
+
+body.launcher-dark .h-disc.selected .h-right {
+	color: #a0e3f1;
+	font-effect: glow(1px 9px #a0e3f188);
+}
+
+/* Credits (frontend.cpp credits_rml). */
+body.launcher-dark.credits .menu {
+	justify-content: flex-start;
+}
+
+body.launcher-dark.credits .note {
+	display: none;
+}
+
+body.launcher-dark .credits {
+	margin-top: 3vh;
+	font-family: "IM FELL English";
+}
+
+body.launcher-dark .c-entry {
+	margin-bottom: 2.2vh;
+}
+
+body.launcher-dark .c-who {
+	font-family: "Alegreya SC";
+	font-weight: bold;
+	font-size: 2vh;
+	line-height: 2.8vh;
+	letter-spacing: 0.2vh;
+	color: #c9ab68;
+}
+
+body.launcher-dark .c-what {
+	font-size: 2.1vh;
+	line-height: 2.8vh;
+	color: #8db2ba;
+}
+
+body.launcher-dark .c-foot {
+	margin-top: 3.4vh;
+	font-style: italic;
+	font-size: 1.8vh;
+	line-height: 2.5vh;
+	color: #6d9098;
+}
