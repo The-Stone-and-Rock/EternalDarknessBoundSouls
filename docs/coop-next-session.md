@@ -32,9 +32,16 @@
   docs/research/solo-coop-picker/next-requests.md, "Built: P8 and P9". Seen in a sound trace and a recording, not by ear.
   The Tome's pages still pause the game for both players: the user's choice for now (2026-11-18: "leave those settings
   ... to see how it plays").
-- **Next, in order:** (1) the title sounds are built (above); hear them by ear. (2) The sweep for other hooks that can leave pass-through on after nested game calls
-  (workflow run wf_d053beaa-569, started 2026-11-18; its result was not in when this was written: read it, fix only what
-  a skeptic confirmed, one hook at a time with a run each). (3) F11 still refuses a state made in the other mode. (4) By
+- **Next, in order:** (1) the title sounds are built (above); hear them by ear. (2) The sweep for other hooks that can leave
+  pass-through wrong after nested game calls is done (247 hooks read in six parts, each part's finds re-read by a
+  skeptic; docs/research/passthrough-sweep/result.json has every find with its fix and risk). No second memory wipe.
+  Confirmed, NOT fixed yet (the user is told first; one hook at a time, a run each): `coop_words_tick` (player 1's words
+  window is not stepped on frames where player 2's own window is up and their turn was refused: the most likely to be
+  felt in play), `hle_find_by_id` (a failed weapon copy for player 2 hands the caller the id as a node), `hle_moves_want`
+  (two rare failed-load returns), `coop_script_timers` (the game's script timers a frame late once per arrival scene),
+  `tome_stops_return` (the tail flag); and hardening only, right today by luck: `room_section_draw`, `tw_mode_change`,
+  `fog_object_draw`, `fog_door_setup`, `coop_held_weapon`. Refuted: `coop_sign_follow`, `title_main_start_load`,
+  `sanity_door_rules`, `coop_reload_trace`, `coop_grab_events`, `coop_equip_take`. (3) F11 still refuses a state made in the other mode. (4) By
   ear: every sound and the music (all runs were muted); real B/Esc/mouse on the pages; other languages; 4:3 and 21:9.
   (5) The user to try: play.bat, Tome > Load/Save > Load on their own saves; a character change from the Tome (it reloads
   when the Tome closes); the new character page; Esc / Back for the launcher's menu.
