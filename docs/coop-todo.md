@@ -1,5 +1,10 @@
 # Co-op: to do
 
+**Marks (the user, 2026-11-18):** every item carries one at its start as it is touched: `[FIXED]` or `[DONE]` with one
+sentence on how and where, `[OPEN]`, `[NOT VERIFIED]`, `[DECIDE]`. The board with the current order of work is at the top
+of `docs/coop-next-session.md`. Items below written before that day say "Fixed ..." or "BUILT ..." in their own words:
+read those as marked, and put the mark on when you next touch one. Never delete an item: mark it.
+
 ## Independent sanity effects (requested)
 
 Each player should have their own sanity effects, each tied to that player's own

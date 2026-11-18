@@ -1,6 +1,91 @@
-# HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit, through native menus step 6, the Tome look in co-op; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
+# HANDOFF 2026-11-18 (afternoon): START HERE. Everything is committed on tools/game-kit through c6e4c63 and NOT pushed (ten commits past v0.1.6); controls.cpp's test edits stay uncommitted by rule. What to play: docs/coop-play-test.md
 
-## 2026-11-18: Karim's arms on the opening dream's Shotgun (Alex's moveset on any body); built, NOT committed yet
+## The status board (keep it true: every session marks what it finishes)
+
+**The marks, at the start of a line, in this file and in docs/coop-todo.md:**
+`[FIXED]` a fault put right, `[DONE]` a piece of work finished, `[OPEN]` not started or not finished,
+`[NOT VERIFIED]` built but not seen working, `[DECIDE]` waits for the user. A `[FIXED]` or `[DONE]` line says in one
+sentence HOW it was done and where (function, file, commit), so nobody rebuilds it, breaks it or checks it again.
+When you finish something, change its mark here in the same commit as the work. Never delete a line: mark it.
+
+### How the user wants this worked on (their words of 2026-11-18, in priority order)
+1. **Use every tool, skill, kit and table that exists before fixing anything in the co-op mod.** The `ed` skill first
+   (`python -I tools/ed/ed.py keep`, `how`, `verb`, `system`, `needs`, `host`), the pages in `docs/game/systems/`,
+   the tables in `tools/ed/*.tsv` and `tools/ed/facts/`, `docs/coop-failed-attempts.md` before writing a fix. The
+   game already has the function: find it, don't rebuild it. (2026-11-18 showed why: Karim's shotgun was "fixed" at
+   first with another character's moveset, against the mapped rule, and the user had to refuse it.)
+2. **Solo play is not touched** unless the task says so (a character fix, a menu that solo has too). Gate co-op work
+   on co-op, and run the solo case as well.
+3. **Fixes are for the whole game**: every chapter, character, form and both players. Never a chapter's or a
+   character's special case where a general rule exists.
+4. **Few test runs. No fix-break-fix-break.** Read the code and the tables first, build once, then one run that
+   records both players (`sh tools/ed/run.sh`, `sh tools/ed/jtg.sh`, `ed timeline`, `ed check`, `ed stops`). Where
+   reading is wide, use several agents at once on separate questions rather than many runs.
+   `ED_RUN_AWAY=1` on every run. `JTG_EXE` only works with `JTG_SLOT=1` (without it the run uses today's exe).
+5. **The goal is a true co-op game**, as if made for two, that runs smoothly: optimise what is built; the tables,
+   ids, doors, sanity effects and the co-op code that exist make it reachable without breaking features.
+6. **Usage: check the usage tracker (`mcp__ccd_session_mgmt__get_usage`) before starting and after each step. At
+   95% of the weekly Fable limit or of the weekly all-models limit: stop at a commit, update this board, write the
+   hand-off, and tell the user**, so they can reset the counts with nothing half done.
+7. Plain words, pictures first, no questions the user has to decode. A weapon plays its own chapter's character's
+   moveset on every body: never swap in another character's.
+
+### Open work, in the user's order
+- `[OPEN]` **1. A high-pitched break in the sound when the game loads from the title screen** (the user, 2026-11-18).
+  Not looked at. Where to start: `docs/research/firstrun-hd-flash/title-music.md` (the title's music under the pages,
+  "[audio] ran dry"), `runtime/host/audio.c`, and what changed last at the title: 9d0f752 (the Choose Character
+  row's loop sound) and the Solo / Co-op picker's restart (P3, P4). Memory: co-op must not restore MusyX globals.
+  One logged run from the title into a game (`sh tools/ed/run.sh launcher NAME`, ED_DTK_LOG is on) before any change.
+- `[OPEN]` **2. Graphics options reworked.** (a) Take "Remastered spells" out (settings `spell_fx`; frontend.cpp
+  `enhancement::kSpellFx`; its renderer side in .deps/GXRuntime) and bring back the original look of spells, with HD
+  textures on and off. Decide with the user what happens to "Spell glow" (`spell_rim`) and to the spell lights by
+  room (P7, built on Remastered spells only). (b) Contact shadows and the other heavy options (haze, light shafts,
+  occlusion, character shadows) cause slowdowns, high GPU use or do nothing in play: measure each
+  (`ed graphics [SAVE] [OPTION]`, the FPS counter, `ED_DETAIL_LOG`), then optimise or remove. (c) The aim: the game
+  looks like a beautiful remaster, breaks nothing, and works the same in co-op; changing these options in co-op
+  broke features before, so each is checked in co-op too. Judge on the whole game in pictures: `ed chapters N` for
+  saves 1 to 12, before and after (`ed system graphics`, `docs/game/systems/graphics.md`).
+- `[OPEN]` **3. Jump to Game on the title screen does not ask Solo or Co-op.** Start Game and Load Game do (the
+  picker, steps P1 to P7 below: `FRONTEND_PAGE_TITLE_PICK`, hle.c `title_main_start_load`,
+  `docs/research/solo-coop-picker/plan.md`). Add the same page before Jump to Game's chapter grid.
+- `[NOT VERIFIED]` **4. The shotgun on Karim: the reload**, and Roberto, Lindsey and Max with it (same fix, not run).
+  See the Karim section below. One logged play by the user settles it (Z once in the open).
+- `[OPEN]` **5. Changing character in the middle of the opening dream drops the dream's own mode** (the sepia look
+  goes, the bars come on): seen in logs/run-20261118-131413-karim-solo-test at the reload. `characters_reload` (hle.c).
+- `[OPEN]` **6. `ed test` has not passed since the launcher work**: it stopped in `test-shadow-steady` on a missing
+  `probe.txt` (last had one 2026-11-13) and was then cut short so the user could play. Run it (`ED_RUN_AWAY=1`),
+  find why the probe file is not written, and get it green before the next co-op fix.
+- `[DECIDE]` **7. FINISH HIM inside the opening dream for player 1.** The game does not draw it there (its chooser
+  0x80117628 takes slot 3 only on the walking or R-held channel; the dream has its own input mode). Player 2 has it
+  there in co-op because the host draws theirs. Left as the game has it. Do not ask the user about this again
+  unless they bring it up.
+- `[NOT VERIFIED]` **8. The new launcher** (section below): a real mouse and controller on the tabs, Fullscreen,
+  a key rebind on Button mapping, Duplicate and Delete of a slot, the Update button's own press, a Tome page's
+  picture after the change, HDR calibration from the Display tab, the Mac and Steam Deck builds.
+- `[DECIDE]` **9. The launcher's open choices**: whether Continue stays the third button; what Credits shows; the
+  exact look of the toggles (the user will send a photo; step4-toggles.png is where it stands, they said it looks
+  good); a larger backdrop picture.
+- `[OPEN]` **10. Push** (ten commits past v0.1.6 are local). Only when the user says: fork/main, never origin.
+  A release then needs `res/version.txt` raised.
+- `[OPEN]` **11. Everything older that is still open** is in `docs/coop-todo.md` ("Open issues", "Requested
+  2026-11-13") and `docs/coop-glitch-todo.md`; the co-op sweep chapter by chapter; the kit session
+  (`docs/prompts/session-kit-mapping.md`). Put the marks on those lists as each is touched.
+
+### Finished on 2026-11-18 (do not redo, do not recheck)
+- `[FIXED]` **Karim (and Roberto, Lindsey, Max) did not hold the opening dream's Shotgun** (their arms froze).
+  How: `wpn_bind` (hle.c) keeps a joint with a limb under it on the weapon's own moveset when it sits 45 to 90
+  degrees from the home's as made, and a weapon asked for twice keeps the first fit's held bones. Commit c6e4c63.
+  The user saw the hold in play. Not last night's b2fdc04 and not the launcher: the 2026-11-15 exe had it too.
+- `[DONE]` **The new main launcher** (mock-up 7): side bar of tabs, Play page, Check Updates, styled toggles,
+  first-start and no-disc pages, 4:3 / 16:9 / 21:9. How: `launcher_dark()` in frontend.cpp, `body.launcher-dark`
+  in menu.rcss, updatecheck.cpp. Commits f79b175 to 602ee61. The in-game menu and the title pages are unchanged.
+- `[FIXED]` **The Tome character-change freeze; "not created by Eternal Darkness" on the Tome's Load/Save; the
+  launcher menu on Esc / Back; Settings' old Quit row**: the sections of 2026-11-18 further down say how.
+- `[DONE]` **The pass-through sweep's ten hooks** (b2fdc04) and its check with the players apart (100848b).
+
+## The hand-off before this one (2026-11-17, morning): all committed through native menus step 6, the Tome look in co-op
+
+## 2026-11-18: [FIXED] Karim's arms on the opening dream's Shotgun (Alex's moveset on any body); committed c6e4c63
 - **What the user saw** (their play: logs/run-20261118-123512-karim-shotgun, Start Game in co-op, player 1 Ellia,
   player 2 Karim): Karim did not hold the dream's Shotgun; it stood up by his face and his arms did not follow.
 - **The rule (the user, 2026-11-18): a weapon plays its own chapter's character's moves on every body.** The dream's
@@ -44,7 +129,7 @@
   Karim). Roberto, Lindsey and Max with the Shotgun (the same joints, not run). The front hand's exact
   place on the barrel (the pictures are dark). `ed test` was stopped after one scenario so the user could play.
 
-## 2026-11-18: the new MAIN launcher is built (the user's mock-up 7); committed, not pushed
+## 2026-11-18: [DONE] the new MAIN launcher is built (the user's mock-up 7); committed, not pushed
 What the user chose is `docs/research/launcher-redesign/decisions.md`; pictures of every step are in
 `Screenshots for Claude/launcher-redesign/` (step1-home, step2-update, step3-display, sheet-*.png).
 - **What was built.** Only the launcher the program opens with. A side bar of tabs (Play, Choose Character, Display,
