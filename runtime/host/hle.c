@@ -9289,7 +9289,7 @@ static const u32* wpn_skeleton(int model, u32* count) {
 }
 
 // Each slot's binding: whose body its moves are fitted to, and how (as g_fin's).
-static struct {
+static struct WpnBinding {
     u32 object, body, table;  // table 0: not bound
     int home, holder, want;
     u32 bones, home_bones;
@@ -9375,6 +9375,16 @@ static int wpn_gun_mover(CPUState* cpu, u32 node, int model, u32 item) {
         gun = kGuns[i] == item;
     if (!gun)
         return -1;
+    // ED_GUN_MOVER=WEARER:MOVER (testing): that character's guns on MOVER's moves, to compare fits in pictures.
+    static int test_wearer = -2, test_mover = -1;
+    if (test_wearer == -2) {
+        test_wearer = -1;
+        const char* t = getenv("ED_GUN_MOVER");
+        if (t != NULL && sscanf(t, "%d:%d", &test_wearer, &test_mover) != 2)
+            test_wearer = -1;
+    }
+    if (test_wearer == model)
+        return test_mover;
     const Costume* c = NULL;
     bool looked = false;
     for (size_t i = 0; i < sizeof kGunMoves / sizeof kGunMoves[0]; i++) {
@@ -9513,9 +9523,21 @@ static bool wpn_bind(CPUState* cpu, int k, u32 object, int holder, int home, int
     // change of character) or one fitted here before gives others' keys to them. With none they get no track, and the
     // game then places such a bone by its whole place as made on top of its parent's (0x80120E2C: inverse of its +12).
     const u32 now_tracks = now_record != 0u && guest_ram_range_valid(cpu, now_record + 4u, 2u) ? mem_read16(cpu, now_record + 4u) : 0u;
+    // A weapon asked for twice running (player 2's copy asks its seven's first part as it is made and the part of its
+    // hold a few frames on: the opening dream's Shotgun, 77 then 81): the move playing is then the one fitted at the
+    // first ask. The bones held keep the keys that first fit took from this body's own move, which is still their
+    // pose; left as modelled, 54 of Karim's 72 bones stood as made under Alex's 18 (the user, 2026-11-18).
+    static struct WpnBinding before;
+    const struct WpnBinding* kept = NULL;
     if (now != 0u && ((c == NULL && now_tracks != nb + 1u) || (now >= FIN_SCRATCH && now < SCRATCH_WPN_P1))) {
-        fprintf(stderr, "[player] %s's held bones: the move playing (%u tracks) isn't their body's (%u bones): as modelled\n", who,
-                now_tracks, nb);
+        for (int x = 0; x < 4 && kept == NULL; x++)
+            if (g_wpn[x].table != 0u && g_wpn[x].object == object && g_wpn[x].body == body && g_wpn[x].bones == nb &&
+                g_wpn[x].holder == holder) {
+                before = g_wpn[x];
+                kept = &before;
+            }
+        fprintf(stderr, "[player] %s's held bones: the move playing (%u tracks) isn't their body's (%u bones): %s\n", who,
+                now_tracks, nb, kept != NULL ? "held as the fit before held them" : "as modelled");
         now = 0u;
     }
     memset(&g_wpn[w], 0, sizeof g_wpn[w]);
@@ -9535,7 +9557,7 @@ static bool wpn_bind(CPUState* cpu, int k, u32 object, int holder, int home, int
     for (size_t i = 0; i < sizeof kFinTurnsOf / sizeof kFinTurnsOf[0]; i++)
         if (kFinTurnsOf[i].model == home && kFinTurnsOf[i].count == home_bones)
             home_turns = kFinTurnsOf[i].turns;
-    bool far[COSTUME_MAX_BONES] = {false};
+    bool far[COSTUME_MAX_BONES] = {false}, right_round[COSTUME_MAX_BONES] = {false};
     for (u32 j = 0u; j < nb; j++) {
         const u32 name = c != NULL && g_costume_map->from[j] >= 0 ? mem_read32(cpu, plain + (u32)g_costume_map->from[j] * 80u + 64u)
                                                                   : mem_read32(cpu, own + j * 80u + 64u);
@@ -9549,8 +9571,39 @@ static bool wpn_bind(CPUState* cpu, int k, u32 object, int holder, int home, int
             const s16* t = home_turns[g_wpn[w].from[j]];
             const float dot = fabsf(q[0] * t[0] + q[1] * t[1] + q[2] * t[2] + q[3] * t[3]) / 16384.0f;
             far[j] = dot < 0.9238795f;  // cos(22.5 degrees): the two turns more than 45 apart
+            right_round[j] = dot < 0.7071068f;  // cos(45 degrees): more than 90 apart
         }
     }
+    // A joint with a limb under it is not left out for sitting 45 to 90 degrees otherwise as made: everything under it
+    // froze with it. The only such joints on the disc are the two upper arms (17 or 18 bones under each): Karim's,
+    // Roberto's, Lindsey's and Max's sit 49 to 65 degrees from Alex's and Ellia's, so with the opening dream's Shotgun
+    // (Alex's moves, the only ones made for it) they held it with both whole arms as they stood when it came to hand
+    // (the user, 2026-11-18: Karim's straight up by his face), where Pius, Edward, Paul, Peter, Michael and Anthony,
+    // under 45, hold it as she does. A track turns a bone from its parent outright, so the arm is posed as the home
+    // poses it, as a reload's is (fin_fit: the home's turns as they are). A short chain (hair, a thumb turned right
+    // round) is left out as before, with what hangs under it. ED_WPN_LIMBS=0 (testing): left out too, as before.
+    static int limbs_on = -1;
+    if (limbs_on < 0)
+        limbs_on = getenv("ED_WPN_LIMBS") == NULL || atoi(getenv("ED_WPN_LIMBS")) != 0;
+    u32 limbs = 0u;
+    for (u32 j = 1u; j < nb && limbs_on; j++) {
+        if (!far[j] || right_round[j])
+            continue;
+        u32 under = 0u;
+        for (u32 i = 1u; i < nb; i++) {
+            u32 up = mem_read16(cpu, own + i * 80u + 76u);
+            for (u32 steps = 0u; up < nb && up != j && steps < nb; steps++)
+                up = mem_read16(cpu, own + up * 80u + 76u);
+            under += up == j;
+        }
+        if (under >= 8u) {
+            far[j] = false;
+            limbs++;
+        }
+    }
+    if (limbs != 0u)
+        fprintf(stderr, "[player] %s (%s) with %s's moves: %u joint(s) with a limb under them kept on those moves, though made more than 45 degrees otherwise\n",
+                who, fin_name(holder), fin_name(home), limbs);
     for (u32 pass = 0u; pass < nb; pass++) {  // under a far one: far too
         bool more = false;
         for (u32 j = 1u; j < nb; j++) {
@@ -9580,6 +9633,11 @@ static bool wpn_bind(CPUState* cpu, int k, u32 object, int holder, int home, int
                 g_wpn[w].held[j][list][b] = (u8)mem_read8(cpu, keys + b);
             g_wpn[w].held_n[j][list] = 1u;
         }
+        for (u32 list = 0u; list < 2u && kept != NULL; list++)
+            if (kept->held_n[j][list] != 0u) {
+                memcpy(g_wpn[w].held[j][list], kept->held[j][list], 12u);
+                g_wpn[w].held_n[j][list] = 1u;
+            }
         held += g_wpn[w].held_n[j][0] != 0u || g_wpn[w].held_n[j][1] != 0u;
     }
     // ED_WPN_BONES=1 (testing): each of the holder's bones, its parent, where it is as made, and the home's bone it plays.
@@ -11530,6 +11588,19 @@ static void hle_object_model(CPUState* cpu) {
         (their_turn || (player_model() >= 0 && (s32)mem_read32(cpu, object + 580u) == player_model()))) {
         hle_set_u32(cpu, (u32)g_chapter_model);
         return;
+    }
+    // ED_FIN_LOG: the look for someone down to finish (0x800330E0) asks the model of what the looker holds to fight with
+    // here (lr 0x800331EC), and gives up at once for 99, 198 and 241: said each time the answer changes.
+    if (cpu->lr == 0x800331ECu && fin_log()) {
+        static u32 told_object = 0xFFFFFFFFu;
+        static s32 told_model = -2;
+        const s32 model = guest_ram_range_valid(cpu, object + 580u, 4u) ? (s32)mem_read32(cpu, object + 580u) : -1;
+        if (object != told_object || model != told_model)
+            fprintf(stderr, "[fin] the look for someone down: the thing held to fight with is object 0x%08X, model %d%s (frame %llu)\n", object,
+                    model, model == 99 || model == 198 || model == 241 ? ": the game gives up, no FINISH HIM" : "",
+                    (unsigned long long)(cpu->timebase / 675000ull));
+        told_object = object;
+        told_model = model;
     }
     hle_set_u32(cpu, guest_ram_range_valid(cpu, object + 580u, 4u) ? mem_read32(cpu, object + 580u) : 0u);
 }

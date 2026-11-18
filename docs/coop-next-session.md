@@ -1,5 +1,49 @@
 # HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit, through native menus step 6, the Tome look in co-op; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
 
+## 2026-11-18: Karim's arms on the opening dream's Shotgun (Alex's moveset on any body); built, NOT committed yet
+- **What the user saw** (their play: logs/run-20261118-123512-karim-shotgun, Start Game in co-op, player 1 Ellia,
+  player 2 Karim): Karim did not hold the dream's Shotgun; it stood up by his face and his arms did not follow.
+- **The rule (the user, 2026-11-18): a weapon plays its own chapter's character's moves on every body.** The dream's
+  Shotgun is Alex's moveset, the only one made for it. Do NOT give Karim another character's (I tried Peter's first:
+  the hand off the barrel, the reload floating over his head, the user refused it; the row is gone from `kGunMoves`).
+- **Cause** (`wpn_bind`, hle.c): a bone matched by name is left out when it sits more than 45 degrees from the home's
+  as made, with everything under it. The only such joints with a limb under them, on the whole disc, are the two upper
+  arms: Karim's, Roberto's, Lindsey's and Max's sit 49 to 65 degrees from Alex's and Ellia's (counted from
+  `kFinBones*` / `kFinTurns*`), so with Alex's moves both whole arms were left out and held as they stood (18 of
+  Karim's 72 bones followed). Pius, Edward, Paul, Peter, Michael and Anthony are under 45 and hold it as Alex does,
+  which is why it "worked before" for the others.
+- **Fix.** A joint 45 to 90 degrees off with 8 or more bones under it is kept on the home's moves (a track turns a
+  bone from its parent outright, as the reload's fit already takes them: `fin_fit`). Hair and a thumb turned right
+  round are left out as before. Also: a weapon asked for twice running (player 2's copy: part 77 as it is made, 81 a
+  few frames on) keeps the held bones' keys of the first fit instead of dropping them ("held as the fit before held
+  them"). Test doors: `ED_WPN_LIMBS=0` the old rule; `ED_GUN_MOVER=WEARER:MOVER` another character's gun moves.
+- **Not new, checked properly.** The same scripted start (`JTG_NEWGAME=1 ED_TITLE_PICK=coop JTG_P1=2 JTG_P2=4 sh
+  tools/ed/jtg.sh 1 NAME`) on the 2026-11-15 exe and on a build without b2fdc04's ten fixes, each with `JTG_SLOT=1
+  JTG_EXE=...` (runs -jtg-karim7-nov15, -karim7-nosweep): the same "18 of 72 bones by name (38 more turned too far)".
+  **`JTG_EXE` does nothing without `JTG_SLOT`**: my first three "older build" runs (-karim2-*) all ran today's exe.
+- **Seen.** Co-op, run -jtg-karim9-coop-alex: "player 2 (Karim) holds Alex's weapon ... 48 of 72 bones by name (8
+  more turned too far), 24 held" at both asks; solo as Karim the same (-jtg-karim5-solo-alex). Pictures in
+  `Screenshots for Claude/zoom/` (-karim2-now-1790 before, -karim9-coop-alex-1790 after: the gun low in both hands,
+  as Ellia beside him holds hers) and `Screenshots for Claude/karim-shotgun/`.
+- **FINISH HIM in the dream, solo (the user: missing as Karim, there as Alex; logs/run-20261118-131413-karim-solo-test).**
+  Not a Karim matter. In a fresh dream the game's look for someone down (0x800330E0) passes the same for Karim and
+  Alex (same calls, same arguments: runs -jtg-fintrace-alex, -fintrace-karim, `ED_TRACE_FN=0x80033534,0x801F8BC8`),
+  and the game asks for the prompt each tick (`0x80117404(2, 23, 2244, ...)` from 0x800C03FC, 77 to 200 times a run),
+  but player 1's words are never drawn: as Alex herself too, and the same on the 2026-11-15 exe and without b2fdc04
+  (runs -jtg-finold-nov15, -finold-nosweep, each with JTG_SLOT=1). The user's Alex had it only after the character
+  change reloaded the game in the middle of the dream, which also dropped the dream's sepia look (so the dream's own
+  mode, ed56(7), was gone: a bug of its own). In co-op player 2 has the prompt in the dream because the host draws
+  theirs. No earlier log has it drawn for player 1 in room 96. **Why (read in the game's code):** the prompts'
+  chooser 0x80117628 takes slots 1, 3 and 5 (FINISH HIM is slot 3) only while the walking channel (r13-23060) or
+  the R-held channel (r13-23056) is the one in use (`0x80199F50`, `0x80199F74` -> `0x8013DBD8`); the dream runs on
+  its own input mode (ed56(7)), so the game itself does not draw them there. It is the game's rule, not a fault of
+  the fit or of Karim. The user took my question about it badly ("that is a literal function the game has"): do not
+  ask again; FINISH HIM everywhere else is untouched. Left as the game has it unless the user asks for it in the dream.
+  New log line with ED_FIN_LOG: "[fin] the look for someone down: the thing held to fight with is object ..., model N".
+- **NOT verified.** The reload (my scripted reload was hidden behind the zombies; the user's test did not press Z as
+  Karim). Roberto, Lindsey and Max with the Shotgun (the same joints, not run). The front hand's exact
+  place on the barrel (the pictures are dark). `ed test` was stopped after one scenario so the user could play.
+
 ## 2026-11-18: the new MAIN launcher is built (the user's mock-up 7); committed, not pushed
 What the user chose is `docs/research/launcher-redesign/decisions.md`; pictures of every step are in
 `Screenshots for Claude/launcher-redesign/` (step1-home, step2-update, step3-display, sheet-*.png).
