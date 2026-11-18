@@ -233,6 +233,27 @@ Only while Enhanced is chosen, so Normal is untouched. Each is one place to chan
 - **Risks to settle at high chances:** about half the pool sends you back to the room you left, so a low meter can keep a player from getting through a door. A fix to consider: no effect on the next try of that same door. Recover isn't available early in a chapter or game, so a low meter may have no way back up yet: check per chapter.
 - **Co-op sanity music is split by player:** only the sanity music, not other sounds. Player 1's plays on the left and player 2's on the right, each from their own meter, so one player's full sanity leaves their side without it. The music is `audio/music/insangk.adp`, `inscath.adp`, `ins_mansion.adp`, which are disc streams with their own volume (`docs/mods-feasibility.md`). Where it starts isn't traced.
 
-## Co-op, after single player
+## Co-op: each player's own effects (begun 2026-11-18)
+
+Player 2 has a sanity set of their own and the game's own tracker is run once more each frame as them: `sanity_p2_step`
+in `hle.c`, and `docs/coop-next-session.md` items 12a and 12b for what works and what is left. What one player's sanity
+is made of, read from the code:
+
+| Where | Size | What |
+|---|---|---|
+| The tracker's holder (node +40, then +56) | 200 | +0 clock, +4 the effect picked or running, +8 +12 the two always-on records (0 and 2), +16 table, +20 count, +21 level, +22 music cooldown, +56 the character watched, +60 sanity over most, +64 three step scripts, +196 the data |
+| The node's +20, +24, +32 | 12 | Its state (1 at rest, 41 picked, 42 running), the next, the change flag |
+| `0x80317638` | 1584 | The table: 44 records of 36 (+10 stage, +12 length, +16 cooldown, +20 timer, +24 flags, +28 step, +32 start) |
+| `0x80317C68` | 36 | The clock: +16 the deck's timer, +20 the roll's |
+| `0x80317C8C` | 356 | The data: +12 +16 the deck, +20 +24 the running effect's bit, +32 flags, +56 the number asked for, +72 the return record |
+| `0x80317DF0` | 6024 | The running effect's screen object |
+| r13-25488, -25492 (the overlay's function), -25496 and nine more | 4 each | The overlay's own words (`kSanityWords`) |
+
+A picked effect is started by an event 84 the tracker sends ITSELF for later (0x801F57C0 at 0x8006D3CC), so a second
+set needs that event kept and given back in its own update. The 2D overlay is one function pointer (r13-25492) called
+from the frame at 0x80008534 through 0x800AC71C; in split-screen a flat picture is player 1's as drawn and player 2's
+when moved across by `coop_subtitle_away`, never by a view mark.
+
+## Co-op, after single player (the first notes, kept)
 
 One tracker, one table, one clock, so only one character's sanity rolls effects. `0x80069018` reads `r13-26524` and the current player (`ed needs 0x80069018`). A second clock and table per player would go through `coop_be_player2`. Only one room is loaded, so a visit takes both players (`coop_follow`). Screens that are game modes stop both, and sound shares one set of speakers. **Save/Erase Game stays off in co-op**, by the user's decision: saving in co-op is already fragile.

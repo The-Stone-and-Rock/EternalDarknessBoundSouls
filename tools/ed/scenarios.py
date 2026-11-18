@@ -209,7 +209,7 @@ def run_game(s):
     env['ED_PUT'] = ';'.join('%d,%d,%g,%g,%g' % ((st['frame'] + 20, who) + tuple(s['put'][key]))
                              for who, key in ((1, 'p1'), (2, 'p2')) if key in s.get('put', {}))
     for k, v in s.get('env', {}).items():
-        env[k] = moved(v, shift, 1) if k in ('ED_COOP_P2_PUT', 'ED_QUICK_SET') else v  # (those start with a frame)
+        env[k] = moved(v, shift, 1) if k in ('ED_COOP_P2_PUT', 'ED_QUICK_SET', 'ED_SANITY_P2_TEST') else v  # (those start with a frame)
     # run.sh's first line is this run's folder. A name search could find an older run when this one never started, and pass it.
     run, out = sh('run.sh', [st['path'], name], env)
     if not run or not os.path.exists(os.path.join(run, 'both.tsv')) or os.path.getsize(os.path.join(run, 'both.tsv')) < 2000:

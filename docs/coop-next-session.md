@@ -173,7 +173,34 @@ When you finish something, change its mark here in the same commit as the work. 
   good); a larger backdrop picture.
 - `[OPEN]` **10. Push** (ten commits past v0.1.6 are local). Only when the user says: fork/main, never origin.
   A release then needs `res/version.txt` raised.
-- `[OPEN]` **12. Independent sanity effects for each player in co-op** (the user, 2026-11-18; docs/coop-todo.md's first
+- `[DONE]` **12a. Each player's own sanity effects, the first step (2026-11-18 night).** Player 2 has a sanity set of
+  their own (hle.c `SanityOwn`, `sanity_set_io`: the tracker's 200-byte holder and its node's state, the 44 x 36
+  table 0x80317638, the clock 0x80317C68, the data 0x80317C8C, the screen object 0x80317DF0, twelve r13 words). Once a
+  frame `sanity_p2_step` puts it in, runs the game's own tracker update (0x801F5D48) with player 2 the player
+  (`coop_state`, `coop_be_player2`, their cameras and room) and takes it out. In that update the level function
+  0x80069018 is answered by `sanity_level` (their level from their own meter; no music, no story scenes twice), an
+  event the tracker sends itself for later is kept and given in a later update of theirs (`sanity_later`, called from
+  `split_send`, which already has 0x801F57C0), and the rules answer "not allowed" for every effect but 1, 4, 5, 8,
+  24, 31, 38 (`kSanityP2`). The overlay's draw 0x800AC71C runs once for each player with their set in
+  (`sanity_overlay`), player 2's moved across into their half as their words are (`coop_subtitle_away` on the
+  identity loaded at lr 0x8019D068). Seen: player 2's meter at 10 of 75 reads level 3, effect 31 (TV volume) asked
+  for in their set is picked, started by the kept event 84, runs 384 frames and ends, the VOLUME bar in their half
+  alone, player 1's tracker at rest and player 1 walking (logs/run-20261118-165903-jtg-sanity2-vol6; Screenshots for
+  Claude/sanity-per-player/01; `ed test alex-sanity-p2`). Test doors: `ED_COOP_P2_SANITY=N`,
+  `ED_SANITY_P2_TEST=FRAME,EFFECT`, `ED_SANITY_P2_LOG=1` (why no step), `ED_SANITY_P2=0` (off). Solo untouched.
+- `[OPEN]` **12b. What is left of it, in order.** (1) NOT SEEN YET: a roll by the game's own clock for player 2 (only a
+  forced effect was run), effects 1, 4, 5, 8, 24, 38 for them, and the user's play. Effect 4 (TV shut off) draws
+  full-screen rectangles, which the renderer may not bring back into a half: look first. (2) Player 1's own overlays
+  when the cameras are lent. (3) World effects kept to their player's half in a shared room (blood 1 and 5: effect
+  objects made by 0x801413E8, drawn through 0x8017C1D8; `effect_draw_by_room`'s marks). (4) The effects that need
+  the player's controller state or a door (6, 7, then the door-started ones with their return, for whoever took the
+  door). (5) The whole-game screens in one half (15, 25, 26, 28: the user wants them per player, e.g. a fake blue
+  screen for one while the other plays on; the Tome's copy of memory is the only thing that runs a whole-game screen
+  for one player today). (6) Sound: a mute or a volume fall is for both players now; the sanity music follows player
+  1's meter. (7) Save states do not carry player 2's set (made again after a load: their deck starts over). (8) The
+  Mods menu's Sanity Effects for either player in co-op. (9) Events other code sends to the tracker outside their
+  update (a script's event 82) reach player 1's set.
+- The first wording of item 12, kept: **12. Independent sanity effects for each player in co-op** (the user, 2026-11-18; docs/coop-todo.md's first
   section). Read 2026-11-18 evening, nothing built: the game has ONE tracker (the thing of kind 32, handler 0x8006CEAC),
   one clock and one deck (41 records at r13-25476, the same table for the whole game; chapter limits are code,
   0x8006EB6C; each room file has its own list), watching player 1 only. Player 2 has their own meter and bar already

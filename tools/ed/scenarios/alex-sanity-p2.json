@@ -1,0 +1,48 @@
+{
+ "name": "alex-sanity-p2",
+ "proves": "Each player's own sanity effects, co-op: player 2's meter is set low and one effect (the fake TV volume, 31) is asked for in THEIR set. It is picked, started and ended by the game's own tracker run as player 2, while player 1's tracker stays at rest and player 1 walks through all of it.",
+ "start": "alex-100",
+ "base": 10000,
+ "frames": 10650,
+ "seconds": 150,
+ "env": {
+  "ED_COOP_P2_SANITY": "10",
+  "ED_SANITY_P2_TEST": "10060,31"
+ },
+ "p1": "10100,10160,0x0000,0,100,0;10180,10240,0x0000,100,0,0;10260,10320,0x0000,0,-100,0;10340,10400,0x0000,-100,0,0",
+ "p2": "",
+ "source": "written 2026-11-18 with the first step of each player's own sanity effects (hle.c sanity_p2_step)",
+ "expect": [
+  {
+   "check": "log",
+   "pattern": "player 2's sanity 10 of \\d+: level 3"
+  },
+  {
+   "check": "log",
+   "pattern": "player 2's tracker: state 42, effect 31 running"
+  },
+  {
+   "check": "log",
+   "pattern": "the overlay's draw: player 2's overlay is 0x800AC664, player 1's 0x00000000"
+  },
+  {
+   "check": "count",
+   "pattern": "player 2's tracker: state 1, effect 0",
+   "n": 2
+  },
+  {
+   "check": "moved",
+   "who": "p1",
+   "from": 10100,
+   "to": 10400,
+   "min": 100
+  },
+  {
+   "check": "no_log",
+   "pattern": "WebGPU error"
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}
