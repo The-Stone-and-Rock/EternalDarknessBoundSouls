@@ -2908,7 +2908,8 @@ void build_options_rows() {
 
     // The launcher's menu over the game is for testing: in play, the game's own menus hold everything (the Tome's
     // Options for player 1, the title screen's Options before a game).
-    Row debug{"Debug menu in game", on_off(g_settings.debug_menu)};
+    // (On by default for now, the user 2026-11-18: a fallback while the Tome's pages settle.)
+    Row debug{"Launcher menu in game", on_off(g_settings.debug_menu)};
     debug.toggle = true;
     debug.page = 1;
     debug.note = "Esc or Back opens this menu over the game. Off: settings are in the Tome's Options and the title's Options.";
@@ -3068,15 +3069,17 @@ void build_options() {
             };
             g_rows.push_back(title);
         }
-        Row quit{"Quit game"};
-        quit.gap = !g_on_title;
-        quit.note = g_on_title ? "" : "Unsaved progress is lost.";
-        quit.activate = [] {
-            settings_save();
-            dol_aurora_request_quit();
-            g_close = true;
-        };
-        g_rows.push_back(quit);
+        // (The Tome's Settings has no Quit row since 2026-11-18: it quit with no question. Player 1's Tome has the Exit
+        // Game plaque beside Settings, which asks first: FRONTEND_PAGE_QUIT.)
+        if (g_on_title) {
+            Row quit{"Quit game"};
+            quit.activate = [] {
+                settings_save();
+                dol_aurora_request_quit();
+                g_close = true;
+            };
+            g_rows.push_back(quit);
+        }
     }
 
     Row back{"Back"};

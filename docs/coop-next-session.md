@@ -1,5 +1,26 @@
 # HANDOFF 2026-11-17 (morning): START HERE (all committed on tools/game-kit, through native menus step 6, the Tome look in co-op; controls.cpp's test edits stay uncommitted by rule). What to play: docs/coop-play-test.md
 
+## 2026-11-18: the Tome character change freeze fixed; the launcher menu on Esc / Back is back; Settings' old Quit row gone
+- **The freeze (the user, 2026-11-17 evening; hang-20261117-204821, also 163217/163606/163817): fixed, committed.**
+  A character chosen on the Tome's Characters page in co-op reloaded the game while the Tome was still open (the world
+  goes on behind player 1's Tome, so the mode read "play"). The game ended under the Tome ("the world asks for mode 5
+  with the Tome open"), the prompt chooser then made its words from a freed pack (0x8011708C -> 0x801DB374) and the
+  byte-pair unpacker 0x801559D8 never ended. `characters_reload` (hle.c) now waits until no Tome is open (player 1's,
+  a copy Tome, a Tome asked for), as solo's did already (its Tome is mode 3). The log line ends "(it waited for the Tome
+  to close)". So: choose in the Tome, close the Tome, the game reloads where they stand about a second later.
+  Seen: logs/run-20261117-210755-jtg-fix-tome-change (chapter 1, co-op; the same presses as the hanging baseline
+  -163718, plus Start to close the Tome): reload at the close, both players walking after, no hang report. Picture:
+  Screenshots for Claude/tome-character-change-fix/01. Not seen: player 2's change from their copy Tome, the user's play.
+- **The launcher's menu opens over the game again on Esc / Back** (the user, 2026-11-18: a fallback while the Tome's
+  pages settle). `debug_menu` is on by default (settings.c) and set to 1 in the user's settings.ini; the row is now
+  "Launcher menu in game" (launcher Options > Display). The Tome's pages stay as they are. Not seen in a run (scripts
+  cannot press Esc or Back); it is the same switch as before.
+- **The Tome's Settings page has no "Quit game" row any more** (it quit with no question): Exit Game, the plaque beside
+  Settings, asks first. The title's Options keeps its own.
+- **Mock-ups for a bigger character page in the Tome** (the user: the portraits are too small): Screenshots for
+  Claude/tome-character-layout/ A (one large picture), B (large picture and a strip of five), C (a list and the
+  picture). Waiting for the user's pick; build nothing before it.
+
 **REMIND THE USER (asked 2026-11-17):** play Karim's skeletal pedestal (room 193) with logging so it can be traced:
 docs/coop-play-test.md section 7. Its saves unblock the L04 elevator and Artifact-room tests. Drop this line once played.
 
