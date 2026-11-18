@@ -16,7 +16,8 @@ Bound Souls adds a second player, 34 playable characters and forms, and a set of
 
 ![The title screen with Choose Character lit](https://github.com/The-Stone-and-Rock/EternalDarknessBoundSouls/releases/download/v0.1.6/v0.1.6-title-menu.jpg)
 
-Co-op is **experimental**, and the menus mark anything else that is new. Bug reports are welcome in the
+**Solo**, the game plays from start to finish with any character. **Co-op** is experimental: for now, play it
+side by side with the Original camera. Bug reports are welcome in the
 [Issues](https://github.com/The-Stone-and-Rock/EternalDarknessBoundSouls/issues), and each version's known issues
 are on the [Releases](https://github.com/The-Stone-and-Rock/EternalDarknessBoundSouls/releases) page.
 
@@ -34,13 +35,14 @@ Pius and Alex in the Roivas mansion, Karim and Chandra in the Forbidden City.
 
 | | |
 | --- | --- |
-| **Players** | 1, or 2 on one screen (side by side, or above and below) |
+| **Players** | 1, or 2 on one screen, side by side |
+| **Solo** | The whole game, start to finish, with any character |
 | **Playable characters** | **12**: Pius, Ellia, Anthony, Karim, Max, Lindsey, Paul, Roberto, Peter, Edward, Michael and Alex |
 | **Other forms** | **22** more from the story: spirits, corpses, the Liche, Chandra, the Bishop and others (**34 in all**) |
-| **Tomes** | One for each player, open at the same time |
+| **Tomes** | Independent: each player has their own |
 | **Rooms** | Split up and explore different rooms |
 | **Save slots** | 100 save states, besides the game's own memory-card saves |
-| **Sanity effects** | Any of the game's 35 on demand, in solo play |
+| **Sanity effects on demand** | In testing, not recommended yet |
 
 ---
 
@@ -50,15 +52,17 @@ Pius and Alex in the Roivas mansion, Karim and Chandra in the Forbidden City.
 
 *On the title screen: Start Game or Load Game, then Co-op.*
 
-- **Split screen**: side by side or above and below, at 60 frames a second.
-- **Everything of your own**: a Tome, magick, health, sanity, weapons and ammo for each player.
+- **Split screen**: side by side, at 60 frames a second. Above and below is untested: use side by side for now.
+- **Independent Tomes**: each player opens and uses their own, with their own magick, health, sanity, weapons
+  and ammo.
 - **Go your own way**: split up and explore different rooms, each half of the screen showing its own room's
   light, mist and flames.
-- **Nobody waits**: examine, read, pick up and cast at the same time, and work a puzzle while your partner plays
-  on. A scene plays in the half of whoever starts it, and the story's big moments bring you both together.
+- **Independent actions**: examine, read, pick up and cast at the same time, and work a puzzle while your partner
+  plays on. A scene plays in the half of whoever starts it, and the story's big moments bring you both together.
 - **Creatures hunt you both**, and the sight of them costs each of you sanity.
-- **Your own controls and camera**: controller or keyboard with your own button mapping, in Original, Third
-  person or First person view.
+- **Your own controls**: two controllers, or one controller and one keyboard and mouse, each with their own
+  button mapping.
+- **Camera**: play co-op with the game's Original camera for now. Third person and First person are untested.
 - **Co-op saves**: player 1 saves for both, and a save loads with the two of you together.
 
 ### Characters
@@ -81,10 +85,10 @@ Pius and Alex in the Roivas mansion, Karim and Chandra in the Forbidden City.
 
 *In a game: the Tome's Options > Mods. Before one: Mods in the title's Options or the launcher.*
 
-- **Sanity Effects** (solo, in a game): play any of the game's 35 whenever you like, or let a random one strike
-  at doors.
-- **Challenge**: *Enhanced* (solo) brings sanity effects at doors, more often as your sanity falls. *Off* keeps
-  only the story's.
+- **Sanity Effects** (solo, in testing): play one of the game's 35 on demand. This is being reworked and not
+  every effect works yet, so it is not recommended for now.
+- **Challenge** (solo, in testing): *Enhanced* brings sanity effects at doors, more often as your sanity falls.
+  *Off* keeps only the story's.
 - **Cheats** (in a game): *All magick* and *Full stats*, one switch each, covering both players.
 - **Title video**: Bound Souls' own video behind the title menu, switched on or off before a game.
 - **Skip intro**: a switch on the launcher to skip the opening movies.
@@ -165,8 +169,8 @@ Image > HD textures** says how many it found. The pack is the work of **Zombie**
   leads to the title screen.
 - **Start Game** and **Load Game** ask **Solo** or **Co-op**; return to the title to change. **Jump to Game**
   starts any chapter in the mode you picked last.
-- For co-op, plug in two controllers. With one controller and the keyboard, set *Options > Controls > Player II >
-  Plays with* to **Keyboard**.
+- For co-op, use two controllers, or one controller and one keyboard and mouse (set *Options > Controls >
+  Player II > Plays with* to **Keyboard**). Side by side with the Original camera is the recommended way to play.
 - **Choose Character**, on the title screen or the launcher, sets who each player plays.
 - In a game, player 1's Tome holds Characters, Save States, Settings and Mods under **Options**, and player 2's
   holds their own Characters. **Esc** or the View/Back button opens the launcher's menu too.
