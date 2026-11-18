@@ -1049,3 +1049,20 @@ menu.rcss already has `.pick { display: block; min-width: 16vh; text-align: cent
 matched `<body class="pick">` too, so the body was no longer the flex box that centres `#book`.
 What worked: names no rule uses, `pickpage` on the body and `pickcard` on the cards (grep menu.rcss for a class before
 using it). Seen centred in -171306-jtg-p2-title-mode and after.
+
+## 2026-11-18: the weapon fit made to wait for "a move of the body's OWN" held player 2 still after every state load
+
+The fault: Karim drawn out in spikes at the start of Alex's last chapter (the fit to Alex's weapon moves made before
+any move of his had played, so the bones those moves haven't had no pose: `wpn_bind`, "0 held"). First fix tried in
+`wpn_serve`: answer 0 ("not yet") for up to 90 ASKS while the move playing is not one by the body's own bones:
+
+    if (!wpn_own_move_plays(cpu, object)) {   // false too for a move fitted before (FIN_SCRATCH..SCRATCH_WPN_P1)
+        if (waited[p2] < 90u) { waited[p2]++; return 0; }
+
+It fixed the chapter's start ("24 held") and broke every run from a save state: after a load the body plays the
+move fitted before the save, which is not its own, the asks come 16 frames apart, so player 2 stood for 24 seconds
+("PUSHES, STILL"; `ed test`'s three Alex scenarios: "p2 walked 0"). It also showed the second way into the same
+fault: after a load the fit was made again "as modelled", 0 held, as the held keys were host memory only.
+What stands: wait only while the body plays NO move at all, counted in frames (`wpn_a_move_plays`), and the fits
+saved in the state (section COWP) for the load. Lesson: a wait on "its own move" is wrong wherever a fitted move is
+already playing; run `ed test` before showing a body fix.

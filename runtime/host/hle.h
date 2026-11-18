@@ -71,6 +71,11 @@ void hle_coop_prompt_load(const void* in);
 size_t hle_coop_tome_trip_size(void);
 void hle_coop_tome_trip_save(void* out);
 void hle_coop_tome_trip_load(const void* in);
+// Each player's fit to another character's weapon moves (the bones those moves haven't, held at their pose).
+// hle_wpn_load(NULL) for a state that has none.
+size_t hle_wpn_size(void);
+void hle_wpn_save(void* out);
+void hle_wpn_load(const void* in);
 // Each wearer's own body, for a player's form (its moves are fitted to it).
 size_t hle_costume_size(void);
 void hle_costume_save(void* out);

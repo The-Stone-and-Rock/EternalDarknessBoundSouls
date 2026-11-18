@@ -190,6 +190,19 @@ When you finish something, change its mark here in the same commit as the work. 
   (`docs/prompts/session-kit-mapping.md`). Put the marks on those lists as each is touched.
 
 ### Finished on 2026-11-18 (do not redo, do not recheck)
+- `[FIXED]` **Karim (player 2) drawn out in spikes and sheets at the start of Alex's last chapter** (the user's own
+  frame, 2026-11-18 evening, Jump to Game 12 with Pius and Karim; Screenshots for Claude/karim-distorted/). Not from
+  the evening's changes. Cause: a player fitted to another character's weapon moves has bones those moves haven't
+  (Karim 24 of 72, Ellia 29 of 77), held at the pose of the move the body plays as the fit is made (`wpn_bind`).
+  Two ways they had no pose and the game drew each by its whole place as made on top of its parent's: (1) the weapon
+  is in hand as the body is made (Alex's last chapter), so the fit came before any move had played ("0 held");
+  (2) after ANY save state's load with such a weapon in hand, the fit is made again and the keys held before were
+  host memory only ("as modelled"). How: (1) `wpn_serve` answers "not yet" while the body plays no move at all
+  (`wpn_a_move_plays`), 90 frames at most: seen 33 frames, then "24 held"; (2) save states carry the fits (section
+  COWP: `hle_wpn_save`, `g_wpn_loaded`, read by `wpn_bind`'s `kept`): "held as the fit before held them ... 29 held"
+  after a load. Seen: logs/run-20261118-162907-jtg-karim-fit-final; `ed test` 5 of 5 (its Alex scenarios run from a
+  loaded state with Ellia holding Alex's weapon). A state made before this build has no COWP: load it and it is as
+  before; make it again. Not seen: the user's play of it; the other characters there.
 - `[FIXED]` **Karim (and Roberto, Lindsey, Max) did not hold the opening dream's Shotgun** (their arms froze).
   How: `wpn_bind` (hle.c) keeps a joint with a limb under it on the weapon's own moveset when it sits 45 to 90
   degrees from the home's as made, and a weapon asked for twice keeps the first fit's held bones. Commit c6e4c63.

@@ -9305,6 +9305,17 @@ static struct WpnBinding {
     u32 held_n[COSTUME_MAX_BONES][2];
     u8 held[COSTUME_MAX_BONES][2][12];
 } g_wpn[4];
+// The bindings a loaded state was saved with (save states' section COWP), read only for their held bones' keys: the
+// slots themselves are host memory and are loaded and fitted again after a load (wpn_bind's `kept`).
+static struct WpnBinding g_wpn_loaded[4];
+size_t hle_wpn_size(void) { return sizeof g_wpn; }
+void hle_wpn_save(void* out) { memcpy(out, g_wpn, sizeof g_wpn); }
+void hle_wpn_load(const void* in) {
+    if (in != NULL)
+        memcpy(g_wpn_loaded, in, sizeof g_wpn_loaded);
+    else
+        memset(g_wpn_loaded, 0, sizeof g_wpn_loaded);  // (a state made before this section: fitted as modelled, as before)
+}
 
 static int wpn_index(int k) {
     return k == 0 || k == 1 ? k : k == WPN_P1_SLOT || k == WPN_P1_SLOT + 1 ? 2 + (k - WPN_P1_SLOT) : -1;
@@ -9544,6 +9555,14 @@ static bool wpn_bind(CPUState* cpu, int k, u32 object, int holder, int home, int
                 before = g_wpn[x];
                 kept = &before;
             }
+        // A state just loaded: the fit it was saved with (hle_wpn_load), for the same body. Without it every state loaded
+        // with a player holding another's weapon came back "as modelled", the bones the home hasn't drawn out as above.
+        for (int x = 0; x < 4 && kept == NULL; x++)
+            if (g_wpn_loaded[x].table != 0u && g_wpn_loaded[x].object == object && g_wpn_loaded[x].body == body &&
+                g_wpn_loaded[x].bones == nb && g_wpn_loaded[x].holder == holder) {
+                before = g_wpn_loaded[x];
+                kept = &before;
+            }
         fprintf(stderr, "[player] %s's held bones: the move playing (%u tracks) isn't their body's (%u bones): %s\n", who,
                 now_tracks, nb, kept != NULL ? "held as the fit before held them" : "as modelled");
         now = 0u;
@@ -9694,6 +9713,21 @@ static bool wpn_bind(CPUState* cpu, int k, u32 object, int holder, int home, int
     return true;
 }
 
+// Whether the body plays any move yet (wpn_bind's `now`: the set in use, its record, its tracks). A body just made
+// plays none: a fit made then has no pose for the bones the home's moves haven't. (A body that plays a move fitted
+// before, as after a state's load, does play one: its held bones come from that fit, kept in the state: hle_wpn_save.)
+static bool wpn_a_move_plays(CPUState* cpu, u32 object) {
+    const u32 anim = mem_read32(cpu, object + 64u);
+    if (!guest_ram_range_valid(cpu, anim + 2176u, 2u) || mem_read16(cpu, anim + 2176u) >= 8u)
+        return false;
+    const u32 set = mem_read32(cpu, anim + mem_read16(cpu, anim + 2176u) * 272u + 184u);
+    const u32 record = guest_ram_range_valid(cpu, set, 8u) ? mem_read32(cpu, set + 4u) : 0u;
+    if (!guest_ram_range_valid(cpu, record, 8u))
+        return false;
+    const u32 now = mem_read32(cpu, record), tracks = mem_read16(cpu, record + 4u);
+    return tracks != 0u && guest_ram_range_valid(cpu, now, tracks * 16u);
+}
+
 // A part asked for, served from the player's own two host slots (first, first + 1) with the home's part: 1 ready, 0 not
 // yet (asked again, as the game's own answer), -1 not served (as before).
 static int wpn_serve(CPUState* cpu, u32 object, int model, int part, int first, int home, int want, bool p2) {
@@ -9708,6 +9742,39 @@ static int wpn_serve(CPUState* cpu, u32 object, int model, int part, int first, 
             k = i;
     }
     if (k < 0) {
+        // The bones the home's moves haven't are held at the pose of the move the holder plays as the fit is made
+        // (wpn_bind). A weapon in hand as the body is made (Alex's last chapter from Jump to Game: player 2 is made
+        // holding her weapon's copy) asked before any move of their own had played, so there was nothing to hold them at,
+        // and the game places such a bone by its whole place as made on top of its parent's: Karim's 24 such bones were
+        // drawn out in spikes and sheets (the user, 2026-11-18; "0 held" in logs/play.log, where the opening dream's fit,
+        // made a while after he stood there, has "24 held"). So the fit waits, as a part still loading does (the answer
+        // 0, asked again), while the body plays no move at all yet; a second and a half at most, then as before. A body
+        // that plays a move is fitted at once, as ever (after a state's load it plays the move fitted before the save:
+        // waiting there held player 2 still for as long, `ed test`'s three Alex scenarios, the same evening).
+        static u32 wait_object[2];
+        static unsigned long long wait_from[2];
+        static bool wait_told[2];
+        const unsigned long long frame = cpu->timebase / 675000ull;
+        if (wait_object[p2] != object || frame < wait_from[p2]) {
+            wait_object[p2] = object;
+            wait_from[p2] = frame;
+            wait_told[p2] = false;
+        }
+        if (!wpn_a_move_plays(cpu, object)) {
+            if (frame - wait_from[p2] < 90ull) {
+                if (!wait_told[p2])
+                    fprintf(stderr, "[player] player %d's weapon moves: part %d waits, their body plays no move yet (frame %llu)\n", p2 ? 2 : 1,
+                            part, frame);
+                wait_told[p2] = true;
+                return 0;
+            }
+            fprintf(stderr, "[player] player %d's weapon moves: part %d fitted with no move playing to hold the other bones at (frame %llu)\n",
+                    p2 ? 2 : 1, part, frame);
+        } else if (wait_told[p2]) {
+            fprintf(stderr, "[player] player %d's weapon moves: part %d waited %llu frames for the body's first move (frame %llu)\n", p2 ? 2 : 1,
+                    part, frame - wait_from[p2], frame);
+            wait_told[p2] = false;
+        }
         // Into the slot of theirs they are not playing from, and not over the move still playing.
         k = mem_read32(cpu, object + 648u) == moves_slot_table(first) ? first + 1 : first;
         if (moves_slot_playing(cpu, object, k)) {
