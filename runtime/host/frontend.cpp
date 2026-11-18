@@ -3904,7 +3904,9 @@ void build_launcher_home() {
     Row load{"Load"};
     load.sub = used != 0 ? "Your save states" : "No save states yet";
     load.enabled = playable && used != 0;
-    load.note = !playable ? no_disc : "Your save states: load, duplicate or delete one. Experimental, expect glitches.";
+    load.note = !playable ? no_disc
+                : used != 0 ? "Your save states: load, duplicate or delete one. Experimental, expect glitches."
+                            : "No save states yet: F1 to F10 save one while you play.";
     load.activate = [] {
         g_screen = Screen::Play;
         g_selected = play_row(newest_slot());  // the save made last
@@ -3922,7 +3924,9 @@ void build_launcher_home() {
         cont.sub = "Newest: slot " + std::to_string(newest) + (mem1 == 0u ? "" : coop ? ", co-op" : ", solo");
     }
     cont.enabled = playable && newest != 0;
-    cont.note = !playable ? no_disc : "Back where you saved last (" + slot_time(newest) + ").";
+    cont.note = !playable ? no_disc
+                : newest != 0 ? "Back where you saved last (" + slot_time(newest) + ")."
+                              : "No save state yet: F1 to F10 save one while you play.";
     cont.activate = [newest] {
         leave_page();
         start_game(newest);
