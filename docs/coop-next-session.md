@@ -215,6 +215,16 @@ When you finish something, change its mark here in the same commit as the work. 
   started at their own door, three phantoms round them in room 51, none in player 1's room 100, player 1 walking
   (logs/run-20261118-174701-jtg-sanity2-phantoms; Screenshots for Claude/sanity-per-player/05). 10 not run. In a
   SHARED room both players would see the phantoms: not kept to a half yet.
+- `[DONE]` **12a, the first whole-game screen for one player: TV Video (25).** When it waits in player 2's set and they
+  press Start, the host does mode 8's work itself with the game's own calls (in `sanity_p2_step`: event 84, the play
+  hold as them, the sounds at ticks 46, 66, 140, 160, at 300 event 81 and the flash 0x8006B270; drawn in
+  `sanity_overlay`: 0x8019CFD4(5), the black as TWO half-height rectangles from -106, 853 across, the green word at
+  455, 31). The game's mode is never asked, so the world and player 1 go on; their Start is not their Tome's while it
+  waits (`g_sanity_p2_takes_start` in `coop_p2_own_up`). Seen: their whole half black with VIDEO, player 1 walking,
+  let go after 300 frames (logs/run-20261118-180717-jtg-sanity2-video4; Screenshots for Claude/sanity-per-player/06).
+  Lesson: ONE rectangle of the whole screen is a "whole screen" picture to the split and is lost from both halves.
+  Blue Screen (28) and Game Reset (26) need UInsane's pictures (plan.md): the same way, with the picture as two
+  halves or a marked matrix. Not heard: the sounds (runs are muted).
 - `[OPEN]` **12b. What is left of it, in order.** (1) NOT SEEN YET: effects 1, 4, 5, 8, 38 for player 2 in a picture,
   and the user's play. Effect 4 (TV shut off) draws
   full-screen rectangles, which the renderer may not bring back into a half: look first. (2) Player 1's own overlays

@@ -3445,6 +3445,13 @@ static int g_flash_out_of = -1;  // the view the flash being drawn leaves out (0
 static int g_sanity_overlay_out = -1;  // a sanity effect's overlay is being drawn (sanity_overlay): 0 player 2's, 1 player 1's, -1 none
 static s16 coop_subtitle_away(CPUState* cpu, int owner);  // (below)
 static bool g_sanity_overlay_wide;  // the overlay being drawn is TV Shut Off's
+// A whole-game screen of player 2's own (TV Video for now), shown in their half alone by the host (sanity_p2_step).
+static struct {
+    bool on;
+    int effect;
+    unsigned tick;
+} g_sanity_p2_screen;
+static bool g_sanity_p2_takes_start;  // their Start is that screen's (one waits in their set, or is up): no Tome for it
 static int g_sanity_p2_began_effect;                // the effect player 2's own tracker started last (sanity_p2_step, sanity_p2_door)
 static unsigned long long g_sanity_p2_began_frame;  // and when
 static void notify_GXLoadPosMtxImm(CPUState* cpu) {
@@ -18649,7 +18656,7 @@ static bool coop_p2_words_open_call(void) { return coop_p2_words_call() || g_coo
 // Their own words, close-up or find is up (step D): their Start is refused then, as the game refuses the player's Start while
 // words or a close-up hold play (0x80006CDC's gates on r13-25696 and the control channels), and a save waits (hle_save_held).
 static bool coop_p2_own_up(void) {
-    return g_coop_p2_words.up || coop_p2_look_up() || g_coop_p2_find.up;
+    return g_sanity_p2_takes_start || g_coop_p2_words.up || coop_p2_look_up() || g_coop_p2_find.up;
 }
 static bool coop_p2_own_set_in(void) { return g_coop_p2_words_tick || g_coop_prompt_look || g_coop_p2_left_run; }
 // Their own set is host memory: nothing of it is in a state, and once player 2 is unlisted (an area change) nobody could close it
@@ -27560,7 +27567,7 @@ static void sanity_door_rules(CPUState* cpu) {
 }
 
 // (Each player's own sanity effects in co-op, sanity_p2_step below: what the rules' intercept needs of it.)
-static const s8 kSanityP2[] = {1, 4, 5, 6, 7, 8, 10, 14, 21, 24, 31, 38};  // the effects player 2's own set may roll so far
+static const s8 kSanityP2[] = {1, 4, 5, 6, 7, 8, 10, 14, 21, 24, 25, 31, 38};  // the effects player 2's own set may roll so far
 static bool g_sanity_p2_in;         // player 2's update of the tracker is running
 static int g_sanity_p2_forced = -1;  // ED_SANITY_P2_TEST's effect while it is asked for
 static bool sanity_p2_has(int effect) {
@@ -27983,6 +27990,25 @@ static void sanity_overlay(CPUState* cpu) {
             told = theirs;
         }
         hle_guest_call(cpu, SANITY_OVERLAY, args, 4, 0.0, &ignore);
+        if (g_sanity_p2_screen.on) {
+            // Their TV Video screen, as mode 8 draws it (0x8011332C-0x80113388): the 2D setup, the black rectangle, then
+            // the green word at 455, 31, with the game's own numbers (the rectangle from -106, 853 across: a wide screen's).
+            const u32 colours = EFFECT_MTX_SCRATCH + 64u, five = 5u, zero = 0u;
+            hle_guest_call(cpu, 0x8019CFD4u, &five, 1, 0.0, &ignore);
+            mem_write32(cpu, colours, mem_read32(cpu, cpu->gpr[2] - 23808u));
+            // (Two rectangles, each half the height: one of the whole screen, the game's -106..747 or 0..640, is a
+            // "whole screen" picture to the split, which never brings one back into a half: lost from both.)
+            const u32 top[6] = {(u32)-106, 0u, 853u, 240u, (u32)-1, colours}, bottom[6] = {(u32)-106, 240u, 853u, 240u, (u32)-1, colours};
+            hle_guest_call(cpu, 0x8019C8FCu, top, 6, 0.0, &ignore);
+            hle_guest_call(cpu, 0x8019C8FCu, bottom, 6, 0.0, &ignore);
+            hle_guest_call(cpu, 0x801D7D2Cu, &zero, 1, 0.0, &ignore);
+            const u32 at[2] = {455u, 31u};
+            hle_guest_call(cpu, 0x801D972Cu, at, 2, 0.0, &ignore);
+            mem_write32(cpu, colours + 4u, mem_read32(cpu, cpu->gpr[2] - 23804u));
+            const u32 colour = colours + 4u, word = cpu->gpr[13] - 29040u;
+            hle_guest_call(cpu, 0x801D7CBCu, &colour, 1, 0.0, &ignore);
+            hle_guest_call(cpu, 0x801D9AC8u, &word, 1, (double)guest_read_f32(cpu, cpu->gpr[2] - 23800u), &ignore);
+        }
         sanity_set_io(cpu, &g_sanity_p2, node, holder, true);
         sanity_set_io(cpu, &g_sanity_p1_kept, node, holder, false);
     }
@@ -28209,6 +28235,51 @@ static void sanity_p2_step(CPUState* cpu) {
         }
         if (room_now != -1)
             room_was = room_now;
+    }
+    {
+        // TV Video (25), one of the effects the game starts at a press of Start: its pause code sends the tracker event 84
+        // and asks for game mode 8, a screen that takes the whole game (0x801132F4: a black screen, green VIDEO, the
+        // sounds of being eaten at ticks 46 and 140 and the player's own at 66 and 160, 300 ticks, then event 81 and the
+        // flash). For player 2 the host does that screen's work itself with the game's own calls, in their half alone
+        // (drawn in sanity_overlay), with them held by the game's play hold in their own controller state: the mode is
+        // never asked, so the world and player 1 go on. Their Start is the screen's while one waits (coop_p2_own_up).
+        const u32 record = mem_read32(cpu, holder + 4u);
+        const u32 waiting = mem_read32(cpu, node + 20u) == 41u && guest_ram_range_valid(cpu, record, 36u) ? mem_read32(cpu, record) : 0u;
+        static bool start_was;
+        const bool start = (g_coop_p2_buttons & 0x1000u) != 0u;
+        if (!g_sanity_p2_screen.on && waiting == 25u && start && !start_was) {
+            g_sanity_p2_screen.on = true, g_sanity_p2_screen.effect = 25, g_sanity_p2_screen.tick = 0u;
+            const u32 args[4] = {84u, 0u, id, 0u}, hold = 0u;
+            hle_guest_call(cpu, COOP_SEND_EVENT, args, 4, 0.0, &ignore);
+            hle_guest_call(cpu, 0x80199EA0u, &hold, 1, 0.0, &ignore);
+            fprintf(stderr, "[sanity2] player 2 pressed Start with TV Video waiting: its screen is up in their half, they are held (tracker state %u; frame %llu)\n",
+                    mem_read32(cpu, node + 20u), frame);
+        } else if (g_sanity_p2_screen.on) {
+            const unsigned t = ++g_sanity_p2_screen.tick;
+            if (t == 46u || t == 140u) {
+                const u32 pick[2] = {3u, 0x8023A550u};
+                u32 sound = 0u;
+                hle_guest_call(cpu, 0x8019E1E0u, pick, 2, 0.0, &sound);
+                const u32 play[2] = {sound & 0xFFFFu, 85u};
+                hle_guest_call(cpu, SOUND_PLAIN, play, 2, 0.0, &ignore);
+            }
+            if (t == 66u || t == 160u) {
+                const u32 voice[2] = {mem_read32(cpu, cpu->gpr[13] - 26524u), 33u};
+                hle_guest_call(cpu, 0x8019DA18u, voice, 2, 0.0, &ignore);
+            }
+            if (t >= 300u) {
+                g_sanity_p2_screen.on = false;
+                const u32 let = 1u, args[4] = {81u, 0u, id, 0u};
+                hle_guest_call(cpu, 0x80199EA0u, &let, 1, 0.0, &ignore);
+                hle_guest_call(cpu, COOP_SEND_EVENT, args, 4, 0.0, &ignore);
+                hle_guest_call(cpu, 0x8006B270u, &holder, 1, 0.0, &ignore);
+                fprintf(stderr, "[sanity2] player 2's TV Video is over: event 81 and the flash, they are let go (frame %llu)\n", frame);
+            }
+        }
+        start_was = start;
+        const u32 record2 = mem_read32(cpu, holder + 4u);
+        g_sanity_p2_takes_start = g_sanity_p2_screen.on || (mem_read32(cpu, node + 20u) == 41u && guest_ram_range_valid(cpu, record2, 36u) &&
+                                                             mem_read32(cpu, record2) == 25u);
     }
     hle_guest_call(cpu, SANITY_UPDATE, &node, 1, 0.0, &ignore);
     {  // what their tracker is at, said as it changes
