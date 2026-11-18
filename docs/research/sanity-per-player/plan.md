@@ -19,6 +19,9 @@ round it (`SanityOwn`, `sanity_set_io`, `sanity_level`, `sanity_later`, `sanity_
 - Allowed for them now (`kSanityP2`): 1, 4, 5, 6, 7, 8, 24, 31, 38. Not seen in a picture: 1, 5 (blood: not found in
   the rooms tried), 6, 7, 8, 38.
 
+- Late 2026-11-18: steps 1 to 3 of the door plan below are BUILT for stay mode, by the whole-bracket way
+  (`sanity_p2_door`), with 14 Bug Crawl seen at player 2's own door. Next in that plan: 10 and 21, then step 4.
+
 ## Lessons of the build (do not repeat)
 
 - In split-screen a flat picture is player 1's as drawn and player 2's when moved across by `coop_subtitle_away(cpu, 2)`

@@ -201,6 +201,16 @@ When you finish something, change its mark here in the same commit as the work. 
   **The plan for everything left, with every address the readers found, is `docs/research/sanity-per-player/plan.md`:
   read it before the next step** (door effects for a door player 2 takes, then the whole-game screens in one half by
   the Tome copy's way, then the world effects' halves, sound, save states, the menu).
+- `[DONE]` **12a, the door step (2026-11-18, late).** A door player 2 takes with player 1 staying has THEIR sanity set in
+  for the whole of the mod's bracket (`sanity_p2_door`, called from `notify_ticket_run` and `coop_stay_change_end`),
+  with their own link to the tracker (`sanity_p2_link`: info +140, then +68, which the game never set for them), so
+  the game's door code looks at their waiting effect and starts it in their new room. Bug Crawl (14) is allowed them:
+  seen picked, waiting, started at their door into room 51 and a bug on their half alone, player 1 in room 100
+  (logs/run-20261118-173901-jtg-sanity2-door4; Screenshots for Claude/sanity-per-player/04). Its bugs are an effect
+  object (draw 0x80192F10), moved into its player's half in `effect_draw_by_room`. The rule that ends a background
+  effect at their next room leaves alone an effect that very door started. In the test the start was forced whatever
+  the next room's list says (`sanity_door_rules`, only for `ED_SANITY_P2_TEST`'s effect); in play the game's own rule
+  stands (the next room must have a list), not seen yet. Follow mode has no bracket: not done there.
 - `[OPEN]` **12b. What is left of it, in order.** (1) NOT SEEN YET: effects 1, 4, 5, 8, 38 for player 2 in a picture,
   and the user's play. Effect 4 (TV shut off) draws
   full-screen rectangles, which the renderer may not bring back into a half: look first. (2) Player 1's own overlays
