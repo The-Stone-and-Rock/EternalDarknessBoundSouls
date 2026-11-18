@@ -833,3 +833,12 @@ docs/research/solo-coop-picker/next-requests.md, P7. The user: player 1 needs an
   real Tome (`g_coop_tome_owner == 1`, the P2 stops by `tome_stops_player`, from the code).
 - **Left as it was:** the Tome's Settings page still has its own "Quit game" row (no ask) and "Return to title screen".
   The user may want that row gone now, or asking too.
+
+## Built: the cards' explainer lines removed (2026-11-17)
+
+- The user: the gold lines "The same as player 1" and "Two players, the screen split" don't make sense; the form text
+  stays. `pick_line` now gives only a form name (none for Default and Random); the Co-op card has no line; Player II's
+  "Plays with a controller / the keyboard" is gone too. The white "A - ..." line is kept.
+- Seen: logs/run-20261117-203856-jtg-goldless-pick2 (ED_TITLE_PAGE_TEST=700:12:0, Karim Spirit and Lindsey):
+  Screenshots for Claude/solo-coop-picker/P7b-no-gold-lines/01-start-game-cards-form-only.jpg. The Controls picker and
+  player 2 on Default: from the code only (same function).

@@ -1671,15 +1671,12 @@ RosterTile pick_tile(int player) {
         return {g_settings.mod_p2_character, form_on(1, g_settings.mod_p2_character)};
     return {p1, player == 1 ? 0 : form_on(0, p1)};
 }
-// The line under a picture's name: the form, or what Default and Random mean (never the rolled character).
+// The line under a picture's name: the form only (the user, 2026-11-17: no lines explaining Default, Random, player 2
+// on Default or the split). Default and Random have none, and Random never shows who was rolled.
 std::string pick_line(int player) {
     const RosterTile t = pick_tile(player);
-    if (player == 1 && g_settings.mod_p2_character == 0 && t.character != 0)
-        return "The same as player 1";
-    if (t.character == 0)
-        return "Each chapter's own character";
-    if (t.character == SETTINGS_RANDOM)
-        return "Who it is stays a surprise";
+    if (t.character == 0 || t.character == SETTINGS_RANDOM)
+        return "";
     return tile_form_name(t);
 }
 std::string pick_frame_rml(int player, const char* where) {
@@ -1698,13 +1695,10 @@ std::string pick_card_rml(int which, bool selected, size_t index) {
     const int player = controls ? which : 0;  // whose picture is in front
     std::string name = tile_title(pick_tile(player)), line = pick_line(player);
     if (pair) {
-        // Co-op: both names, or one when player 2 is on Default (they play player 1's).
-        if (g_settings.mod_p2_character != 0) {
+        // Co-op: both names, or one when player 2 is on Default (they play player 1's). No line under them.
+        if (g_settings.mod_p2_character != 0)
             name += std::string(" and ") + tile_title(pick_tile(1));
-            line = "Two players, the screen split";
-        } else {
-            line = pick_tile(0).character == 0 ? "Each chapter's own character, for both" : "For both players";
-        }
+        line.clear();
     }
     const char* label = controls ? (which == 1 ? "Player II" : "Player I") : (which == 1 ? "Co-op" : "Solo");
     const char* press = controls ? "A &#8212; their controls" : which == 1 ? "A &#8212; play together" : "A &#8212; play alone";
@@ -1717,10 +1711,6 @@ std::string pick_card_rml(int which, bool selected, size_t index) {
         out += "<div class=\"pcard-pair\">" + pick_frame_rml(1, " behind") + pick_frame_rml(0, " front") + "</div>";
     else
         out += pick_frame_rml(controls ? which : 0, "");
-    if (controls && which == 1) {
-        static const char* const kInput[] = {"Plays with a controller", "Plays with the keyboard"};
-        line = line.empty() ? kInput[g_settings.mod_p2_input & 1] : line;
-    }
     // (A mode that needs the game started again, once its A was pressed: the program starts again in it.)
     const bool note = !controls && g_pick_note == which;
     if (note)
