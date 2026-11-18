@@ -188,8 +188,13 @@ When you finish something, change its mark here in the same commit as the work. 
   alone, player 1's tracker at rest and player 1 walking (logs/run-20261118-165903-jtg-sanity2-vol6; Screenshots for
   Claude/sanity-per-player/01; `ed test alex-sanity-p2`). Test doors: `ED_COOP_P2_SANITY=N`,
   `ED_SANITY_P2_TEST=FRAME,EFFECT`, `ED_SANITY_P2_LOG=1` (why no step), `ED_SANITY_P2=0` (off). Solo untouched.
-- `[OPEN]` **12b. What is left of it, in order.** (1) NOT SEEN YET: a roll by the game's own clock for player 2 (only a
-  forced effect was run), effects 1, 4, 5, 8, 24, 38 for them, and the user's play. Effect 4 (TV shut off) draws
+- `[DONE]` **12a, seen the same night: the game's own roll for player 2, nothing forced.** With their meter at 10 of 75
+  and player 1's full, the game's clock (3600 ticks) picked TV Mute (24) for player 2 at frame 5058, ran it 216 frames,
+  ended it, and 3600 ticks on picked Bleeding Walls (1); player 1's tracker stayed at rest throughout. MUTE is in player
+  2's half alone (logs/run-20261118-170714-jtg-sanity2-roll; Screenshots for Claude/sanity-per-player/02). The blood
+  of effect 1 was not found in the picture (room 100's far camera): not judged.
+- `[OPEN]` **12b. What is left of it, in order.** (1) NOT SEEN YET: effects 1, 4, 5, 8, 38 for player 2 in a picture,
+  and the user's play. Effect 4 (TV shut off) draws
   full-screen rectangles, which the renderer may not bring back into a half: look first. (2) Player 1's own overlays
   when the cameras are lent. (3) World effects kept to their player's half in a shared room (blood 1 and 5: effect
   objects made by 0x801413E8, drawn through 0x8017C1D8; `effect_draw_by_room`'s marks). (4) The effects that need
