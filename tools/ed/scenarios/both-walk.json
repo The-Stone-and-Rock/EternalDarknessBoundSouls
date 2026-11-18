@@ -1,7 +1,11 @@
 {
  "name": "both-walk",
  "proves": "Nothing up: both players walk at once from standing, each camera stays on the room's own camera. The first check after any change.",
- "save": "saves/slot1.state",
+ "start": "anthony-147",
+ "skip": "written for Anthony's bookshelf room 147 on a save of the user's from 2026-11-04; a fresh Jump to Game start does not reach that room past the Tome by script. To be written again in Alex's last chapter (start alex-100), where the Tome and every spell are there from the first frame",
+ "base": 6536,
+ "put": {"p1": [1017, 188, -48], "p2": [956, 71, -48]},
+ "old_save": "saves/slot1.state",
  "frames": 7700,
  "seconds": 120,
  "p1": "6900,6940,0x0000,0,100,0;6960,7000,0x0000,100,0,0;7020,7060,0x0000,0,-100,0;7080,7120,0x0000,-100,0,0;7140,7180,0x0000,0,100,0;7200,7240,0x0000,100,0,0;7260,7300,0x0000,0,-100,0;7320,7360,0x0000,-100,0,0;7380,7420,0x0000,0,100,0;7440,7480,0x0000,100,0,0;7500,7540,0x0000,0,-100,0;7560,7600,0x0000,-100,0,0",

@@ -1,7 +1,10 @@
 {
  "name": "shadow-steady",
  "proves": "Character shadows hold steady from frame to frame in room 338, the corpse's and player 2's too, though the game leaves their flattened draws out now and then. Player 1 walks off and their camera sweeps, with player 2 standing: player 2's picture doesn't jump. saves/shadow-room338.state is a copy of slot 10 of 2026-11-04 11:20.",
- "save": "saves/shadow-room338.state",
+ "start": "karim-338",
+ "base": 14564,
+ "put": {"p1": [-506, -616, 0], "p2": [-677, -625, 0]},
+ "old_save": "saves/shadow-room338.state",
  "env": {
   "ED_RUN_PROBE": "1"
  },

@@ -1,0 +1,40 @@
+{
+ "name": "alex-spell-cast",
+ "proves": "Player 1 casts a quick spell (Ulyaoth Recover) in Alex's last chapter, where every spell is hers: the cast runs, each of its runes gets its light (Remastered spells), player 2 walks through it, and nothing freezes or errors in the renderer.",
+ "start": "alex-100",
+ "base": 10000,
+ "frames": 10700,
+ "seconds": 150,
+ "env": {
+  "ED_QUICK_SET": "10020,0,0x00011042",
+  "ED_RUNES_LOG": "1",
+  "ED_SPELL_LIGHTS": "1"
+ },
+ "p1": "10080,10088,0x0800,0,0,0",
+ "p2": "10200,10260,lup;10280,10340,lright;10360,10420,ldown;10440,10500,lleft",
+ "source": "written 2026-11-18; the cast as docs/runes-3d.md's test, with no Tome to spawn",
+ "expect": [
+  {
+   "check": "log",
+   "pattern": "spell 0x[0-9A-F]+ \\(0x00011042\\) cast by 0x1"
+  },
+  {
+   "check": "log",
+   "pattern": "\\[runes\\] glyph \\d of spell .* a light at .* alignment 2"
+  },
+  {
+   "check": "moved",
+   "who": "p2",
+   "from": 10200,
+   "to": 10500,
+   "min": 100
+  },
+  {
+   "check": "no_log",
+   "pattern": "WebGPU error"
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}

@@ -1,7 +1,11 @@
 {
  "name": "lever-tomes",
  "proves": "Both Tomes after player 2 moves the book, then both walk: two Tomes and the scene's end leave each other alone. Player 1's opens first, player 2's beside it, a page turned.",
- "save": "saves/lever.state",
+ "start": "anthony-147",
+ "skip": "written for Anthony's bookshelf room 147 on a save of the user's from 2026-11-04; a fresh Jump to Game start does not reach that room past the Tome by script. To be written again in Alex's last chapter (start alex-100), where the Tome and every spell are there from the first frame",
+ "base": 12635,
+ "put": {"p1": [1017, 188, -48], "p2": [956, 71, -48]},
+ "old_save": "saves/lever.state",
  "frames": 14150,
  "seconds": 120,
  "p1": "13300,13304,0x1000,0,0,0;13700,13704,0x1000,0,0,0;13900,13940,0x0000,100,0,0",

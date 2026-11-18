@@ -1,7 +1,12 @@
 {
  "name": "p2cam-door",
  "proves": "Player 1 walks through a door and player 2 is brought along: player 2's first look in the new room is at their new place, not at the old room's numbers. Anthony's chapter, room 147 to 150, as the user played it (logs/run-20261104-011724-p2cam-leave): the old numbers fell in CameraRgn07, so player 2 got Camera07 and lost themselves on the stairs. saves/p2cam-door.state is a copy of the user's slot 9 from that run.",
- "save": "saves/p2cam-door.state",
+ "start": "anthony-147",
+ "skip": "written for Anthony's bookshelf room 147 on a save of the user's from 2026-11-04; a fresh Jump to Game start does not reach that room past the Tome by script. To be written again in Alex's last chapter (start alex-100), where the Tome and every spell are there from the first frame",
+ "base": 10716,
+ "put": {"p1": [-378, 804, -48], "p2": [-227, 889, -48]},
+ "mode": "follow",
+ "old_save": "saves/p2cam-door.state",
  "frames": 11100,
  "seconds": 120,
  "p1": "10760,10860,0x0000,-70,127,0",

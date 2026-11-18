@@ -1,5 +1,15 @@
 # 3D runes on the floor when casting (the user's wish, 2026-11-09)
 
+**[DONE] Taken out, 2026-11-18 (the user's order).** The 3D rune stones, their rising flames, the streaks in the
+alignment's colour and the `textures-spellfx` swap are gone from the code (hle.c's `runes_frame` block, texpack.cpp's
+spell map, the setting `spell_fx` and its menu row). What stays, under ONE option: the glow the user likes (the setting
+`spell_rim`, once shown as "Spell glow") is now shown as **Remastered spells**, and it also turns on the spells' own light
+on the room: each flat rune glyph of a cast lights the surfaces round it in its alignment's colour (`spell_lights_frame`
+in hle.c, the renderer's `set_spell_lights` in its haze pass, each light in its caster's room's half while the players are
+apart). Off: every spell as the original game draws it. The folder `textures-spellfx/` and the tools that made it
+(`tools/rune_glow.py`, `spell_fire.py`, `vfx_soften.py`) are no longer read by the game. Everything below is the history
+of the first try: do not rebuild it.
+
 **Paused (2026-11-09).** The user played it and didn't like it: the 3D runes didn't fade or blend in well, the effects
 didn't show well, and **black blocks appeared**. Remastered spells is now off by default (settings.c `spell_fx`); off,
 every spell is the game's own. Everything below is kept for when it's picked up again; start with the black blocks.

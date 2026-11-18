@@ -31,11 +31,9 @@ OPTIONS = {
     'ssao_high': [0, 1],
     'smaa': [0, 1],
     'sharpen': [0, 1, 2, 3],
-    'shafts': [0, 1, 2],
     'per_pixel_lighting': [0, 1],
     'char_shadows': [0, 1, 2],
     'shadow_hard': [0, 1],
-    'contact_shadows': [0, 1],
     'haze': [0, 25, 50, 100],
     'skin_scatter': [0, 1],
     'spell_rim': [0, 1],
@@ -77,8 +75,13 @@ def spikes(series, name, threshold):
     return out
 
 
-def summary(path, threshold=0.1):
+def summary(path, threshold=0.1, skip=0):
     rows = load_probe(path)
+    if skip and rows:
+        # (`ed test`: the first frames of a run from a fresh state hold the players' put to their places, a jump of the
+        # picture that is the test's own doing.)
+        first = min(r['frame'] for r in rows)
+        rows = [r for r in rows if r['frame'] >= first + skip]
     res = {'renders': len(rows), 'between': sum(r['kind'] == 2 for r in rows), 'views': {}}
     for view in (0, 1):
         series = [r for r in rows if r['view'] == view and r['mask'] is not None]

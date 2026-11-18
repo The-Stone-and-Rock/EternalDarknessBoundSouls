@@ -1,7 +1,11 @@
 {
  "name": "find-p2-desk",
  "proves": "Player 2 finds the Circle of Power on the desk: its close-up, find and tutorial words in their Tome all end, and they walk off. A close-up of theirs now lasts through a script's hold, so this checks one that ends in a find. Player 1 walks through it. They're put at the desk (ED_COOP_P2_PUT), not walked there.",
- "save": "saves/p2cam-door.state",
+ "start": "anthony-147",
+ "skip": "written for Anthony's bookshelf room 147 on a save of the user's from 2026-11-04; a fresh Jump to Game start does not reach that room past the Tome by script. To be written again in Alex's last chapter (start alex-100), where the Tome and every spell are there from the first frame",
+ "base": 10716,
+ "put": {"p1": [-378, 804, -48], "p2": [-227, 889, -48]},
+ "old_save": "saves/p2cam-door.state",
  "env": {
   "ED_COOP_P2_PUT": "10740,413,115,-44"
  },

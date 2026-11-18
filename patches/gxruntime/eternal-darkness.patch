@@ -13300,10 +13300,10 @@ index 0000000..9d3c383
 +} // namespace aurora::gfx::post
 diff --git a/graphics/aurora/lib/gfx/shadow.cpp b/graphics/aurora/lib/gfx/shadow.cpp
 new file mode 100644
-index 0000000..18bad77
+index 0000000..a58e5eb
 --- /dev/null
 +++ b/graphics/aurora/lib/gfx/shadow.cpp
-@@ -0,0 +1,1022 @@
+@@ -0,0 +1,1052 @@
 +#include "shadow.hpp"
 +
 +#include "gxcore_draw.hpp"
@@ -13572,11 +13572,6 @@ index 0000000..18bad77
 +@fragment fn vol(in: VOut) -> @location(0) vec4f {
 +  let px = in.pos.xy * 4.0;
 +  let d = textureLoad(depthTex, clamp(vec2i(px), vec2i(0), vec2i(P.size.yz) - vec2i(1)), 0);
-+  // The surface here and which way it faces (from its neighbours), for a spell's light on it: before any return.
-+  let surface = view_at(in, px, max(d, P.depth.x + 2e-5));
-+  var facing = cross(dpdx(surface), dpdy(surface));
-+  facing = facing / max(length(facing), 1e-6);
-+  if (dot(facing, -surface) < 0.0) { facing = -facing; }
 +  let start = view_at(in, px, P.depth.y);
 +  let ray = view_at(in, px, max(d, P.depth.x + 2e-5)) - start;
 +  let full = length(ray);
@@ -13603,15 +13598,31 @@ index 0000000..18bad77
 +    for (var n = 0; n < i32(P.misc.y); n++) {
 +      let to = P.vol[n * 2].xyz - p;
 +      let reach = abs(P.vol[n * 2].w);
-+      let air = select(1.0, 0.25, P.vol[n * 2].w < 0.0);  // a spell's light (radius below 0) is mostly on what it lights
++      let air = select(1.0, 0.1, P.vol[n * 2].w < 0.0);  // a spell's light (radius below 0) is on what it lights (spell)
 +      sum = sum + air * mix(P.vol[n * 2 + 1].rgb, vec3f(dot(P.vol[n * 2 + 1].rgb, vec3f(0.33))), 0.35) / (1.0 + dot(to, to) / (reach * reach)) * open;
 +    }
 +  }
-+  // A spell's light on the surfaces round it (a rune's: radius below 0, its falloff past the rune's own size), from
-+  // all of the rune, not its middle: the distance is from its edge (64, half a glyph). Soft, lit by which way a
-+  // surface faces, with a little shine.
-+  var lit = vec3f(0.0);
++  // However near a lamp the eye goes it only tends to white, and it takes a lot: haze doesn't hide things.
++  let haze = (vec3f(1.0) - exp(-sum * len / 12.0 * 0.00045 * P.misc.x)) * 0.6;
++  return vec4f(min(haze, vec3f(1.0)), 1.0);
++}
++// A spell's light on the surfaces round it (a rune's: radius below 0), kept apart from the haze since 2026-11-18: it was
++// added over the picture with the haze and read as "a round red cloud sitting on top of the runes" (the user). Here it is
++// only how much light falls on each surface: by its distance from the rune's edge (64, half a glyph), by which way the
++// surface faces (found from its neighbours' depth), with a little shine, and none where a character or a pillar stands
++// in the way (spell_shadow). spell_add then MULTIPLIES the picture by it, so the surface's own pattern shows through,
++// tinted and brightened, as a real light does; what is black stays black. No pool of colour of its own.
++@fragment fn spell(in: VOut) -> @location(0) vec4f {
++  let px = in.pos.xy * 4.0;
++  let d = textureLoad(depthTex, clamp(vec2i(px), vec2i(0), vec2i(P.size.yz) - vec2i(1)), 0);
++  let surface = view_at(in, px, max(d, P.depth.x + 2e-5));
++  var facing = cross(dpdx(surface), dpdy(surface));
++  facing = facing / max(length(facing), 1e-6);
++  if (dot(facing, -surface) < 0.0) { facing = -facing; }
++  if (d <= 1e-7) { return vec4f(0.0, 0.0, 0.0, 1.0); }
++  let noise = fract(52.9829189 * fract(dot(in.pos.xy, vec2f(0.06711056, 0.00583715))));
 +  let eye = normalize(-surface);
++  var lit = vec3f(0.0);
 +  for (var n = 0; n < i32(P.misc.y); n++) {
 +    if (P.vol[n * 2].w >= 0.0) { continue; }
 +    let reach = -P.vol[n * 2].w;
@@ -13620,16 +13631,16 @@ index 0000000..18bad77
 +    let l = to / max(dist, 1e-3);
 +    let edge = max(dist - 64.0, 0.0);
 +    let fall = (1.0 / (1.0 + edge * edge / (reach * reach))) * (1.0 - smoothstep(reach * 2.5, reach * 4.0, edge));
-+    let diffuse = clamp(dot(facing, l) * 0.6 + 0.4, 0.0, 1.0);
++    let diffuse = clamp(dot(facing, l) * 0.75 + 0.25, 0.0, 1.0);
 +    let shine = pow(max(dot(facing, normalize(l + eye)), 0.0), 24.0) * 0.45;
-+    let shade = 1.0 - 0.8 * spell_shadow(in, surface, P.vol[n * 2].xyz, noise);
++    let shade = 1.0 - 0.85 * spell_shadow(in, surface, P.vol[n * 2].xyz, noise);
 +    lit = lit + P.vol[n * 2 + 1].rgb * fall * (diffuse + shine) * shade;
-+    // Its bloom: a soft bright pool right round the rune, whichever way things face (blurred with the pass).
-+    lit = lit + P.vol[n * 2 + 1].rgb * exp(-edge / 36.0) * 1.3;
 +  }
-+  // However near a lamp the eye goes it only tends to white, and it takes a lot: haze doesn't hide things.
-+  let haze = (vec3f(1.0) - exp(-sum * len / 12.0 * 0.00045 * P.misc.x)) * 0.6;
-+  return vec4f(min(haze + (vec3f(1.0) - exp(-lit * 0.6)), vec3f(1.0)), 1.0);
++  return vec4f(lit, 1.0);
++}
++// The picture times (1 + this), by the pipeline's blend (source x what is there, plus what is there).
++@fragment fn spell_add(in: VOut) -> @location(0) vec4f {
++  return vec4f(textureSampleLevel(maskTex, lin, in.pos.xy / P.size.yz, 0.0).rgb * 2.6, 1.0);
 +}
 +@fragment fn vol_soften(in: VOut) -> @location(0) vec4f {
 +  let q = vec2i(in.pos.xy);
@@ -13696,7 +13707,7 @@ index 0000000..18bad77
 +  uint32_t samples = 0;
 +  wgpu::TextureFormat format = wgpu::TextureFormat::Undefined;
 +  wgpu::BindGroupLayout layout;
-+  wgpu::RenderPipeline shade, apply, vol, volSoften, volAdd, probeCell;
++  wgpu::RenderPipeline shade, apply, vol, volSoften, volAdd, spell, spellAdd, probeCell;
 +};
 +Shade g_s;
 +struct Targets {
@@ -13708,6 +13719,7 @@ index 0000000..18bad77
 +  wgpu::Texture volTex[2];
 +  wgpu::TextureView volView[2];
 +  wgpu::BindGroup volGroup, volAcross, volDown, volAddGroup, probeGroup;
++  wgpu::BindGroup spellAcross, spellDown, spellAddGroup;  // the spells' light: made in volView[1], softened by way of [0]
 +};
 +Targets g_t;
 +wgpu::Texture g_blank;
@@ -13805,15 +13817,20 @@ index 0000000..18bad77
 +      .color = {.operation = wgpu::BlendOperation::Add, .srcFactor = wgpu::BlendFactor::One, .dstFactor = wgpu::BlendFactor::OneMinusSrc},
 +      .alpha = {.operation = wgpu::BlendOperation::Add, .srcFactor = wgpu::BlendFactor::Zero, .dstFactor = wgpu::BlendFactor::One},
 +  };
-+  const auto make = [&](const char* entry, wgpu::TextureFormat target, uint32_t count, bool multiply, bool add = false) {
++  const wgpu::BlendState lighting{
++      // A light on what is there: the picture x the light, plus the picture (spell_add).
++      .color = {.operation = wgpu::BlendOperation::Add, .srcFactor = wgpu::BlendFactor::Dst, .dstFactor = wgpu::BlendFactor::One},
++      .alpha = {.operation = wgpu::BlendOperation::Add, .srcFactor = wgpu::BlendFactor::Zero, .dstFactor = wgpu::BlendFactor::One},
++  };
++  const auto make = [&](const char* entry, wgpu::TextureFormat target, uint32_t count, bool multiply, bool add = false, bool light = false) {
 +    const wgpu::BlendState blend{
 +        .color = {.operation = wgpu::BlendOperation::Add, .srcFactor = wgpu::BlendFactor::Zero, .dstFactor = wgpu::BlendFactor::Src},
 +        .alpha = {.operation = wgpu::BlendOperation::Add, .srcFactor = wgpu::BlendFactor::Zero, .dstFactor = wgpu::BlendFactor::One},
 +    };
 +    const wgpu::ColorTargetState state{
 +        .format = target,
-+        .blend = add ? &adding : multiply && !g_show ? &blend : nullptr,
-+        .writeMask = multiply || add ? wgpu::ColorWriteMask::Red | wgpu::ColorWriteMask::Green | wgpu::ColorWriteMask::Blue : wgpu::ColorWriteMask::All,
++        .blend = light ? &lighting : add ? &adding : multiply && !g_show ? &blend : nullptr,
++        .writeMask = multiply || add || light ? wgpu::ColorWriteMask::Red | wgpu::ColorWriteMask::Green | wgpu::ColorWriteMask::Blue : wgpu::ColorWriteMask::All,
 +    };
 +    const wgpu::FragmentState fragment{.module = module, .entryPoint = entry, .targetCount = 1, .targets = &state};
 +    const wgpu::RenderPipelineDescriptor desc{
@@ -13831,6 +13848,8 @@ index 0000000..18bad77
 +  g_s.vol = make("vol", kVolFormat, 1, false);
 +  g_s.volSoften = make("vol_soften", kVolFormat, 1, false);
 +  g_s.volAdd = make("vol_add", format, samples, false, true);
++  g_s.spell = make("spell", kVolFormat, 1, false);
++  g_s.spellAdd = make("spell_add", format, samples, false, false, true);
 +  g_s.probeCell = make("probe_cell", wgpu::TextureFormat::RGBA8Unorm, 1, false);
 +  g_s.samples = samples;
 +  g_s.format = format;
@@ -13879,6 +13898,9 @@ index 0000000..18bad77
 +  g_t.volAcross = shade_group(depth, color, g_t.volView[0]);
 +  g_t.volDown = shade_group(depth, color, g_t.volView[1], true);
 +  g_t.volAddGroup = shade_group(depth, g_blankView, g_t.volView[0]);
++  g_t.spellAcross = shade_group(depth, color, g_t.volView[1]);
++  g_t.spellDown = shade_group(depth, color, g_t.volView[0], true);
++  g_t.spellAddGroup = shade_group(depth, g_blankView, g_t.volView[1]);
 +  g_t.probeGroup = shade_group(depth, color, g_t.maskView);
 +}
 +
@@ -14118,6 +14140,14 @@ index 0000000..18bad77
 +  draw(g_s.volSoften, g_t.volAcross, g_t.volView[1], nullptr, false);
 +  draw(g_s.volSoften, g_t.volDown, g_t.volView[0], nullptr, false);
 +  draw(g_s.volAdd, g_t.volAddGroup, color, msaaSamples > 1 ? resolve : wgpu::TextureView{}, true);
++  // The spells' light on the surfaces, after the haze has been added (its two textures are free again): only in a view a
++  // spell's light is shown in.
++  if (frame.spell) {
++    draw(g_s.spell, g_t.volGroup, g_t.volView[1], nullptr, false);
++    draw(g_s.volSoften, g_t.spellAcross, g_t.volView[0], nullptr, false);
++    draw(g_s.volSoften, g_t.spellDown, g_t.volView[1], nullptr, false);
++    draw(g_s.spellAdd, g_t.spellAddGroup, color, msaaSamples > 1 ? resolve : wgpu::TextureView{}, true);
++  }
 +}
 +
 +// ---- AURORA_SHADOW_PROBE ----

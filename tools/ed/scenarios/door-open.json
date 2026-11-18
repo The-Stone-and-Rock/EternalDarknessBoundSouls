@@ -1,7 +1,12 @@
 {
  "name": "door-open",
  "proves": "A door for a normal player 1, through the game's own script from the host: OPEN DOOR's script, motion 25, room 154, then motion 25 out of the door. Player 2 comes too, and nothing freezes. Not a real walk-up or press.",
- "save": "saves/slot7.state",
+ "start": "anthony-147",
+ "skip": "written for Anthony's bookshelf room 147 on a save of the user's from 2026-11-04; a fresh Jump to Game start does not reach that room past the Tome by script. To be written again in Alex's last chapter (start alex-100), where the Tome and every spell are there from the first frame",
+ "base": 23518,
+ "put": {"p1": [1017, 188, -48], "p2": [956, 71, -48]},
+ "mode": "follow",
+ "old_save": "saves/slot7.state",
  "run_script": "400:656,460:656",
  "frames": 24400,
  "seconds": 60,

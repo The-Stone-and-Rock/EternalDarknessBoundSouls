@@ -1,0 +1,38 @@
+{
+ "name": "alex-tomes",
+ "proves": "Both Tomes in Alex's last chapter: player 1's opens and closes, player 2's opens beside it and closes, then both walk. Two Tomes leave each other and the world alone.",
+ "start": "alex-100",
+ "base": 10000,
+ "frames": 10800,
+ "seconds": 150,
+ "p1": "10060,10064,0x1000,0,0,0;10400,10404,0x1000,0,0,0;10600,10660,0x0000,100,0,0",
+ "p2": "10160,10164,start;10300,10304,start;10620,10680,lleft",
+ "source": "written 2026-11-18, after lever-tomes",
+ "expect": [
+  {
+   "check": "log",
+   "pattern": "player 2's Tome opens"
+  },
+  {
+   "check": "moved",
+   "who": "p1",
+   "from": 10590,
+   "to": 10700,
+   "min": 20
+  },
+  {
+   "check": "moved",
+   "who": "p2",
+   "from": 10610,
+   "to": 10720,
+   "min": 50
+  },
+  {
+   "check": "no_log",
+   "pattern": "WebGPU error"
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}

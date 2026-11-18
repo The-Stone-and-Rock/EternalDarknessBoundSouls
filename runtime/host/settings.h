@@ -22,15 +22,13 @@ typedef struct {
     bool ssao_high;       // ambient occlusion at full size, by its horizons (GTAO)
     bool smaa;            // SMAA on the finished scene, with or without MSAA
     int sharpen;          // sharpening (CAS): 0 off, 1 low, 2 medium, 3 high
-    int shafts;           // light shafts: 0 off, 1 soft, 2 strong
     bool per_pixel_lighting;  // the game's lights worked out per pixel, not per vertex
     int char_shadows;     // characters' shadows: 0 the game's own, 1 light, 2 dark (from the game's lights)
     bool shadow_hard;     // their edges: crisp at any distance, not softening further from the character
-    bool contact_shadows; // short shadows where characters meet what's round them
     int volumetric;       // the haze, the air lit by lamps and spells: 0 off to 100 percent
     bool skin_scatter;    // light through skin, with per-pixel lighting
-    bool spell_rim;       // spells' meshes with glowing edges, and their sparks shining
-    bool spell_fx;        // remastered spells: 3D runes, their light and colours (hle.c runes_frame)
+    bool spell_rim;       // Remastered spells: spells' meshes with glowing edges, their sparks shining, and their runes' light
+                          // on the room (hle.c spell_lights_frame). The key keeps its first name, "spell_rim".
     int anti_aliasing;    // 1: 4x multisampling (from the next start)
     int anisotropy;       // texture filtering: 1x, 2x, 4x, 8x, 16x (0-4, from the next start)
     // HDR calibration (Graphics enhancements > Calibrate HDR): the display's

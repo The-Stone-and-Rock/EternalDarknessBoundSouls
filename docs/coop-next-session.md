@@ -1,4 +1,4 @@
-# HANDOFF 2026-11-18 (evening): START HERE. Everything is committed on tools/game-kit and NOT pushed (past v0.1.6; the evening's checkpoint is items 1, 3 and 5 of the board); controls.cpp's test edits stay uncommitted by rule. What to play: docs/coop-play-test.md
+# HANDOFF 2026-11-18 (evening): START HERE. Everything is committed on tools/game-kit and NOT pushed (past v0.1.6; the evening's two commits are items 1, 3, 5 and then 2a, 2b, 6 of the board); controls.cpp's test edits stay uncommitted by rule. What to play: docs/coop-play-test.md
 
 ## The status board (keep it true: every session marks what it finishes)
 
@@ -48,7 +48,45 @@ When you finish something, change its mark here in the same commit as the work. 
   "[audio] ran dry"), `runtime/host/audio.c`, and what changed last at the title: 9d0f752 (the Choose Character
   row's loop sound) and the Solo / Co-op picker's restart (P3, P4). Memory: co-op must not restore MusyX globals.
   One logged run from the title into a game (`sh tools/ed/run.sh launcher NAME`, ED_DTK_LOG is on) before any change.
-- `[OPEN]` **2. Graphics options reworked.** (a) Take "Remastered spells" out (settings `spell_fx`; frontend.cpp
+- `[DONE]` **2a. "Remastered spells" reworked (2026-11-18 evening, the user's answers the same day).** The first one
+  (3D rune stones, their flames, the streaks' colours, textures-spellfx; setting `spell_fx`) is out of the code. The glow
+  the user likes (setting `spell_rim`, once shown as "Spell glow") is now shown as **Remastered spells** and also turns
+  on the spells' own light: each flat rune glyph of a cast lights the surfaces round it in its alignment's colour
+  (`spell_lights_frame` in hle.c sends them through the renderer's `set_spell_lights`; each light in its caster's
+  room's half while apart). The user's first look: "a round red cloud just sitting on top of the runes". So the
+  renderer was changed the same evening (shadow.cpp, the patch regenerated): the light is no longer added over the
+  picture with the haze; a pass of its own (`spell`: distance from the rune's edge, which way the surface faces, a
+  little shine, none behind a character or pillar) is drawn with a blend that MULTIPLIES the picture (`spell_add`,
+  the `lighting` blend: picture x light + picture), so stone keeps its pattern and takes the colour; the round bloom
+  pool is gone and only a tenth of the light is in the air. Off: the original look. The light's strength is 1.4 with reach 60 (the user
+  found the first 1.8 / 95 too bright on the ground, the pools bleeding together; `ED_RUNE_LIGHT=B,R` tries others
+  with no build). Cost: about 0.2 ms of GPU time a frame while a spell is cast. Seen: Karim's Chattur'gha Recover in
+  chapter 4, co-op, on and off, HD textures on and off (logs/run-20261118-15*-jtg-spell-*; sheets in Screenshots for
+  Claude/remastered-spells/: 07 the cloud against the surface light, 09 all four colours by Alex in the last
+  chapter, logs/run-20261118-15[45]*-jtg-alexz-*). **Test spells with Alex's last chapter only** (`sh tools/ed/jtg.sh
+  12 NAME` with `ED_QUICK_SET=FRAME,0,0x0001104N` and Y at a later frame; N 1 red, 2 blue, 4 green, 8 purple): the
+  Tome and every spell are hers from the first frame (the user, 2026-11-18; Karim has spells but not every rune,
+  Anthony none that early). Not seen: larger circles, a cast while apart, solo, the user's play (they have not said
+  yet whether the surface light is right). Not
+  done: with Glow or HDR on, spells still bloom as every bright thing does (the Glow option's own doing).
+- `[DONE]` **2b. The heavy options measured, then cut or eased (2026-11-18 evening).** Measured one at a time on top of
+  everything-off, the user's settings (1920x1080 at 2x), chapter 4's start room, GPU ms a frame (`AURORA_GPU_TIME_LOG=1`,
+  "[gpu-pass]"; logs/run-20261118-14*-jtg-gfx-{coop,solo}-*; pictures in Screenshots for Claude/graphics-options/).
+  Co-op, off 3.1: Occlusion High +2.5, Haze +1.1, Contact shadows +0.9, Light shafts +0.8, Character shadows +0.7,
+  Glow +0.6, Occlusion Standard +0.3, SMAA +0.25, Sharpening +0.2, HDR / Per-pixel / Skin 0; everything on 8.8. Solo
+  (120 pictures a second), off 8.6: every option under +0.8, everything on 10.4. Nothing dropped the game below 60 in
+  that room. Done: **Contact shadows removed** (no change seen in the picture, and with it on the long character
+  shadow was missing); **Light shafts removed** (a faint halo for 0.8 ms); **Occlusion quality High is solo's alone**
+  (co-op draws Standard). How: settings.c `settings_apply` holds shafts and contact at 0 and passes `ssao_high &&
+  !mod_coop`; the rows are gone from frontend.cpp; the renderer's code for them is unreached, not deleted.
+- `[OPEN]` **2c. What is left of the graphics work.** (1) The whole game in pictures (`ed chapters N`, before and
+  after): not run, saves 4 to 12 are in saves/old-2026-11-09 and are old states (make fresh ones as `ed test` does).
+  (2) The biggest saving left in co-op: every effect runs three times a game frame (each half and the game's own
+  frame, which nobody sees); leaving the effects out of the hidden frame would take about a third off each (common.cpp
+  `render`, the `passInfo.glowScene` block; care: glow::take_scene and the EFB copies the game reads). (3) The
+  renderer's unreached parts (contact shadows, shafts) and the folder textures-spellfx/ with its three tools can be
+  deleted. (4) Measure a heavy room (many casters, room 338 with enemies) and a spell-heavy fight.
+  The first wording of this item, kept: (a) Take "Remastered spells" out (settings `spell_fx`; frontend.cpp
   `enhancement::kSpellFx`; its renderer side in .deps/GXRuntime) and bring back the original look of spells, with HD
   textures on and off. Decide with the user what happens to "Spell glow" (`spell_rim`) and to the spell lights by
   room (P7, built on Remastered spells only). (b) Contact shadows and the other heavy options (haze, light shafts,
@@ -97,7 +135,21 @@ When you finish something, change its mark here in the same commit as the work. 
   mode (ed56's byte 0x80323AEB) is in the save and the game sets it again itself. So FINISH HIM in the dream (item 7)
   after a change was the prompts-off bit lost, not a new rule. Was: (the sepia look
   goes, the bars come on): seen in logs/run-20261118-131413-karim-solo-test at the reload. `characters_reload` (hle.c).
-- `[OPEN]` **6. `ed test` has not passed since the launcher work**: it stopped in `test-shadow-steady` on a missing
+- `[DONE]` **6. `ed test` passes again, from fresh Jump to Game states (2026-11-18 evening).** How: tools/ed/scenarios.py
+  makes each start's state itself (`STARTS`, `fresh_state`: a cold boot through the title and Jump to Game, a state
+  saved with both players standing, kept as saves/test-START.state and made again whenever the exe is newer; a bad
+  start is retried), runs every scenario as the user plays (two room slots, the other player staying), moves each
+  scenario's frames by the fresh state's, never starts over a game the user has open, and counts a missing probe as
+  a FAIL. Result: `5 of 5 passed, 18 skipped (not run)`: alex-both-walk, alex-spell-cast, alex-tomes (new, Alex's
+  last chapter), shadow-karim, shadow-steady (chapter 4).
+- `[OPEN]` **6b. Eighteen scenarios are SKIPPED, not passed**: the seven lever ones, the door, ladder, desk and urn ones
+  were written for Anthony's bookshelf room 147 on a save of the user's. From a fresh chapter start that room is past
+  the Tome: the plane's script 892 sends Anthony to the Tome's room 5 until that room's own Tome (tag 733) is his, and
+  three scripted tries at that pickup did not get it (the user then said to stop: test in Alex's last chapter, where
+  the Tome and every spell are there from the first frame). Write each again in Alex's chapter (start `alex-100`): a
+  scene of one player's with the other walking, a door with the other staying and with them following, a ladder, a
+  find, an item used from each Tome. Each keeps its old text with a `skip` line saying why.
+- The first wording of item 6, kept: **6. `ed test` has not passed since the launcher work**: it stopped in `test-shadow-steady` on a missing
   `probe.txt` (last had one 2026-11-13) and was then cut short so the user could play. Run it (`ED_RUN_AWAY=1`),
   find why the probe file is not written, and get it green before the next co-op fix.
   **Found 2026-11-18 evening (read, nothing changed yet):** not the launcher. Since P3 (213a350, 2026-11-17) a boot

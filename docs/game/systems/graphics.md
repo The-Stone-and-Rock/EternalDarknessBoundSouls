@@ -32,6 +32,37 @@ The camera code runs on the game thread, up to a frame ahead of the renderer. A 
 
 **The haze** is a bar now, 0 to 100, in Options > Graphics > Effects (`haze` in settings.ini, 50 by default; an old `volumetric` of 0, 1, 2 reads as 0, 50, 100). It takes the 12 lamps nearest anyone, fading in and out, as a room can have 57.
 
+## The options and what they cost (measured 2026-11-18)
+
+GPU time a frame on top of everything off, the user's settings (1920x1080 at 2x), chapter 4's start room, both players
+standing: `AURORA_GPU_TIME_LOG=1` and the "[gpu-pass]" lines, one option a run from Jump to Game
+(logs/run-20261118-14*-jtg-gfx-*). In co-op every effect runs three times a game frame: each half and the game's own
+frame, which nobody sees.
+
+| Option | Co-op (off: 3.1 ms) | Solo at 120 (off: 8.6 ms) | What stands |
+|---|---|---|---|
+| Occlusion, High | +2.5 | +0.6 | Solo only since this day: co-op draws Standard (`settings_apply`) |
+| Haze 50 | +1.1 | +0.4 | Kept |
+| Contact shadows | +0.9 | +0.3 | **Removed**: nothing seen in the picture, and the long character shadow went missing with it |
+| Light shafts | +0.8 | +0.4 | **Removed**: a faint halo round lamps |
+| Character shadows, Dark | +0.7 | +0.7 | Kept |
+| Glow, Strong | +0.6 | +0.35 | Kept |
+| Occlusion, Standard | +0.3 | +0.3 | Kept |
+| SMAA / Sharpening | +0.25 / +0.2 | +0.25 / +0.1 | Kept |
+| HDR, Per-pixel lighting, Skin scattering | 0 | 0 | Kept |
+| Remastered spells (the glow and the spells' light) | +0.2 while a spell is cast | not measured | Kept, see below |
+| Everything on | +5.7 | +1.8 | |
+
+**Remastered spells** (the setting `spell_rim`; before 2026-11-18 it was shown as "Spell glow", and "Remastered spells"
+was the 3D rune stones, now gone): spells' edges glow, their sparks shine, and each rune glyph of a cast lights the
+surfaces round it in its alignment's colour (`spell_lights_frame` in hle.c, strength 1.4, reach 60; `ED_RUNE_LIGHT=B,R`
+tries others; `ED_SPELL_LIGHTS=0/1` forces it). The light multiplies what is there (shadow.cpp `spell` and `spell_add`,
+drawn after the haze with the blend picture x light + picture): a surface keeps its pattern and takes the colour, and a
+character or pillar in the way shades it. Added over the picture, as it first was, it read as a red cloud on the runes.
+Off: the original look. **Test casts in Alex's last chapter**, where every spell is hers: `ED_QUICK_SET=2500,0,0x00011042
+ED_INPUT_SCRIPT="2700,2708,0x0800" sh tools/ed/jtg.sh 12 NAME` (the last digit: 1 red, 2 blue, 4 green, 8 purple), or
+`ed test alex-spell-cast`.
+
 ## Lamps seen, by save
 
 The old way of finding them, from `AURORA_SHADOW_LOG` and `ed lamps`, and now only useful as what was seen. World units.

@@ -27,15 +27,12 @@ Settings g_settings = {
     .ssao_high = true,
     .smaa = true,
     .sharpen = 1,
-    .shafts = 0,
     .per_pixel_lighting = true,
     .char_shadows = 1,
     .shadow_hard = false,
-    .contact_shadows = true,
     .volumetric = 50,
     .skin_scatter = true,
     .spell_rim = true,
-    .spell_fx = false,  // paused: the user tested it and didn't like it (docs/runes-3d.md)
     .hdr_peak = 1000,
 #if defined(__APPLE__)
     .hdr_paper = 100,  // macOS's own SDR white (EDR 1.0)
@@ -157,8 +154,6 @@ void settings_load(void) {
             g_settings.smaa = n != 0;
         else if (strcmp(key, "sharpen") == 0)
             g_settings.sharpen = clamp_int(n, 0, 3);
-        else if (strcmp(key, "shafts") == 0)
-            g_settings.shafts = clamp_int(n, 0, 2);
         else if (strcmp(key, "per_pixel_lighting") == 0)
             g_settings.per_pixel_lighting = n != 0;
         else if (strcmp(key, "char_shadows") == 0)
@@ -173,10 +168,6 @@ void settings_load(void) {
             g_settings.skin_scatter = n != 0;
         else if (strcmp(key, "spell_rim") == 0)
             g_settings.spell_rim = n != 0;
-        else if (strcmp(key, "spell_fx") == 0)
-            g_settings.spell_fx = n != 0;
-        else if (strcmp(key, "contact_shadows") == 0)
-            g_settings.contact_shadows = n != 0;
         else if (strcmp(key, "anti_aliasing") == 0)
             g_settings.anti_aliasing = clamp_int(n, 0, 1);
         else if (strcmp(key, "anisotropy") == 0)
@@ -362,15 +353,12 @@ void settings_save(void) {
     fprintf(f, "ssao_high = %d\n", g_settings.ssao_high ? 1 : 0);
     fprintf(f, "smaa = %d\n", g_settings.smaa ? 1 : 0);
     fprintf(f, "sharpen = %d\n", g_settings.sharpen);
-    fprintf(f, "shafts = %d\n", g_settings.shafts);
     fprintf(f, "per_pixel_lighting = %d\n", g_settings.per_pixel_lighting ? 1 : 0);
     fprintf(f, "char_shadows = %d\n", g_settings.char_shadows);
     fprintf(f, "shadow_hard = %d\n", g_settings.shadow_hard ? 1 : 0);
-    fprintf(f, "contact_shadows = %d\n", g_settings.contact_shadows ? 1 : 0);
     fprintf(f, "haze = %d\n", g_settings.volumetric);
     fprintf(f, "skin_scatter = %d\n", g_settings.skin_scatter ? 1 : 0);
     fprintf(f, "spell_rim = %d\n", g_settings.spell_rim ? 1 : 0);
-    fprintf(f, "spell_fx = %d\n", g_settings.spell_fx ? 1 : 0);
     fprintf(f, "anti_aliasing = %d\n", g_settings.anti_aliasing);
     fprintf(f, "anisotropy = %d\n", g_settings.anisotropy);
     fprintf(f, "hdr_peak = %d\n", g_settings.hdr_peak);
@@ -454,12 +442,17 @@ void settings_apply_graphics(void) {
     dol_aurora_set_hdr(g_settings.hdr);
     static const float kSsao[] = {0.f, 1.3f, 2.4f};
     dol_aurora_set_ssao(kSsao[g_settings.ssao]);
-    dol_aurora_set_ssao_high(g_settings.ssao_high);
+    // Occlusion quality High is solo's: measured 2026-11-18 (the user's settings, 1920x1080 at 2x, chapter 4's start room),
+    // it costs 2.5 ms of GPU time a frame in split-screen (each half and the game's own frame) against 0.3 for Standard,
+    // 0.6 in solo, with hardly a difference in the picture. Co-op draws Standard whatever the row says.
+    dol_aurora_set_ssao_high(g_settings.ssao_high && !g_settings.mod_coop);
     dol_aurora_set_smaa(g_settings.smaa);
     static const float kSharpen[] = {0.f, 0.35f, 0.65f, 1.f};
     dol_aurora_set_sharpen(kSharpen[g_settings.sharpen]);
-    static const float kShafts[] = {0.f, 0.6f, 1.2f};
-    dol_aurora_set_shafts(kShafts[g_settings.shafts]);
+    // Light shafts and Contact shadows are no longer options (2026-11-18, measured in co-op: 0.8 and 0.9 ms of GPU time a
+    // frame, the first for a faint halo round lamps, the second for nothing seen in the picture, and with it on the long
+    // character shadow was missing): held off. An old settings.ini's "shafts" and "contact_shadows" lines are not read.
+    dol_aurora_set_shafts(0.f);
     dol_aurora_set_per_pixel_lighting(g_settings.per_pixel_lighting);
     static const float kCharShadows[] = {0.f, 0.5f, 0.8f};
     dol_aurora_set_char_shadows(kCharShadows[g_settings.char_shadows]);
@@ -467,7 +460,7 @@ void settings_apply_graphics(void) {
     dol_aurora_set_volumetric(0.9f * (float)g_settings.volumetric / 100.f);
     dol_aurora_set_skin_scatter(g_settings.skin_scatter);
     dol_aurora_set_spell_rim(g_settings.spell_rim);
-    dol_aurora_set_contact_shadows(g_settings.contact_shadows ? 0.45f : 0.f);
+    dol_aurora_set_contact_shadows(0.f);
     // Black level in steps of 0.0002 linear: -10 sinks the darkest 0.002
     // (about 7/255 of SDR) to black, the most that looked right on an OLED.
     dol_aurora_set_hdr_levels((float)g_settings.hdr_paper, (float)g_settings.hdr_peak,

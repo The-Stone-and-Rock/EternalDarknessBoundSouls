@@ -1,7 +1,12 @@
 {
  "name": "p2cam-door-spot",
  "proves": "As p2cam-door with player 2 standing somewhere else: which zone the old numbers fall in depends on where they stood.",
- "save": "saves/p2cam-door.state",
+ "start": "anthony-147",
+ "skip": "written for Anthony's bookshelf room 147 on a save of the user's from 2026-11-04; a fresh Jump to Game start does not reach that room past the Tome by script. To be written again in Alex's last chapter (start alex-100), where the Tome and every spell are there from the first frame",
+ "base": 10716,
+ "put": {"p1": [-378, 804, -48], "p2": [-227, 889, -48]},
+ "mode": "follow",
+ "old_save": "saves/p2cam-door.state",
  "env": {
   "ED_COOP_P2_PUT": "10730,800,400,-48"
  },

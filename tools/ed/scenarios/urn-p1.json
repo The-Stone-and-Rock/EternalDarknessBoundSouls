@@ -1,7 +1,11 @@
 {
  "name": "urn-p1",
  "proves": "Player 1 uses the urn from their Tome: player 2 starts from standing and keeps walking through its words, pickup and rune; the rune goes in once.",
- "save": "saves/lever.state",
+ "start": "anthony-147",
+ "skip": "written for Anthony's bookshelf room 147 on a save of the user's from 2026-11-04; a fresh Jump to Game start does not reach that room past the Tome by script. To be written again in Alex's last chapter (start alex-100), where the Tome and every spell are there from the first frame",
+ "base": 12635,
+ "put": {"p1": [1017, 188, -48], "p2": [956, 71, -48]},
+ "old_save": "saves/lever.state",
  "frames": 16549,
  "seconds": 240,
  "p1": "14806,14809,0x1000;14876,14880,0x0100,0,0,255;14891,14896,0x0100,0,0,255;14951,14959,0x0200;15287,15291,0x0200;15486,15493,0x0200;15629,15639,0x0200;15657,15666,0x0200;15701,15710,0x0200;15728,15737,0x0200;15756,15765,0x0200;15798,15808,0x0200;15889,15894,0x0200;16348,16351,0x1000;16413,16416,0x0004;16422,16426,0x0004;16435,16442,0x0100,0,0,255;16462,16469,0x0200;16476,16481,0x0200",

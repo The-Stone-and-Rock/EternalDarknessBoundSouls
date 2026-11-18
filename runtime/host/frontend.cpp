@@ -2609,9 +2609,9 @@ Row vibration_row() {
 // Graphics enhancements: the options' rows and photo mode change the same
 // values, applied at once.
 namespace enhancement {
-enum { kGlow, kOcclusion, kHdr, kShadows, kHdTextures, kOcclusionQuality, kPerPixel, kSmaa, kSharpen, kShafts, kCharShadows, kShadowEdges, kContact, kVolumetric, kSkin, kSpellRim, kSpellFx, kCount };
+enum { kGlow, kOcclusion, kHdr, kShadows, kHdTextures, kOcclusionQuality, kPerPixel, kSmaa, kSharpen, kCharShadows, kShadowEdges, kVolumetric, kSkin, kSpellRim, kCount };
 const char* const kNames[kCount] = {"Glow", "Ambient occlusion", "HDR", "Baked shadows", "HD textures", "Occlusion quality",
-                                    "Per-pixel lighting", "SMAA", "Sharpening", "Light shafts", "Character shadows", "Shadow edges", "Contact shadows", "Haze", "Skin scattering", "Spell glow", "Remastered spells"};
+                                    "Per-pixel lighting", "SMAA", "Sharpening", "Character shadows", "Shadow edges", "Haze", "Skin scattering", "Remastered spells"};
 const char* const kLevels[] = {"Off", "Soft", "Strong"};
 
 bool available(int which) {
@@ -2640,17 +2640,14 @@ std::string value(int which) {
         static const char* const kAmounts[] = {"Off", "Low", "Medium", "High"};
         return kAmounts[g_settings.sharpen];
     }
-    case kShafts: return kLevels[g_settings.shafts];
     case kCharShadows: {
         static const char* const kKinds[] = {"The game's", "Light", "Dark"};
         return kKinds[g_settings.char_shadows];
     }
     case kShadowEdges: return g_settings.shadow_hard ? "Hard" : "Soft";
-    case kContact: return on_off(g_settings.contact_shadows);
     case kVolumetric: return g_settings.volumetric == 0 ? "Off" : std::to_string(g_settings.volumetric) + "%";
     case kSkin: return on_off(g_settings.skin_scatter);
     case kSpellRim: return on_off(g_settings.spell_rim);
-    case kSpellFx: return on_off(g_settings.spell_fx);
     default: return "";
     }
 }
@@ -2666,14 +2663,11 @@ void change(int which, int dir) {
     case kPerPixel: g_settings.per_pixel_lighting = !g_settings.per_pixel_lighting; break;
     case kSmaa: g_settings.smaa = !g_settings.smaa; break;
     case kSharpen: cycle(g_settings.sharpen, 4, dir); break;
-    case kShafts: cycle(g_settings.shafts, 3, dir); break;
     case kCharShadows: cycle(g_settings.char_shadows, 3, dir); break;
     case kShadowEdges: g_settings.shadow_hard = !g_settings.shadow_hard; break;
-    case kContact: g_settings.contact_shadows = !g_settings.contact_shadows; break;
     case kVolumetric: g_settings.volumetric = std::clamp(g_settings.volumetric + dir * 5, 0, 100); break;
     case kSkin: g_settings.skin_scatter = !g_settings.skin_scatter; break;
     case kSpellRim: g_settings.spell_rim = !g_settings.spell_rim; break;
-    case kSpellFx: g_settings.spell_fx = !g_settings.spell_fx; break;
     default: return;
     }
     settings_apply_graphics();
@@ -2685,18 +2679,15 @@ const char* const kNotes[kCount] = {
     "Light brighter than white on an HDR display.",
     "Sharp: the rooms' light maps upscaled. Original: as on the disc.",
     "",
-    "High: fuller, cleaner shade, at full size. It takes more of the graphics card.",
+    "High: fuller, cleaner shade, at full size. It takes more of the graphics card. Co-op always draws Standard.",
     "Smoother light across characters and things, from the game's own lights.",
     "Smooths edges MSAA can't reach, such as cut-out textures.",
     "Crisper textures. The HUD and text aren't touched.",
-    "Soft beams from lamps and flames, cut by what stands in their way.",
     "Cast from the game's own lights, how dark. The game's: flat on the floor.",
     "Soft: blurs further from the character, as real shadows do. Hard: a crisp edge all along.",
-    "Short, dark shadows where characters meet the floor and walls.",
     "Hazy air round the room's lamps and spells, with the characters' shadows through it.",
     "A warm glow where light turns to shade on skin.",
-    "Spells shine, and the edges of their shapes glow.",
-    "A spell's runes as 3D stones glowing in its colour, lighting what's round them, its sparks in its colour.",
+    "Spells shine, the edges of their shapes glow, and their runes light the room round them. Off: the original look.",
 };
 
 }  // namespace enhancement
@@ -2880,8 +2871,8 @@ void build_options_rows() {
             if (first)
                 r.section = section;
             first = false;
-            r.toggle = which == kHdTextures || which == kPerPixel || which == kSmaa || which == kContact ||
-                       which == kSkin || which == kSpellRim || which == kSpellFx;
+            r.toggle = which == kHdTextures || which == kPerPixel || which == kSmaa ||
+                       which == kSkin || which == kSpellRim;
             if (which == kVolumetric)
                 r.slider = g_settings.volumetric;
             r.enabled = available(which);
@@ -2924,12 +2915,10 @@ void build_options_rows() {
     };
     g_rows.push_back(af);
 
-    graphics_rows("VII \u00b7 Shadows", {enhancement::kShadows, enhancement::kCharShadows, enhancement::kShadowEdges,
-                                         enhancement::kContact});
+    graphics_rows("VII \u00b7 Shadows", {enhancement::kShadows, enhancement::kCharShadows, enhancement::kShadowEdges});
     graphics_rows("VIII \u00b7 Lighting", {enhancement::kPerPixel, enhancement::kSkin, enhancement::kOcclusion,
                                            enhancement::kOcclusionQuality});
-    graphics_rows("IX \u00b7 Effects", {enhancement::kGlow, enhancement::kSpellRim, enhancement::kSpellFx, enhancement::kVolumetric,
-                                        enhancement::kShafts});
+    graphics_rows("IX \u00b7 Effects", {enhancement::kGlow, enhancement::kSpellRim, enhancement::kVolumetric});
 
     // (Controls and Mods are rows of Options itself, build_options: their sections here, IV and VI with its Disc row,
     // were never shown, and are gone.)
