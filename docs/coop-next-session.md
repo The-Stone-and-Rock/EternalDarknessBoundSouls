@@ -376,6 +376,53 @@ When you finish something, change its mark here in the same commit as the work. 
   own view in the camera block as `coop_found_place` places a found thing. START with the glide: why player 2's camera
   moves at the pickup when single player's stays (the find's lend and blend), and log the head's place frame by frame
   in single player against co-op from the pickup on (the lesson of the head's fall: the side-by-side log first).
+- `[DONE]` **12d (1). Blood per player: Bleeding Walls (1) and Blood Pool (5), each player's own, in their own half
+  (2026-11-19).** The reference first: blood goes to the room's wall points (flag 0x100, `BloodMkr`/`SanityMkr`) and
+  ceiling points (0x1000, `PoolMkr`) nearest the player; in Max's bedroom the cameras see the east wall point (304,
+  -350, 504) only with the player by it (put at 150, -450): single player's patch on the painting, then blood running
+  down the wall (picture 25), and the pool on the floor with the red column falling into it (picture 27). Found: player
+  2's running blood was never made (their request queued from inside their set, drained with player 1's in), and
+  their first patch showed in both halves. How (hle.c): `coop_thing_gone` keeps a request of ops 26 / 18 inside the
+  screen object 0x80317DF0 asked in their update, and `sanity_blood_drain` does the drain's own work for it at the end
+  of that update with their set in; `sanity_blood_children` (intercept on 0x80141824) notes each child with its owner,
+  `sanity_blood_stage1` the first part (screen +148, serial +5952) of each set after its update; `effect_draw_by_room`
+  draws an owned blood object once, in its owner's half, in a shared room (apart, by its room as before). Seen: player
+  2's walls blood running below the painting in their half and not player 1's (logs/run-20261118-223937-blood1-p2-own,
+  picture 26); player 1's walls blood and player 2's pool at once, each in its own half alone, the pool's falling column
+  in player 2's half (-224241-blood-both, picture 28). Not seen: apart; 5's drops (0x80146EB0, type-23 things) by
+  themselves; the blood's sound is for both (one set of speakers).
+- `[DONE]` **12d (4). Player 1's own whole-game screens in co-op, in their half alone (2026-11-19).** Blue Screen (28), TV
+  Video (25), Game Reset (26): the screen code player 2 had made one for either player (hle.c: `SanityScreen
+  g_sanity_screen[2]`, `sanity_screen_step(cpu, who, ...)` run for player 1 with their set in before player 2's update
+  and for player 2 in it as before, `sanity_screen_draw(cpu, who)` called for each in `sanity_overlay`); player 1's
+  Start is taken from the game's pad while one waits (`g_sanity_p1_takes_start` in the pad read), so the game's pause
+  code never asks for the mode that took the whole game for both; after the game's play hold player 1's controls go
+  off with the world running (0x801556CC(2, 0), as 29 does), and the hold's channels, which are both players', are let
+  go for player 2's turn (`screen_hold_open` in `hle_coop_controller`, `coop_hold_open`): without that player 2 stood
+  still with their stick pushed (logs/run-20261118-224906-screen28-p1). Seen: each screen in player 1's half alone, the
+  game's mode 2 throughout, player 2 walking the bedroom, the flash after in player 1's half
+  (-225043-screen28-p1b, -225120-screen25-p1, -225139-screen26-p1; pictures 29, 30, 30b). The sounds are both players'.
+  The reader's notes for every effect left: docs/research/sanity-per-player/read-rest.md.
+  Player 1's Walk on Ceiling (22) black the same way: `sanity_black` also answers outside player 2's update in co-op
+  with the split on (`g_sanity_black[0]`, drawn by `sanity_screen_draw(cpu, 1)`). Seen with player 1's sanity set low
+  (`ED_COOP_P1_SANITY=10`, the twin of player 2's test switch) through 249 -> 252 -> 256 -> 257, the game's own start at
+  that door: player 1's half alone black for 40 frames, then the room upside down in their half, player 2 walking the
+  bedroom untouched (logs/run-20261118-225238-ceiling-p1; picture 31).
+- `[DONE]` **12d, Controller Not Found (29) for player 2 (2026-11-19).** Allowed in `kSanityP2`; the owner list
+  (`sanity_phantoms_note`, `g_phantoms`) now takes every thing a set's effect made (its data+188 list), not phantoms
+  alone: 16, 18, 19 and 29 make the chapter's own creatures as "the current player's quarry only", so they went for
+  player 1 whoever's effect it was. Seen: started at player 2's door into 252, its five creatures (kind 13) theirs, the
+  band in the middle of their half, their health 75 to 65 from the creatures and back at the return, the return to
+  the door they took (-320, -878 in 249), player 1 walking in 249 (logs/run-20261118-225354-ctrl29-p2; picture 32).
+  Not seen: a shared room (the creatures hidden from the other's half; hits across owners are open, 12d (2)).
+- `[DONE]` **12d, Ammo Pickup (9) for player 2 (2026-11-19).** Allowed in `kSanityP2`; its 16 items (kind 121, a grid
+  at z 555 in 252) go in the owner list with the creatures, so each is drawn in player 2's half alone; `sanity_pickup`
+  refuses a thing of the other player's effect (the head's test made general); the pickup's window words are kept in
+  their half for 9 as for 17. Seen: the items on the hallway floor in player 2's half and not in player 1's once both
+  were there, B PICK UP and the game's own "Ellia has found some Flintlock Pistol Ammunition!" with the ammo floating up
+  in player 2's half alone, player 1 standing on another of the items offered nothing (the game asks player 1's set),
+  the return to the door they took with the flash in their half (logs/run-20261118-225550-ammo9-p2, -225735-ammo9-pick;
+  pictures 33, 34). Not seen: the window closed by their B and the effect's end at 500 ticks after it.
 - `[OPEN]` **12d. What is left of each player's own sanity effects.** (1) Blood (1, 5) per player: not built; the reader
   found player 2's running blood is probably never made (docs/research/sanity-per-player/read-shared-room.md, steps 7
   to 12). (2) Phantoms' hits across owners; one player's head and body parts hidden from the other. (3) The head's
