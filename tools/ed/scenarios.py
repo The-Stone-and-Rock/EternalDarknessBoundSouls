@@ -57,6 +57,9 @@ STARTS = {
     # script 892 sends him to the Tome's room 5 until the room's own Tome (tag 733) is his, a story of several scenes.
     'alex-100': {'chapter': 12, 'scripts': [], 'room': 100},
     'karim-338': {'chapter': 4, 'scripts': [], 'room': 338},       # Karim's start room
+    # Max's chapter from its start, his bedroom: a close camera, three plain doors to a Walk on Ceiling room (249 -> 252 ->
+    # 256 -> 257). The place to test sanity effects (the user, 2026-11-18: Alex's room 100 has its camera too far away).
+    'max-249': {'chapter': 5, 'scripts': [], 'room': 249},
 }
 # The players of every test, whatever the user's settings.ini has: player 1 the chapter's own character, player 2 Ellia,
 # no other forms. A scenario that tests a form or a change of characters asks for it itself (ED_COSTUME, ED_TEST_*).

@@ -1,3 +1,4 @@
+# HANDOFF 2026-11-18 (late night, the end of the second session): all committed on tools/game-kit, not pushed. Item 12 as player 2: the head, Blood Bath, Walk on Ceiling, the blue screen and reset, the phantoms, REPLACE HEAD are done; OPEN are 12g (the head not centred in their half) and 12d (blood per player, and the rest). Test sanity effects in Max's chapter (rule 8). Earlier:
 # HANDOFF 2026-11-18 (night, second session): the head, Blood Bath and a two-room fault are built and NOT committed yet (hle.c, docs, four new reader files in docs/research/sanity-per-player/); next is 12c. Before it:
 # HANDOFF 2026-11-18 (evening): START HERE. Everything is committed on tools/game-kit and NOT pushed (past v0.1.6; the evening's two commits are items 1, 3, 5 and then 2a, 2b, 6 of the board); controls.cpp's test edits stay uncommitted by rule. What to play: docs/coop-play-test.md
 
@@ -30,6 +31,16 @@ When you finish something, change its mark here in the same commit as the work. 
    hand-off, and tell the user**, so they can reset the counts with nothing half done.
 7. Plain words, pictures first, no questions the user has to decode. A weapon plays its own chapter's character's
    moveset on every body: never swap in another character's.
+
+8. **Sanity effects are tested in Max's chapter, not Alex's** (the user, 2026-11-18, late night): Alex's room 100 has its
+   camera too far away to see anything. Jump to Game 5; the start `max-249` (tools/ed/scenarios.py) makes the state
+   `saves/test-max-249.state` with both players in Max's bedroom, and `sh tools/ed/run.sh saves/test-max-249.state NAME`
+   with `ED_SETTINGS=saves/test-max-249.settings.ini ED_ROOM_SLOTS=2 ED_COOP_STAY=1` runs from it (frames count on from
+   1762). The door 249 -> 252 is at -321, -887, 3 (`ED_PUT`, a tap of lup, then B). Effects will be added to chapters
+   anyway, so forcing one there is fine. **Player 2 first; player 1 only when a bug appears or as the reference.**
+9. **After a sanity effect a player is NEVER moved to the other player** (the user, the same night): "that is not how
+   co-op nor the game operates". The effect's return puts them where they took the door from, as the game's own return
+   record says. Check it in every run of a returning effect.
 
 ### Open work, in the user's order
 - `[NOT VERIFIED]` **1. A high-pitched break in the sound when the game loads from the title screen** (the user, 2026-11-18).
@@ -291,6 +302,47 @@ When you finish something, change its mark here in the same commit as the work. 
   after their owner alone (`coop_interface_player`). Seen: both players in room 51, player 2's five phantoms in their
   half closing on them, none in player 1's half (logs/run-20261118-203810-jtg-sanity2-phantoms-shared; picture 14).
   Not built: hits across owners (a phantom the other player cannot see can still hit them and be hit).
+- `[DONE]` **12e. The sweep in Max's chapter, each effect as player 2, player 1 at the desk (2026-11-18, late night).**
+  Seen in pictures (Screenshots for Claude/sanity-per-player/15 to 18; logs/run-20261118-21*-sweep-max-*): TV Volume
+  (31), Mute (24), Shut Off (4) in their half alone; TV Video (25), Blue Screen (28), Game Reset (26) by the log's whole
+  sequence; Shrink (32), Expand (33), Sinking (35) at their door into room 252, each ended after they walked and put
+  them back at the door they pressed (-321, -887) in room 249, NOT beside player 1; Head of Shakespeare (17) with PICK UP,
+  the recital and the return; Blood Bath (11) with the death "not real" and the return to the door; Walk on Ceiling (22)
+  by the game's own rule at the door into room 257. Player 1's half and prompt untouched in all of them but one, below.
+  Ran but NOT judged: 38 (1800 frames) and 8 show nothing with player 2 standing still; 6 ran 9 frames; 7 was refused
+  by the game there; Bug Crawl (14) started (not looked at); Phantom Creatures (21) made none in room 256.
+- `[FIXED]` **12f. "B REPLACE HEAD" in the wrong player's half (the user, 2026-11-18: "the effect is not finished").**
+  What it is: not a prompt. It is the WORDS of the window the head's pickup opens (boot text 0,12, the B is in the
+  text; the window's record is 0x8030A704, made by 0x80024A14, its channel r13-25960). Three things, all in hle.c:
+  (1) the words are placed where player 2's own B prompts go, the top left of their half (`COOP_PROMPT_AT`), at the
+  pickup and each update of theirs (`sanity_pickup`, `sanity_p2_step`); only this one element's x is written, nothing
+  of the prompts' own code or slots (at the game's x + 4096 they sat at the top RIGHT of their half, over their bars:
+  the user had them moved, 2026-11-18); (2) the game's end of the effect by its clock never calls the window's
+  own close (single player loses the words at the return's fade), so for player 2 the same three calls of that close
+  (0x801DA4D8 the words, 0x8013DB94 the channel, 0x80042BB8(0) the hold) are made just before their 81; (3) REPLACE HEAD
+  pressed by player 2 ends the effect at once, as in the game: the window's close 0x80024818 runs with their sanity set
+  in (`sanity_head_close`), so its event 81 is theirs. Seen in Max's chapter: B REPLACE HEAD in player 2's half through
+  the recital with player 1's own B PICK UP untouched, nothing left after the timed end
+  (logs/run-20261118-212819-max-head-timed3, -212941-max-head-timed4; picture 19), and the return 12 frames after their
+  press (-213138-max-head-replace2), player 2 walking after both. The wrong tries, taken out again: clearing a script
+  -2 prompt slot (it was player 1's own EXAMINE), running the pickup with player 2's prompt slots and look records in,
+  moving the game's prompt across. Seen after the move (logs/run-20261118-213935-max-head-place; picture 20): player
+  2's B PICK UP before, B REPLACE HEAD in the same place while they hold the head, their B OPEN DOOR after the return,
+  player 1's B PICK UP untouched all through.
+- `[OPEN]` **12g. Player 2's picked-up head is not in the middle of their half (the user, 2026-11-18: it must be centred
+  on the triggering player's screen and in proportion to it).** Single player (the reference, Max's hallway,
+  logs/run-20261118-215123-jtg-head-solo-max2, picture 21): the head floats to the middle of the screen, about a third
+  of its height, and turns slowly while it recites; the camera stays the room's Camera01. Player 2 (picture 22,
+  -214708-max-head-centre): the head is far too large, off to the left and cut by the edge, and their camera GLIDES at
+  the pickup (cam free from about -635, 1717 to Camera01's -1388, 67 in 100 frames), which single player's does not.
+  What is known: the head's own job is 0x801FA520 (eye 0x801EB01C, view angle 0x801EB088, the screen point 320, 165
+  unprojected with 0x801EB15C at 0x801FA608); the cameras are LENT to player 2 during the find, their own view equals
+  the camera block (eye -1388 67 841, fov 67.5), and the unprojected point is dead centre, 101 ahead; yet the head
+  stands about 75 to the side of the view's axis and only 30 to 50 ahead of the eye, and drifts. Two tries did
+  nothing and are out of the code: the job with player 2's camera set in (`coop_cameras_in`), and the job with their
+  own view in the camera block as `coop_found_place` places a found thing. START with the glide: why player 2's camera
+  moves at the pickup when single player's stays (the find's lend and blend), and log the head's place frame by frame
+  in single player against co-op from the pickup on (the lesson of the head's fall: the side-by-side log first).
 - `[OPEN]` **12d. What is left of each player's own sanity effects.** (1) Blood (1, 5) per player: not built; the reader
   found player 2's running blood is probably never made (docs/research/sanity-per-player/read-shared-room.md, steps 7
   to 12). (2) Phantoms' hits across owners; one player's head and body parts hidden from the other. (3) The head's

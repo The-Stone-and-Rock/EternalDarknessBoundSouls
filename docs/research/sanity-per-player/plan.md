@@ -266,3 +266,15 @@ Read these before the next step. Each is a spec read from the game's code, marke
 3. The pickup of the head with both players in the room (put player 2 clear of the gate's examine region first).
 4. Player 1's own screens and Walk on Ceiling's black in co-op (they still take both halves).
 5. `sanity_later`'s frames-as-seconds, the early end of 22 on B, Blood Bath's swallowed event 8.
+
+## 2026-11-18, late night: the user's two rules, and the sweep in Max's chapter
+
+- **Test sanity effects in Max's chapter** (Jump to Game 5, the start `max-249`): the cameras are close. The exact way to
+  run from its state is on the board, rule 8. **After an effect a player is never moved to the other player**: rule 9.
+- What the sweep showed is the board's 12e; what it found wrong, and how it was put right, is 12f: "B REPLACE HEAD" is the
+  words of the head's own window (record 0x8030A704), not a prompt; its close is 0x80024818.
+- Shrink (32) does not end while its player stands still (the same in single player: sanity.md, "stays on with no one
+  walking"); a door taken while shrunk sends the host's event 82, which the game ignores for it. With walking it ended
+  after 740 frames. So a test of 32, 33 or 35 walks.
+- Blood: still not built. Take its reference in Max's bedroom first (`ED_SANITY_TEST=1,...` and `5,...` in single player
+  from Jump to Game 5, then the same two as player 2 from the state).

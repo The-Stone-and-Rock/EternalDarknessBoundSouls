@@ -1098,3 +1098,19 @@ the recital (-195634-jtg-sanity2-head-final). The guard acts every frame while t
 keeps growing): harmless up to the test's reach of 20,000 units, but the real cause is still to be found.
 Lesson: three of the four tries were guesses run one after another. The comparison that named the place (the same
 log line in single player and co-op, side by side) should have been the FIRST run, not the eighth.
+
+## 2026-11-18 (late night): "B REPLACE HEAD" in player 1's corner: three fixes for a prompt that was never a prompt
+The fault: player 2 picks up their own head (Head of Shakespeare); when the effect ends by its clock with the head
+still held, "B REPLACE HEAD" stands in PLAYER 1's corner for good, over their own prompt.
+What I tried, each on the idea that it was a prompt (a slot, script -2):
+- At their return, clear every prompt slot with script -2 in `PROMPT_SLOTS` (in `sanity_p2_door(false)`): it cleared
+  player 1's own EXAMINE slot (6/-2, theirs since the chapter's start); the game asked it again and nothing changed.
+- Run the pickup with player 2's prompt slots and look records in (`coop_bytes` of `PROMPT_SLOTS` and `PROMPT_LOOKS`
+  round `hle_guest_call(SANITY_PICKUP)`): no change after the return.
+- Treat the game's prompt element as theirs while their find is open (`g_sanity_p2_head_pick` in
+  `coop_close_up_prompt`): it would have moved player 1's own prompt across.
+What it is (found with `ed text "REPLACE HEAD"`: boot text 0,12, "\i21 ... REPLACE HEAD", the B icon is IN the text):
+the words of a window of its own, opened by 0x80024A14 from the pickup (record 0x8030A704: +0 the words' element, +8
+the head's id; channel r13-25960), closed only by 0x80024818. What stands is on the board, 12f.
+Lesson: look the words up in the kit FIRST (`ed text`, `ed prompts`). The trace line "player 1's prompts: 6/-2" was
+read as the culprit when prompt 6 is EXAMINE; one `ed prompts` call said so.

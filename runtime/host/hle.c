@@ -28437,7 +28437,6 @@ static void sanity_p2_unlink(CPUState* cpu, const u32 link[2]) {
 // Head of Shakespeare runs. (return-spec.md, section 4. Not done yet: the head's cleanup in a room that stays loaded.)
 #define SANITY_PICKUP 0x800C362Cu
 static u32 g_sanity_p2_head;  // the id of the head of player 2's own Head of Shakespeare, while it lies there (sanity_p2_step)
-static bool g_sanity_p2_head_pick;  // they picked it up: the game's prompt of that find (REPLACE HEAD) is theirs (coop_close_up_prompt)
 static void sanity_pickup(CPUState* cpu) {
     static bool running;
     g_hle_passthrough = true;
@@ -28470,7 +28469,6 @@ static void sanity_pickup(CPUState* cpu) {
         return;
     fprintf(stderr, "[sanity2] a pickup by player 2 runs with their own sanity set in (their effect %d; frame %llu)\n",
             sanity_own_running(cpu, &g_sanity_p2, NULL), (unsigned long long)(cpu->timebase / 675000ull));
-    g_sanity_p2_head_pick = sanity_own_running(cpu, &g_sanity_p2, NULL) == 17;
     running = true;
     const u32 args[4] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5], cpu->gpr[6]};
     u32 link[2];
@@ -28480,11 +28478,52 @@ static void sanity_pickup(CPUState* cpu) {
     g_sanity_p2_tracker_id = id;
     g_sanity_p2_in = true;
     hle_guest_call(cpu, SANITY_PICKUP, args, 4, 0.0, &out);
+    {  // (the head's window's words, "B REPLACE HEAD", in their half from their first picture: see sanity_p2_step)
+        const u32 words = mem_read32(cpu, 0x8030A704u);
+        if (mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u && words != 0u && guest_ram_range_valid(cpu, words, 0x660u) &&
+            (s16)mem_read16(cpu, words + 8u) != (s16)COOP_PROMPT_AT)
+            mem_write16(cpu, words + 8u, (u16)(s16)COOP_PROMPT_AT);
+    }
     g_sanity_p2_in = false;
     sanity_p2_unlink(cpu, link);
     sanity_set_io(cpu, &g_sanity_p2, node, holder, true);
     sanity_set_io(cpu, &g_sanity_p1_kept, node, holder, false);
     running = false;
+    hle_set_u32(cpu, out);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+// REPLACE HEAD pressed (the head's window's own close, 0x80024818(button, the window's record)): the game frees the
+// words, sends the head away, and with Head of Shakespeare running sends the tracker event 92 (the recital stops) and
+// event 81: putting the head back ENDS the effect. For player 2's own head the tracker in memory at their press is
+// player 1's: the 81 was lost and their effect ran on to its clock's end. Their close runs with their set and link in,
+// as their pickup does (sanity_pickup); the 81 is handled in their set and the return follows from their next updates.
+#define SANITY_HEAD_CLOSE 0x80024818u
+static void sanity_head_close(CPUState* cpu) {
+    static bool running;
+    g_hle_passthrough = true;
+    g_hle_tail_call = false;
+    u32 node = 0u, holder = 0u, id = 0u, out = 0u;
+    if (running || !g_settings.mod_coop || !g_sanity_p2.made || g_sanity_p2_in || g_sanity_p2_door || g_coop_p2 == 0u || !sda_ready(cpu) ||
+        !g_coop_find_theirs || sanity_own_running(cpu, &g_sanity_p2, NULL) != 17 || !sanity_tracker(cpu, &node, &holder) ||
+        node != g_sanity_p2.node || holder != g_sanity_p2.holder_at || !hle_guest_call(cpu, SANITY_ID, &node, 1, 0.0, &id))
+        return;
+    running = true;
+    const u32 args[4] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5], cpu->gpr[6]};
+    u32 link[2];
+    sanity_set_io(cpu, &g_sanity_p1_kept, node, holder, true);
+    sanity_set_io(cpu, &g_sanity_p2, node, holder, false);
+    sanity_p2_link(cpu, id, link);
+    g_sanity_p2_tracker_id = id;
+    g_sanity_p2_in = true;
+    hle_guest_call(cpu, SANITY_HEAD_CLOSE, args, 4, 0.0, &out);
+    g_sanity_p2_in = false;
+    sanity_p2_unlink(cpu, link);
+    sanity_set_io(cpu, &g_sanity_p2, node, holder, true);
+    sanity_set_io(cpu, &g_sanity_p1_kept, node, holder, false);
+    running = false;
+    fprintf(stderr, "[sanity2] player 2 put their head back (REPLACE HEAD): the window's close ran with their own sanity set in, its 81 is theirs (frame %llu)\n",
+            (unsigned long long)(cpu->timebase / 675000ull));
     hle_set_u32(cpu, out);
     g_hle_passthrough = false;
     g_hle_tail_call = false;
@@ -28557,26 +28596,6 @@ static void sanity_p2_door(CPUState* cpu, bool in) {
         coop_state(cpu, &g_coop_state[1], true);
         coop_state(cpu, &g_sanity_ret_p1_state, false);
         g_sanity_p2_door_began = true;  // (the room they come back into is not "another room": no event 82 for it)
-        if (g_sanity_p2_began_effect == 17 && !coop_p1_in_close_up(cpu) && mem_read32(cpu, cpu->gpr[13] - 25960u) == 0u) {
-            // Their head still in their hands as the effect ended: the game closed its window (0x80024384 at 0x8006CC98,
-            // no script) and leaves the window's own prompt slot (REPLACE HEAD, script -2) to the room change's prompt
-            // reset, which in their change's bracket is not player 1's set's. It stayed in player 1's corner for good
-            // (logs/run-20261118-195634-jtg-sanity2-head-final, frames 3960, 4250). Cleared as the reset clears a slot.
-            int n = 0;
-            for (u32 i = 0u; i < 6u; i++) {
-                const u32 slot = PROMPT_SLOTS + i * 28u;
-                if (mem_read32(cpu, slot + 12u) != 0xFFFFFFFEu)
-                    continue;
-                for (u32 at = 0u; at < 28u; at += 4u)
-                    mem_write32(cpu, slot + at, at == 4u || at == 8u || at == 20u ? 0xFFFFFFFFu : 0u);
-                n++;
-            }
-            if (n > 0)
-                fprintf(stderr, "[sanity2] the head's own prompt left over after their return: cleared (%d slot; frame %llu)\n", n,
-                        (unsigned long long)(cpu->timebase / 675000ull));
-        }
-        fprintf(stderr, "[sanity2] player 2's return is done: busy bits of theirs left 0x%X (frame %llu)\n", still,
-                (unsigned long long)(cpu->timebase / 675000ull));
         node = g_sanity_p2.node, holder = g_sanity_p2.holder_at;
         g_sanity_p2_in = false;
         g_sanity_p2_door = false;
@@ -28604,6 +28623,12 @@ static void sanity_p2_door(CPUState* cpu, bool in) {
     sanity_set_io(cpu, &g_sanity_p1_door, node, holder, false);
 }
 
+// The effect a tracker in memory has picked or running (its record's number), 0 for none.
+static int sanity_tracker_effect(CPUState* cpu, u32 node, u32 holder) {
+    (void)node;
+    const u32 record = mem_read32(cpu, holder + 4u);
+    return guest_ram_range_valid(cpu, record, 36u) ? (int)mem_read32(cpu, record) : 0;
+}
 static void sanity_p2_step(CPUState* cpu) {
     static unsigned long long last;
     const unsigned long long frame = cpu->timebase / 675000ull;
@@ -28731,6 +28756,27 @@ static void sanity_p2_step(CPUState* cpu) {
         }
         const u32 args[4] = {g_sanity_p2_later[i].event, id, id, g_sanity_p2_later[i].data};
         fprintf(stderr, "[sanity2] the kept event %u given to player 2's tracker (frame %llu)\n", args[0], frame);
+        if (args[0] == 81u && sanity_tracker_effect(cpu, node, holder) == 17 && mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u &&
+            mem_read32(cpu, 0x8030A704u) != 0u) {
+            // Head of Shakespeare ending by its own clock with the head still in their hands. The head's pickup opened
+            // a window of its own (0x80024A14: its record 0x8030A704 {the words, .., the head's id}, its channel in
+            // r13-25960) whose words are "B REPLACE HEAD" (boot text 0,12: the B is in the text, it is not a prompt).
+            // Only the window's own close frees it (0x80024818, on their B: the words freed with 0x801DA4D8, the channel
+            // closed with 0x8013DB94, the find word let go with 0x80042BB8(0); it then ends the effect itself). The
+            // game's end of the effect by the clock does not call it: single player loses the words at the return's
+            // fade, and player 2's own return left them, laid out again in PLAYER 1's corner over their own prompt for
+            // good (Max's chapter: logs/run-20261118-211108-sweep-max-head5). So the window is closed here with the
+            // same three calls, just before the 81 (no 81 or 92 of its own: the effect is ending already).
+            const u32 words = mem_read32(cpu, 0x8030A704u), channel = mem_read32(cpu, cpu->gpr[13] - 25960u), off = 0u;
+            u32 none = 0u;
+            hle_guest_call(cpu, 0x801DA4D8u, &words, 1, 0.0, &none);
+            mem_write32(cpu, 0x8030A704u, 0u);
+            hle_guest_call(cpu, 0x8013DB94u, &channel, 1, 0.0, &none);
+            mem_write32(cpu, cpu->gpr[13] - 25960u, 0u);
+            hle_guest_call(cpu, 0x80042BB8u, &off, 1, 0.0, &none);
+            fprintf(stderr, "[sanity2] their head's window was still up as the effect ends by its clock: closed as its own close does (words 0x%08X freed, channel 0x%08X closed; frame %llu)\n",
+                    words, channel, frame);
+        }
         g_sanity_p2_later[i] = g_sanity_p2_later[--g_sanity_p2_later_n];
         hle_guest_call(cpu, COOP_SEND_EVENT, args, 4, 0.0, &ignore);
     }
@@ -28867,6 +28913,27 @@ static void sanity_p2_step(CPUState* cpu) {
         g_sanity_p2_takes_start = g_sanity_p2_screen.on || (mem_read32(cpu, node + 20u) == 41u && guest_ram_range_valid(cpu, record2, 36u) &&
                                                              (mem_read32(cpu, record2) == 25u || mem_read32(cpu, record2) == 26u ||
                                                               mem_read32(cpu, record2) == 28u));
+    }
+    {
+        // Their head's window (Head of Shakespeare, picked up): its words "B REPLACE HEAD" are theirs and read as a B prompt
+        // (the B is in the text), so they go where player 2's own B prompts go: COOP_PROMPT_AT, the top left of their half,
+        // which only their view brings back. (At the game's own x they are player 1's corner; at that x + 4096 they were
+        // in player 2's half but at its top RIGHT, over their bars: the user, 2026-11-18.) Only this one element's x is
+        // written, the words of the head's window (record 0x8030A704): nothing of the prompts' own code or slots is
+        // touched. A relayout puts it back at the game's x, so it is placed each update of theirs.
+        static u32 said;
+        const u32 words = mem_read32(cpu, 0x8030A704u);
+        if (sanity_tracker_effect(cpu, node, holder) == 17 && mem_read32(cpu, cpu->gpr[13] - 25960u) != 0u && words != 0u &&
+            guest_ram_range_valid(cpu, words, 0x660u)) {
+            const s16 x = (s16)mem_read16(cpu, words + 8u);
+            if (said != words) {
+                said = words;
+                fprintf(stderr, "[sanity2] their head's window's words (element 0x%08X) are at x %d, y %d: kept at x %d, where player 2's B prompts go (frame %llu)\n", words, x,
+                        (s16)mem_read16(cpu, words + 10u), (int)COOP_PROMPT_AT, frame);
+            }
+            if (x != (s16)COOP_PROMPT_AT)
+                mem_write16(cpu, words + 8u, (u16)(s16)COOP_PROMPT_AT);
+        }
     }
     hle_guest_call(cpu, SANITY_UPDATE, &node, 1, 0.0, &ignore);
     sanity_phantoms_note(cpu, &g_sanity_p1_kept);
@@ -29423,7 +29490,7 @@ static void sanity_tool_install(CPUState* cpu) {
         } kOwn[] = {{SANITY_LEVEL, sanity_level, "the level"}, {SANITY_OVERLAY, sanity_overlay, "the overlay"}, {SANITY_PICKUP, sanity_pickup, "the pickup"},
                     {SANITY_IS_ON, sanity_is_on, "the question which effect runs"}, {SANITY_IS_ON_N, sanity_is_on_n, "the question whether one effect runs"},
                     {SANITY_FAKE_DEATH, sanity_fake_death, "the question whether a death is an effect's"}, {SANITY_DEATH_ENDS, sanity_death_ends, "a death's own end of its effect"},
-                    {SANITY_BLACK, sanity_black, "the black of Walk on Ceiling's change"}};  // (the event for later: in split_send)
+                    {SANITY_BLACK, sanity_black, "the black of Walk on Ceiling's change"}, {SANITY_HEAD_CLOSE, sanity_head_close, "the head's window's close"}};  // (the event for later: in split_send)
         for (size_t i = 0; i < sizeof kOwn / sizeof kOwn[0]; i++) {
             HleDispatchEntry* e = hle_dispatch_entry(kOwn[i].at);
             if (e != NULL && e->intercept == NULL && e->notify == NULL)
@@ -33984,15 +34051,7 @@ static u16 g_close_up_prompt_own_x;
 static void coop_close_up_prompt(CPUState* cpu) {
     const u32 element = mem_read32(cpu, cpu->gpr[13] - COOP_GAME_PROMPT);
     const bool valid = guest_ram_range_valid(cpu, element, 0x100u);
-    // Their own head picked up (Head of Shakespeare, sanity_pickup): that find's prompt, REPLACE HEAD, is the game's
-    // prompt too and was in player 1's corner for its 20 frames, with no close-up of theirs on. Theirs while their
-    // find is open.
-    if (g_sanity_p2_head_pick && !g_coop_p2_find.up) {
-        static unsigned waited;
-        if (++waited > 30u || g_close_up_prompt_moved != 0u)  // (the find opens a frame or two after the pickup's call)
-            g_sanity_p2_head_pick = false, waited = 0u;
-    }
-    const bool theirs = g_coop_screen || g_sanity_p2_head_pick;
+    const bool theirs = g_coop_screen;
     if (theirs && valid) {
         if (element != g_close_up_prompt_moved) {
             g_close_up_prompt_moved = element;
@@ -34026,7 +34085,7 @@ static void coop_close_up_prompt(CPUState* cpu) {
 static void coop_game_prompt_made(CPUState* cpu) {
     static bool running;
     g_hle_passthrough = true;
-    if (running || !(g_coop_screen || g_sanity_p2_head_pick) || !sda_ready(cpu))
+    if (running || !g_coop_screen || !sda_ready(cpu))
         return;
     u32 args[8], ignore = 0u;
     for (int i = 0; i < 8; i++)
