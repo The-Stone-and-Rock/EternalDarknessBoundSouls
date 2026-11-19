@@ -23441,8 +23441,21 @@ static void coop_gate_log(CPUState* cpu, const char* where) {
             g_coop_cameras.lent, g_coop_tome_owner, hle_coop_tome_shares(), game_menu_open(cpu), cutscene_playing(cpu), frame);
 }
 
+static u32 g_sanity_death_pass;  // the id a sanity effect's own death (event 8) is on its way to (coop_send_event)
+static unsigned long long g_sanity_death_pass_frame;
 static void coop_busy_ask_answer(CPUState* cpu) {
     g_hle_passthrough = true;
+    if (g_sanity_death_pass != 0u && cpu->lr == 0x80058E84u) {
+        const bool now = cpu->timebase / 675000ull == g_sanity_death_pass_frame;
+        g_sanity_death_pass = 0u;
+        if (now) {
+            fprintf(stderr, "[sanity2] a sanity effect's own death of a player answered \"not busy\" at its handler's busy test (frame %llu)\n",
+                    (unsigned long long)(cpu->timebase / 675000ull));
+            hle_set_u32(cpu, 0u);
+            g_hle_passthrough = false;
+            return;
+        }
+    }
     // Inside a door's countdown with the other player staying (design-split-hold.md S1, K1/K7): the mover's own filter
     // and the room-changers' asks keep the game's word, before today's cases, which answer for everyone.
     if (split_busy_kept(cpu))
@@ -25309,6 +25322,15 @@ static void coop_send_event(CPUState* cpu) {
         }
     }
     const u32 event = cpu->gpr[3], from = cpu->gpr[4], to = cpu->gpr[5];
+    // A sanity effect's own death of a player (Blood Bath's last step: event 8 from the sanity code, 0x80068000 to
+    // 0x800A0000): the player's handler drops an event 8 while the game is busy (0x80058E80 asks 0x80155738), and the
+    // effect, its steps already cleared, then never ends (read-blood-bath.md, item 6). In co-op the game is busy with the
+    // other player's find, door or hold far more often than in solo: the busy ask the handler makes for this one event is
+    // answered "not busy" (coop_busy_ask_answer, lr 0x80058E84).
+    if (event == 8u && cpu->lr >= 0x80068000u && cpu->lr < 0x800A0000u && g_settings.mod_coop && g_coop_p2 != 0u && sda_ready(cpu)) {
+        g_sanity_death_pass = to;
+        g_sanity_death_pass_frame = cpu->timebase / 675000ull;
+    }
     if (event == COOP_FINISH_ASK && coop_finish_taken(cpu, from, to)) {
         static unsigned long long told;
         const unsigned long long frame = cpu->timebase / 675000ull;
@@ -28571,8 +28593,12 @@ static void sanity_later(CPUState* cpu) {
     g_hle_tail_call = false;
     if (!g_sanity_p2_in || cpu->gpr[5] != g_sanity_p2_tracker_id || g_sanity_p2_later_n >= 8)
         return;
+    // (The wait is in the game's clock, r13-22216, which ticks once a main loop: frames, not seconds. Read as seconds,
+    // Head of Shakespeare's end by its clock came 61 frames late and Walk on Ceiling's 81 one frame after it was sent,
+    // not 50: docs/research/sanity-per-player/read-ceiling.md, item 7. Due when the clock reaches now + wait, so a wait
+    // of 1 is the next frame.)
     const double wait = cpu->fpr[1];
-    const unsigned long long frames = wait > 0.0 && wait < 20.0 ? (unsigned long long)(wait * 60.0) + 1ull : 1ull;
+    const unsigned long long frames = wait > 1.0 && wait < 100000.0 ? (unsigned long long)ceil(wait) : 1ull;
     g_sanity_p2_later[g_sanity_p2_later_n].event = cpu->gpr[3];
     g_sanity_p2_later[g_sanity_p2_later_n].data = cpu->gpr[6];
     g_sanity_p2_later[g_sanity_p2_later_n].due = cpu->timebase / 675000ull + frames;
@@ -29423,7 +29449,20 @@ static void sanity_p2_step(CPUState* cpu) {
                 mem_write16(cpu, words + 8u, (u16)(s16)COOP_PROMPT_AT);
         }
     }
+    // Walk on Ceiling's early end (state 42's event 3, 0x8006D61C): past 60 ticks, B pressed with the SHOWN prompt an OPEN
+    // DOOR, CLIMB UP or CLIMB DOWN (its button and id: 0x801179AC, 0x801179CC, the record inside PROMPT_SLOTS) ends it.
+    // In their update the pad is theirs and the prompt was player 1's: their B at the ceiling room's door did not end it,
+    // and their B anywhere did while player 1 stood at a door (read-ceiling.md, item 6). Their own slots are put in for
+    // the update while their 22 runs, read only, and the game's put back after.
+    static u8 slots_game[PROMPT_SLOTS_SIZE];
+    const bool ceiling = !g_coop_cameras.lent && mem_read32(cpu, node + 20u) == 42u && sanity_tracker_effect(cpu, node, holder) == 22;
+    if (ceiling) {
+        coop_bytes(cpu, PROMPT_SLOTS, slots_game, sizeof slots_game, true);
+        coop_bytes(cpu, PROMPT_SLOTS, g_coop_prompt_slots, sizeof g_coop_prompt_slots, false);
+    }
     hle_guest_call(cpu, SANITY_UPDATE, &node, 1, 0.0, &ignore);
+    if (ceiling)
+        coop_bytes(cpu, PROMPT_SLOTS, slots_game, sizeof slots_game, false);
     sanity_blood_drain(cpu);       // (their running blood, made with their set in)
     sanity_blood_stage1(cpu, 2);   // (and their first part, noted as theirs)
     sanity_phantoms_note(cpu, &g_sanity_p1_kept);

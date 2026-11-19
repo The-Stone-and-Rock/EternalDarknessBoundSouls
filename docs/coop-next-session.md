@@ -498,7 +498,19 @@ When you finish something, change its mark here in the same commit as the work. 
   Tome copy (`tome_copy_*`). The reader's plan (read-rest.md, 20) puts their set into the copy; the keep table says not
   to swap more memory ranges for the copy, so this one wants its own careful step (or the user's say). Not in
   `kSanityP2`: player 2's set never picks it (refused by the rules).
-- `[OPEN]` **12d. What is left of each player's own sanity effects.** (1) Blood (1, 5) per player: not built; the reader
+- `[FIXED]` **12d (5), the three small ones (2026-11-19).**
+  - `sanity_later` read the game's wait as seconds (x 60): it is the game's clock, r13-22216, one tick a main loop.
+    Now frames (at least 1). Seen: Head of Shakespeare's end by its clock "1.000, 1 frames" where it was 61
+    (logs/run-20261119-001211-head-clock).
+  - Walk on Ceiling's early end on B read player 1's shown prompt with player 2's B: their own prompt slots are put in
+    (read only) for their update while their 22 runs. Seen: player 2's B at the upside-down room's door at 2800, back
+    at the door they took into it in room 256 by 2880; before, it ran its 1500 frames (-001139-ceiling-b-p2).
+  - Blood Bath's death (event 8 from the sanity code) is answered "not busy" at its handler's busy test (lr 0x80058E84;
+    `coop_send_event`, `coop_busy_ask_answer`), for either player. Seen acting on the death's own test each run, and
+    Blood Bath ending and returning as before (-001352, -001441-bloodbath-busy2/3). Not produced: the game busy at that
+    very frame (player 2's update waits through a door's countdown, so a door cannot overlap it).
+- `[DONE]` **12d. What is left of each player's own sanity effects** (2026-11-19: every part is on the lines above, done,
+  kept by the user, or left alone by their decision). The first wording, kept: (1) Blood (1, 5) per player: not built; the reader
   found player 2's running blood is probably never made (docs/research/sanity-per-player/read-shared-room.md, steps 7
   to 12). (2) Phantoms' hits across owners: KEPT by the user's decision (2026-11-19, a nice side effect); one player's head and body parts hidden from the other. (3) The head's
   pickup with both players in the room. (4) Player 1's own whole-game screens and Walk on Ceiling's black in co-op.
