@@ -22501,6 +22501,9 @@ static void coop_subtitle_place(CPUState* cpu) {
 // elements are shared with the words, the prompts and the finds: the copy is made only with one more left free after
 // it, and let go when none is free, so the owner's half alone is shown rather than another's words go without.
 #define SUBTITLE_COPY_SPARE 1
+// (A hallucination's words are its player's alone, by the user's rule that what an effect shows is the triggering
+// player's: the head's recital in one room showed in both halves, logs/run-20261118-232903-heads-both 2600.)
+static bool sanity_owner_recites(CPUState* cpu, int owner);  // (below, with the sanity sets)
 static void coop_subtitle_copy(CPUState* cpu) {
     if (!coop_subtitles_on() || !sda_ready(cpu))
         return;
@@ -22518,6 +22521,8 @@ static void coop_subtitle_copy(CPUState* cpu) {
         why = "the split is off";
     else if (coop_rooms_apart(cpu))
         why = "the players are in two rooms";
+    else if (sanity_owner_recites(cpu, g_sub.line_owner))
+        why = "the words are its player's own hallucination (Head of Shakespeare)";
     else if (g_tw.sharing || g_tome_copy_open || g_coop_tome_p2)
         why = "a Tome is up";
     else if (g_sub.copy != 0u && g_sub.copy_of != g_sub.serial)
@@ -28281,10 +28286,32 @@ static u32 sanity_own_read(CPUState* cpu, const SanityOwn* s, u32 at, u32 bytes)
 // The phantoms of both sets, read where player 2's set is the one in memory and player 1's the one kept out (their
 // update, the end of a door of theirs). An entry stays until its node is no longer that thing (a later door effect uses
 // the set's slots again while the creatures live on).
+static int sanity_own_running(CPUState* cpu, const SanityOwn* s, u32* data_out);  // (below)
 static void sanity_phantoms_note(CPUState* cpu, const SanityOwn* p1_out) {
     for (int i = 0; i < PHANTOM_MAX; i++)
         if (g_phantoms[i].owner != 0 && (!guest_ram_range_valid(cpu, g_phantoms[i].node, 60u) || mem_read32(cpu, g_phantoms[i].node + 16u) != g_phantoms[i].id))
             g_phantoms[i].owner = 0, g_phantoms[i].object = 0u;
+    // Each player's own head (Head of Shakespeare: its id in their set's data+148 while 17 runs) is theirs too: on the floor
+    // and floating in its recital it showed in both halves with both players in one room (logs/run-20261118-232903-
+    // heads-both 2600). Listed here, it is drawn in its owner's half alone and refused to the other's press.
+    for (int owner = 1; owner <= 2; owner++) {
+        const bool on = sanity_own_running(cpu, owner == 2 ? &g_sanity_p2 : p1_out, NULL) == 17;
+        const u32 head = !on ? 0u : owner == 2 ? mem_read32(cpu, SANITY_EXT + 148u) : sanity_own_read(cpu, p1_out, SANITY_EXT + 148u, 4u);
+        u32 node = 0u;
+        if (head == 0u || !hle_guest_call(cpu, 0x801F5F88u, &head, 1, 0.0, &node) || !guest_ram_range_valid(cpu, node, 60u) || mem_read32(cpu, node + 16u) != head)
+            continue;
+        int at = -1;
+        for (int i = 0; i < PHANTOM_MAX; i++)
+            if (g_phantoms[i].owner != 0 && g_phantoms[i].node == node)
+                at = i;
+        for (int i = 0; i < PHANTOM_MAX && at < 0; i++)
+            if (g_phantoms[i].owner == 0) {
+                at = i;
+                g_phantoms[at].node = node, g_phantoms[at].id = head, g_phantoms[at].object = mem_read32(cpu, node + 52u), g_phantoms[at].owner = owner;
+                fprintf(stderr, "[sanity2] player %d's own head (thing %u): drawn in their half alone, refused to the other player (frame %llu)\n", owner, head,
+                        (unsigned long long)(cpu->timebase / 675000ull));
+            }
+    }
     for (int owner = 1; owner <= 2; owner++) {
         u32 count = owner == 2 ? mem_read8(cpu, SANITY_EXT + 85u) : (sanity_own_read(cpu, p1_out, SANITY_EXT + 84u, 4u) >> 16) & 0xFFu;
         if (count > 16u)
@@ -28979,6 +29006,17 @@ static int sanity_tracker_effect(CPUState* cpu, u32 node, u32 holder) {
     (void)node;
     const u32 record = mem_read32(cpu, holder + 4u);
     return guest_ram_range_valid(cpu, record, 36u) ? (int)mem_read32(cpu, record) : 0;
+}
+// Head of Shakespeare (17) runs in that player's own set (player 2's kept, player 1's in memory outside their update).
+static bool sanity_owner_recites(CPUState* cpu, int owner) {
+    if (!g_settings.mod_coop || !g_sanity_p2.made || !sda_ready(cpu))
+        return false;
+    if (owner == 2)
+        return sanity_own_running(cpu, &g_sanity_p2, NULL) == 17;
+    if (g_sanity_p2_in)
+        return sanity_own_running(cpu, &g_sanity_p1_kept, NULL) == 17;
+    u32 node = 0u, holder = 0u;
+    return sanity_tracker(cpu, &node, &holder) && node == g_sanity_p2.node && mem_read32(cpu, node + 20u) == 42u && sanity_tracker_effect(cpu, node, holder) == 17;
 }
 // One player's whole-game screen of their own (TV Video 25, Game Reset 26, Blue Screen 28), with THEIR sanity set in
 // memory (player 2's in their update, player 1's before it: sanity_p2_step): the host does the game's mode's work in

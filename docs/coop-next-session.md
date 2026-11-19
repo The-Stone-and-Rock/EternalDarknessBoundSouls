@@ -461,6 +461,23 @@ When you finish something, change its mark here in the same commit as the work. 
   `sanity_spell_wrong_drop`); both in `kSanityP2`. Not seen: player 2 has no gun in Max's chapter from the test start
   (their A is a melee swing: logs/run-20261118-230809-reload34-p2), and 36 needs flag 938 and a spell of theirs. Test
   34 in a chapter where player 2 holds a gun (flag 1126 clear: the first reload of the game), 36 in chapter 4 or later.
+- **12d (3), both players' heads in one room (the user asked, 2026-11-19).** Run: player 2 and then player 1 through the
+  door 249 -> 252 each with their own 17, each head falling by its player, player 2 picking theirs up at 2540, player 1
+  pressing B on theirs at 2760 during player 2's recital (logs/run-20261118-232903-heads-both; picture 41).
+  - `[FIXED]` player 2's floating head was drawn in player 1's half too: each player's head (their set's data+148
+    while 17 runs) goes in the owner list (`sanity_phantoms_note`), so it is drawn in its owner's half alone and refused
+    to the other's press (-233138-heads-both2; picture 42).
+  - `[FIXED]` the recital's subtitles were in both halves (the U2 rule: one room, both halves): a line whose owner's own
+    Head of Shakespeare runs is not copied to the other half (`sanity_owner_recites` in `coop_subtitle_copy`).
+  - `[OPEN]` the head's red blood still floats in the other player's half where no head is drawn (picture 42, player
+    1's half): an effect object that follows the head, not yet found (`ED_FX_KINDS=1` names its draw).
+  - `[OPEN]` player 1 could not pick up their own head while player 2's head was up: their B PICK UP shows, their
+    press does nothing. Player 2's pickup goes the lend route (`coop_find_hold`'s "theirs" branch: the window, its
+    hold bits 16 and 2 and the input focus 0x805881F0 in the game's own input), and the game has one find window
+    (record 0x8030A704) and one focus. Player 2's own-look finds go the own route (their copy: `g_coop_p2_find`,
+    `coop_p2_words_call`), which leaves the game's focus free. Not head-only: any two finds at once meet it. `[DECIDE]`
+    with the user: the press and find code is shared by every pickup.
+  - Seen right: each head refused to the other player, both returns to their own doors, no hang.
 - `[OPEN]` **12d, Empty Inventory (20) for player 2: not built.** Its start sets 0x80335758 bit 2 in real memory (so
   player 2's roll would empty PLAYER 1's Tome) and it runs on the Tome's inventory page, which for player 2 is their
   Tome copy (`tome_copy_*`). The reader's plan (read-rest.md, 20) puts their set into the copy; the keep table says not
