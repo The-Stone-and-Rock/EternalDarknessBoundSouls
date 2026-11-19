@@ -423,6 +423,49 @@ When you finish something, change its mark here in the same commit as the work. 
   in player 2's half alone, player 1 standing on another of the items offered nothing (the game asks player 1's set),
   the return to the door they took with the flash in their half (logs/run-20261118-225550-ammo9-p2, -225735-ammo9-pick;
   pictures 33, 34). Not seen: the window closed by their B and the effect's end at 500 ticks after it.
+- `[DONE]` **12d, Helpless Battle (18), Enemy One Hit Kill (16), Illusions of Grandeur (19) for player 2 (2026-11-19).**
+  All three allowed in `kSanityP2`, their creatures theirs by the widened owner list. 16: a hit on player 2 answers "the
+  victim is the current player" (`coop_interface_player` at lr 0x80061C3C) and its "is 16 on" is asked of their set
+  (`sanity_ask_is_p2s` at lr 0x80061C78 with r27 player 2). 19: its four asks in the hit code are answered from the set
+  of the creature's owner (`sanity_hit_on_p2s_thing`: r31 at 0x8003BA5C and 0x80072598, r29 at 0x8005E9B8, r24 at
+  0x800627D0). Seen: 18, player 2 brought from 75 to 3 health with no fight, the death "not real" by their set, the
+  return to their door with full health; 16, the first hit drops them at 75 health, "not real", the return; 19, five
+  small creatures (kinds 21, 14, 13) cut down by player 2, the end, the return; player 1 walking or at the desk in 249
+  throughout, the flash in player 2's half (logs/run-20261118-230555-fight18-p2, -230628-fight16-p2,
+  -230924-illusions19-p2; pictures 35 to 37). Not seen: any of them in a shared room (hits across owners: 12d (2)).
+- `[FIXED]` **12d, an effect of player 1's own that holds play stood player 2 still too (2026-11-19).** Seen with player
+  1's TV Shut Off: player 2's stick pushed, read 0 and they stood for its 130 frames (logs/run-20261118-231740-shutoff4-p1).
+  The game's play hold (0x80199EA0(0)) sets busy bit 2, which stops the game's controller step for player 1, and
+  player 2's turn rides on that step; its channels are both players'. How (hle.c): `coop_play_hold` takes a hold from
+  the sanity code (lr 0x80068000..0x800A0000) while player 1's own effect runs (`sanity_p1_effect_running`), in co-op
+  with the split on, and clears busy bit 2 right after (0x801556CC(2, 0), as Controller Not Found does itself:
+  their controls off, the world on); `hle_coop_controller` lets the hold's channels go for player 2's turn while it
+  stands (`sanity_p1_effect_holds`, `screen_hold_open`), as for player 1's own screens. Seen: player 1's half black
+  and them standing with their stick pushed, player 2 walking the bedroom throughout, player 1 walking after it, the
+  flash in their half (-232040-shutoff4-p1c; picture 40). The same rule covers every effect of player 1's that holds.
+- `[DONE]` **12d, To Be Continued (15) for either player in co-op (2026-11-19).** It is door-started (the reader's guess
+  that it starts itself was wrong: picked, it waits). Its step asks for the game's mode 11, the whole game for both:
+  `sanity_game_mode` (intercept on 0x80018808 at lr 0x8009CB20) does not ask it in co-op with the split on and opens
+  the triggering player's own screen (`g_sanity_screen[who]`, effect 15, 400 ticks in `sanity_screen_step`); the
+  picture bank (`sanity_screen_bank`) now holds pictures 7 (the fake ending) and 8 ("Eternal Darkness: Sanity's
+  Redemption, Coming Soon...") too; the end is the 81 alone (its own end flashes in its player's half; the host's
+  second flash had no owner and was drawn in both halves, taken out for 15). Seen: player 2's and player 1's, each in
+  their own half, the other walking, the game's mode 2 throughout, the return to where they stood (room 252, as the
+  game keeps it) (logs/run-20261118-231558-tbc15-door2, -231634-tbc15-p1door; pictures 38, 39). `[OPEN]`: picture 8
+  comes in as a cut at tick 200, not the game's crossfade (a second picture drawn over the first in the same frame
+  is not shown; picture 8 is drawn first and 7 fading over it, so the fade is lost, not the picture). 15 in `kSanityP2`.
+- `[NOT VERIFIED]` **12d, Shoots Self (34) and Spell Goes Wrong (36) for player 2: built, not seen (2026-11-19).** The game
+  arms them from other code that asks whichever set is in memory: 34 from the reload (0x8009E5F0 at lr 0x80079FB8), 36
+  from the cast (0x8009DDC4, 0x8009DD20). `sanity_as_p2` (hle.c; the pickup's bracket made general) makes each call with
+  player 2's set and link in when the one reloading or casting is player 2 (`sanity_shoots_self`, `sanity_spell_wrong`,
+  `sanity_spell_wrong_drop`); both in `kSanityP2`. Not seen: player 2 has no gun in Max's chapter from the test start
+  (their A is a melee swing: logs/run-20261118-230809-reload34-p2), and 36 needs flag 938 and a spell of theirs. Test
+  34 in a chapter where player 2 holds a gun (flag 1126 clear: the first reload of the game), 36 in chapter 4 or later.
+- `[OPEN]` **12d, Empty Inventory (20) for player 2: not built.** Its start sets 0x80335758 bit 2 in real memory (so
+  player 2's roll would empty PLAYER 1's Tome) and it runs on the Tome's inventory page, which for player 2 is their
+  Tome copy (`tome_copy_*`). The reader's plan (read-rest.md, 20) puts their set into the copy; the keep table says not
+  to swap more memory ranges for the copy, so this one wants its own careful step (or the user's say). Not in
+  `kSanityP2`: player 2's set never picks it (refused by the rules).
 - `[OPEN]` **12d. What is left of each player's own sanity effects.** (1) Blood (1, 5) per player: not built; the reader
   found player 2's running blood is probably never made (docs/research/sanity-per-player/read-shared-room.md, steps 7
   to 12). (2) Phantoms' hits across owners; one player's head and body parts hidden from the other. (3) The head's

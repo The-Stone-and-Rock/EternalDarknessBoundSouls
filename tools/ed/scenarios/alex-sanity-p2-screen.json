@@ -15,7 +15,7 @@
  "expect": [
   {
    "check": "log",
-   "pattern": "the pictures of Game Reset and Blue Screen read from /UInsane.tpl"
+   "pattern": "the pictures of Game Reset, Blue Screen and To Be Continued read from /UInsane.tpl"
   },
   {
    "check": "log",
