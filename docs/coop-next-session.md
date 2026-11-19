@@ -1,4 +1,4 @@
-# HANDOFF 2026-11-18 (late night, the end of the second session): all committed on tools/game-kit, not pushed. Item 12 as player 2: the head, Blood Bath, Walk on Ceiling, the blue screen and reset, the phantoms, REPLACE HEAD are done; OPEN are 12g (the head not centred in their half) and 12d (blood per player, and the rest). Test sanity effects in Max's chapter (rule 8). Earlier:
+# HANDOFF 2026-11-18 (late night, the end of the second session): START HERE. All committed on tools/game-kit (1967947 and this hand-off), not pushed. The next session's prompt, ready to paste, is docs/prompts/session-sanity-head.md. Working on item 12 (each player's own sanity effects): DONE and checked off below are the head's fall, pick-up, recital and REPLACE HEAD, Blood Bath, Walk on Ceiling, the blue screen and reset, the phantoms, the two-room words fault, the Max's chapter sweep. OPEN: 12g (the picked-up head is not centred in player 2's half) FIRST, then 12d (blood per player and the leftovers). Earlier:
 # HANDOFF 2026-11-18 (night, second session): the head, Blood Bath and a two-room fault are built and NOT committed yet (hle.c, docs, four new reader files in docs/research/sanity-per-player/); next is 12c. Before it:
 # HANDOFF 2026-11-18 (evening): START HERE. Everything is committed on tools/game-kit and NOT pushed (past v0.1.6; the evening's two commits are items 1, 3, 5 and then 2a, 2b, 6 of the board); controls.cpp's test edits stay uncommitted by rule. What to play: docs/coop-play-test.md
 
@@ -41,6 +41,20 @@ When you finish something, change its mark here in the same commit as the work. 
 9. **After a sanity effect a player is NEVER moved to the other player** (the user, the same night): "that is not how
    co-op nor the game operates". The effect's return puts them where they took the door from, as the game's own return
    record says. Check it in every run of a returning effect.
+
+10. **The game never pauses for a sanity effect** (the user, 2026-11-18, late night). The player who triggered Head of
+   Shakespeare cannot move while it recites; the OTHER player must be able to move and play on the whole time. The
+   same holds for every effect that holds its player.
+11. **What an effect shows is centred on, and in proportion to, the triggering player's half**, as single player has it
+   on the full screen (the head, the screens, any close-up).
+12. **Do not break the prompts**: they were hard to get right. Touch only the one thing being fixed, and look a text or a
+   prompt up in the kit first (`ed text`, `ed prompts`).
+13. **Commit only when there are no bugs to report in what was just worked on** (`ed test` passes and the pictures are
+   right). Never push unless asked.
+14. **Test only what is needed**: one run that answers one question, never the same measurement over and over. Every
+   run records both players at once (both.tsv, shots/): read it with `ed timeline`, `ed see`, `ed sheet`, `ed zoom`.
+15. **After each finding, check the usage tracker and report plainly and simply**: what was seen, what it means, what
+   comes next, and the usage number.
 
 ### Open work, in the user's order
 - `[NOT VERIFIED]` **1. A high-pitched break in the sound when the game loads from the title screen** (the user, 2026-11-18).
