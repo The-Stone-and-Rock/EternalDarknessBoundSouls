@@ -27623,9 +27623,12 @@ static const SanityDoor* sanity_door_pick(CPUState* cpu, int number) {
 // door's own end of it for the one asked for: the room's part, then the word to start.
 static bool g_sanity_p2_door;  // (below: player 2's own sanity set is in for a door of theirs)
 static int g_sanity_p2_forced;
+static int g_sanity_p1_forced = -1;  // ED_SANITY_P1_TEST's effect, until it starts at player 1's door (co-op, testing)
 static void sanity_door_rules(CPUState* cpu) {
     g_hle_passthrough = true;
-    if (g_sanity_p2_door && g_sanity_p2_forced > 0 && g_sanity_p2_forced != 22 && (int)cpu->gpr[3] == g_sanity_p2_forced) {  // (22, Walk on Ceiling: only where the game starts it)
+    const bool p1_test = g_settings.mod_coop && !g_sanity_p2_door && g_sanity_p1_forced > 0 && g_sanity_p1_forced != 22 &&
+                         (int)cpu->gpr[3] == g_sanity_p1_forced;
+    if (p1_test || (g_sanity_p2_door && g_sanity_p2_forced > 0 && g_sanity_p2_forced != 22 && (int)cpu->gpr[3] == g_sanity_p2_forced)) {  // (22, Walk on Ceiling: only where the game starts it)
         // (Testing, ED_SANITY_P2_TEST: the effect asked for in player 2's set starts at their door whatever the next
         // room's own list says, as the menu's Ignore does for player 1's. In play the game's own rule stands.)
         u32 thing = 0u, holder = 0u, id = 0u, ignored = 0u;
@@ -27634,8 +27637,10 @@ static void sanity_door_rules(CPUState* cpu) {
             hle_guest_call(cpu, SANITY_SETUP, setup, 4, 0.0, &ignored);
             const u32 start[4] = {SANITY_START_EVENT, 0u, id, 0u};
             hle_guest_call(cpu, COOP_SEND_EVENT, start, 4, 0.0, &ignored);
-            fprintf(stderr, "[sanity2] TEST effect %d started at player 2's door into room %u (frame %llu)\n", g_sanity_p2_forced, setup[1],
-                    (unsigned long long)(cpu->timebase / 675000ull));
+            fprintf(stderr, "[sanity2] TEST effect %d started at player %d's door into room %u (frame %llu)\n", p1_test ? g_sanity_p1_forced : g_sanity_p2_forced,
+                    p1_test ? 1 : 2, setup[1], (unsigned long long)(cpu->timebase / 675000ull));
+            if (p1_test)
+                g_sanity_p1_forced = -1;
             g_hle_passthrough = false;
             g_hle_tail_call = false;
             cpu->gpr[3] = 1u;
@@ -27755,6 +27760,10 @@ static void sanity_rules(CPUState* cpu) {
         } else if ((int)cpu->gpr[3] == g_sanity_p2_forced) {
             cpu->gpr[4] = 3u;
         }
+        return;
+    }
+    if (g_settings.mod_coop && g_sanity_p1_forced > 0 && (int)cpu->gpr[3] == g_sanity_p1_forced) {
+        cpu->gpr[4] = 3u;  // (ED_SANITY_P1_TEST: player 1's asked effect at any level, as player 2's test lifts it)
         return;
     }
     if (g_sanity.rules_for < 0 || (int)cpu->gpr[3] != g_sanity.rules_for)
@@ -28716,6 +28725,26 @@ static void sanity_p2_step(CPUState* cpu) {
         } else {
             test_list[test_at] = 0;
             test_frame = -1;
+        }
+    }
+    {
+        // ED_SANITY_P1_TEST=FRAME,EFFECT (testing, co-op): the same ask in PLAYER 1's own set (in memory here, before
+        // player 2's goes in), started at player 1's next door as player 2's test effect is at theirs (sanity_door_rules).
+        static int p1_frame = -2, p1_effect;
+        if (p1_frame == -2) {
+            const char* t = getenv("ED_SANITY_P1_TEST");
+            if (t == NULL || sscanf(t, "%d,%d", &p1_frame, &p1_effect) != 2)
+                p1_frame = -1;
+        }
+        if (p1_frame >= 0 && frame >= (unsigned long long)p1_frame && mem_read32(cpu, holder + 4u) == 0u) {
+            const u32 data = mem_read32(cpu, holder + 196u);
+            mem_write32(cpu, data + 56u, (u32)p1_effect);
+            g_sanity_p1_forced = p1_effect;
+            const u32 args[4] = {SANITY_ASK_EVENT, 0u, id, data + 56u};
+            hle_guest_call(cpu, COOP_SEND_EVENT, args, 4, 0.0, &ignore);
+            fprintf(stderr, "[sanity2] TEST effect %d asked for in player 1's set: %s (frame %llu)\n", p1_effect,
+                    mem_read32(cpu, holder + 4u) != 0u ? "picked" : "refused by the game", frame);
+            p1_frame = -1;
         }
     }
     static CoopPlayerState p1_state;
@@ -33915,18 +33944,29 @@ static void coop_tome_player(CPUState* cpu, bool p2) {
 // player: stepped for them as it opens and closes, it went where player 2
 // stands and came back slowly, in player 1's half. A close-up from their Tome
 // is theirs.
+// And the other way round: while the cameras are LENT to player 2 (a find, a use or a scene of theirs: coop_cameras_lend),
+// the game's step moves their set, and a camera record that follows "the player" (+104 of 0 is r13-26524) followed
+// player 1. Seen with Head of Shakespeare's pickup in Max's hallway: player 2's camera glided in 100 frames to the place
+// on its path for where player 1 stood in the other room, while single player's stays (logs/run-20261118-214708-max-head-
+// centre against -215123-jtg-head-solo-max2). Lent, the step runs with player 2 the player, as their own step does.
 static void coop_game_camera(CPUState* cpu) {
     static bool running;
-    if (running || g_coop_own_step || !g_coop_tome_p2 || g_coop_screen || g_coop_cameras.lent) {
+    const bool lent = g_coop_cameras.lent && g_coop_p2 != 0u && sda_ready(cpu) && g_settings.mod_coop;
+    if (running || g_coop_own_step || (!lent && (!g_coop_tome_p2 || g_coop_screen || g_coop_cameras.lent))) {
         g_hle_passthrough = true;
         return;
     }
     const u32 who[2] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21496u};
+    const u32 lent_to[2] = {lent ? mem_read32(cpu, g_coop_p2 + 52u) : 0u, lent ? mem_read32(cpu, g_coop_p2 + 16u) : 0u};
+    if (lent && (lent_to[0] == 0u || lent_to[1] == 0u)) {
+        g_hle_passthrough = true;
+        return;
+    }
     u32 theirs[2], ignore = 0u;
     const u32 mask = cpu->gpr[3];
     for (int i = 0; i < 2; i++) {
         theirs[i] = mem_read32(cpu, who[i]);
-        mem_write32(cpu, who[i], g_coop_tome_was[i]);
+        mem_write32(cpu, who[i], lent ? lent_to[i] : g_coop_tome_was[i]);
     }
     running = true;
     if (!hle_guest_call(cpu, CAMERA_STEP, &mask, 1, 0.0, &ignore))

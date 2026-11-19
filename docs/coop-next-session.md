@@ -1,3 +1,4 @@
+# 2026-11-19: 12g is FIXED (the head centred for either player in co-op, the lent camera follows player 2; see 12g below). Next: 12d, blood per player first (its single-player reference in Max's bedroom before building).
 # HANDOFF 2026-11-18 (late night, the end of the second session): START HERE. All committed on tools/game-kit (1967947 and this hand-off), not pushed. The next session's prompt, ready to paste, is docs/prompts/session-sanity-head.md. Working on item 12 (each player's own sanity effects): DONE and checked off below are the head's fall, pick-up, recital and REPLACE HEAD, Blood Bath, Walk on Ceiling, the blue screen and reset, the phantoms, the two-room words fault, the Max's chapter sweep. OPEN: 12g (the picked-up head is not centred in player 2's half) FIRST, then 12d (blood per player and the leftovers). Earlier:
 # HANDOFF 2026-11-18 (night, second session): the head, Blood Bath and a two-room fault are built and NOT committed yet (hle.c, docs, four new reader files in docs/research/sanity-per-player/); next is 12c. Before it:
 # HANDOFF 2026-11-18 (evening): START HERE. Everything is committed on tools/game-kit and NOT pushed (past v0.1.6; the evening's two commits are items 1, 3, 5 and then 2a, 2b, 6 of the board); controls.cpp's test edits stay uncommitted by rule. What to play: docs/coop-play-test.md
@@ -343,7 +344,25 @@ When you finish something, change its mark here in the same commit as the work. 
   moving the game's prompt across. Seen after the move (logs/run-20261118-213935-max-head-place; picture 20): player
   2's B PICK UP before, B REPLACE HEAD in the same place while they hold the head, their B OPEN DOOR after the return,
   player 1's B PICK UP untouched all through.
-- `[OPEN]` **12g. Player 2's picked-up head is not in the middle of their half (the user, 2026-11-18: it must be centred
+- `[FIXED]` **12g. The picked-up head in the middle of its player's half, the camera still (2026-11-19).** The cause was the
+  camera, not the head: the pickup lends the cameras to player 2 (`coop_cameras_lend`), and the game's own camera step
+  in the main loop then moved THEIR set with player 1 as "the player" (a record's +104 of 0 follows r13-26524), so their
+  Camera01 glided to its place for where player 1 stood in the other room and the head, eased toward a point in front
+  of the moving eye, lagged beside it, close and large. How: `coop_game_camera` (hle.c, the intercept on the step
+  0x801EB9A0) runs the step with player 2 the player (r13-26524, r13-21496) while the cameras are lent: a general rule
+  for every lend (finds, uses, scenes of theirs), co-op only. Seen: player 2's camera still through the pickup (eye
+  -596, 1805, as single player's -567, 1807), the head in the middle of their half turning through the recital as single
+  player's, held while they push the stick, REPLACE HEAD ending it, back at the door they took and walking
+  (logs/run-20261118-221052-head-lent-follow, -221346-head-lent-final; picture 23). Player 1's own head in co-op (the
+  user asked, the same night): B PICK UP and B REPLACE HEAD in their own corner, the head in the middle of their half,
+  words in their half alone, player 2 walking the bedroom throughout, the return's flash in their half and them back at
+  their door (logs/run-20261118-221622-head-p1-coop; picture 24). Test door for that: `ED_SANITY_P1_TEST=FRAME,EFFECT`
+  (co-op: player 1's set asked, started at their next door, as `ED_SANITY_P2_TEST` is for player 2). Not seen: the
+  pickup with both players in the room; player 1 walking during player 2's recital (that run's player 1 input was
+  `ED_PAD_SCRIPT`, which does not reach player 1: use `ED_INPUT_SCRIPT`; player 2 walking during player 1's was seen).
+  Left as it is (the user: "I don't mind it as long as it doesn't cause issues"): red blood drops over the floating head
+  in co-op, either player's, which single player does not show (pictures 09, 23, 24): look at it with 12d's blood.
+- The first wording of 12g, kept: `[OPEN]` **12g. Player 2's picked-up head is not in the middle of their half (the user, 2026-11-18: it must be centred
   on the triggering player's screen and in proportion to it).** Single player (the reference, Max's hallway,
   logs/run-20261118-215123-jtg-head-solo-max2, picture 21): the head floats to the middle of the screen, about a third
   of its height, and turns slowly while it recites; the camera stays the room's Camera01. Player 2 (picture 22,

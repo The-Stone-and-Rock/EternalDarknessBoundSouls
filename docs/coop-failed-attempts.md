@@ -1114,3 +1114,19 @@ the words of a window of its own, opened by 0x80024A14 from the pickup (record 0
 the head's id; channel r13-25960), closed only by 0x80024818. What stands is on the board, 12f.
 Lesson: look the words up in the kit FIRST (`ed text`, `ed prompts`). The trace line "player 1's prompts: 6/-2" was
 read as the culprit when prompt 6 is EXAMINE; one `ed prompts` call said so.
+
+## 2026-11-19: player 2's picked-up head off centre and too large: two fixes on the head that did nothing
+The fault (12g on the board): player 2 picks up their own head (Head of Shakespeare) and it stands far too large, to
+the left and cut by the edge of their half; their camera glides at the pickup. Single player's head floats to the
+middle and the camera stays.
+What was tried on the HEAD, on the idea that its job (0x801FA520) read the wrong camera (both taken out again):
+- The job run with player 2's camera set in (`coop_cameras_in(cpu, 2)` round it): no change.
+- The job run with their own view in the camera block, as `coop_found_place` places a found thing: no change.
+What it was: the CAMERA, not the head. The pickup lends the cameras to player 2 (`coop_cameras_lend`), and the game's
+own camera step in the main loop then moves THEIR set; its Camera01 follows "the player" (a record's +104 of 0 is
+r13-26524, player 1), so it glided in 100 frames to the place on its path for where player 1 stood in the other room
+(eye -595,1805 to -1391,61, looking away from player 2), and the head, eased each frame toward a point in front of the
+moving eye, lagged beside it, close and large. Seen side by side in both.tsv (the camera columns from the pickup on):
+logs/run-20261118-214708-max-head-centre against -215123-jtg-head-solo-max2, the first difference the frame of the lend.
+The fix: `coop_game_camera` runs the step with player 2 the player (r13-26524, r13-21496) while the cameras are lent.
+Lesson: when a thing placed in front of the camera is wrong, look at the camera's own frames first.
