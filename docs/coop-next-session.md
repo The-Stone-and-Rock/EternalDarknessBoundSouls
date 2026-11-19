@@ -203,7 +203,9 @@ When you finish something, change its mark here in the same commit as the work. 
 - `[DECIDE]` **9. The launcher's open choices**: whether Continue stays the third button; what Credits shows; the
   exact look of the toggles (the user will send a photo; step4-toggles.png is where it stands, they said it looks
   good); a larger backdrop picture.
-- `[OPEN]` **10. Push** (ten commits past v0.1.6 are local). Only when the user says: fork/main, never origin.
+- `[DONE]` **10. Push: v0.1.7 released (2026-11-19).** Pushed to fork/main (94232bf, the release commit with
+  res/version.txt 0.1.7), tag v0.1.7, a GitHub pre-release with the zip and six screenshots; the zip downloaded back is
+  byte-identical. The first wording, kept: (ten commits past v0.1.6 are local). Only when the user says: fork/main, never origin.
   A release then needs `res/version.txt` raised.
 - `[DONE]` **12a. Each player's own sanity effects, the first step (2026-11-18 night).** Player 2 has a sanity set of
   their own (hle.c `SanityOwn`, `sanity_set_io`: the tracker's 200-byte holder and its node's state, the 44 x 36
