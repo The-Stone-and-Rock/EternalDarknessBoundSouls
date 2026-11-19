@@ -1,0 +1,52 @@
+{
+ "name": "alex-sanity-p2-screen",
+ "proves": "A whole-game sanity screen for one player, co-op: the fake Blue Screen (28) is asked for in player 2's set, their Start puts it up in their half with them held, their presses end it, and player 1 walks through all of it with their own tracker at rest. Its picture comes from /UInsane.tpl (sanity_screen_bank).",
+ "start": "alex-100",
+ "base": 10000,
+ "frames": 10650,
+ "seconds": 150,
+ "env": {
+  "ED_COOP_P2_SANITY": "10",
+  "ED_SANITY_P2_TEST": "10060,28"
+ },
+ "p1": "10100,10160,0x0000,0,100,0;10180,10240,0x0000,100,0,0;10260,10320,0x0000,0,-100,0;10340,10400,0x0000,-100,0,0",
+ "p2": "10120,10126,start;10260,10380,a",
+ "source": "written 2026-11-18 with player 2's own Blue Screen and Game Reset (hle.c sanity_p2_step's screen block, sanity_overlay)",
+ "expect": [
+  {
+   "check": "log",
+   "pattern": "the pictures of Game Reset and Blue Screen read from /UInsane.tpl"
+  },
+  {
+   "check": "log",
+   "pattern": "player 2 pressed Start with effect 28 waiting: its screen is up in their half"
+  },
+  {
+   "check": "log",
+   "pattern": "player 2's screen of effect 28 is over after \\d+ ticks"
+  },
+  {
+   "check": "count",
+   "pattern": "player 2's tracker: state 1, effect 0",
+   "n": 2
+  },
+  {
+   "check": "moved",
+   "who": "p1",
+   "from": 10100,
+   "to": 10400,
+   "min": 100
+  },
+  {
+   "check": "no_log",
+   "pattern": "not put back"
+  },
+  {
+   "check": "no_log",
+   "pattern": "WebGPU error"
+  },
+  {
+   "check": "rules"
+  }
+ ]
+}

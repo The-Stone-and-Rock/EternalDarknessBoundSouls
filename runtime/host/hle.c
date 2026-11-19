@@ -3382,6 +3382,15 @@ static bool g_coop_show_kept[2];  // a hide kept, per owner (coop_show_asked)
 static u32 g_coop_unseen_look[COOP_UNSEEN_MAX];
 static int g_coop_mark_view;
 
+// Phantom Creatures (sanity effect 21) are real creatures the door's setup makes (0x8006C008 -> 0x8006D9B4), kept in
+// their owner's sanity set (data +188 the nodes, +252 the ids, +85 how many). Each player's own are theirs alone
+// (sanity_phantoms_note fills this): left out of the other player's half here, and after their owner alone
+// (coop_interface_player). docs/research/sanity-per-player/read-shared-room.md.
+#define PHANTOM_MAX 24
+static struct {
+    u32 node, id, object;
+    int owner;  // 1 or 2
+} g_phantoms[PHANTOM_MAX];
 static void coop_found_object_draw(CPUState* cpu) {
     g_coop_found_drawing = false;
     int found_owner = -1;
@@ -3402,6 +3411,11 @@ static void coop_found_object_draw(CPUState* cpu) {
         if (cpu->gpr[3] != 0u && cpu->gpr[3] == g_coop_unseen_look[i]) {
             g_coop_found_drawing = true;
             g_coop_mark_view = 1;
+        }
+    for (int i = 0; !g_coop_found_drawing && cpu->gpr[3] != 0u && i < PHANTOM_MAX; i++)
+        if (g_phantoms[i].object == cpu->gpr[3] && g_phantoms[i].owner != 0) {  // one player's own phantom: out of the other's half
+            g_coop_found_drawing = true;
+            g_coop_mark_view = g_phantoms[i].owner == 2 ? 0 : 1;
         }
     // The players in two rooms (ED_COOP_STAY, R3): a thing of player 1's room leaves player 2's half, one of player 2's room
     // leaves player 1's (the game draws every actor with no room test); the found and unseen rules above come first.
@@ -3454,6 +3468,9 @@ static struct {
     bool on;
     int effect;
     unsigned tick;
+    unsigned countdown, count;  // Blue Screen: the 10 ticks of a press's beep, and the presses so far (6 end it)
+    bool pressed;
+    bool music;                 // Game Reset: the room's music was playing as it began (brought back at its end)
 } g_sanity_p2_screen;
 static bool g_sanity_p2_takes_start;  // their Start is that screen's (one waits in their set, or is up): no Tome for it
 static int g_sanity_p2_began_effect;                // the effect player 2's own tracker started last (sanity_p2_step, sanity_p2_door)
@@ -4998,8 +5015,10 @@ static const char* trace_name(u32 address) {
 // without ever waiting in GXWaitDrawDone; the callback, run from the PE finish
 // interrupt, receives the message the main loop sends just after. Raise the
 // interrupt once the GPU would have finished, after that send.
+static void room_in_check(CPUState* cpu);  // (below, separate rooms)
 static void notify_GXSetDrawDone(CPUState* cpu) {
     camera_held_end(cpu);  // the frame is drawn: what the player holds as the game has it
+    room_in_check(cpu);
     interrupt_defer_pe_finish();
 }
 
@@ -15247,11 +15266,20 @@ static void coop_sound_rooms_log(CPUState* cpu) {
 }
 // A resident room current for one call: the room word and the table's two indices (keep[] read live, so these nest);
 // coop_stay_room_out puts them back. The caller has checked the room is resident (room_slot_of >= 0).
+// How many of these are open, and what the outermost one found (room_in_check, once a frame: none may be left open).
+static int g_room_in_depth;
+static u32 g_room_in_outer[3], g_room_in_lr;
+static unsigned long long g_room_in_opened;  // counts the outermost ones: the same one still open a frame later was never closed
 static void coop_room_in(CPUState* cpu, s32 room, u32 keep[3]) {
     const int slot = room_slot_of(cpu, room);
     keep[0] = mem_read32(cpu, cpu->gpr[13] - 23276u);
     keep[1] = mem_read32(cpu, ROOM_SLOT_TABLE);
     keep[2] = mem_read32(cpu, ROOM_SLOT_TABLE + 4u);
+    if (g_room_in_depth++ == 0) {
+        memcpy(g_room_in_outer, keep, sizeof g_room_in_outer);
+        g_room_in_lr = cpu->lr;
+        g_room_in_opened++;
+    }
     mem_write32(cpu, cpu->gpr[13] - 23276u, (u32)room);
     if ((s32)keep[1] != slot) {
         mem_write32(cpu, ROOM_SLOT_TABLE, (u32)slot);
@@ -15269,6 +15297,33 @@ static void coop_stay_room_out(CPUState* cpu, const u32 keep[3]) {
     mem_write32(cpu, cpu->gpr[13] - 23276u, keep[0]);
     mem_write32(cpu, ROOM_SLOT_TABLE, keep[1]);
     mem_write32(cpu, ROOM_SLOT_TABLE + 4u, keep[2]);
+    g_room_in_depth--;
+}
+// Once a frame, where no call of player 2's is open (the frame's end of drawing): a room made current for one call and
+// never put back leaves "the room in play" on player 2's room for good: the players read as together, coop_follow
+// brings player 2 to player 1's room, and player 1's half shows player 2's room (seen with player 2's own words
+// opening while apart: logs/run-20261118-183045-jtg-sanity2-shrink, -201459-jtg-sanity2-bloodbath3, frame 3221).
+// Said with the call's return address, and put back as the outermost one found it.
+static void room_in_check(CPUState* cpu) {
+    static unsigned long long seen_open;
+    if (g_room_in_depth <= 0) {
+        g_room_in_depth = 0;
+        seen_open = 0ull;
+        return;
+    }
+    if (seen_open != g_room_in_opened) {  // (one open right now, inside this very call: looked at again next frame)
+        seen_open = g_room_in_opened;
+        return;
+    }
+    seen_open = 0ull;
+    fprintf(stderr, "[rooms] a room made current for a call was not put back (%d open, the first from lr 0x%08X): room %d in play, put back to %d (frame %llu)\n",
+            g_room_in_depth, g_room_in_lr, (s32)mem_read32(cpu, cpu->gpr[13] - 23276u), (s32)g_room_in_outer[0], (unsigned long long)(cpu->timebase / 675000ull));
+    if (g_room_in_depth > 0 && sda_ready(cpu)) {
+        mem_write32(cpu, cpu->gpr[13] - 23276u, g_room_in_outer[0]);
+        mem_write32(cpu, ROOM_SLOT_TABLE, g_room_in_outer[1]);
+        mem_write32(cpu, ROOM_SLOT_TABLE + 4u, g_room_in_outer[2]);
+    }
+    g_room_in_depth = 0;
 }
 
 // ---- The Tome trip's pieces, P2-P11 (the record, P1, and the switches above notify_room_change; the design is
@@ -18950,10 +19005,14 @@ static void coop_words_tick(CPUState* cpu) {
     hle_guest_call(cpu, COOP_CHANNEL_STEP, &g_coop_p2_words.channel, 1, 0.0, &ignore);
     g_coop_events_own = false;
     g_coop_p2_words_tick = false;
+    // (Put back whether the words are a close-up's or plain ones. Before 2026-11-18 only a close-up's were: player 2's
+    // plain words while apart (a region's ed12, the gate of room 51) left THEIR room the room in play each tick, the
+    // players read as together and coop_follow brought player 2 to player 1's room with player 1's half on the wrong
+    // room: logs/run-20261118-183045-jtg-sanity2-shrink, -202054-jtg-sanity2-bloodbath4 "not put back ... lr 0x80008500".)
+    if (room_in)
+        coop_stay_room_out(cpu, room_keep);
     if (look) {
         g_coop_p2_stepper_in = false;
-        if (room_in)
-            coop_stay_room_out(cpu, room_keep);
         coop_be_player2(cpu, false, was);
         coop_cameras_in(cpu, set_was);
         coop_bytes(cpu, PROMPT_LOOKS, g_coop_p2_looks, sizeof g_coop_p2_looks, true);
@@ -23596,6 +23655,22 @@ static bool coop_interface_ran(u32 lr) {
 #define COOP_WRONG_TILE_NODE 0x80080EC8u
 static void coop_interface_player(CPUState* cpu) {
     g_hle_passthrough = true;
+    // A phantom's look for its quarry takes only "the current player" (flag 0x1000: 0x801F62B8 at lr 0x8003256C, r15 the
+    // phantom's node): player 2's own phantoms went for player 1. Each is told its owner.
+    if (cpu->lr == 0x8003256Cu && g_settings.mod_coop && g_coop_p2 != 0u && cpu->gpr[15] != 0u) {
+        for (int i = 0; i < PHANTOM_MAX; i++) {
+            if (g_phantoms[i].owner == 0 || g_phantoms[i].node != cpu->gpr[15])
+                continue;
+            const u32 p1 = r6_player1_node(cpu);
+            const u32 owner_node = g_phantoms[i].owner == 2 ? g_coop_p2 : p1;
+            if (!guest_ram_range_valid(cpu, owner_node, 20u))
+                break;
+            cpu->gpr[3] = mem_read32(cpu, owner_node + 16u);
+            g_hle_passthrough = false;
+            g_hle_tail_call = false;
+            return;
+        }
+    }
     if ((cpu->lr != COOP_WRONG_TILE_ID && cpu->lr != COOP_WRONG_TILE_NODE) || !g_coop_screen || !g_coop_cameras.lent || g_coop_p2 == 0u ||
         !guest_ram_range_valid(cpu, g_coop_p2 + 16u, 4u))
         return;
@@ -23769,6 +23844,7 @@ static void coop_way_out_p1_go(CPUState* cpu, bool p2_up) {
         coop_way_out_go(cpu, 0, cpu->gpr[4], NULL);
 }
 
+static bool g_sanity_p2_in, g_sanity_p2_door;  // (below: player 2's own sanity update, and their set in for a door of theirs)
 static void coop_scan_player1(CPUState* cpu) {
     g_hle_passthrough = true;
     if (g_coop_p1_own_look)
@@ -23784,8 +23860,16 @@ static void coop_scan_player1(CPUState* cpu) {
         static int other_zones = -1;
         if (other_zones < 0)
             other_zones = getenv("ED_COOP_P2_OTHER_ZONES") != NULL;
+        // The same inside their own sanity update (sanity_p2_step: they ARE the player there): an effect that moves their
+        // body (Blood Bath's stagger as a part comes off, Sinking, Shrink) takes the game's step, whose look then ran
+        // the region they were pushed into as the player's, in the middle of that update: the gate's words of room 51
+        // opened there and the two players' rooms came out of it mixed up (player 1's half on room 51, player 2 put in
+        // room 100, player 1's half black after the return: logs/run-20261118-200432-jtg-sanity2-bloodbath2, frame
+        // 3220). Passed over there too: their own look, in their turn, runs the region a frame later, as theirs.
+        const bool in_their_update = g_sanity_p2_in && !g_sanity_p2_door;
         if (!other_zones && g_settings.mod_coop && g_coop_p2 != 0u && g_coop_p2_is_player && cpu->lr == COOP_STEP_SCAN_RAN &&
-            sda_ready(cpu) && cpu->gpr[3] == mem_read32(cpu, g_coop_p2 + 52u) && cpu->gpr[3] != mem_read32(cpu, cpu->gpr[13] - 26524u)) {
+            sda_ready(cpu) && cpu->gpr[3] == mem_read32(cpu, g_coop_p2 + 52u) &&
+            (cpu->gpr[3] != mem_read32(cpu, cpu->gpr[13] - 26524u) || in_their_update)) {
             static u32 said_zones = 0xFFFFFFFFu;  // once per zones list (per room)
             if (getenv("ED_COOP_LOG") != NULL && said_zones != cpu->gpr[4]) {
                 said_zones = cpu->gpr[4];
@@ -27541,7 +27625,7 @@ static bool g_sanity_p2_door;  // (below: player 2's own sanity set is in for a 
 static int g_sanity_p2_forced;
 static void sanity_door_rules(CPUState* cpu) {
     g_hle_passthrough = true;
-    if (g_sanity_p2_door && g_sanity_p2_forced > 0 && (int)cpu->gpr[3] == g_sanity_p2_forced) {
+    if (g_sanity_p2_door && g_sanity_p2_forced > 0 && g_sanity_p2_forced != 22 && (int)cpu->gpr[3] == g_sanity_p2_forced) {  // (22, Walk on Ceiling: only where the game starts it)
         // (Testing, ED_SANITY_P2_TEST: the effect asked for in player 2's set starts at their door whatever the next
         // room's own list says, as the menu's Ignore does for player 1's. In play the game's own rule stands.)
         u32 thing = 0u, holder = 0u, id = 0u, ignored = 0u;
@@ -27585,8 +27669,72 @@ static void sanity_door_rules(CPUState* cpu) {
     cpu->gpr[3] = 1u;
 }
 
+// The two pictures of the screens that take over the whole game, for a screen of one player's own (Game Reset, 26: the
+// boot's quote screen; Blue Screen, 28): the game loads UInsane*.cmp over the room's own data for them (its mode's enter,
+// 0x80112D98), which one player's screen cannot do with the other playing on. The same two pictures lie unpacked on the
+// disc in /UInsane.tpl (640x480 CMPR, 153,600 bytes each, pictures 2 and 6; the same bytes as every language's .cmp):
+// read once into host scratch as a bank of two, as the Tome's plaques are (tome_plaques_bank), and drawn with the
+// game's own art calls in sanity_overlay. (docs/research/sanity-per-player/read-screens.md.)
+#define SANITY_BANK 0x82320000u  // to +0x4B100: past SPELL_COLOUR (0x82300000), before SCRATCH_FINISH (0x82400000)
+#define SANITY_BANK_CANARY 0x53414E32u
+static bool sanity_screen_bank(CPUState* cpu) {
+    static int have = -1;  // 0: no file or not as expected (said once)
+    if (have == 0)
+        return false;
+    if (mem_read32(cpu, SANITY_BANK) == 0x0020AF30u && mem_read32(cpu, SANITY_BANK + 0xF0u) == SANITY_BANK_CANARY)
+        return true;
+    have = 0;
+    static u8 head[512];
+    u32 start = 0u, length = 0u;
+    const s32 file = dvd_path_to_entrynum("/UInsane.tpl");
+    if (file < 0 || !dvd_entry_info(file, &start, &length) || length < 0x100000u || (u64)(SANITY_BANK - GC_RAM_BASE) + 0x4B200u > cpu->ram_size ||
+        !moves_disc(cpu, start, sizeof head, head) || moves_be32(head) != 0x0020AF30u || moves_be32(head + 4u) < 7u) {
+        fprintf(stderr, "[sanity2] /UInsane.tpl not found or not as expected: Game Reset and Blue Screen stay off for player 2\n");
+        return false;
+    }
+    static const u32 kPicture[2] = {2u, 6u}, kData[2] = {SANITY_BANK + 0x100u, SANITY_BANK + 0x25900u};
+    u32 offset[2];
+    for (int i = 0; i < 2; i++) {
+        const u32 header = moves_be32(head + 12u + 8u * kPicture[i]);
+        if (header + 36u > sizeof head || (head[header] << 8 | head[header + 1u]) != 480 || (head[header + 2u] << 8 | head[header + 3u]) != 640 ||
+            moves_be32(head + header + 4u) != 14u || (offset[i] = moves_be32(head + header + 8u)) + 153600u > length) {
+            fprintf(stderr, "[sanity2] /UInsane.tpl's picture %u is not 640x480 CMPR: Game Reset and Blue Screen stay off for player 2\n", kPicture[i]);
+            return false;
+        }
+    }
+    mem_write32(cpu, SANITY_BANK, 0x0020AF30u);
+    mem_write32(cpu, SANITY_BANK + 4u, 2u);
+    mem_write32(cpu, SANITY_BANK + 8u, SANITY_BANK + 12u);
+    for (u32 i = 0u; i < 2u; i++) {
+        const u32 header = SANITY_BANK + 28u + 36u * i;
+        mem_write32(cpu, SANITY_BANK + 12u + 8u * i, header);
+        mem_write32(cpu, SANITY_BANK + 16u + 8u * i, 0u);
+        mem_write16(cpu, header, 480u);
+        mem_write16(cpu, header + 2u, 640u);
+        mem_write32(cpu, header + 4u, 14u);  // CMPR
+        mem_write32(cpu, header + 8u, kData[i]);
+        mem_write32(cpu, header + 12u, 0u);  // clamp, clamp
+        mem_write32(cpu, header + 16u, 0u);
+        mem_write32(cpu, header + 20u, 1u);  // linear, linear
+        mem_write32(cpu, header + 24u, 1u);
+        mem_write32(cpu, header + 28u, 0u);
+        mem_write32(cpu, header + 32u, 0x00000001u);  // unpacked
+        dvd_read_to_guest(cpu, kData[i], start + offset[i], 153600u);
+    }
+    mem_write32(cpu, SANITY_BANK + 0x68u, 0xFFFFFFFFu);  // the material's colour
+    // The texcoords of two half-height quads, each four pairs of s16 (512 is the whole picture): the top half, then the bottom.
+    static const s16 kUv[16] = {0, 512, 512, 512, 512, 256, 0, 256, 0, 256, 512, 256, 512, 0, 0, 0};
+    for (u32 i = 0u; i < 16u; i++)
+        mem_write16(cpu, SANITY_BANK + 0x70u + 2u * i, (u16)kUv[i]);
+    mem_write32(cpu, SANITY_BANK + 0xF0u, SANITY_BANK_CANARY);
+    have = 1;
+    fprintf(stderr, "[sanity2] the pictures of Game Reset and Blue Screen read from /UInsane.tpl (at +%u and +%u) into a bank of their own (frame %llu)\n", offset[0],
+            offset[1], (unsigned long long)(cpu->timebase / 675000ull));
+    return true;
+}
+
 // (Each player's own sanity effects in co-op, sanity_p2_step below: what the rules' intercept needs of it.)
-static const s8 kSanityP2[] = {1, 4, 5, 6, 7, 8, 10, 14, 17, 21, 24, 25, 31, 32, 33, 35, 38};  // the effects player 2's own set may roll so far
+static const s8 kSanityP2[] = {1, 4, 5, 6, 7, 8, 10, 11, 14, 17, 21, 22, 24, 25, 26, 28, 31, 32, 33, 35, 38};  // the effects player 2's own set may roll so far
 static bool g_sanity_p2_in;         // player 2's update of the tracker is running
 static int g_sanity_p2_forced = -1;  // ED_SANITY_P2_TEST's effect while it is asked for
 static bool sanity_p2_has(int effect) {
@@ -27600,7 +27748,8 @@ static void sanity_rules(CPUState* cpu) {
     g_hle_passthrough = true;
     if (g_sanity_p2_in) {
         // Player 2's update: only the effects kept to their own half so far, and the one a test asks for at any level.
-        if (!sanity_p2_has((int)cpu->gpr[3])) {
+        if ((!sanity_p2_has((int)cpu->gpr[3]) && (int)cpu->gpr[3] != g_sanity_p2_forced) ||
+            (((int)cpu->gpr[3] == 26 || (int)cpu->gpr[3] == 28) && !sanity_screen_bank(cpu))) {  // (26, 28: only with their pictures read)
             g_hle_passthrough = false;
             cpu->gpr[3] = 0u;
         } else if ((int)cpu->gpr[3] == g_sanity_p2_forced) {
@@ -27897,6 +28046,7 @@ static struct {
 } g_sanity_p2_later[8];
 static int g_sanity_p2_later_n;
 static u32 g_sanity_p2_busy;  // the busy bits player 2's own effect holds play with (theirs alone: sanity_p2_step)
+static u32 g_sanity_p2_prompts;  // and the prompts-off bits (64, 256 of r13-24048) their effect set: theirs alone too
 static bool g_sanity_p2_door;  // their set is in for a door of theirs (sanity_p2_door)
 static bool g_sanity_p2_door_began;  // that door started an effect of theirs (not one to end at the room's change)
 static u32 g_sanity_p2_door_state;   // their tracker's state as the door began
@@ -27935,6 +28085,192 @@ static void sanity_set_io(CPUState* cpu, SanityOwn* s, u32 node, u32 holder, boo
         s->word_abs = mem_read32(cpu, 0x80324138u);
     else
         mem_write32(cpu, 0x80324138u, s->word_abs);
+}
+
+// A word of one player's kept set, by the game's own address for it (the holder, the clock, the data, the table, the
+// screen object); any other address is the game's memory as it stands (the records' fixed parts).
+static u32 sanity_own_read(CPUState* cpu, const SanityOwn* s, u32 at, u32 bytes) {
+    const struct {
+        u32 base, size;
+        const u8* host;
+    } kParts[] = {{s->holder_at, sizeof s->holder, s->holder}, {SANITY_CLOCK, sizeof s->clock, s->clock}, {SANITY_EXT, sizeof s->ext, s->ext},
+                  {SANITY_TABLE, sizeof s->table, s->table}, {SANITY_SCREEN, sizeof s->screen, s->screen}};
+    for (size_t i = 0; i < sizeof kParts / sizeof kParts[0]; i++) {
+        if (at < kParts[i].base || at + bytes > kParts[i].base + kParts[i].size)
+            continue;
+        const u8* p = kParts[i].host + (at - kParts[i].base);
+        return bytes == 2u ? ((u32)p[0] << 8) | p[1] : ((u32)p[0] << 24) | ((u32)p[1] << 16) | ((u32)p[2] << 8) | p[3];
+    }
+    if (!guest_ram_range_valid(cpu, at, bytes))
+        return 0u;
+    return bytes == 2u ? mem_read16(cpu, at) : mem_read32(cpu, at);
+}
+// The phantoms of both sets, read where player 2's set is the one in memory and player 1's the one kept out (their
+// update, the end of a door of theirs). An entry stays until its node is no longer that thing (a later door effect uses
+// the set's slots again while the creatures live on).
+static void sanity_phantoms_note(CPUState* cpu, const SanityOwn* p1_out) {
+    for (int i = 0; i < PHANTOM_MAX; i++)
+        if (g_phantoms[i].owner != 0 && (!guest_ram_range_valid(cpu, g_phantoms[i].node, 60u) || mem_read32(cpu, g_phantoms[i].node + 16u) != g_phantoms[i].id))
+            g_phantoms[i].owner = 0, g_phantoms[i].object = 0u;
+    for (int owner = 1; owner <= 2; owner++) {
+        u32 count = owner == 2 ? mem_read8(cpu, SANITY_EXT + 85u) : (sanity_own_read(cpu, p1_out, SANITY_EXT + 84u, 4u) >> 16) & 0xFFu;
+        if (count > 16u)
+            count = 16u;
+        for (u32 k = 0u; k < count; k++) {
+            const u32 node = owner == 2 ? mem_read32(cpu, SANITY_EXT + 188u + 4u * k) : sanity_own_read(cpu, p1_out, SANITY_EXT + 188u + 4u * k, 4u);
+            const u32 id = owner == 2 ? mem_read32(cpu, SANITY_EXT + 252u + 4u * k) : sanity_own_read(cpu, p1_out, SANITY_EXT + 252u + 4u * k, 4u);
+            if (!guest_ram_range_valid(cpu, node, 60u) || id == 0u || mem_read32(cpu, node + 16u) != id || mem_read32(cpu, node + 56u) != 1u)
+                continue;
+            const u32 actor = mem_read32(cpu, node + 40u);
+            const s32 kind = guest_ram_range_valid(cpu, actor, 156u) ? (s32)(s16)mem_read16(cpu, actor + 152u) : 0;
+            if (kind < 64 || kind > 66)
+                continue;
+            int at = -1;
+            for (int i = 0; i < PHANTOM_MAX; i++)
+                if (g_phantoms[i].owner != 0 && g_phantoms[i].node == node)
+                    at = i;
+            if (at >= 0)
+                continue;  // (known: whose it was first is whose it is)
+            for (int i = 0; i < PHANTOM_MAX && at < 0; i++)
+                if (g_phantoms[i].owner == 0)
+                    at = i;
+            if (at < 0)
+                continue;
+            g_phantoms[at].node = node, g_phantoms[at].id = id, g_phantoms[at].object = mem_read32(cpu, node + 52u), g_phantoms[at].owner = owner;
+            fprintf(stderr, "[sanity2] a phantom of player %d's own (thing %u, kind %d): left out of the other player's half, and after player %d alone (frame %llu)\n", owner,
+                    id, kind, owner, (unsigned long long)(cpu->timebase / 675000ull));
+        }
+    }
+}
+// The effect running in a kept set (its number, 0 for none), as the game's own question reads it: the holder's +4
+// record at stage 4, unless the data's flag 0x10000 is set (0x8006A3A8, 0x8006A32C).
+static int sanity_own_running(CPUState* cpu, const SanityOwn* s, u32* data_out) {
+    const u32 data = sanity_own_read(cpu, s, s->holder_at + 196u, 4u), record = sanity_own_read(cpu, s, s->holder_at + 4u, 4u);
+    if (data_out != NULL)
+        *data_out = data;
+    if (data == 0u || record == 0u || (sanity_own_read(cpu, s, data + 32u, 4u) & 0x10000u) != 0u || sanity_own_read(cpu, s, record + 10u, 2u) != 4u)
+        return 0;
+    return (int)sanity_own_read(cpu, s, record, 4u);
+}
+// "Is this effect the one running?": 0x8006A3A8(holder, bits of effects 0-31, bits of 32 and up) and
+// 0x8006A32C(holder, number). The game asks it for whoever is the player at that moment, in 24 places: the look for
+// things lying about (0x800DA688: only with Head of Shakespeare or the fake items running does it offer the head or
+// the item), the pickup, the character's own behaviour under an effect. It reads the one tracker, and outside player
+// 2's own update the set in memory is player 1's: in player 2's turn the game asked about PLAYER 1's effect, so player
+// 2 was never offered their own head, and would have been player 1's. Asked while player 2 is the player (their turn,
+// their look, their press), it is answered from player 2's own kept set, the same test on the same words.
+#define SANITY_IS_ON 0x8006A3A8u
+#define SANITY_IS_ON_N 0x8006A32Cu
+static bool sanity_ask_is_p2s(CPUState* cpu) {
+    return g_settings.mod_coop && g_sanity_p2.made && !g_sanity_p2_in && !g_sanity_p2_door && g_coop_p2 != 0u && sda_ready(cpu) &&
+           cpu->gpr[3] == g_sanity_p2.holder_at && mem_read32(cpu, cpu->gpr[13] - 21492u) == g_coop_p2;
+}
+static void sanity_is_on(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!sanity_ask_is_p2s(cpu))
+        return;
+    u32 data = 0u;
+    const int number = sanity_own_running(cpu, &g_sanity_p2, &data);
+    const bool yes = number > 0 && ((sanity_own_read(cpu, &g_sanity_p2, data + 20u, 4u) & cpu->gpr[4]) != 0u ||
+                                    (sanity_own_read(cpu, &g_sanity_p2, data + 24u, 4u) & cpu->gpr[5]) != 0u);
+    hle_set_u32(cpu, yes ? 1u : 0u);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+static void sanity_is_on_n(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!sanity_ask_is_p2s(cpu))
+        return;
+    const int number = sanity_own_running(cpu, &g_sanity_p2, NULL);
+    hle_set_u32(cpu, number > 0 && number == (int)cpu->gpr[4] ? 1u : 0u);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+// A death under a sanity effect that is not real (Blood Bath's own end, a death while shrunk, headless, sinking...):
+// the game asks 0x8009E218() "is the effect running one of those?" of the one tracker, from the dying character's own
+// handlers, and on yes plays the death as the effect's end: 0x800C04EC(0, their id) sends the tracker event 81 (the
+// effect's "it was not real") through the character's own link. Player 2's death is handled in the frame's node update,
+// with player 1's set in memory and their own link 0: Blood Bath's death of player 2 read as a REAL death (event 17,
+// the whole screen's fade, the game over for both) and its 81 went nowhere.
+// (docs/research/sanity-per-player/read-blood-bath.md.) So: asked by player 2's character (the asker's node by the
+// call's return address), the question is answered from player 2's own kept set, the game's own test on the same
+// words; and their 81 is kept for their next update, as an event their tracker sends itself is (sanity_later), with
+// the body made whole as the game's state 8 does at the 81 (0x80124788). A real death of player 2, with no such effect
+// of theirs on, stays the game's.
+#define SANITY_FAKE_DEATH 0x8009E218u
+#define SANITY_DEATH_ENDS 0x800C04ECu
+static bool sanity_p2_death_is_fake(CPUState* cpu) {
+    u32 data = 0u, flag = 0u;
+    const int number = sanity_own_running(cpu, &g_sanity_p2, &data);
+    const u32 flags = data != 0u ? sanity_own_read(cpu, &g_sanity_p2, data + 32u, 4u) : 0u;
+    static const s8 kFake[] = {4, 9, 11, 16, 17, 18, 19, 22, 29, 32, 33, 34, 35, 36};
+    bool fake = number == 13 && (flags & 4u) == 0u;
+    for (size_t i = 0; i < sizeof kFake / sizeof kFake[0]; i++)
+        fake = fake || number == kFake[i];
+    fake = fake || (data != 0u && (flags & 0x20000u) != 0u);
+    // (the game's last clause, whatever the effect: room 255 of chapter 5 with flag 883)
+    const u32 args[2] = {mem_read32(cpu, cpu->gpr[13] - 26528u), 883u};
+    if (coop_object_room(cpu, g_coop_p2) == 255 && mem_read32(cpu, 0x80307178u) == 5u && hle_guest_call(cpu, 0x801DC22Cu, args, 2, 0.0, &flag) && flag != 0u)
+        fake = true;
+    return fake;
+}
+static void sanity_fake_death(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!g_settings.mod_coop || !g_sanity_p2.made || g_sanity_p2_in || g_sanity_p2_door || g_coop_p2 == 0u || !sda_ready(cpu))
+        return;
+    const u32 lr = cpu->lr;
+    const u32 asker = lr == 0x80059F70u ? cpu->gpr[31]
+                      : lr == 0x800585F4u || lr == 0x800586F4u || lr == 0x80058730u || lr == 0x80058744u || lr == 0x8005875Cu ? cpu->gpr[27]
+                      : lr == 0x80053F88u ? cpu->gpr[24]
+                      : lr == 0x801CF398u ? cpu->gpr[30]
+                      : 0u;
+    if (asker != g_coop_p2)
+        return;
+    const bool fake = sanity_p2_death_is_fake(cpu);
+    static unsigned told;
+    if (told++ < 12u)
+        fprintf(stderr, "[sanity2] player 2's death asks whether it is an effect's (lr 0x%08X): %s, by their own set (effect %d; frame %llu)\n", lr,
+                fake ? "yes, not real" : "no, a real death", sanity_own_running(cpu, &g_sanity_p2, NULL), (unsigned long long)(cpu->timebase / 675000ull));
+    hle_set_u32(cpu, fake ? 1u : 0u);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+static void sanity_death_ends(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!g_settings.mod_coop || !g_sanity_p2.made || g_sanity_p2_in || g_sanity_p2_door || g_coop_p2 == 0u || !sda_ready(cpu) ||
+        cpu->gpr[4] != mem_read32(cpu, g_coop_p2 + 16u) || sanity_own_running(cpu, &g_sanity_p2, NULL) <= 0 || g_sanity_p2_later_n >= 8)
+        return;
+    g_sanity_p2_later[g_sanity_p2_later_n].event = 81u;
+    g_sanity_p2_later[g_sanity_p2_later_n].data = 0u;
+    g_sanity_p2_later[g_sanity_p2_later_n].due = cpu->timebase / 675000ull + 1ull;
+    g_sanity_p2_later_n++;
+    const u32 object = mem_read32(cpu, g_coop_p2 + 52u);
+    u32 ignore = 0u;
+    hle_guest_call(cpu, 0x80124788u, &object, 1, 0.0, &ignore);
+    fprintf(stderr, "[sanity2] player 2's death was their effect's own (effect %d): its end (event 81) kept for their update (frame %llu)\n",
+            sanity_own_running(cpu, &g_sanity_p2, NULL), (unsigned long long)(cpu->timebase / 675000ull));
+    hle_set_u32(cpu, 1u);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+}
+
+// Walk on Ceiling (22) blacks the picture for the half second of its change into the room upside down: 0x801E4610(1)
+// at 0x8009B810, off again at 0x8009B6AC (it ends in VISetBlack: the whole window, both halves). For player 2's own,
+// asked in their update, the game's is not called: their half alone is drawn black (sanity_overlay, the two rectangles
+// of their TV Video screen), and player 1's picture is never touched. (docs/research/sanity-per-player/read-ceiling.md.)
+#define SANITY_BLACK 0x801E4610u
+static bool g_sanity_p2_black;
+static void sanity_black(CPUState* cpu) {
+    g_hle_passthrough = true;
+    if (!g_sanity_p2_in || !g_settings.mod_coop || !sda_ready(cpu) || (cpu->lr != 0x8009B814u && cpu->lr != 0x8009B6B0u))
+        return;
+    g_sanity_p2_black = cpu->lr == 0x8009B814u;
+    fprintf(stderr, "[sanity2] player 2's Walk on Ceiling: their half %s (the game's black of the whole picture not asked; frame %llu)\n",
+            g_sanity_p2_black ? "goes black for the change" : "is shown again", (unsigned long long)(cpu->timebase / 675000ull));
+    hle_set_u32(cpu, mem_read32(cpu, cpu->gpr[13] - 21880u));
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
 }
 
 // The level, in player 2's update: theirs from their own meter, and none of the level function's other work.
@@ -28012,7 +28348,31 @@ static void sanity_overlay(CPUState* cpu) {
             told = theirs;
         }
         hle_guest_call(cpu, SANITY_OVERLAY, args, 4, 0.0, &ignore);
-        if (g_sanity_p2_screen.on) {
+        if (g_sanity_p2_black && !g_sanity_p2_screen.on) {  // (Walk on Ceiling's change: their half black, no words)
+            const u32 colours = EFFECT_MTX_SCRATCH + 64u, five = 5u;
+            hle_guest_call(cpu, 0x8019CFD4u, &five, 1, 0.0, &ignore);
+            mem_write32(cpu, colours, mem_read32(cpu, cpu->gpr[2] - 23808u));
+            const u32 top[6] = {(u32)-106, 0u, 853u, 240u, (u32)-1, colours}, bottom[6] = {(u32)-106, 240u, 853u, 240u, (u32)-1, colours};
+            hle_guest_call(cpu, 0x8019C8FCu, top, 6, 0.0, &ignore);
+            hle_guest_call(cpu, 0x8019C8FCu, bottom, 6, 0.0, &ignore);
+        }
+        if (g_sanity_p2_screen.on && (g_sanity_p2_screen.effect == 26 || g_sanity_p2_screen.effect == 28) && sanity_screen_bank(cpu)) {
+            // Their Game Reset or Blue Screen: the picture alone, as two half-height quads (one of the whole screen is lost
+            // from both halves), with the game's own art calls and the bank bound before put back.
+            const u32 five = 5u, bank = SANITY_BANK, image = g_sanity_p2_screen.effect == 26 ? 0u : 1u;
+            const bool wide = mem_read32(cpu, cpu->gpr[13] - 24660u) == 1u;
+            const u32 x0 = wide ? (u32)-106 : 0u, x1 = wide ? 745u : 639u;
+            u32 old = 0u;
+            hle_guest_call(cpu, 0x8019CFD4u, &five, 1, 0.0, &ignore);
+            hle_guest_call(cpu, 0x801E1B74u, &bank, 1, 0.0, &old);
+            const u32 material[4] = {SANITY_BANK + 0x68u, 0u, image, 0x80000000u};
+            hle_guest_call(cpu, 0x8019C7C8u, material, 4, 0.0, &ignore);
+            const u32 top[8] = {SANITY_BANK + 0x70u, x0, 0u, x1, 240u, (u32)-1, 0u, 5u}, bottom[8] = {SANITY_BANK + 0x70u, x0, 240u, x1, 479u, (u32)-1, 4u, 5u};
+            hle_guest_call(cpu, 0x8019D084u, top, 8, 0.0, &ignore);
+            hle_guest_call(cpu, 0x8019D084u, bottom, 8, 0.0, &ignore);
+            hle_guest_call(cpu, 0x801E1B74u, &old, 1, 0.0, &ignore);
+        }
+        if (g_sanity_p2_screen.on && g_sanity_p2_screen.effect == 25) {
             // Their TV Video screen, as mode 8 draws it (0x8011332C-0x80113388): the 2D setup, the black rectangle, then
             // the green word at 455, 31, with the game's own numbers (the rectangle from -106, 853 across: a wide screen's).
             const u32 colours = EFFECT_MTX_SCRATCH + 64u, five = 5u, zero = 0u;
@@ -28072,17 +28432,45 @@ static void sanity_p2_unlink(CPUState* cpu, const u32 link[2]) {
 // head, flag 0x4000), the game looks in the tracker's data (0x8006A32C(holder, 17)), writes there, shows its words and
 // sends event 91 to the picker's own link to the tracker, which plays the recital. With player 1's set in memory the
 // head would be taken with no recital. So their pickup runs with THEIR set and link in, as their update does.
-// (return-spec.md, section 4. Not done yet: player 1 refused on the head of player 2's effect; the head's cleanup.)
+// A head is its own player's alone: the other player's press on it is refused (nothing happens, the head stays), since
+// taken by them it would vanish with no words and no recital for anyone. The head's id is in its set's data +148 while
+// Head of Shakespeare runs. (return-spec.md, section 4. Not done yet: the head's cleanup in a room that stays loaded.)
 #define SANITY_PICKUP 0x800C362Cu
+static u32 g_sanity_p2_head;  // the id of the head of player 2's own Head of Shakespeare, while it lies there (sanity_p2_step)
+static bool g_sanity_p2_head_pick;  // they picked it up: the game's prompt of that find (REPLACE HEAD) is theirs (coop_close_up_prompt)
 static void sanity_pickup(CPUState* cpu) {
     static bool running;
     g_hle_passthrough = true;
     g_hle_tail_call = false;
     u32 node = 0u, holder = 0u, id = 0u, out = 0u;
-    if (running || !g_settings.mod_coop || !g_sanity_p2.made || g_sanity_p2_in || g_sanity_p2_door || g_coop_p2 == 0u || cpu->gpr[3] != g_coop_p2 ||
-        !sda_ready(cpu) || !sanity_tracker(cpu, &node, &holder) || node != g_sanity_p2.node || holder != g_sanity_p2.holder_at ||
+    if (running || !g_settings.mod_coop || !g_sanity_p2.made || g_sanity_p2_in || g_sanity_p2_door || g_coop_p2 == 0u || !sda_ready(cpu))
+        return;
+    {
+        // What is being picked up, as the game finds it (0x800C365C: 0x801F6308(the picker), then 0x801F6480).
+        u32 link = 0u, target = 0u;
+        const u32 picker = cpu->gpr[3];
+        if (hle_guest_call(cpu, 0x801F6308u, &picker, 1, 0.0, &link) && hle_guest_call(cpu, 0x801F6480u, &link, 1, 0.0, &target) && target != 0u &&
+            target != 0xFFFFFFFFu) {
+            const bool p1s_head_on = guest_ram_range_valid(cpu, mem_read32(cpu, g_sanity_p2.holder_at + 4u), 36u) &&
+                                     mem_read32(cpu, mem_read32(cpu, g_sanity_p2.holder_at + 4u)) == 17u;
+            const u32 p1s_head = p1s_head_on ? mem_read32(cpu, SANITY_EXT + 148u) : 0u;
+            const bool refuse = picker == g_coop_p2 ? target == p1s_head : target == g_sanity_p2_head;
+            if (refuse) {
+                fprintf(stderr, "[sanity2] player %d pressed on player %d's own head (thing %u): refused, it is the other player's (frame %llu)\n",
+                        picker == g_coop_p2 ? 2 : 1, picker == g_coop_p2 ? 1 : 2, target, (unsigned long long)(cpu->timebase / 675000ull));
+                hle_set_u32(cpu, 0u);
+                g_hle_passthrough = false;
+                g_hle_tail_call = false;
+                return;
+            }
+        }
+    }
+    if (cpu->gpr[3] != g_coop_p2 || !sanity_tracker(cpu, &node, &holder) || node != g_sanity_p2.node || holder != g_sanity_p2.holder_at ||
         !hle_guest_call(cpu, SANITY_ID, &node, 1, 0.0, &id))
         return;
+    fprintf(stderr, "[sanity2] a pickup by player 2 runs with their own sanity set in (their effect %d; frame %llu)\n",
+            sanity_own_running(cpu, &g_sanity_p2, NULL), (unsigned long long)(cpu->timebase / 675000ull));
+    g_sanity_p2_head_pick = sanity_own_running(cpu, &g_sanity_p2, NULL) == 17;
     running = true;
     const u32 args[4] = {cpu->gpr[3], cpu->gpr[4], cpu->gpr[5], cpu->gpr[6]};
     u32 link[2];
@@ -28117,6 +28505,7 @@ static u32 g_sanity_p2_door_link[2];
 static bool g_sanity_ret_on;
 static CoopPlayerState g_sanity_ret_p1_state;
 static u32 g_sanity_ret_theirs;
+static u32 g_sanity_ret_prompts_p1;
 static void sanity_p2_return_open(CPUState* cpu) {
     stay_bracket_open(cpu);
     if (g_stay_bracket == 0 || !g_sanity_p2_door) {
@@ -28128,6 +28517,8 @@ static void sanity_p2_return_open(CPUState* cpu) {
     coop_state(cpu, &g_coop_state[1], false);
     g_sanity_ret_theirs = g_sanity_p2_busy;
     mem_write32(cpu, cpu->gpr[13] - 23344u, mem_read32(cpu, cpu->gpr[13] - 23344u) | g_sanity_p2_busy);
+    g_sanity_ret_prompts_p1 = mem_read32(cpu, cpu->gpr[13] - 24048u) & 0x140u;
+    mem_write32(cpu, cpu->gpr[13] - 24048u, mem_read32(cpu, cpu->gpr[13] - 24048u) | g_sanity_p2_prompts);
     g_sanity_ret_on = true;
     fprintf(stderr, "[sanity2] player 2's return to room %d runs as theirs: their set, their controller state, busy bits 0x%X of theirs in (frame %llu)\n",
             (s32)cpu->gpr[3], g_sanity_p2_busy, (unsigned long long)(cpu->timebase / 675000ull));
@@ -28158,9 +28549,32 @@ static void sanity_p2_door(CPUState* cpu, bool in) {
         const u32 now = mem_read32(cpu, cpu->gpr[13] - 23344u), still = now & g_sanity_ret_theirs;
         g_sanity_p2_busy = still;
         mem_write32(cpu, cpu->gpr[13] - 23344u, now & ~still);
+        {
+            const u32 p = mem_read32(cpu, cpu->gpr[13] - 24048u);
+            g_sanity_p2_prompts &= p;  // (what the return's callback cleared is cleared)
+            mem_write32(cpu, cpu->gpr[13] - 24048u, (p & ~0x140u) | g_sanity_ret_prompts_p1);
+        }
         coop_state(cpu, &g_coop_state[1], true);
         coop_state(cpu, &g_sanity_ret_p1_state, false);
         g_sanity_p2_door_began = true;  // (the room they come back into is not "another room": no event 82 for it)
+        if (g_sanity_p2_began_effect == 17 && !coop_p1_in_close_up(cpu) && mem_read32(cpu, cpu->gpr[13] - 25960u) == 0u) {
+            // Their head still in their hands as the effect ended: the game closed its window (0x80024384 at 0x8006CC98,
+            // no script) and leaves the window's own prompt slot (REPLACE HEAD, script -2) to the room change's prompt
+            // reset, which in their change's bracket is not player 1's set's. It stayed in player 1's corner for good
+            // (logs/run-20261118-195634-jtg-sanity2-head-final, frames 3960, 4250). Cleared as the reset clears a slot.
+            int n = 0;
+            for (u32 i = 0u; i < 6u; i++) {
+                const u32 slot = PROMPT_SLOTS + i * 28u;
+                if (mem_read32(cpu, slot + 12u) != 0xFFFFFFFEu)
+                    continue;
+                for (u32 at = 0u; at < 28u; at += 4u)
+                    mem_write32(cpu, slot + at, at == 4u || at == 8u || at == 20u ? 0xFFFFFFFFu : 0u);
+                n++;
+            }
+            if (n > 0)
+                fprintf(stderr, "[sanity2] the head's own prompt left over after their return: cleared (%d slot; frame %llu)\n", n,
+                        (unsigned long long)(cpu->timebase / 675000ull));
+        }
         fprintf(stderr, "[sanity2] player 2's return is done: busy bits of theirs left 0x%X (frame %llu)\n", still,
                 (unsigned long long)(cpu->timebase / 675000ull));
         node = g_sanity_p2.node, holder = g_sanity_p2.holder_at;
@@ -28172,7 +28586,9 @@ static void sanity_p2_door(CPUState* cpu, bool in) {
         return;
     }
     node = g_sanity_p2.node, holder = g_sanity_p2.holder_at;
-    g_sanity_p2_door_began = mem_read32(cpu, node + 20u) == 42u && g_sanity_p2_door_state != 42u;
+    g_sanity_p2_door_began = mem_read32(cpu, node + 20u) == 42u &&
+                             (g_sanity_p2_door_state != 42u || (guest_ram_range_valid(cpu, mem_read32(cpu, holder + 4u), 36u) &&
+                                                                mem_read32(cpu, mem_read32(cpu, holder + 4u)) == 22u));  // (22's own change into its second room too)
     if (g_sanity_p2_door_began && guest_ram_range_valid(cpu, mem_read32(cpu, holder + 4u), 36u)) {
         g_sanity_p2_began_effect = (int)mem_read32(cpu, mem_read32(cpu, holder + 4u));
         g_sanity_p2_began_frame = cpu->timebase / 675000ull;
@@ -28183,6 +28599,7 @@ static void sanity_p2_door(CPUState* cpu, bool in) {
     const u32 record = mem_read32(cpu, holder + 4u);
     fprintf(stderr, "[sanity2] player 2's door is over: their set comes out (state %u, effect %u; frame %llu)\n", mem_read32(cpu, node + 20u),
             guest_ram_range_valid(cpu, record, 36u) ? mem_read32(cpu, record) : 0u, (unsigned long long)(cpu->timebase / 675000ull));
+    sanity_phantoms_note(cpu, &g_sanity_p1_door);  // (their phantoms from their first picture in the new room)
     sanity_set_io(cpu, &g_sanity_p2, node, holder, true);
     sanity_set_io(cpu, &g_sanity_p1_door, node, holder, false);
 }
@@ -28215,7 +28632,10 @@ static void sanity_p2_step(CPUState* cpu) {
     static int on = -1;  // ED_SANITY_P2=0 (testing): off, the game as before this step
     if (on < 0)
         on = getenv("ED_SANITY_P2") == NULL || atoi(getenv("ED_SANITY_P2")) != 0;
-    if (!on || g_stay_bracket != 0 || g_sanity_p2_door || g_sanity_p2_return || mem_read32(cpu, cpu->gpr[13] - 26188u) != 2u || mem_read32(cpu, cpu->gpr[13] - 26240u) != 2u ||
+    // (Nor while a room ticket counts: an effect's own ticket written then (Walk on Ceiling's second room, a return) would be
+    // refused by split_ticket_ask and the effect would go on without its room; their timers stand still for a door's
+    // second, as the game's do.)
+    if (!on || g_stay_bracket != 0 || g_sanity_p2_door || g_sanity_p2_return || (s32)mem_read32(cpu, COOP_ROOM_TICKET) > 0 || mem_read32(cpu, cpu->gpr[13] - 26188u) != 2u || mem_read32(cpu, cpu->gpr[13] - 26240u) != 2u ||
         cutscene_playing(cpu) || game_menu_open(cpu) || g_tw.sharing || g_tome_copy_open || g_tome_copy_turn)
         return;
     u32 node = 0u, holder = 0u, id = 0u, ignore = 0u;
@@ -28236,6 +28656,9 @@ static void sanity_p2_step(CPUState* cpu) {
         s->holder[21] = 0u, s->holder[22] = 0u;
         memset(s->holder + 64, 0, 132);
         memset(s->ext + 12, 0, 16);   // the deck and the running effect's bits
+        memset(s->ext + 28, 0, 4);    // Walk on Ceiling's rooms already done (once a room): none yet
+        memset(s->ext + 148, 0, 4);   // no head lying about; nothing let go by Blood Bath (data +156, +160, +164: -1 is none)
+        memset(s->ext + 156, 0xFF, 12);
         memset(s->ext + 56, 0, 4);
         g_sanity_p2_later_n = 0;
         g_sanity_p2_forced = -1;
@@ -28288,6 +28711,10 @@ static void sanity_p2_step(CPUState* cpu) {
     // hold changed with theirs in (coop_state).
     const u32 busy_was = mem_read32(cpu, cpu->gpr[13] - 23344u);
     mem_write32(cpu, cpu->gpr[13] - 23344u, busy_was | g_sanity_p2_busy);
+    // The same for the two prompts-off bits an effect's end and Blood Bath set (64 and 256 of r13-24048, 0x80117260):
+    // set in their update they switched PLAYER 1's prompts off until the return, 600 updates and more for Blood Bath.
+    const u32 prompts_was = mem_read32(cpu, cpu->gpr[13] - 24048u);
+    mem_write32(cpu, cpu->gpr[13] - 24048u, prompts_was | g_sanity_p2_prompts);
     u32 link[2];
     sanity_p2_link(cpu, id, link);
     g_sanity_p2_in = true;
@@ -28345,41 +28772,104 @@ static void sanity_p2_step(CPUState* cpu) {
         const u32 waiting = mem_read32(cpu, node + 20u) == 41u && guest_ram_range_valid(cpu, record, 36u) ? mem_read32(cpu, record) : 0u;
         static bool start_was;
         const bool start = (g_coop_p2_buttons & 0x1000u) != 0u;
-        if (!g_sanity_p2_screen.on && waiting == 25u && start && !start_was) {
-            g_sanity_p2_screen.on = true, g_sanity_p2_screen.effect = 25, g_sanity_p2_screen.tick = 0u;
+        // Game Reset (26, the game's mode 7: the boot's quote screen with its narration, 150 ticks) and Blue Screen (28, mode
+        // 10: the picture, a beep at its start and at each press, 6 presses or 300 ticks) the same way, their pictures from
+        // sanity_screen_bank. The beep and the narration are the one set of speakers': both players hear them, and the
+        // room's music stops for Game Reset's 150 ticks as it does in the game.
+        if (!g_sanity_p2_screen.on && (waiting == 25u || ((waiting == 26u || waiting == 28u) && sanity_screen_bank(cpu))) && start && !start_was) {
+            g_sanity_p2_screen.on = true, g_sanity_p2_screen.effect = (int)waiting, g_sanity_p2_screen.tick = 0u;
+            g_sanity_p2_screen.countdown = 10u, g_sanity_p2_screen.count = 0u, g_sanity_p2_screen.pressed = false, g_sanity_p2_screen.music = false;
             const u32 args[4] = {84u, 0u, id, 0u}, hold = 0u;
             hle_guest_call(cpu, COOP_SEND_EVENT, args, 4, 0.0, &ignore);
             hle_guest_call(cpu, 0x80199EA0u, &hold, 1, 0.0, &ignore);
-            fprintf(stderr, "[sanity2] player 2 pressed Start with TV Video waiting: its screen is up in their half, they are held (tracker state %u; frame %llu)\n",
-                    mem_read32(cpu, node + 20u), frame);
+            if (waiting == 26u) {  // (its enter's sound: the music faded out, kept to come back)
+                u32 music = 0u;
+                const u32 a1[2] = {1u, 0u}, a2[3] = {0u, 0u, 16u}, a3[3] = {100u, 100u, 1u};
+                hle_guest_call(cpu, 0x801A1028u, NULL, 0, 0.0, &ignore);
+                hle_guest_call(cpu, 0x801A1898u, a1, 2, 0.0, &music);
+                g_sanity_p2_screen.music = music != 0u;
+                if (music != 0u) {
+                    hle_guest_call(cpu, 0x801A16A0u, a2, 3, 0.0, &ignore);
+                    hle_guest_call(cpu, 0x801A172Cu, NULL, 0, 0.0, &ignore);
+                    hle_guest_call(cpu, 0x801A16A0u, a3, 3, 0.0, &ignore);
+                }
+            }
+            fprintf(stderr, "[sanity2] player 2 pressed Start with effect %u waiting: its screen is up in their half, they are held (tracker state %u; frame %llu)\n",
+                    waiting, mem_read32(cpu, node + 20u), frame);
         } else if (g_sanity_p2_screen.on) {
             const unsigned t = ++g_sanity_p2_screen.tick;
-            if (t == 46u || t == 140u) {
+            bool over = false;
+            if (g_sanity_p2_screen.effect == 28) {
+                if (t == 1u || g_sanity_p2_screen.pressed) {
+                    if (g_sanity_p2_screen.countdown == 10u) {
+                        const u32 beep[8] = {583u, 100u, 6u, 0u, 0u, 5u, 0u, 1u};
+                        hle_guest_call(cpu, 0x801A4884u, beep, 8, 0.0, &ignore);
+                    }
+                    if (--g_sanity_p2_screen.countdown == 0u) {
+                        const u32 stop[2] = {0xFFFFFFFFu, 583u};
+                        over = ++g_sanity_p2_screen.count == 6u;
+                        hle_guest_call(cpu, 0x801A4F40u, stop, 2, 0.0, &ignore);
+                        g_sanity_p2_screen.countdown = 10u, g_sanity_p2_screen.pressed = false;
+                    }
+                } else if ((g_coop_p2_buttons & 0x1F60u) != 0u) {
+                    g_sanity_p2_screen.pressed = true, g_sanity_p2_screen.countdown = 10u;
+                }
+                if (t >= 300u || over) {
+                    const u32 off[3] = {0xFFFFFFFFu, 583u, 0u};  // (this sound alone: the game's -1, -1 would stop the other player's room's)
+                    hle_guest_call(cpu, 0x801A4B58u, off, 3, 0.0, &ignore);
+                    over = true;
+                }
+            } else if (g_sanity_p2_screen.effect == 26) {
+                const u32 full[3] = {100u, 100u, 1u};
+                if (t == 3u) {
+                    const u32 stream[4] = {7u, 0u, 0u, 0u};
+                    hle_guest_call(cpu, 0x801A172Cu, NULL, 0, 0.0, &ignore);
+                    hle_guest_call(cpu, 0x801A16A0u, full, 3, 0.0, &ignore);
+                    hle_guest_call(cpu, 0x801A1750u, stream, 4, 0.0, &ignore);
+                }
+                if (t >= 150u) {
+                    const u32 out[3] = {0u, 0u, 10u};
+                    hle_guest_call(cpu, 0x801A16A0u, out, 3, 0.0, &ignore);
+                    hle_guest_call(cpu, 0x801A172Cu, NULL, 0, 0.0, &ignore);
+                    hle_guest_call(cpu, 0x801A16A0u, full, 3, 0.0, &ignore);
+                    over = true;
+                }
+            }
+            if (g_sanity_p2_screen.effect == 25 && (t == 46u || t == 140u)) {
                 const u32 pick[2] = {3u, 0x8023A550u};
                 u32 sound = 0u;
                 hle_guest_call(cpu, 0x8019E1E0u, pick, 2, 0.0, &sound);
                 const u32 play[2] = {sound & 0xFFFFu, 85u};
                 hle_guest_call(cpu, SOUND_PLAIN, play, 2, 0.0, &ignore);
             }
-            if (t == 66u || t == 160u) {
+            if (g_sanity_p2_screen.effect == 25 && (t == 66u || t == 160u)) {
                 const u32 voice[2] = {mem_read32(cpu, cpu->gpr[13] - 26524u), 33u};
                 hle_guest_call(cpu, 0x8019DA18u, voice, 2, 0.0, &ignore);
             }
-            if (t >= 300u) {
+            if (g_sanity_p2_screen.effect == 25 ? t >= 300u : over) {
                 g_sanity_p2_screen.on = false;
                 const u32 let = 1u, args[4] = {81u, 0u, id, 0u};
                 hle_guest_call(cpu, 0x80199EA0u, &let, 1, 0.0, &ignore);
                 hle_guest_call(cpu, COOP_SEND_EVENT, args, 4, 0.0, &ignore);
                 hle_guest_call(cpu, 0x8006B270u, &holder, 1, 0.0, &ignore);
-                fprintf(stderr, "[sanity2] player 2's TV Video is over: event 81 and the flash, they are let go (frame %llu)\n", frame);
+                if (g_sanity_p2_screen.effect == 26 && g_sanity_p2_screen.music) {  // (the room's music back, as the game's end does)
+                    const u32 a2[3] = {0u, 0u, 16u}, back[2] = {1u, 32u};
+                    hle_guest_call(cpu, 0x801A16A0u, a2, 3, 0.0, &ignore);
+                    hle_guest_call(cpu, 0x801A172Cu, NULL, 0, 0.0, &ignore);
+                    hle_guest_call(cpu, 0x801A17C4u, back, 2, 0.0, &ignore);
+                }
+                fprintf(stderr, "[sanity2] player 2's screen of effect %d is over after %u ticks: event 81 and the flash, they are let go (frame %llu)\n",
+                        g_sanity_p2_screen.effect, t, frame);
             }
         }
         start_was = start;
         const u32 record2 = mem_read32(cpu, holder + 4u);
         g_sanity_p2_takes_start = g_sanity_p2_screen.on || (mem_read32(cpu, node + 20u) == 41u && guest_ram_range_valid(cpu, record2, 36u) &&
-                                                             mem_read32(cpu, record2) == 25u);
+                                                             (mem_read32(cpu, record2) == 25u || mem_read32(cpu, record2) == 26u ||
+                                                              mem_read32(cpu, record2) == 28u));
     }
     hle_guest_call(cpu, SANITY_UPDATE, &node, 1, 0.0, &ignore);
+    sanity_phantoms_note(cpu, &g_sanity_p1_kept);
     {  // what their tracker is at, said as it changes
         static u32 told_state = ~0u, told_effect = ~0u;
         const u32 state = mem_read32(cpu, node + 20u), record = mem_read32(cpu, holder + 4u);
@@ -28392,6 +28882,31 @@ static void sanity_p2_step(CPUState* cpu) {
         told_state = state, told_effect = effect;
         if (state == 1u)
             g_sanity_p2_forced = -1;
+        if (g_sanity_p2_black && !(state == 42u && effect == 22u))
+            g_sanity_p2_black = false;  // (a Walk on Ceiling that ended another way leaves no black half)
+    }
+    {
+        // The head of their own Head of Shakespeare: its id is in the data's +148 from the moment it falls until the
+        // effect's end (sanity_pickup refuses player 1 on it). Said as it falls and once it lies still, with where.
+        static unsigned long long fell;
+        const u32 record = mem_read32(cpu, holder + 4u), data = mem_read32(cpu, holder + 196u);
+        const bool on17 = mem_read32(cpu, node + 20u) == 42u && guest_ram_range_valid(cpu, record, 36u) && mem_read32(cpu, record) == 17u &&
+                          guest_ram_range_valid(cpu, data, 156u);
+        const u32 head = on17 ? mem_read32(cpu, data + 148u) : 0u;
+        if (head != g_sanity_p2_head)
+            fell = head != 0u ? frame : 0ull;
+        if (head != 0u && (frame == fell || frame == fell + 90ull)) {
+            u32 thing = 0u;
+            hle_guest_call(cpu, 0x801F5F88u, &head, 1, 0.0, &thing);
+            const u32 o = guest_ram_range_valid(cpu, thing, 56u) ? mem_read32(cpu, thing + 52u) : 0u, mine = mem_read32(cpu, g_coop_p2 + 52u);
+            if (guest_ram_range_valid(cpu, o, 12u) && guest_ram_range_valid(cpu, mine, 12u))
+                fprintf(stderr, "[sanity2] player 2's own head (thing %u) %s at %.0f %.0f %.0f; they stand at %.0f %.0f %.0f (frame %llu)\n", head,
+                        frame == fell ? "falls" : "lies", guest_read_f32(cpu, o), guest_read_f32(cpu, o + 4u), guest_read_f32(cpu, o + 8u),
+                        guest_read_f32(cpu, mine), guest_read_f32(cpu, mine + 4u), guest_read_f32(cpu, mine + 8u), frame);
+        }
+        if (head == 0u && g_sanity_p2_head != 0u)
+            fprintf(stderr, "[sanity2] player 2's own head (thing %u) is no longer their effect's (frame %llu)\n", g_sanity_p2_head, frame);
+        g_sanity_p2_head = head;
     }
     g_sanity_p2_in = false;
     sanity_p2_unlink(cpu, link);
@@ -28402,6 +28917,11 @@ static void sanity_p2_step(CPUState* cpu) {
                     theirs, g_sanity_p2_busy, busy_was, frame);
         g_sanity_p2_busy = theirs;
         mem_write32(cpu, cpu->gpr[13] - 23344u, busy_was | (busy_now & 4u));
+    }
+    {
+        const u32 now = mem_read32(cpu, cpu->gpr[13] - 24048u);
+        g_sanity_p2_prompts = now & 0x140u & (~prompts_was | g_sanity_p2_prompts);
+        mem_write32(cpu, cpu->gpr[13] - 24048u, (now & ~0x140u) | (prompts_was & 0x140u));
     }
     if (room_in)
         coop_stay_room_out(cpu, keep);
@@ -28900,7 +29420,10 @@ static void sanity_tool_install(CPUState* cpu) {
             u32 at;
             void (*fn)(CPUState*);
             const char* what;
-        } kOwn[] = {{SANITY_LEVEL, sanity_level, "the level"}, {SANITY_OVERLAY, sanity_overlay, "the overlay"}, {SANITY_PICKUP, sanity_pickup, "the pickup"}};  // (the event for later: in split_send)
+        } kOwn[] = {{SANITY_LEVEL, sanity_level, "the level"}, {SANITY_OVERLAY, sanity_overlay, "the overlay"}, {SANITY_PICKUP, sanity_pickup, "the pickup"},
+                    {SANITY_IS_ON, sanity_is_on, "the question which effect runs"}, {SANITY_IS_ON_N, sanity_is_on_n, "the question whether one effect runs"},
+                    {SANITY_FAKE_DEATH, sanity_fake_death, "the question whether a death is an effect's"}, {SANITY_DEATH_ENDS, sanity_death_ends, "a death's own end of its effect"},
+                    {SANITY_BLACK, sanity_black, "the black of Walk on Ceiling's change"}};  // (the event for later: in split_send)
         for (size_t i = 0; i < sizeof kOwn / sizeof kOwn[0]; i++) {
             HleDispatchEntry* e = hle_dispatch_entry(kOwn[i].at);
             if (e != NULL && e->intercept == NULL && e->notify == NULL)
@@ -31739,6 +32262,117 @@ static void r6c_creature(CPUState* cpu) {
     g_hle_tail_call = false;
 }
 
+// A part off a body (made by 0x801F9FD0: a limb cut from a creature, the head of Head of Shakespeare, the parts of Blood
+// Bath; a node of type 3) falls by the game's own step each frame (0x80133434, called for it by the body mover at
+// 0x801241B4). With another room in play that step found no floor under it: player 2's own head, alone in room 51 with
+// player 1's room 100 in play, fell 38,000 units in three seconds, where the same head in single player comes to rest
+// 212 under the body's feet, its own point on the floor (logs/run-20261118-190519-jtg-sanity2-head-log1 against
+// -191822-jtg-sanity-head-solo3: the same place, speed, size and flags frame by frame until the floor). Apart, a part
+// of the other resident room takes its step with its own room current, as that room's creatures take their events
+// (r6c_creature). Together, solo, and a part of the room in play: the game's. ED_PART_ROOM=0 (testing): as before.
+#define PART_NODE_OF 0x801F6344u  // (object) -> its node, as the step's own first call
+static bool part_step_own_room(CPUState* cpu, u32 object) {
+    static bool running;
+    static int on = -1;
+    if (on < 0)
+        on = getenv("ED_PART_ROOM") == NULL || atoi(getenv("ED_PART_ROOM")) != 0;
+    if (running || !on || !g_settings.mod_coop || g_coop_p2 == 0u || !sda_ready(cpu) || !guest_ram_range_valid(cpu, object, 596u))
+        return false;
+    const s32 room = (s32)mem_read32(cpu, object + 592u);
+    if (room == -1 || room == (s32)mem_read32(cpu, cpu->gpr[13] - 23276u) || room_slot_of(cpu, room) < 0 || !r6_apart(cpu) ||
+        coop_camera_at_room_change(cpu) || !r6_room_loaded(cpu, room))
+        return false;
+    u32 node = 0u, out = 0u, keep[3], args[8];
+    if (!hle_guest_call(cpu, PART_NODE_OF, &object, 1, 0.0, &node) || !guest_ram_range_valid(cpu, node, 56u) || mem_read32(cpu, node + 8u) != 3u)
+        return false;
+    for (int i = 0; i < 8; i++)
+        args[i] = cpu->gpr[3 + i];
+    // The floor it skipped. Each frame the part is moved twice the stretch the step's gravity tests (seen: tested
+    // -353 to -367, found next frame at -382, its ball 13 into the floor; from inside, no test finds the floor again).
+    // In single player and with both players in the room the game catches it (the same frame: found at -363, landed
+    // one step later); apart it does not, and why is NOT found (the room data, the test's answer from above, the
+    // options, the flags and who is the player are all the same: logs/run-20261118-194406-jtg-head-wt-coop against
+    // -194610-jtg-head-wt-solo). So: where it stood at the end of its last step is kept, and when the game's own
+    // floor test (camera_collide_object: 0x80123F70's world, 0x80130684) says a floor lies between there and where it
+    // is now, it is put back there. The step that follows tests the stretch from above, hits, and lands it with the
+    // game's own landing (0x80118A6C), as in single player.
+    static struct {
+        u32 object;
+        float at[3];
+        unsigned long long frame;
+    } last[8];
+    const unsigned long long now_frame = cpu->timebase / 675000ull;
+    int slot = -1;
+    for (int i = 0; i < 8; i++)
+        if (last[i].object == object && now_frame - last[i].frame <= 2ull)
+            slot = i;
+    if (slot >= 0) {
+        float cur[3], hit[3];
+        for (u32 i = 0u; i < 3u; i++)
+            cur[i] = guest_read_f32(cpu, object + i * 4u);
+        if (cur[2] < last[slot].at[2] - 0.5f && camera_collide_object(cpu, object, last[slot].at, cur, guest_read_f32(cpu, object + 628u), hit)) {
+            for (u32 i = 0u; i < 3u; i++)
+                guest_write_f32(cpu, object + i * 4u, last[slot].at[i]);
+            // (the step's own from and to are this place plus the part's offset, as the mover made them: 0x80124170-0x8012419C)
+            for (u32 i = 0u; i < 3u; i++) {
+                const float o = guest_read_f32(cpu, object + 612u + i * 4u);
+                if (guest_ram_range_valid(cpu, args[1], 12u))
+                    guest_write_f32(cpu, args[1] + i * 4u, last[slot].at[i] + o);
+                if (guest_ram_range_valid(cpu, args[2], 12u))
+                    guest_write_f32(cpu, args[2] + i * 4u, last[slot].at[i] + o);
+            }
+            static unsigned told_n;
+            if (told_n++ < 6u)
+                fprintf(stderr, "[rooms] a part off a body (room %d) was moved past its floor (%.1f to %.1f, the floor's touch at %.1f): put back above it for the game's own landing (frame %llu)\n",
+                        room, last[slot].at[2], cur[2], hit[2], now_frame);
+        }
+    }
+    // (and that room's player the player, as r6c_creature has it)
+    const u32 p1 = r6_player1_node(cpu);
+    const u32 player = room == coop_object_room(cpu, g_coop_p2) ? g_coop_p2 : room == coop_object_room(cpu, p1) ? p1 : 0u;
+    const u32 who[3] = {cpu->gpr[13] - 26524u, cpu->gpr[13] - 21492u, cpu->gpr[13] - 21496u};
+    u32 was[3] = {0u, 0u, 0u};
+    coop_room_in(cpu, room, keep);
+    if (player != 0u) {
+        const u32 now[3] = {mem_read32(cpu, player + 52u), player, mem_read32(cpu, player + 16u)};
+        for (int i = 0; i < 3; i++) {
+            was[i] = mem_read32(cpu, who[i]);
+            mem_write32(cpu, who[i], now[i]);
+        }
+    }
+    running = true;
+    hle_guest_call(cpu, 0x80133434u, args, 8, cpu->fpr[1], &out);
+    running = false;
+    if (player != 0u)
+        for (int i = 0; i < 3; i++)
+            mem_write32(cpu, who[i], was[i]);
+    coop_stay_room_out(cpu, keep);
+    {  // where the step left it (the place the mover writes from the step's answer: its out less the part's offset)
+        if (slot < 0) {
+            slot = 0;
+            for (int i = 1; i < 8; i++)
+                if (last[i].frame < last[slot].frame)
+                    slot = i;
+        }
+        last[slot].object = object;
+        last[slot].frame = now_frame;
+        for (u32 i = 0u; i < 3u; i++)
+            last[slot].at[i] = guest_ram_range_valid(cpu, args[3], 12u) ? guest_read_f32(cpu, args[3] + i * 4u) - guest_read_f32(cpu, object + 612u + i * 4u)
+                                                                         : guest_read_f32(cpu, object + i * 4u);
+    }
+    static unsigned long long told;
+    const unsigned long long frame = cpu->timebase / 675000ull;
+    if (getenv("ED_COOP_LOG") != NULL && frame >= told + 300ull) {
+        told = frame;
+        fprintf(stderr, "[rooms] a part off a body (thing %u, room %d) takes its step with its own room current, room %d in play (frame %llu)\n", mem_read32(cpu, node + 16u),
+                room, (s32)mem_read32(cpu, cpu->gpr[13] - 23276u), frame);
+    }
+    hle_set_u32(cpu, out);
+    g_hle_passthrough = false;
+    g_hle_tail_call = false;
+    return true;
+}
+
 // D4, apart: an enemy after a player of another room (kept from before they parted) or after the one player of its room
 // while the game holds them (their words, close-up, Tome) is after nobody (+20 := 0, the quarry's own "nobody"); the game
 // chooses again from its own room at its next look (every 8-64 frames), and a held player answers 59 "no" (coop_send_event).
@@ -32249,6 +32883,8 @@ static void coop_character_step(CPUState* cpu) {
     coop_enemy_target(cpu, object);
     if (g_coop_p2 != 0u && !g_coop_step_running && object == mem_read32(cpu, g_coop_p2 + 52u))
         coop_p2_step_seen(cpu, object);
+    if (part_step_own_room(cpu, object))  // (a part off a body in the room that isn't in play: its floor is its own room's)
+        return;
     // Off unless ED_COOP_P2_STEP=1 (testing): with it, player 2 finds doors
     // (the record above is theirs) but neither player can open one yet:
     // something of the door's own, beyond these globals, is upset by the
@@ -33348,13 +33984,22 @@ static u16 g_close_up_prompt_own_x;
 static void coop_close_up_prompt(CPUState* cpu) {
     const u32 element = mem_read32(cpu, cpu->gpr[13] - COOP_GAME_PROMPT);
     const bool valid = guest_ram_range_valid(cpu, element, 0x100u);
-    if (g_coop_screen && valid) {
+    // Their own head picked up (Head of Shakespeare, sanity_pickup): that find's prompt, REPLACE HEAD, is the game's
+    // prompt too and was in player 1's corner for its 20 frames, with no close-up of theirs on. Theirs while their
+    // find is open.
+    if (g_sanity_p2_head_pick && !g_coop_p2_find.up) {
+        static unsigned waited;
+        if (++waited > 30u || g_close_up_prompt_moved != 0u)  // (the find opens a frame or two after the pickup's call)
+            g_sanity_p2_head_pick = false, waited = 0u;
+    }
+    const bool theirs = g_coop_screen || g_sanity_p2_head_pick;
+    if (theirs && valid) {
         if (element != g_close_up_prompt_moved) {
             g_close_up_prompt_moved = element;
             g_close_up_prompt_own_x = mem_read16(cpu, element + 8u);
         }
         mem_write16(cpu, element + 8u, (u16)(s16)COOP_PROMPT_AT);
-    } else if (!g_coop_screen && g_close_up_prompt_moved != 0u) {
+    } else if (!theirs && g_close_up_prompt_moved != 0u) {
         if (valid && element == g_close_up_prompt_moved)
             mem_write16(cpu, element + 8u, g_close_up_prompt_own_x);
         g_close_up_prompt_moved = 0u;
@@ -33381,7 +34026,7 @@ static void coop_close_up_prompt(CPUState* cpu) {
 static void coop_game_prompt_made(CPUState* cpu) {
     static bool running;
     g_hle_passthrough = true;
-    if (running || !g_coop_screen || !sda_ready(cpu))
+    if (running || !(g_coop_screen || g_sanity_p2_head_pick) || !sda_ready(cpu))
         return;
     u32 args[8], ignore = 0u;
     for (int i = 0; i < 8; i++)

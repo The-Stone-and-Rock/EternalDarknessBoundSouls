@@ -158,3 +158,111 @@ guest memory, bound with 0x801E1B74 and the bank before put back, a host timer, 
   memory of their own (1.39 MB, loaded by 0x801562B8, unpacked by 0x80156924, bound with 0x801E1B74; the picture drawn
   by 0x8019D470(n, alpha, 0) is ONE whole-screen quad: draw it as two halves or with a marked matrix, or it is lost
   from both halves as the single black rectangle was).
+
+## 2026-11-18 (night, second session): what was built, and what the four new readers found
+
+Read these before the next step. Each is a spec read from the game's code, marked READ or GUESS:
+- `read-blood-bath.md`: effect 11, the fake death (0x8009E218, 0x800C04EC), the parts, the prompts-off bits.
+- `read-ceiling.md`: effect 22. Room + 1000 is a real room file; the runner's bracket takes its ticket; the test is
+  Jump to Game 5 (Max), 249 -> 252 -> 256 -> 257 by three plain doors (its command is in the file). To do first: 22 in
+  `kSanityP2` with the forced start kept off it, the black of VISetBlack kept to their half, the guard on a counting
+  ticket, `sanity_later`'s frames-as-seconds.
+- `read-screens.md`: Blue Screen (28) and Game Reset (26). No 1.39 MB load: pictures 2 and 6 are 153,600 bytes each
+  in `/UInsane.tpl`, read with `dvd_read_to_guest` as `tome_plaques_bank` does; drawn as two half-height quads with
+  0x8019D084. Reset's stream 7 is `/audio/music/poe.adp` (sound only). Start's code 0x80006CDC.
+- `read-shared-room.md`: phantoms (21) are real creatures kept in the set's data +188/+252 (count +85), their quarry
+  flag 0x1000 is "the current player"; blood (1, 5) is made in two stages, the second in the frame's drain from
+  PLAYER 1's bytes (so player 2's running blood is probably never made). What each other allowed effect still shares.
+
+### Head of Shakespeare (17) for player 2: DONE apart, seen in pictures
+- The game offers the head (PICK UP) only while 17 or 9 is "the effect running" (0x800DA688 asks 0x8006A3A8(holder,
+  0x20200)); in player 2's turn that read PLAYER 1's set. `sanity_is_on` / `sanity_is_on_n` (intercepts on 0x8006A3A8
+  and 0x8006A32C) answer from player 2's own kept set whenever player 2 is the player and their set is out. This is
+  the general rule for all 24 callers (behaviour under an effect, the pickup, the door code).
+- The head fell through the floor when apart: `part_step_own_room` (the guard; `docs/coop-failed-attempts.md` has the
+  whole story and what is NOT known).
+- The pickup runs with their set and link in (`sanity_pickup`, built before); the other player's press on a head is
+  refused. Seen: PICK UP in their half, B, the head in close-up in their half reciting with its subtitles there,
+  player 1 walking in room 100 throughout, the return (logs/run-20261118-195634-jtg-sanity2-head-final; pictures
+  08, 08b, 09 in Screenshots for Claude/sanity-per-player/).
+- The game's prompt of that find (REPLACE HEAD) is put in their half while their find is open (`g_sanity_p2_head_pick`
+  in `coop_close_up_prompt`), and its slot is cleared at their return if the effect ended with the head still held.
+  NOT seen yet: both of these (built after the last picture).
+- NOT done: with BOTH players in the effect's room, player 2 stood in the gate's examine region and B read the gate
+  (so the pickup together is not seen); player 1 sees player 2's head and headless body (the shared-room step);
+  player 1's half is dimmed for the find's first 20 frames; the recital goes on after the return (not compared with
+  single player); the head's cleanup in a room that stays loaded.
+
+### Blood Bath (11) for player 2: DONE apart, seen in pictures
+- The death that ends it is asked of the one tracker (0x8009E218) from the dying character's handlers and answered for
+  player 2 from their own kept set (`sanity_fake_death`, the asker by return address); its 81 is kept for their next
+  update and the body made whole (`sanity_death_ends` on 0x800C04EC). Before: a real death, the game over for both.
+- The two prompts-off bits it sets (64, 256 of r13-24048) are theirs alone, as the busy bits are (`g_sanity_p2_prompts`).
+- Their set starts with data +156, +160, +164 at -1 and +148 at 0.
+- Seen: started at their door, the head off at 115 frames (picture 10's first frame), the death at 1255 frames "yes, not
+  real, by their own set", the return as theirs, player 2 whole beside player 1 in room 100, player 1's half on room 100
+  and player 1 walking throughout, no game over (logs/run-20261118-202252-jtg-sanity2-bloodbath5; picture 11).
+- NOT seen: the body in pieces close up (the gate's words box covered it in the test's spot, below); what they held put
+  back in their hands after the return (read-blood-bath.md section 7); the reader's step 6 (event 8 swallowed while the
+  game is busy) is NOT built: if their Blood Bath never ends in a busy moment, start there.
+
+### A fault of the two-room code found on the way (FIXED): player 2's plain words while apart
+- `coop_words_tick` (their words' own step, at the main loop's 0x800084FC) made THEIR room the room in play each frame
+  and put it back only for a close-up's words. With plain words (a region's ed12: the gate of room 51, which Blood
+  Bath's stagger and Shrink both walked player 2 into) the room in play stayed theirs: the players read as together,
+  `coop_follow` brought player 2 to player 1's room, player 1's half showed player 2's room and went black after the
+  return. Last night's Shrink run has the same lines (logs/run-20261118-183045-jtg-sanity2-shrink).
+- Fixed: put back after the step, whatever the words. And `room_in_check` (once a frame, from GXSetDrawDone) now says
+  "[rooms] a room made current for a call was not put back ... lr 0x..." and puts it back if any other place does it.
+- Also: the step's own region look is passed over for player 2's body inside their sanity update (`coop_scan_player1`,
+  `in_their_update`): their own look runs the region a frame later, in their turn.
+
+### Walk on Ceiling (22) for player 2: DONE, seen in pictures (Max's chapter)
+- Built as `read-ceiling.md` says, items 1, 2, 3, 4, 5, 8: 22 in `kSanityP2`; never forced (`sanity_door_rules`); no
+  update of theirs while a room ticket counts; the black of its change is their half alone (`sanity_black` on
+  0x801E4610, drawn in `sanity_overlay`); its own change into the second room is not "another room"; the ten rooms'
+  once-a-room bits start at 0 in their set.
+- Seen, first run, nothing forced: Jump to Game 5, player 2 through 249 -> 252 -> 256 -> 257 with their meter at 10; at
+  the third door the game's own rule starts 22 for them, their half black for 54 frames, the change to room 1257 as
+  theirs, the room upside down in their half for 1500 frames, the 81, the return to room 256 at the door they pressed;
+  player 1 at Max's desk untouched, never black (logs/run-20261118-203109-jtg-sanity2-ceiling; picture 12).
+- NOT built: item 6 (the early end on B at a door reads PLAYER 1's shown prompt), item 7 (`sanity_later` counts frames as
+  seconds: 22's 81 came 1 frame after it was sent, not 50), item 9. NOT seen: player 2 walking on the ceiling (the test
+  stood still); player 1's own 22 in co-op still blacks both halves.
+
+### Game Reset (26) and Blue Screen (28) for player 2: DONE, seen in pictures
+- Built as `read-screens.md` says, steps 1 to 6: `sanity_screen_bank` reads pictures 2 and 6 of `/UInsane.tpl` once
+  into host scratch (SANITY_BANK 0x82320000); the press, the ticks and the end are in `sanity_p2_step`'s screen block
+  (one block for 25, 26, 28); the draw is two half-height quads in `sanity_overlay`. Both refused if the file is not
+  as expected.
+- Seen, first run: the blue "BootOS ... fatal exception" screen in their half alone, ended by their presses after 194
+  ticks; then the Poe quote screen in their half for 150 ticks; the flash after each; player 1 walking throughout
+  (logs/run-20261118-203524-jtg-sanity2-screens; picture 13).
+- NOT heard (runs are muted): the beep, the narration. By the game's own design the narration is the music stream:
+  both players hear it and the room's music stops for those 150 ticks, then comes back. `[DECIDE]` if the user wants
+  the picture alone with the music left (drop the stream calls in the 26 branch).
+- NOT built: step 7, player 1's own (their Start with 25, 26 or 28 waiting still switches the whole game for both).
+
+### Phantom Creatures (21) kept to their player in a shared room: DONE, seen in pictures
+- `g_phantoms` (hle.c, beside `coop_found_object_draw`) is filled from both sets by `sanity_phantoms_note` (after their
+  update and as a door of theirs ends); each one is left out of the other player's half (`coop_found_object_draw`) and
+  told its owner is the player it looks for (`coop_interface_player`, lr 0x8003256C).
+- Seen: both players in room 51, five phantoms of player 2's in player 2's half closing on player 2, none in player
+  1's half (logs/run-20261118-203810-jtg-sanity2-phantoms-shared; picture 14).
+- NOT built: hits across owners (read-shared-room.md step 4: player 1 can still be hit by, and hit, a phantom they
+  cannot see), sending them away per owner (step 5), the shadow of a hidden phantom (step 6).
+- NOT built at all: blood (1, 5) per player, steps 7 to 12. The reader's finding stands: player 2's running blood is
+  probably never made (stage 2 is made in the frame's drain from player 1's bytes). Start there.
+
+### Next
+1. Blood per player: `read-shared-room.md` steps 7 to 12. **Pick the test room first.** Room 100 of Alex's last chapter
+   shows no blood from its camera even in SINGLE PLAYER with Blood Pool running (logs/run-20261118-204922-jtg-blood5-solo:
+   "5 Blood pool, ceiling drip running" at 2538, nothing in the picture to 3082), and none for player 2 in co-op
+   (-204710-jtg-sanity2-blood-look), so neither run says whether player 2's blood is made. Take the single-player
+   reference in a room with a close camera (Max's bedroom 249, Jump to Game 5, is one), then the same room in co-op,
+   BEFORE building: the lesson of the head (docs/coop-failed-attempts.md, last section).
+2. The phantoms' hits across owners, and the head and body parts of one player hidden from the other (the same list
+   and draw rule as the phantoms: `g_phantoms` could hold them).
+3. The pickup of the head with both players in the room (put player 2 clear of the gate's examine region first).
+4. Player 1's own screens and Walk on Ceiling's black in co-op (they still take both halves).
+5. `sanity_later`'s frames-as-seconds, the early end of 22 on B, Blood Bath's swallowed event 8.

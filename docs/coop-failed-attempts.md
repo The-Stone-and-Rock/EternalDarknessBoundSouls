@@ -1066,3 +1066,35 @@ fault: after a load the fit was made again "as modelled", 0 held, as the held ke
 What stands: wait only while the body plays NO move at all, counted in frames (`wpn_a_move_plays`), and the fits
 saved in the state (section COWP) for the load. Lesson: a wait on "its own move" is wrong wherever a fitted move is
 already playing; run `ed test` before showing a body fix.
+
+## 2026-11-18 (night): player 2's own head (Head of Shakespeare) fell through the floor when apart: four fixes that did nothing
+The fault: player 2 alone in room 51, player 1 in room 100, the head of player 2's own effect 17 is made at their
+feet and falls for ever (z -393 to -220,000). In single player and with both players in room 51 the same head comes
+to rest 212 under the body's feet, its own ball (offset +612 = 6, -9, 236; radius +628 = 24) on the floor.
+What did NOT fix it, each run once (logs/run-20261118-19*):
+- **The head's room.** It is right from the start: object +592 = 51, the collision getter 0x80123F70 answers room
+  51's record (0x806DA640) in the frame and in player 2's update (-190519-jtg-sanity2-head-log1).
+- **A part's events with its room current** (type 3 added to `r6c_creature`): the fall is not an event
+  (-190916-jtg-sanity2-head-parts). Taken out again.
+- **The flags.** Player 1's body has 0x80000000 in +596 and player 2's has not; the head copies its body's flags
+  (less 0x20000000, 0x80, 0x40). Setting 0x80000000 or 0x40 on the head as it is made: it falls the same
+  (-191155-...-f40, -191157-...-f80). Alex or Ellia as player 2: the same (-192006, -192008).
+- **The step with its room current, and with that room's player the player** (`coop_room_in` and the three player
+  words round 0x80133434 for a type 3 node): it falls the same (-192719-...-step, -193416-...-who). This bracket is
+  still in the code (`part_step_own_room`), as the frame of the guard below.
+What was learned (run -194406-jtg-head-wt-coop against -194610-jtg-head-wt-solo, the step's own world test
+0x8013085C logged near the floor):
+- The game's floor test finds the floor from above in every context and with every option (0 to 3).
+- Each frame the part moves TWICE the stretch the step's gravity tests (tested -353.2 to -367.2; next frame it stands
+  at -382.2, its ball 13 into the floor). From inside, no test finds the floor again.
+- In single player the same frame goes differently: tested -352.3 to -366.3, next frame it stands at -363.2 (and 2.1
+  across), then the gravity test hits and lands it. What makes the untested half of the move stop there in single
+  player, and not when apart, is NOT found. It is not in the step, the gravity (0x8013332C), the resolver
+  (0x80133A44) or the mesh test (0x80130684 and below: no global read).
+What stands: the guard in `part_step_own_room` (hle.c). Where the part stood at the end of its last step is kept; when
+the game's own floor test (`camera_collide_object`) says a floor lies between there and where it is now, it is put
+back there, and the step that follows lands it with the game's own landing. Seen: the head lies at -604, PICK UP,
+the recital (-195634-jtg-sanity2-head-final). The guard acts every frame while the part lies there (the blind move
+keeps growing): harmless up to the test's reach of 20,000 units, but the real cause is still to be found.
+Lesson: three of the four tries were guesses run one after another. The comparison that named the place (the same
+log line in single player and co-op, side by side) should have been the FIRST run, not the eighth.

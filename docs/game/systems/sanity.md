@@ -235,6 +235,14 @@ Only while Enhanced is chosen, so Normal is untouched. Each is one place to chan
 
 ## Co-op: each player's own effects (begun 2026-11-18)
 
+**Where it stands (2026-11-18, night):** player 2's own set may roll 1, 4, 5, 6, 7, 8, 10, 11, 14, 17, 21, 22, 24, 25,
+26, 28, 31, 32, 33, 35, 38 (`kSanityP2` in `hle.c`). Seen in pictures for player 2 alone: TV Volume, Mute, Shut Off,
+Video, Bug Crawl, Phantom Creatures (theirs alone in a shared room too), Shrink, Head of Shakespeare (pick-up and
+recital), Blood Bath, Walk on Ceiling (Max's chapter), Game Reset and Blue Screen. The rule that makes the rest of
+the game follow: "which effect is running" (`0x8006A3A8`, `0x8006A32C`, `0x8009E218`) is answered from the asking
+player's own set. What is built, what is not and what comes next: `docs/research/sanity-per-player/plan.md`.
+
+
 Player 2 has a sanity set of their own and the game's own tracker is run once more each frame as them: `sanity_p2_step`
 in `hle.c`, and `docs/coop-next-session.md` items 12a and 12b for what works and what is left. What one player's sanity
 is made of, read from the code:

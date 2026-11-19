@@ -1,3 +1,4 @@
+# HANDOFF 2026-11-18 (night, second session): the head, Blood Bath and a two-room fault are built and NOT committed yet (hle.c, docs, four new reader files in docs/research/sanity-per-player/); next is 12c. Before it:
 # HANDOFF 2026-11-18 (evening): START HERE. Everything is committed on tools/game-kit and NOT pushed (past v0.1.6; the evening's two commits are items 1, 3, 5 and then 2a, 2b, 6 of the board); controls.cpp's test edits stay uncommitted by rule. What to play: docs/coop-play-test.md
 
 ## The status board (keep it true: every session marks what it finishes)
@@ -142,6 +143,10 @@ When you finish something, change its mark here in the same commit as the work. 
   scenario's frames by the fresh state's, never starts over a game the user has open, and counts a missing probe as
   a FAIL. Result: `5 of 5 passed, 18 skipped (not run)`: alex-both-walk, alex-spell-cast, alex-tomes (new, Alex's
   last chapter), shadow-karim, shadow-steady (chapter 4).
+- `[DONE]` **6, again on 2026-11-18 (the second night session): `ed test` 7 of 7 on the final build** (the six of before, and the new
+  `alex-sanity-p2-screen`: player 2's own Blue Screen from its Start press to its end, player 1 walking, no room left
+  switched). The head, Blood Bath, Walk on Ceiling and the phantoms have NO scenario yet: their runs are named in 12a
+  and 12c.
 - `[OPEN]` **6b. Eighteen scenarios are SKIPPED, not passed**: the seven lever ones, the door, ladder, desk and urn ones
   were written for Anthony's bookshelf room 147 on a save of the user's. From a fresh chapter start that room is past
   the Tome: the plane's script 892 sends Anthony to the Tome's room 5 until that room's own Tome (tag 733) is his, and
@@ -236,13 +241,66 @@ When you finish something, change its mark here in the same commit as the work. 
   (logs/run-20261118-183045-jtg-sanity2-shrink; Screenshots for Claude/sanity-per-player/07). NOT judged: where
   exactly they are put back (they came back at the room's entry place), and a clean picture of before and after
   (in that run both players also walked through doors by the test's own sticks). 33 and 35 not run.
-- `[NOT VERIFIED]` **12a, Head of Shakespeare (17) allowed player 2, and their pickup theirs** (`sanity_pickup`, an
+- `[DONE]` **12a, Head of Shakespeare (17) for player 2: the head lands, PICK UP, the recital in their half, the return
+  (2026-11-18, the second night session).** Three things were wrong and are put right in hle.c: (1) the game offers
+  the head only while 17 is "the effect running", asked of the one tracker, which in player 2's turn was player 1's:
+  `sanity_is_on` / `sanity_is_on_n` (intercepts on 0x8006A3A8 and 0x8006A32C) answer from player 2's own kept set
+  whenever player 2 is the player (the general rule for all 24 callers); (2) apart, the head fell through the floor:
+  `part_step_own_room`, a guard with the game's own floor test (the cause is NOT found: docs/coop-failed-attempts.md,
+  the last section, has the four fixes that did nothing); (3) the other player's press on a head is refused
+  (`sanity_pickup`). Seen: B PICK UP in their half, the head in close-up reciting with its subtitles in their half,
+  player 1 walking in room 100 throughout, the return (logs/run-20261118-195634-jtg-sanity2-head-final; Screenshots
+  for Claude/sanity-per-player/08, 08b the single-player reference, 09). `[NOT VERIFIED]`: REPLACE HEAD's prompt in
+  their half and its slot cleared at the return (built after the last picture); the pickup with both players in the
+  room; the recital going on after the return (not compared with single player).
+- `[DONE]` **12a, Blood Bath (11) for player 2 (the same session).** The death that ends it is answered from their own
+  set (`sanity_fake_death` on 0x8009E218, `sanity_death_ends` on 0x800C04EC): before, it was a real death and the game
+  over for both. The prompts-off bits it sets are theirs alone (`g_sanity_p2_prompts`). Seen: the parts come off, the
+  death "not real, by their own set", the return, player 2 whole beside player 1, player 1's half and walking
+  untouched (logs/run-20261118-202252-jtg-sanity2-bloodbath5; picture 11). Not seen: the body in pieces close up; what
+  they held back in their hands; the reader's step 6 is not built (docs/research/sanity-per-player/plan.md).
+- `[FIXED]` **Player 2's plain words while apart left THEIR room the room in play (found with Blood Bath, older than
+  it).** `coop_words_tick` put the room back only for a close-up's words: with a region's words (the gate of room 51)
+  the players read as together, player 2 was brought to player 1's room and player 1's half showed the wrong room,
+  black after a return. How: the put-back moved out of the close-up's branch; and `room_in_check` (once a frame) says
+  "[rooms] a room made current for a call was not put back" with the place, and puts it back, for any other. Seen: the
+  same run before and after (-202054-jtg-sanity2-bloodbath4 "not put back ... lr 0x80008500", -202252-...-bloodbath5
+  clean). The same lines are in last night's Shrink run, so that run's odd return was this.
+- The first wording of the head's line, kept: `[NOT VERIFIED]` **12a, Head of Shakespeare (17) allowed player 2, and their pickup theirs** (`sanity_pickup`, an
   intercept on 0x800C362C: their set and link in when the picker is player 2). Seen by the log only: started at their
   door, ran 1083 frames (solo's was 1030), the return ran as theirs, player 2 back at 64 599 399 beside player 1,
   no hang (logs/run-20261118-184436-jtg-sanity2-head). NOT seen: the head off in a close picture, the pickup and its
   recital, player 1 refused on player 2's head, the head's cleanup (return-spec.md section 4). Next after it: 11
   Blood Bath (the body falling apart: needs the death's event 81 kept for them), then 22 in another chapter.
-- `[OPEN]` **12c. The user's reminders (2026-11-18, late): the body falling apart with the head that is picked up and
+- `[DONE]` **12c, Walk on Ceiling (22) for player 2 (2026-11-18, the second night session).** Only where the game starts it
+  (its ten rooms, by the door's own rule: never forced, `sanity_door_rules`); the black of its change is their half
+  alone (`sanity_black` on 0x801E4610, drawn in `sanity_overlay`); no update of theirs while a room ticket counts.
+  Seen in Max's chapter, nothing forced: player 2 through three doors into room 257, their half black, the room upside
+  down in their half for 1500 frames, back at the door they pressed, player 1 at the desk untouched
+  (logs/run-20261118-203109-jtg-sanity2-ceiling; picture 12). Not built: the early end on B at a door; player 1's own
+  22 still blacks both halves. Not seen: walking on the ceiling.
+- `[DONE]` **12c, the fake blue screen (28) and Game Reset (26) for player 2.** Their pictures are read once from
+  `/UInsane.tpl` (`sanity_screen_bank`) and drawn in their half as two half-height quads; the press, ticks and end are
+  the screen block of `sanity_p2_step` (shared with TV Video). Seen: each fills their half alone, player 1 walking,
+  the flash after (logs/run-20261118-203524-jtg-sanity2-screens; picture 13). Not heard (runs are muted).
+  `[DECIDE]`: Game Reset's narration is the game's music stream, so both players hear it and the room's music stops
+  for its 2.5 seconds; it can be the picture alone instead. Not built: player 1's own (their Start still switches the
+  whole game for both).
+- `[DONE]` **12c, Phantom Creatures kept to their player in a shared room.** Each player's phantoms are listed from their
+  own sanity set (`sanity_phantoms_note`, `g_phantoms`), left out of the other's half (`coop_found_object_draw`) and
+  after their owner alone (`coop_interface_player`). Seen: both players in room 51, player 2's five phantoms in their
+  half closing on them, none in player 1's half (logs/run-20261118-203810-jtg-sanity2-phantoms-shared; picture 14).
+  Not built: hits across owners (a phantom the other player cannot see can still hit them and be hit).
+- `[OPEN]` **12d. What is left of each player's own sanity effects.** (1) Blood (1, 5) per player: not built; the reader
+  found player 2's running blood is probably never made (docs/research/sanity-per-player/read-shared-room.md, steps 7
+  to 12). (2) Phantoms' hits across owners; one player's head and body parts hidden from the other. (3) The head's
+  pickup with both players in the room. (4) Player 1's own whole-game screens and Walk on Ceiling's black in co-op.
+  (5) Small ones: `sanity_later` counts frames as seconds, 22's early end on B, Blood Bath's event 8 swallowed while
+  the game is busy. The order and every address: docs/research/sanity-per-player/plan.md, "Next".
+- The first wording of 12c, kept: `[OPEN]` **12c. What is left of the user's reminders: Walk on Ceiling (22) where the chapter calls for it, then the
+  fake blue screen (28) and reset (26), then phantoms and blood kept to their player in a shared room. Four readers'
+  specs are ready for each: docs/research/sanity-per-player/read-ceiling.md, read-screens.md, read-shared-room.md
+  (and read-blood-bath.md, built). The head and the body falling apart are DONE above.** The first wording, kept: the body falling apart with the head that is picked up and
   recites (17), and Walk on Ceiling (22) where the chapter calls for it, for each player on their own.** Both are
   door-started and return to the room before: `docs/research/sanity-per-player/plan.md`, "The user's reminders".
 - `[OPEN]` **12b. What is left of it, in order.** (1) NOT SEEN YET: effects 1, 4, 5, 8, 38 for player 2 in a picture,
