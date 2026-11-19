@@ -1,4 +1,4 @@
-# 2026-11-19 (later): item 12d done but for Empty Inventory (20) and the two-heads pickup, both left alone by the user's decision; Shoots Self (34) and Spell Goes Wrong (36) are built, not seen. Committed through 6509933.
+# 2026-11-19 (later): item 12d done but for Empty Inventory (20) and the two-heads pickup, both left alone by the user's decision (and the creatures' hits across players in a shared room, kept on purpose); Shoots Self (34) and Spell Goes Wrong (36) are built, not seen. Committed through 6509933.
 # 2026-11-19: 12g is FIXED (the head centred for either player in co-op, the lent camera follows player 2; see 12g below). Next: 12d, blood per player first (its single-player reference in Max's bedroom before building).
 # HANDOFF 2026-11-18 (late night, the end of the second session): START HERE. All committed on tools/game-kit (1967947 and this hand-off), not pushed. The next session's prompt, ready to paste, is docs/prompts/session-sanity-head.md. Working on item 12 (each player's own sanity effects): DONE and checked off below are the head's fall, pick-up, recital and REPLACE HEAD, Blood Bath, Walk on Ceiling, the blue screen and reset, the phantoms, the two-room words fault, the Max's chapter sweep. OPEN: 12g (the picked-up head is not centred in player 2's half) FIRST, then 12d (blood per player and the leftovers). Earlier:
 # HANDOFF 2026-11-18 (night, second session): the head, Blood Bath and a two-room fault are built and NOT committed yet (hle.c, docs, four new reader files in docs/research/sanity-per-player/); next is 12c. Before it:
@@ -317,7 +317,9 @@ When you finish something, change its mark here in the same commit as the work. 
   own sanity set (`sanity_phantoms_note`, `g_phantoms`), left out of the other's half (`coop_found_object_draw`) and
   after their owner alone (`coop_interface_player`). Seen: both players in room 51, player 2's five phantoms in their
   half closing on them, none in player 1's half (logs/run-20261118-203810-jtg-sanity2-phantoms-shared; picture 14).
-  Not built: hits across owners (a phantom the other player cannot see can still hit them and be hit).
+  Kept as it is by the user's decision (2026-11-19): in a shared room one player's creatures can still hit the other
+  player and be hit by them. The user likes it (the other player doesn't know what hit them); change it only if it
+  causes a problem in play.
 - `[DONE]` **12e. The sweep in Max's chapter, each effect as player 2, player 1 at the desk (2026-11-18, late night).**
   Seen in pictures (Screenshots for Claude/sanity-per-player/15 to 18; logs/run-20261118-21*-sweep-max-*): TV Volume
   (31), Mute (24), Shut Off (4) in their half alone; TV Video (25), Blue Screen (28), Game Reset (26) by the log's whole
@@ -498,7 +500,7 @@ When you finish something, change its mark here in the same commit as the work. 
   `kSanityP2`: player 2's set never picks it (refused by the rules).
 - `[OPEN]` **12d. What is left of each player's own sanity effects.** (1) Blood (1, 5) per player: not built; the reader
   found player 2's running blood is probably never made (docs/research/sanity-per-player/read-shared-room.md, steps 7
-  to 12). (2) Phantoms' hits across owners; one player's head and body parts hidden from the other. (3) The head's
+  to 12). (2) Phantoms' hits across owners: KEPT by the user's decision (2026-11-19, a nice side effect); one player's head and body parts hidden from the other. (3) The head's
   pickup with both players in the room. (4) Player 1's own whole-game screens and Walk on Ceiling's black in co-op.
   (5) Small ones: `sanity_later` counts frames as seconds, 22's early end on B, Blood Bath's event 8 swallowed while
   the game is busy. The order and every address: docs/research/sanity-per-player/plan.md, "Next".
