@@ -451,9 +451,13 @@ When you finish something, change its mark here in the same commit as the work. 
   Redemption, Coming Soon...") too; the end is the 81 alone (its own end flashes in its player's half; the host's
   second flash had no owner and was drawn in both halves, taken out for 15). Seen: player 2's and player 1's, each in
   their own half, the other walking, the game's mode 2 throughout, the return to where they stood (room 252, as the
-  game keeps it) (logs/run-20261118-231558-tbc15-door2, -231634-tbc15-p1door; pictures 38, 39). `[OPEN]`: picture 8
-  comes in as a cut at tick 200, not the game's crossfade (a second picture drawn over the first in the same frame
-  is not shown; picture 8 is drawn first and 7 fading over it, so the fade is lost, not the picture). 15 in `kSanityP2`.
+  game keeps it) (logs/run-20261118-231558-tbc15-door2, -231634-tbc15-p1door; pictures 38, 39). 15 in `kSanityP2`.
+  `[FIXED]` the same night: picture 8 came in as a cut at tick 200, not the game's crossfade. Two causes: the alpha
+  belongs in the material's colour (the first argument of 0x8019C7C8, as the game's own picture draw 0x8019D4EC puts
+  it), not the quad's; and the second picture in a frame from the same bank header was drawn with the first's texture.
+  Each layer now has its own colour word (bank +0x68, +0x6C) and the second binds a second header over the same four
+  pictures (bank +0x96200). Seen: the sequel fading in over the fake ending from tick 200 to 400
+  (logs/run-20261118-235031-tbc15-fade; picture 44).
 - `[NOT VERIFIED]` **12d, Shoots Self (34) and Spell Goes Wrong (36) for player 2: built, not seen (2026-11-19).** The game
   arms them from other code that asks whichever set is in memory: 34 from the reload (0x8009E5F0 at lr 0x80079FB8), 36
   from the cast (0x8009DDC4, 0x8009DD20). `sanity_as_p2` (hle.c; the pickup's bracket made general) makes each call with
@@ -469,8 +473,13 @@ When you finish something, change its mark here in the same commit as the work. 
     to the other's press (-233138-heads-both2; picture 42).
   - `[FIXED]` the recital's subtitles were in both halves (the U2 rule: one room, both halves): a line whose owner's own
     Head of Shakespeare runs is not copied to the other half (`sanity_owner_recites` in `coop_subtitle_copy`).
-  - `[OPEN]` the head's red blood still floats in the other player's half where no head is drawn (picture 42, player
-    1's half): an effect object that follows the head, not yet found (`ED_FX_KINDS=1` names its draw).
+  - `[FIXED]` the head's red blood floated in the other player's half where no head is drawn (picture 42). It is a
+    blood spray (step 0x80178428, draw 0x8017E938) on the cut neck: on the body (about 220 above its feet) and, once the
+    head floats, about 270 above the head's own place. `effect_draw_by_room` gives a spray standing on one player's own
+    thing (`g_phantoms`: their head, their effect's creatures) or on the body of a player whose own Head of Shakespeare
+    runs (within 120 across, 50 below to 400 above) to that player: drawn in their half alone. Seen: player 1's half
+    clean, player 2's blood with their head (logs/run-20261118-235003-headblood4; picture 43). `ED_HEAD_BLOOD_LOG=1`
+    says what the rule sees once a second.
   - `[OPEN]` player 1 could not pick up their own head while player 2's head was up: their B PICK UP shows, their
     press does nothing. Player 2's pickup goes the lend route (`coop_find_hold`'s "theirs" branch: the window, its
     hold bits 16 and 2 and the input focus 0x805881F0 in the game's own input), and the game has one find window

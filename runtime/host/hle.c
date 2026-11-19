@@ -14620,6 +14620,7 @@ static void sanity_blood_stage1(CPUState* cpu, int owner) {
     if (object != 0u && guest_ram_range_valid(cpu, object, 60u) && mem_read32(cpu, object + 52u) == serial && sanity_blood_owner(cpu, object) != owner)
         sanity_blood_note(cpu, object, owner);
 }
+static bool sanity_owner_recites(CPUState* cpu, int owner);  // (below, with the sanity sets)
 static void effect_draw_by_room(CPUState* cpu) {
     static bool running;
     g_hle_passthrough = true;
@@ -14684,7 +14685,42 @@ static void effect_draw_by_room(CPUState* cpu) {
     }
     const bool apart = coop_stay_apart(cpu) && (camera_split_on() || whole) && guest_ram_range_valid(cpu, EFFECT_MTX_SCRATCH, 48u);
     const s32 room1 = apart ? coop_object_room(cpu, g_coop_p2) : room0;
-    const int blood = g_settings.mod_coop && g_coop_p2 != 0u && camera_split_on() && !whole ? sanity_blood_owner(cpu, effect) : 0;
+    int blood = g_settings.mod_coop && g_coop_p2 != 0u && camera_split_on() && !whole ? sanity_blood_owner(cpu, effect) : 0;
+    // A blood spray (step 0x80178428, the hit's and the cut neck's) at one player's own hallucinated thing, their head or a
+    // creature of their effect (within 120 across, up to 400 above it), is theirs too: the floating head's blood showed alone in the other
+    // half, where the head is not drawn (logs/run-20261118-233138-heads-both2 2600; draw 0x8017E938, -234538-headblood).
+    if (blood == 0 && g_settings.mod_coop && g_coop_p2 != 0u && camera_split_on() && !whole && mem_read32(cpu, effect + 332u) == 0x80178428u) {
+        const float ex = (float)(s16)mem_read16(cpu, effect + 16u), ey = (float)(s16)mem_read16(cpu, effect + 18u), ez = (float)(s16)mem_read16(cpu, effect + 20u);
+        for (int i = 0; blood == 0 && i < PHANTOM_MAX; i++) {
+            const u32 o = g_phantoms[i].object;
+            if (g_phantoms[i].owner == 0 || !guest_ram_range_valid(cpu, o, 12u))
+                continue;
+            // (Upright, as for a body below: the floating head's spray stands about 270 above the head's own place,
+            // -805 1797 850 over -823 1807 579.)
+            const float dx = guest_read_f32(cpu, o) - ex, dy = guest_read_f32(cpu, o + 4u) - ey, dz = ez - guest_read_f32(cpu, o + 8u);
+            if (dx * dx + dy * dy < 120.0f * 120.0f && dz > -50.0f && dz < 400.0f)
+                blood = g_phantoms[i].owner;
+        }
+        // (And the cut neck of a player whose own Head of Shakespeare runs: the spray stands on their body, about 220
+        // above their feet, where the head was: -1371 1904 775 by player 2 at 553.)
+        for (int o = 1; blood == 0 && o <= 2; o++) {
+            const u32 node = o == 2 ? g_coop_p2 : r6_player1_node(cpu);
+            const u32 body = guest_ram_range_valid(cpu, node + 52u, 4u) ? mem_read32(cpu, node + 52u) : 0u;
+            if (!guest_ram_range_valid(cpu, body, 12u) || !sanity_owner_recites(cpu, o))
+                continue;
+            const float dx = guest_read_f32(cpu, body) - ex, dy = guest_read_f32(cpu, body + 4u) - ey, dz = ez - guest_read_f32(cpu, body + 8u);
+            if (dx * dx + dy * dy < 120.0f * 120.0f && dz > -50.0f && dz < 400.0f)
+                blood = o;
+        }
+        static unsigned long long told;
+        const unsigned long long fr = cpu->timebase / 675000ull;
+        if (getenv("ED_HEAD_BLOOD_LOG") != NULL && fr >= told + 60ull) {
+            told = fr;
+            const u32 b2 = mem_read32(cpu, g_coop_p2 + 52u);
+            fprintf(stderr, "[sanity2] blood spray 0x%08X at %.0f %.0f %.0f: player 2's body at %.0f %.0f %.0f, head on %d/%d, owner %d (frame %llu)\n", effect, ex, ey, ez,
+                    guest_read_f32(cpu, b2), guest_read_f32(cpu, b2 + 4u), guest_read_f32(cpu, b2 + 8u), sanity_owner_recites(cpu, 1), sanity_owner_recites(cpu, 2), blood, fr);
+        }
+    }
     if (blood != 0 && (!apart || room1 == room0) && guest_ram_range_valid(cpu, EFFECT_MTX_SCRATCH, 48u)) {
         // A player's own blood in a room both are in: drawn once, in its owner's half (marked out of the other's view),
         // with the owner's camera for its cards.
@@ -27834,7 +27870,7 @@ static void sanity_door_rules(CPUState* cpu) {
 // read once into host scratch as a bank of two, as the Tome's plaques are (tome_plaques_bank), and drawn with the
 // game's own art calls in sanity_overlay. (docs/research/sanity-per-player/read-screens.md.)
 #define SANITY_BANK 0x82320000u  // to +0x4B100: past SPELL_COLOUR (0x82300000), before SCRATCH_FINISH (0x82400000)
-#define SANITY_BANK_CANARY 0x53414E33u  // (33: the bank of four pictures)
+#define SANITY_BANK_CANARY 0x53414E34u  // (34: the bank of four pictures and a second header)
 static bool sanity_screen_bank(CPUState* cpu) {
     static int have = -1;  // 0: no file or not as expected (said once)
     if (have == 0)
@@ -27845,7 +27881,7 @@ static bool sanity_screen_bank(CPUState* cpu) {
     static u8 head[512];
     u32 start = 0u, length = 0u;
     const s32 file = dvd_path_to_entrynum("/UInsane.tpl");
-    if (file < 0 || !dvd_entry_info(file, &start, &length) || length < 0x100000u || (u64)(SANITY_BANK - GC_RAM_BASE) + 0x96200u > cpu->ram_size ||
+    if (file < 0 || !dvd_entry_info(file, &start, &length) || length < 0x100000u || (u64)(SANITY_BANK - GC_RAM_BASE) + 0x96210u > cpu->ram_size ||
         !moves_disc(cpu, start, sizeof head, head) || moves_be32(head) != 0x0020AF30u || moves_be32(head + 4u) < 7u) {
         fprintf(stderr, "[sanity2] /UInsane.tpl not found or not as expected: Game Reset and Blue Screen stay off for player 2\n");
         return false;
@@ -27882,7 +27918,11 @@ static bool sanity_screen_bank(CPUState* cpu) {
         mem_write32(cpu, header + 32u, 0x00000001u);  // unpacked
         dvd_read_to_guest(cpu, kData[i], start + offset[i], 153600u);
     }
-    mem_write32(cpu, SANITY_BANK + 0x68u, 0xFFFFFFFFu);  // the material's colour
+    mem_write32(cpu, SANITY_BANK + 0x68u, 0xFFFFFFFFu);  // the material's colour (a picture's own, +0x6C the second's)
+    mem_write32(cpu, SANITY_BANK + 0x6Cu, 0xFFFFFFFFu);
+    mem_write32(cpu, SANITY_BANK + 0x96200u, 0x0020AF30u);  // a second header over the same four pictures (a second layer's)
+    mem_write32(cpu, SANITY_BANK + 0x96204u, 4u);
+    mem_write32(cpu, SANITY_BANK + 0x96208u, SANITY_BANK + 0xA0u);
     // The texcoords of two half-height quads, each four pairs of s16 (512 is the whole picture): the top half, then the bottom.
     static const s16 kUv[16] = {0, 512, 512, 512, 512, 256, 0, 256, 0, 256, 512, 256, 512, 0, 0, 0};
     for (u32 i = 0u; i < 16u; i++)
@@ -28565,16 +28605,21 @@ static void sanity_screen_draw(CPUState* cpu, int who) {
         const bool sequel = sc->effect == 15 && sc->tick > 200u;
         const u32 fade = sequel ? (sc->tick - 200u >= 200u ? 255u : (sc->tick - 200u) * 255u / 200u) : 0u;
         const u32 alpha = layer == 1 ? 255u - fade : 255u;
-        const u32 colour = 0xFFFFFF00u | alpha;
+        // (The alpha goes in the material's colour, as the game's own picture draw puts it, 0x8019D4EC: the quad's colour
+        // is not it. Each layer its own colour word and its own bank header over the same pictures, so the second picture
+        // is not taken for the first's texture.)
+        const u32 colour = 0xFFFFFFFFu, tint = SANITY_BANK + 0x68u + 4u * (u32)layer;
+        mem_write32(cpu, tint, 0xFFFFFF00u | alpha);
         // Their Game Reset or Blue Screen: the picture alone, as two half-height quads (one of the whole screen is lost
         // from both halves), with the game's own art calls and the bank bound before put back.
-        const u32 five = 5u, bank = SANITY_BANK, image = sc->effect == 26 ? 0u : sc->effect == 28 ? 1u : sequel == (layer == 0) ? 3u : 2u;
+        const u32 five = 5u, bank = layer == 0 ? SANITY_BANK : SANITY_BANK + 0x96200u,
+                  image = sc->effect == 26 ? 0u : sc->effect == 28 ? 1u : sequel == (layer == 0) ? 3u : 2u;
         const bool wide = mem_read32(cpu, cpu->gpr[13] - 24660u) == 1u;
         const u32 x0 = wide ? (u32)-106 : 0u, x1 = wide ? 745u : 639u;
         u32 old = 0u;
         hle_guest_call(cpu, 0x8019CFD4u, &five, 1, 0.0, &ignore);
         hle_guest_call(cpu, 0x801E1B74u, &bank, 1, 0.0, &old);
-        const u32 material[4] = {SANITY_BANK + 0x68u, 0u, image, 0x80000000u};
+        const u32 material[4] = {tint, 0u, image, 0x80000000u};
         hle_guest_call(cpu, 0x8019C7C8u, material, 4, 0.0, &ignore);
         const u32 top[8] = {SANITY_BANK + 0x70u, x0, 0u, x1, 240u, colour, 0u, 5u}, bottom[8] = {SANITY_BANK + 0x70u, x0, 240u, x1, 479u, colour, 4u, 5u};
         hle_guest_call(cpu, 0x8019D084u, top, 8, 0.0, &ignore);
