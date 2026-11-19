@@ -1,3 +1,4 @@
+# 2026-11-19 (later): item 12d done but for Empty Inventory (20) and the two-heads pickup, both left alone by the user's decision; Shoots Self (34) and Spell Goes Wrong (36) are built, not seen. Committed through 6509933.
 # 2026-11-19: 12g is FIXED (the head centred for either player in co-op, the lent camera follows player 2; see 12g below). Next: 12d, blood per player first (its single-player reference in Max's bedroom before building).
 # HANDOFF 2026-11-18 (late night, the end of the second session): START HERE. All committed on tools/game-kit (1967947 and this hand-off), not pushed. The next session's prompt, ready to paste, is docs/prompts/session-sanity-head.md. Working on item 12 (each player's own sanity effects): DONE and checked off below are the head's fall, pick-up, recital and REPLACE HEAD, Blood Bath, Walk on Ceiling, the blue screen and reset, the phantoms, the two-room words fault, the Max's chapter sweep. OPEN: 12g (the picked-up head is not centred in player 2's half) FIRST, then 12d (blood per player and the leftovers). Earlier:
 # HANDOFF 2026-11-18 (night, second session): the head, Blood Bath and a two-room fault are built and NOT committed yet (hle.c, docs, four new reader files in docs/research/sanity-per-player/); next is 12c. Before it:
@@ -486,8 +487,11 @@ When you finish something, change its mark here in the same commit as the work. 
     (record 0x8030A704) and one focus. Player 2's own-look finds go the own route (their copy: `g_coop_p2_find`,
     `coop_p2_words_call`), which leaves the game's focus free. Not head-only: any two finds at once meet it. `[DECIDE]`
     with the user: the press and find code is shared by every pickup.
+    Left alone by the user's decision (2026-11-19): both players having their head up at once is rare; take it up
+    again only if it comes up in play and causes a problem.
   - Seen right: each head refused to the other player, both returns to their own doors, no hang.
-- `[OPEN]` **12d, Empty Inventory (20) for player 2: not built.** Its start sets 0x80335758 bit 2 in real memory (so
+- `[DECIDE]` **12d, Empty Inventory (20) for player 2: not built, left alone by the user's decision (2026-11-19): the
+  Tome copy was a long deep dive and they don't want it touched for this.** Do not start it unless the user asks. Its start sets 0x80335758 bit 2 in real memory (so
   player 2's roll would empty PLAYER 1's Tome) and it runs on the Tome's inventory page, which for player 2 is their
   Tome copy (`tome_copy_*`). The reader's plan (read-rest.md, 20) puts their set into the copy; the keep table says not
   to swap more memory ranges for the copy, so this one wants its own careful step (or the user's say). Not in
